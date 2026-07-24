@@ -5,6 +5,7 @@ import {
   objectiveWorkerResultSchema,
   type ObjectiveWorkerResult,
 } from "../shared/objectiveQuality.js";
+import { unavailablePhonemeVisemeResult } from "../shared/phonemeVisemeEvaluator.js";
 
 function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorkerResult {
   return {
@@ -78,17 +79,19 @@ function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorker
       windowLagIqrMilliseconds: 42,
       nullP95Correlation: 0.25,
     },
+    phonemeViseme: unavailablePhonemeVisemeResult(),
     ...overrides,
   };
 }
 
 describe("objective output quality", () => {
-  it("reports SFace and classical AV raw measurements without inventing SOTA scores", () => {
+  it("keeps good SFace and classical AV raw measurements insufficient without a Product-GO evaluator", () => {
     const result = buildObjectiveQualityAnalysis(worker(), "2026-07-24T18:10:00.000Z");
 
-    expect(result.status).toBe("measured");
+    expect(result.status).toBe("insufficient");
     expect(result.capabilities).toEqual({
       avSync: "classical-av-raw-measured",
+      phonemeViseme: "manifest-missing",
       identity: "sface-raw-measured",
       dialogue: "whisper-not-run",
     });
@@ -97,11 +100,27 @@ describe("objective output quality", () => {
     expect(result).not.toHaveProperty("score");
     expect(result).not.toHaveProperty("rating");
     expect(result.capabilities.avSync).not.toBe("measured");
-    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v3");
-    if (result.schemaVersion === "ltx-studio-objective-quality.v3") {
-      expect(result.identity.cosineP10).toBe(0.84);
-      expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
-    }
+    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v4");
+    expect(result.identity.cosineP10).toBe(0.84);
+    expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
+    expect(result.phonemeViseme.status).toBe("not-available");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "phoneme-viseme-manifest-missing",
+      level: "warning",
+    }));
+  });
+
+  it("distinguishes a missing CPU runner from a legal or manifest hold", () => {
+    const reason = "Release-Kandidat erkannt; CPU-Inferenzrunner fehlt.";
+    const result = buildObjectiveQualityAnalysis(worker({
+      phonemeViseme: unavailablePhonemeVisemeResult(reason, "runner-unavailable"),
+    }));
+
+    expect(result.capabilities.phonemeViseme).toBe("runner-unavailable");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "phoneme-viseme-runner-unavailable",
+      level: "warning",
+    }));
   });
 
   it("marks missing audio and insufficient face geometry explicitly", () => {
@@ -229,6 +248,18 @@ describe("objective output quality", () => {
       featureLagAgreementMilliseconds: null,
       windowLagIqrMilliseconds: null,
       nullP95Correlation: null,
+    };
+
+    expect(objectiveWorkerResultSchema.safeParse(invalid).success).toBe(false);
+    expect(() => buildObjectiveQualityAnalysis(invalid)).toThrow();
+  });
+
+  it("rejects a measured phoneme/viseme status without Product-GO and both evidence stages", () => {
+    const invalid = worker();
+    invalid.phonemeViseme = {
+      ...unavailablePhonemeVisemeResult("Legal Hold"),
+      status: "measured",
+      error: null,
     };
 
     expect(objectiveWorkerResultSchema.safeParse(invalid).success).toBe(false);

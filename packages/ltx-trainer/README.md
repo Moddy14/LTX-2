@@ -20,6 +20,7 @@ All detailed guides and technical documentation are in the [docs](./docs/) direc
 - [🧪 Inference Guide](../ltx-pipelines/README.md)
 - [🔧 Utility Scripts](docs/utility-scripts.md)
 - [🧩 Custom Training Strategies](docs/custom-training-strategies.md)
+- [AV Evaluator Dataset Governance](docs/av-evaluator-governance.md)
 - [📚 LTX-Core Documentation](../ltx-core/README.md)
 - [🛡️ Troubleshooting Guide](docs/troubleshooting.md)
 

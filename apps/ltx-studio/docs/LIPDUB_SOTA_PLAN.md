@@ -103,6 +103,29 @@ Framezahl Qualitätsvoraussetzungen.
 - Unzureichende Messungen, VFR, fehlende Audiodauer, fehlende Provenienz und
   fehlende Evaluatorstufen werden ausdrücklich angezeigt. Unkalibrierte
   Rohwerte erzeugen keine automatische Qualitätsnote.
+- Objektive Analyse Version 4 bindet den Zustand eines eigenen
+  Phonem-/Visem-Evaluators samt Evaluator-Fingerprint an jedes Cache-Sidecar.
+  Das ausgelieferte Manifest steht im Legal Hold. Ein strukturell gültiger
+  `release-candidate` bleibt als `Runner fehlt` blockiert: Dieser Build liest
+  keine Multi-GiB-Gewichte synchron im Node-Hauptthread und akzeptiert keine
+  selbstbehauptete Rechts- oder Product-GO-Freigabe. Erst ein separater,
+  begrenzter Runner darf Modell, Mapping, Dataset-Freeze, signierte
+  Rechtsfreigabe sowie Tune-/Holdout-Berichte prüfen und messen.
+- Der Trainer enthält einen rechtegebundenen, content-adressierten
+  **Entwicklungs**-Dataset-Freeze. Er verbindet Sprecher, Gesichtsidentität, Quellasset,
+  Sammlung, Session, Äußerung, Ableitung, Rechtequelle, exakte
+  Medien-/Featureduplikate, perzeptuelle Duplikate und Parent-Beziehungen zu
+  transitiven Leakage-Komponenten. Menschlich verifizierte Phonemzeitachsen,
+  Rechtebelege und die im Code versiegelte Preregistrierung werden vor der
+  Splitbildung fail-closed geprüft. Video/Audio werden mit gepinnten
+  DGX-Binaries reproduzierbar dekodiert; RGB96-Mundtensoren und perzeptuelle
+  Fingerprints haben feste Binärschemata. Alle validierten Bytes landen in
+  einem portablen SHA-256-CAS. Die stabile Freeze-ID ist von der aktuellen,
+  separat geschriebenen Rechteattestation getrennt; der Trainingsloader
+  verlangt eine höchstens fünf Minuten alte Attestation.
+  `profile=product` bleibt technisch im Product-HOLD, bis
+  Signaturprüfung, getrennte Blind-Scorer-ACLs und Release-Attestierungen
+  implementiert und unabhängig geprüft sind.
 - LongCat bleibt vorhanden, ist aber standardmäßig aus und kein SOTA-Hauptpfad.
 - DGX-Queue, Thermalwächter und Wiederanlauf bleiben Teil jedes GPU-Laufs.
 
@@ -230,8 +253,9 @@ umgesetzt:
 Noch offen sind die für eine belastbare SOTA-Aussage erforderlichen
 Evaluatoren:
 
-- rechtlich sauberer, lokal kalibrierter Phonem-/Visem-AV-Sync-Evaluator für
-  Inhaltsübereinstimmung, Offset und Synchronitätskonfidenz;
+- eigene, rechtlich freigegebene und lokal kalibrierte Gewichte sowie der
+  CPU-Inferenzrunner für den bereits implementierten
+  Phonem-/Visem-AV-Sync-Vertrag;
 - lokale SFace-Positiv-/Impostor-Kalibrierung für belastbare Grenzbereiche;
 - ASR-Abgleich des erzeugten Dialogs;
 - bewegungskompensierte Artefakt- und Flimmererkennung.

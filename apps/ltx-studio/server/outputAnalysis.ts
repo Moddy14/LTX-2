@@ -4,6 +4,7 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  objectiveBaseWorkerResultSchema,
   objectiveWorkerResultSchema,
   type ObjectiveQualityAnalysis,
   type ObjectiveWorkerResult,
@@ -26,6 +27,10 @@ import {
   type IdentityInputEvidence,
   type ResolvedIdentityReference,
 } from "./inputEvidence.js";
+import {
+  resolvePhonemeVisemeEvaluatorState,
+  type PhonemeVisemeEvaluatorState,
+} from "./evaluatorManifest.js";
 import { OutputLibrary, OutputQualityError, type OutputAnalysisTarget } from "./outputs.js";
 
 const MAX_STDOUT_BYTES = 256 * 1024;
@@ -46,21 +51,30 @@ type OutputAnalysisManagerOptions = {
   analysisTempRoot?: string;
   timeoutMs?: number;
   terminationGraceMs?: number;
+  phonemeVisemeEvaluatorStateResolver?: () => PhonemeVisemeEvaluatorState;
 };
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
-  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v3" }>;
+  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v4" }>;
+  evaluatorState: PhonemeVisemeEvaluatorState;
 };
 
 function analysisWasCancelled(task: AnalysisTask): boolean {
   return task.record.status === "cancelled";
 }
 
-function completedAnalysisIsCurrent(record: OutputAnalysisRecord): boolean {
+function completedAnalysisIsCurrent(
+  record: OutputAnalysisRecord,
+  evaluatorState: PhonemeVisemeEvaluatorState,
+): boolean {
   if (record.status !== "completed"
-    || record.schemaVersion !== "ltx-studio-output-analysis.v3"
-    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v3") return false;
+    || record.schemaVersion !== "ltx-studio-output-analysis.v4"
+    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v4"
+    || record.evaluatorFingerprint !== evaluatorState.fingerprint
+    || record.result.phonemeViseme.manifestSha256 !== evaluatorState.result.manifestSha256
+    || record.result.phonemeViseme.manifestReleaseId !== evaluatorState.result.manifestReleaseId
+    || record.result.phonemeViseme.productGo.status !== evaluatorState.result.productGo.status) return false;
   const identity = record.result.identity;
   if (["not-applicable", "reference-provenance-missing"].includes(identity.status)) return true;
   return identity.modelSha256 === CURRENT_IDENTITY_MODEL_SHA256
@@ -102,7 +116,7 @@ function revisionOf(target: OutputAnalysisTarget): OutputRevision {
 export function buildObjectiveQualityAnalysis(
   input: ObjectiveWorkerResult,
   createdAt = now(),
-): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v3" }> {
+): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v4" }> {
   const worker = objectiveWorkerResultSchema.parse(input);
   const findings: ObjectiveQualityAnalysis["findings"] = [];
   if (worker.technical.hasAudio !== true) {
@@ -215,6 +229,31 @@ export function buildObjectiveQualityAnalysis(
       message: `AV-Rohproxy fehlgeschlagen: ${worker.avSync.error ?? "unbekannter Fehler"}`,
     });
   }
+  if (worker.phonemeViseme.status === "measured") {
+    findings.push({
+      code: "phoneme-viseme-product-go-measured",
+      level: "info",
+      message: `Der freigegebene Phonem-/Visem-Evaluator bestand Offset- und Inhaltsgate (${worker.phonemeViseme.manifestReleaseId}).`,
+    });
+  } else if (worker.phonemeViseme.status === "not-available") {
+    findings.push({
+      code: `phoneme-viseme-${worker.phonemeViseme.blockerCode}`,
+      level: "warning",
+      message: worker.phonemeViseme.error ?? "Kein freigegebener Phonem-/Visem-Evaluator verfügbar.",
+    });
+  } else if (worker.phonemeViseme.status === "insufficient") {
+    findings.push({
+      code: "phoneme-viseme-insufficient",
+      level: "warning",
+      message: worker.phonemeViseme.error ?? "Phonem-/Visem-Inhaltsprüfung unzureichend.",
+    });
+  } else if (worker.phonemeViseme.status === "failed") {
+    findings.push({
+      code: "phoneme-viseme-failed",
+      level: "warning",
+      message: worker.phonemeViseme.error ?? "Phonem-/Visem-Inhaltsprüfung fehlgeschlagen.",
+    });
+  }
   findings.push({
     code: "calibration-required",
     level: "info",
@@ -229,16 +268,18 @@ export function buildObjectiveQualityAnalysis(
     && worker.face.sampledFrames >= 8
     && worker.face.geometryCoverage >= 0.5
     && ["measured", "not-applicable"].includes(worker.identity.status)
-    && worker.avSync.status === "measured";
+    && worker.avSync.status === "measured"
+    && worker.phonemeViseme.status === "measured";
   return {
-    schemaVersion: "ltx-studio-objective-quality.v3",
-    analyzerVersion: "ffprobe-yunet5-sface-avmotion.v3",
+    schemaVersion: "ltx-studio-objective-quality.v4",
+    analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
     createdAt,
     status: sufficient ? "measured" : "insufficient",
     technical: worker.technical,
     face: worker.face,
     identity: worker.identity,
     avSync: worker.avSync,
+    phonemeViseme: worker.phonemeViseme,
     capabilities: {
       avSync: worker.avSync.status === "measured"
         ? "classical-av-raw-measured"
@@ -247,6 +288,21 @@ export function buildObjectiveQualityAnalysis(
           : worker.avSync.status === "failed"
             ? "classical-av-failed"
             : "not-applicable",
+      phonemeViseme: worker.phonemeViseme.status === "measured"
+        ? "product-go-measured"
+        : worker.phonemeViseme.status === "insufficient"
+          ? "product-go-insufficient"
+          : worker.phonemeViseme.status === "failed"
+            ? "failed"
+            : worker.phonemeViseme.status === "not-applicable"
+              ? "not-applicable"
+              : worker.phonemeViseme.blockerCode === "runner-unavailable"
+                ? "runner-unavailable"
+                : worker.phonemeViseme.blockerCode === "legal-hold"
+                  ? "legal-hold"
+                  : worker.phonemeViseme.blockerCode === "manifest-missing"
+                    ? "manifest-missing"
+                    : "failed",
       identity: worker.identity.status === "measured"
         ? "sface-raw-measured"
         : worker.identity.status === "insufficient"
@@ -263,6 +319,7 @@ export function buildObjectiveQualityAnalysis(
       "YuNet liefert fünf Landmarken; die Werte messen Stabilität, aber keine Phonem-Mund-Synchronität.",
       "SFace misst Identitätsähnlichkeit nur gegen während der Generierung kryptografisch gebundene Studio-Referenzen.",
       "Der klassische AV-Rohproxy korreliert Audio-Onsets mit stabilisierter Mundbewegung; er beweist keine Phonem- oder Visemtreue.",
+      "Nur ein manifestgebundener Evaluator mit Product-GO sowie bestandener Offset- und Inhaltsstufe darf Phonem-/Visemtreue als gemessen markieren.",
       "Musik, Fremdsprache, Verdeckungen und starke Beleuchtungswechsel können den AV-Rohproxy verfälschen.",
       "Eine SOTA-Aussage benötigt weiterhin einen lizenzierten und lokal kalibrierten Phonem-AV-Evaluator.",
       "Unkalibrierte Rohwerte dürfen keine automatische 10/10- oder SOTA-Freigabe erzeugen.",
@@ -295,11 +352,13 @@ export class OutputAnalysisManager {
     const target = this.library.resolveAnalysisTarget(outputName);
     const revision = revisionOf(target);
     const current = readOutputAnalysis(this.root, outputName, revision);
+    const evaluatorState = this.resolveEvaluatorState();
     if (current && ["queued", "running"].includes(current.status)) return current;
-    if (current && completedAnalysisIsCurrent(current) && !force) return current;
+    if (current && completedAnalysisIsCurrent(current, evaluatorState) && !force) return current;
     const createdAt = now();
-    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v3" }> = {
-      schemaVersion: "ltx-studio-output-analysis.v3",
+    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v4" }> = {
+      schemaVersion: "ltx-studio-output-analysis.v4",
+      evaluatorFingerprint: evaluatorState.fingerprint,
       outputName,
       sizeBytes: target.sizeBytes,
       modifiedAtMs: target.modifiedAtMs,
@@ -318,7 +377,7 @@ export class OutputAnalysisManager {
       result: null,
     };
     writeOutputAnalysis(this.root, record);
-    this.tasks.set(record.analysisId, { target, record });
+    this.tasks.set(record.analysisId, { target, record, evaluatorState });
     this.activeByOutput.set(outputName, record.analysisId);
     this.queue.push(record.analysisId);
     setImmediate(() => void this.pump());
@@ -398,6 +457,9 @@ export class OutputAnalysisManager {
       if (analysisWasCancelled(task)) return;
       await this.verifyTaskIdentityEvidence(task, "nach der Analyse");
       if (analysisWasCancelled(task)) return;
+      if (this.resolveEvaluatorState().fingerprint !== task.evaluatorState.fingerprint) {
+        throw new Error("Phonem-/Visem-Evaluator-Manifest wurde während der Analyse verändert.");
+      }
       const currentTarget = this.library.resolveAnalysisTarget(task.target.outputName);
       if (currentTarget.sizeBytes !== task.target.sizeBytes
         || Math.abs(currentTarget.modifiedAtMs - task.target.modifiedAtMs) >= 1
@@ -442,6 +504,10 @@ export class OutputAnalysisManager {
     if (error) {
       throw new Error(`Gebundene Identitätsreferenz ${context} verändert: ${error}`);
     }
+  }
+
+  private resolveEvaluatorState(): PhonemeVisemeEvaluatorState {
+    return (this.options.phonemeVisemeEvaluatorStateResolver ?? resolvePhonemeVisemeEvaluatorState)();
   }
 
   private runWorker(task: AnalysisTask): Promise<ObjectiveWorkerResult> {
@@ -506,7 +572,11 @@ export class OutputAnalysisManager {
         rmSync(analysisTempDir, { recursive: true, force: true });
         if (error) return rejectPromise(error);
         try {
-          resolvePromise(objectiveWorkerResultSchema.parse(JSON.parse(stdout)));
+          const baseWorker = objectiveBaseWorkerResultSchema.parse(JSON.parse(stdout));
+          resolvePromise(objectiveWorkerResultSchema.parse({
+            ...baseWorker,
+            phonemeViseme: task.evaluatorState.result,
+          }));
         } catch (parseError) {
           rejectPromise(new Error(`Analyse lieferte ungültige Messdaten: ${String(parseError)}`));
         }

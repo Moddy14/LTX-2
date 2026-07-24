@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "ltx-studio-phoneme-viseme-manifest.v1",
+  "releaseId": "pv-evaluator-legal-hold",
+  "productGo": {
+    "status": "blocked",
+    "reason": "Eigene, rechtegeprüfte Gewichte und unabhängige Holdout-Berichte fehlen.",
+    "candidateCreatedAt": null
+  },
+  "legal": null,
+  "artifacts": null,
+  "calibration": null,
+  "datasets": [],
+  "preprocessing": {
+    "version": "mouth-npz-rgb96-audio-wav16k-cfr.v2",
+    "maxSeconds": 5,
+    "frameRates": [24, 25, 30]
+  },
+  "visemeMap": {
+    "version": "viseme15-en-de.v1",
+    "classCount": 15,
+    "path": "viseme-mapping.v1.json",
+    "sha256": "c2ce7628f8804e5af2cce4ce7b1e34f6f92f768f0e165e4743c63a30151e27a7"
+  }
+}

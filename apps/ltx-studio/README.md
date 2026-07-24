@@ -62,11 +62,19 @@ that cannot be proven from matching provenance.
 | `LTX_STUDIO_THERMAL_START_SAMPLE_INTERVAL_MS` | `1000` | Delay between baseline samples |
 | `LTX_STUDIO_DATA_DIR` | `<repository>/.ltx-studio` | Private runtime data directory |
 | `LTX_STUDIO_MODEL_ROOTS` | `/home/moddy/LTX-2.3-max` | Colon-separated, bounded model discovery roots |
+| `LTX_STUDIO_PHONEME_VISEME_MANIFEST` | unset | Blocked or release-candidate manifest for the owned CPU phoneme/viseme evaluator; every non-measured state fails closed |
 | `DGX_RUNTIME_API_BASE_URL` | `http://127.0.0.1:8878` | Authenticated read-only runtime status endpoint |
 | `DGX_RUNTIME_API_TOKEN_FILE` | `~/.config/openclaw/dgx-runtime-api.token` | Private Runtime API token file |
 
 Admission is required by default. `LTX_STUDIO_REQUIRE_ADMISSION=0` exists only for isolated development and test
 environments; it should not be used for GPU work on the DGX.
+
+The shipped `evaluators/phoneme-viseme/manifest.blocked.json` documents the current Legal Hold. It cannot produce a
+measured result. This build parses a structurally complete `release-candidate` manifest, but deliberately does not
+hash multi-gigabyte model files on the Node event loop and never treats manifest text as Product-GO. The UI reports
+`Runner fehlt`, and the result remains blocked until a bounded evaluator worker independently verifies model,
+mapping, dataset-freeze, legal-approval, tune, and sealed-holdout attestations before inference. The checkpoint-free
+motion proxy never produces a 10/10 or SOTA claim.
 
 ## Verify
 

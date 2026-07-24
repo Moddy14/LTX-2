@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "ltx-studio-viseme-mapping.v1",
+  "mappingVersion": "viseme15-en-de.v1",
+  "classCount": 15,
+  "languages": ["de", "en"],
+  "normalization": {
+    "unicodeForm": "NFC",
+    "stripPrimaryAndSecondaryStress": true,
+    "stripVowelLength": true,
+    "expandAffricatesBeforeMapping": true,
+    "frameAssignment": "phoneme active at video-frame center",
+    "transitionDefinition": "class id changes between adjacent non-silence frame centers",
+    "unknownPolicy": "quarantine"
+  },
+  "classes": [
+    {
+      "id": 0,
+      "code": "SIL",
+      "phones": ["<eps>", "sil", "sp"]
+    },
+    {
+      "id": 1,
+      "code": "P_B_M",
+      "phones": ["p", "b", "m", "P", "B", "M"]
+    },
+    {
+      "id": 2,
+      "code": "F_V",
+      "phones": ["f", "v", "F", "V"]
+    },
+    {
+      "id": 3,
+      "code": "TH_DH",
+      "phones": ["θ", "ð", "TH", "DH"]
+    },
+    {
+      "id": 4,
+      "code": "T_D_N_S_Z",
+      "phones": ["t", "d", "n", "s", "z", "T", "D", "N", "S", "Z"]
+    },
+    {
+      "id": 5,
+      "code": "SH_ZH_CH_JH",
+      "phones": ["ʃ", "ʒ", "tʃ", "dʒ", "SH", "ZH", "CH", "JH"]
+    },
+    {
+      "id": 6,
+      "code": "K_G_NG",
+      "phones": ["k", "g", "ŋ", "K", "G", "NG"]
+    },
+    {
+      "id": 7,
+      "code": "R",
+      "phones": ["r", "ʀ", "ʁ", "ɹ", "R"]
+    },
+    {
+      "id": 8,
+      "code": "L",
+      "phones": ["l", "L"]
+    },
+    {
+      "id": 9,
+      "code": "W_UW_UH_OW_OY",
+      "phones": ["w", "u", "ʊ", "o", "ɔ", "y", "ʏ", "ø", "œ", "W", "UW", "UH", "OW", "OY"]
+    },
+    {
+      "id": 10,
+      "code": "Y_IY_IH_EY",
+      "phones": ["j", "i", "ɪ", "e", "Y", "IY", "IH", "EY"]
+    },
+    {
+      "id": 11,
+      "code": "EH_AE",
+      "phones": ["ɛ", "æ", "EH", "AE"]
+    },
+    {
+      "id": 12,
+      "code": "AA_AH_AW_AY",
+      "phones": ["a", "ɑ", "ɒ", "ʌ", "AA", "AH", "AW", "AY"]
+    },
+    {
+      "id": 13,
+      "code": "ER",
+      "phones": ["ə", "ɐ", "ɜ", "ɚ", "ɝ", "ER"]
+    },
+    {
+      "id": 14,
+      "code": "H",
+      "phones": ["h", "ç", "x", "H", "HH"]
+    }
+  ]
+}

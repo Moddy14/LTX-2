@@ -45,6 +45,31 @@ Checkpoints oder Trainingsdaten.
 | LatentSync, Code `a229c3948406bc2cf6eaf4873e662e70c6a04746`, HF `c42c7e6c8e9c213626389fa7d9a3c444b8536353` | Apache-2.0 Code | HF nur mit `openrail++`-Tag, ohne eindeutige Lizenzdatei je Auxiliary-Weight; VoxCeleb2/HDTF | Passender Sync-Head vorhanden | Legal Hold |
 | WAVE-7B, Code `9c87b5cbb4bf2ad8e21c8c9ca4a2f1f7af8e338b`, HF `7d51cdaecfaabb9c529a447249cd4c2a6df8ce5b` | Code und Weight-Tag Apache-2.0 | Trainingsdaten-/Basiskomponenten-Provenienz noch nicht vollständig auditiert | AV-Retrieval/QA, kein zeitlicher Lippenoffset | Code-/Weight-License-GO, Provenienz offen, funktionales NO-GO |
 
+## Interne Spitzenkomparatoren
+
+Zwei Generatoren werden getrennt von der Evaluator-Lizenzentscheidung als
+vorab zu pinnende **interne Benchmark-Arme** geführt:
+
+- LongCat-Video-Avatar 1.5: Code-Revision
+  `6b3f4b8582a8bc3f20f795735f5383716c4ba794`; der aktuell veröffentlichte
+  Hugging-Face-Head ist
+  `92016c71d5d318d0f5d84e4db30015a571484ab6`, während der lokale Download noch
+  Dateien der Revision `c70e3188051d3804c74fa187340a2aa1e6fac0f1`
+  enthält. Vor dem Holdout ist genau eine vollständig geprüfte Revision
+  festzuschreiben.
+- Wan2.2-S2V-14B: externer Speech-to-Video-Spitzenkomparator; Code
+  `42bf4cfaa384bc21833865abc2f9e6c0e67233dc`, Gewichte
+  `dab4e9c55bbe4c8c4d03db1c2c98c7f0ac9c454b`.
+
+`internal-benchmark-only` ist ausschließlich die Scope-Obergrenze und **keine
+Ausführungsfreigabe**. Beide Arme bleiben `conditional-legal-hold`, bis
+Legal/FTO, Trainingsdaten- und Gewichtsprovenienz sowie die Rechte an den
+konkreten Benchmark-Eingaben für exakt diese Revisionen akzeptiert und
+dokumentiert sind. Erst danach darf ein gesonderter Freigabeakt einen internen
+Vergleichslauf erlauben. Eine gute Vergleichsleistung oder eine permissive
+Repository-/Weight-Lizenz ist keine Freigabe, fremden Code oder Gewichte in
+LTX Studio auszuliefern.
+
 Die Hugging-Face-LFS-Metadaten melden für den untersuchten
 LatentSync-Checkpoint `stable_syncnet.pt` SHA-256
 `77678d13861a02d6e83d0b169962175b6266be773f1f6f85fda2b0182e225118`.
@@ -66,6 +91,14 @@ lokale Nachprüfung noch das Nutzungsrecht.
 - LatentSync: <https://github.com/bytedance/LatentSync/tree/a229c3948406bc2cf6eaf4873e662e70c6a04746> und
   <https://huggingface.co/ByteDance/LatentSync-1.6/tree/c42c7e6c8e9c213626389fa7d9a3c444b8536353>
 - WAVE-7B: <https://huggingface.co/tsinghua-ee/WAVE-7B/tree/7d51cdaecfaabb9c529a447249cd4c2a6df8ce5b>
+- LongCat-Video-Avatar 1.5 Code:
+  <https://github.com/meituan-longcat/LongCat-Video/tree/6b3f4b8582a8bc3f20f795735f5383716c4ba794>
+- LongCat-Video-Avatar 1.5 Gewichte:
+  <https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5/tree/92016c71d5d318d0f5d84e4db30015a571484ab6>
+- Wan2.2-S2V-14B Code:
+  <https://github.com/Wan-Video/Wan2.2/tree/42bf4cfaa384bc21833865abc2f9e6c0e67233dc>
+- Wan2.2-S2V-14B Gewichte:
+  <https://huggingface.co/Wan-AI/Wan2.2-S2V-14B/tree/dab4e9c55bbe4c8c4d03db1c2c98c7f0ac9c454b>
 
 ## Produktionsweg
 

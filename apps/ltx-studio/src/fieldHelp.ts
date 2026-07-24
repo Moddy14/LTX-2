@@ -211,4 +211,14 @@ export const fieldHelp = {
     "Wofür: Interquartilsabstand der Lag-Schätzungen aus mehreren Zeitfenstern. Ein kleiner Wert zeigt zeitlichen Konsens über den Clip; große Werte bedeuten wechselnde oder zufällige Übereinstimmung.",
   objectiveAvNullP95:
     "Wofür: 95. Perzentil der besten Scheinkorrelationen nach kontrolliertem zyklischem Verschieben des Audios. Der echte Peak muss diesen Nullmodellwert klar übertreffen, sonst bleibt die Messung unzureichend.",
+  objectivePvCapability:
+    "Wofür: Zeigt den belastbaren Freigabestand des Phonem-/Visem-Evaluators. Modell fehlt, Legal Hold, Runner fehlt oder technischer Hold bedeutet: keine Inhaltsfreigabe und keine 10/10-/SOTA-Aussage. Gut ist ausschließlich Product-GO gemessen nach unabhängig geprüften Artefakten sowie bestandener Offset- und Inhaltsstufe.",
+  objectivePvOffset:
+    "Wofür: Zeitversatz des gelernten Audio-/Mundinhaltevaluators. Positiv bedeutet, dass der sichtbare Mund dem Audio folgt. Gut: Medianfehler höchstens 20 ms und p95 höchstens 40 ms auf dem unabhängigen Holdout; ein Einzelclipwert allein ist kein Release-Gate.",
+  objectivePvOffsetConfidence:
+    "Wofür: Kalibrierte Sicherheit der gelernten Offsetentscheidung. Gut ist nicht einfach ein hoher Rohwert, sondern eine auf unabhängigem Holdout bestandene FAR-/FRR-, Brier- und ECE-Kalibration.",
+  objectivePvFrameMacroF1:
+    "Wofür: Übereinstimmung der 15 sichtbaren Visemklassen zwischen Audioinhalt und Mundframes, gemittelt über Nicht-Stille-Klassen. Product-GO verlangt mindestens 0,85 insgesamt, 0,75 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
+  objectivePvTransitionF1:
+    "Wofür: Übereinstimmung sichtbarer Visemwechsel mit einer Toleranz von einem Videoframe. Product-GO verlangt mindestens 0,90 insgesamt, 0,80 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
 } as const;

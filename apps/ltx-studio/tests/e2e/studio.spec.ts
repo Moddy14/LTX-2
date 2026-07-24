@@ -375,7 +375,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
     const body = route.request().postDataJSON();
     expect(body).toEqual({ force: false });
     output.analysis = {
-      schemaVersion: "ltx-studio-output-analysis.v3",
+      schemaVersion: "ltx-studio-output-analysis.v4",
+      evaluatorFingerprint: "test-evaluator.v1",
       outputName: output.name,
       sizeBytes: output.sizeBytes,
       modifiedAtMs: Date.parse(modifiedAt),
@@ -392,10 +393,10 @@ test("objective speech analysis exposes raw measurements and honest capability g
       updatedAt: "2026-07-24T18:05:02.000Z",
       error: null,
       result: {
-        schemaVersion: "ltx-studio-objective-quality.v3",
-        analyzerVersion: "ffprobe-yunet5-sface-avmotion.v3",
+        schemaVersion: "ltx-studio-objective-quality.v4",
+        analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
         createdAt: "2026-07-24T18:05:02.000Z",
-        status: "measured",
+        status: "insufficient",
         technical: {
           durationSeconds: 4.041667,
           fps: 24,
@@ -466,8 +467,35 @@ test("objective speech analysis exposes raw measurements and honest capability g
           windowLagIqrMilliseconds: 42,
           nullP95Correlation: 0.21,
         },
+        phonemeViseme: {
+          status: "not-available",
+          blockerCode: "manifest-missing",
+          error: "Kein rechtlich freigegebener Phonem-/Visem-Evaluator konfiguriert.",
+          manifestReleaseId: null,
+          manifestSha256: null,
+          preprocessingVersion: null,
+          visemeMapVersion: null,
+          gateVersion: null,
+          productGo: {
+            status: "blocked",
+            reason: "Kein rechtlich freigegebener Phonem-/Visem-Evaluator konfiguriert.",
+          },
+          offset: {
+            status: "not-run",
+            gatePassed: false,
+            estimatedOffsetMilliseconds: null,
+            confidence: null,
+          },
+          content: {
+            status: "not-run",
+            gatePassed: false,
+            frameMacroF1: null,
+            transitionF1: null,
+          },
+        },
         capabilities: {
           avSync: "classical-av-raw-measured",
+          phonemeViseme: "manifest-missing",
           identity: "sface-raw-measured",
           dialogue: "whisper-not-run",
         },
@@ -488,7 +516,7 @@ test("objective speech analysis exposes raw measurements and honest capability g
 
   await page.getByRole("button", { name: "Objektiv analysieren" }).click();
   await expect(page.getByRole("heading", { name: "Objektive Ausgabeanalyse" })).toBeVisible();
-  await expect(page.locator(".objective-analysis__status")).toHaveText("Rohwerte erfasst");
+  await expect(page.locator(".objective-analysis__status")).toHaveText("Messung unzureichend");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Gesicht erkannt" }).locator("strong")).toHaveText("100 %");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("1 ms");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Rohversatz" }).locator("strong")).toHaveText("20 ms");
@@ -513,6 +541,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
     );
   }
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Rohproxy, Phonem offen");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Phonem/Visem");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Modell fehlt");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("SFace Rohwerte");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper nicht ausgeführt");
   await expect(page.locator(".objective-analysis__actions")).toContainText("keine DGX-Modellbelegung");

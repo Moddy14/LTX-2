@@ -82,3 +82,5 @@ playwright-report/
 *.tsbuildinfo
 .ltx-studio/
 !apps/ltx-studio/*.json
+!apps/ltx-studio/evaluators/phoneme-viseme/*.json
+!packages/ltx-trainer/configs/av_eval/*.json

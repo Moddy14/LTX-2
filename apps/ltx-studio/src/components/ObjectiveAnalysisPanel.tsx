@@ -45,10 +45,15 @@ export function ObjectiveAnalysisPanel({
   const result = analysis?.status === "completed" ? analysis.result : null;
   const identity = result?.schemaVersion === "ltx-studio-objective-quality.v2"
     || result?.schemaVersion === "ltx-studio-objective-quality.v3"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v4"
     ? result.identity
     : null;
   const avSync = result?.schemaVersion === "ltx-studio-objective-quality.v3"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v4"
     ? result.avSync
+    : null;
+  const phonemeViseme = result?.schemaVersion === "ltx-studio-objective-quality.v4"
+    ? result.phonemeViseme
     : null;
   const showIdentityMetrics = identity && ["measured", "insufficient"].includes(identity.status);
   const statusLabel = analysis?.status === "completed"
@@ -191,6 +196,28 @@ export function ObjectiveAnalysisPanel({
                   : percent(avSync.audioActivityRatio)} help={fieldHelp.objectiveAvAudioActivity} />
               </>
             ) : null}
+            {phonemeViseme?.status === "measured" ? (
+              <>
+                <MetricRow label="PV-Offset" value={metricWithUnit(
+                  phonemeViseme.offset.estimatedOffsetMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectivePvOffset} />
+                <MetricRow label="PV-Offsetkonfidenz" value={phonemeViseme.offset.confidence === null
+                  ? "Nicht messbar"
+                  : percent(phonemeViseme.offset.confidence)} help={fieldHelp.objectivePvOffsetConfidence} />
+                <MetricRow label="Visem-Makro-F1" value={metricWithUnit(
+                  phonemeViseme.content.frameMacroF1,
+                  "",
+                  3,
+                )} help={fieldHelp.objectivePvFrameMacroF1} />
+                <MetricRow label="Visem-Übergangs-F1" value={metricWithUnit(
+                  phonemeViseme.content.transitionF1,
+                  "",
+                  3,
+                )} help={fieldHelp.objectivePvTransitionF1} />
+              </>
+            ) : null}
           </div>
           <div className="objective-analysis__capabilities">
             <span>AV-Sync <strong>{avSync?.status === "measured"
@@ -202,6 +229,23 @@ export function ObjectiveAnalysisPanel({
                   : avSync?.status === "not-applicable"
                     ? "Nicht anwendbar"
                     : "Phonem-Evaluator fehlt"}</strong></span>
+            <span>Phonem/Visem <InfoTooltip text={fieldHelp.objectivePvCapability} /> <strong>{
+              phonemeViseme?.status === "measured"
+                ? "Product-GO gemessen"
+                : phonemeViseme?.status === "failed"
+                  ? "Manifest-/Evaluatorfehler"
+                  : phonemeViseme?.status === "insufficient"
+                    ? "Nicht ausreichend"
+                    : phonemeViseme?.status === "not-applicable"
+                      ? "Nicht anwendbar"
+                      : phonemeViseme?.blockerCode === "runner-unavailable"
+                        ? "Runner fehlt"
+                        : phonemeViseme?.blockerCode === "legal-hold"
+                          ? "Legal Hold"
+                          : phonemeViseme?.blockerCode === "manifest-missing"
+                            ? "Modell fehlt"
+                            : "Technischer Hold"
+            }</strong></span>
             <span>Identität <strong>{identity?.status === "measured"
               ? "SFace Rohwerte"
               : identity?.status === "failed"

@@ -1,0 +1,137 @@
+{
+  "schema_version": "ltx-av-eval-preregistration.v1",
+  "status": "draft",
+  "mapping_sha256": "9ef0f073f76a1fd60b5ad10e15231d648100c349f05b88639940d5bc06e35376",
+  "preprocessing_version": "mouth-npz-rgb96-audio-wav16k-cfr.v2",
+  "split_algorithm": "transitive-components-sha256.v1",
+  "split_seed_sha256": "f9952d9e9418a55240951daf7d3d23f697e67e8e6259862b65c69215dac4bf0e",
+  "bootstrap_replicates": 10000,
+  "bootstrap_unit": "voice-speaker-and-leakage-component",
+  "holdout_commitments": {
+    "model_family": "owned-dual-head-av-evaluator.v1",
+    "model_recipe_sha256": null,
+    "initial_weights_sha256": null,
+    "training_runner_sha256": null,
+    "evaluation_runner_sha256": null,
+    "hyperparameter_search_space_sha256": null,
+    "prompt_set_sha256": null,
+    "rating_protocol_sha256": null,
+    "baseline_matrix_sha256": null,
+    "generation_seeds": [23072026, 24072026, 25072026],
+    "selection_metric": "speaker-bootstrap-worst-stratum-product-gates.v1",
+    "calibration_method": "speaker-disjoint-isotonic.v1",
+    "operating_point": "far-0.01-frr-0.05.v1",
+    "comparator_arms": [
+      {
+        "id": "native-ltx-a2v",
+        "code_revision": null,
+        "weights_revision": null,
+        "scope_ceiling": "owned-candidate",
+        "execution_status": "pending-artifact-freeze"
+      },
+      {
+        "id": "longcat-video-avatar-1.5",
+        "code_revision": "6b3f4b8582a8bc3f20f795735f5383716c4ba794",
+        "weights_revision": "92016c71d5d318d0f5d84e4db30015a571484ab6",
+        "scope_ceiling": "internal-benchmark-only",
+        "execution_status": "conditional-legal-hold"
+      },
+      {
+        "id": "wan2.2-s2v-14b",
+        "code_revision": "42bf4cfaa384bc21833865abc2f9e6c0e67233dc",
+        "weights_revision": "dab4e9c55bbe4c8c4d03db1c2c98c7f0ac9c454b",
+        "scope_ceiling": "internal-benchmark-only",
+        "execution_status": "conditional-legal-hold"
+      }
+    ],
+    "human_mos_gates": {
+      "lip_sync_min": 9.0,
+      "identity_and_mouth_naturalness_min": 9.0,
+      "candidate_lip_sync_margin_min": 0.5,
+      "candidate_identity_and_mouth_margin_min": 0.3,
+      "confidence_level": 0.95,
+      "multiplicity_correction": "holm"
+    }
+  },
+  "release_authorization": null,
+  "claim_domain": {
+    "languages": ["de", "en"],
+    "duration_seconds": {
+      "minimum": 2,
+      "maximum": 5
+    },
+    "frame_rates": [24, 25, 30],
+    "speech_rate_wpm": {
+      "minimum": 65,
+      "maximum": 220
+    },
+    "head_motion": ["static", "light"],
+    "lighting": ["standard", "difficult"],
+    "gender_groups": ["female", "male", "nonbinary", "not-disclosed"],
+    "age_bands": ["18-29", "30-44", "45-59", "60-plus"],
+    "skin_tone_fitzpatrick": [1, 2, 3, 4, 5, 6],
+    "source_domains": ["consented-recording", "ltx-generated-product-output"],
+    "absolute_yaw_degrees_max": 20,
+    "mouth_visible_ratio_min": 0.99,
+    "single_speaker_required": true,
+    "music_allowed": false,
+    "cuts_allowed": false,
+    "ood_kinds": [
+      "silence",
+      "mouth-occluded",
+      "no-active-speaker",
+      "music",
+      "multiple-speakers",
+      "offscreen-speech",
+      "synthetic-training-source"
+    ]
+  },
+  "release_gates": {
+    "offset": {
+      "median_absolute_error_ms_max": 20,
+      "p95_absolute_error_ms_max": 40,
+      "bootstrap95_upper_ms_max": 40,
+      "within_one_frame_accuracy_min": 0.95,
+      "worst_stratum_within_one_frame_accuracy_min": 0.9,
+      "false_accept_rate_max": 0.01,
+      "false_reject_rate_max": 0.05,
+      "worst_stratum_false_accept_rate_max": 0.03,
+      "worst_stratum_false_reject_rate_max": 0.1,
+      "calibration_ece_max": 0.05,
+      "brier_score_max": 0.1,
+      "ood_abstention_recall_min": 0.95,
+      "in_domain_false_abstention_rate_max": 0.05
+    },
+    "content": {
+      "frame_macro_f1_min": 0.85,
+      "worst_stratum_frame_macro_f1_min": 0.75,
+      "bootstrap95_lower_frame_macro_f1_min": 0.82,
+      "worst_stratum_bootstrap95_lower_frame_macro_f1_min": 0.72,
+      "transition_f1_min": 0.9,
+      "worst_stratum_transition_f1_min": 0.8,
+      "bootstrap95_lower_transition_f1_min": 0.87,
+      "worst_stratum_bootstrap95_lower_transition_f1_min": 0.77
+    },
+    "subgroups": {
+      "minimum_test_clips": 90,
+      "minimum_test_identities": 30,
+      "minimum_test_voice_speakers": 30,
+      "minimum_test_leakage_components": 30,
+      "minimum_clips_per_language": 30,
+      "minimum_identities_per_language": 10,
+      "minimum_clips_per_gender_group": 10,
+      "minimum_clips_per_age_band": 10,
+      "minimum_clips_per_skin_tone": 6,
+      "minimum_clips_per_speech_rate_bucket": 15,
+      "minimum_clips_per_source_domain": 15,
+      "minimum_clips_per_ood_kind": 5,
+      "worst_language_macro_f1_min": 0.8,
+      "maximum_language_macro_f1_gap": 0.05
+    },
+    "independence": {
+      "test_annotations_blinded": true,
+      "test_split_sealed": true,
+      "no_threshold_tuning_on_test": true
+    }
+  }
+}

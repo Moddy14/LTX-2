@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 import { appRoot, pythonExecutable } from "../server/config.js";
+import type { PhonemeVisemeEvaluatorState } from "../server/evaluatorManifest.js";
 import { writeOutputAnalysis } from "../server/analysisStore.js";
 import type { StudioJob } from "../server/jobs.js";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../server/outputAnalysis.js";
 import { OutputLibrary } from "../server/outputs.js";
 import type { ObjectiveWorkerResult } from "../shared/objectiveQuality.js";
+import { unavailablePhonemeVisemeResult } from "../shared/phonemeVisemeEvaluator.js";
 import { validRequest } from "./fixtures.js";
 
 const faceModel = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
@@ -97,6 +99,13 @@ const syntheticWorkerResult: ObjectiveWorkerResult = {
     windowLagIqrMilliseconds: null,
     nullP95Correlation: null,
   },
+  phonemeViseme: unavailablePhonemeVisemeResult(),
+};
+const syntheticBaseWorkerResult = {
+  technical: syntheticWorkerResult.technical,
+  face: syntheticWorkerResult.face,
+  identity: syntheticWorkerResult.identity,
+  avSync: syntheticWorkerResult.avSync,
 };
 
 afterEach(async () => {
@@ -158,6 +167,28 @@ function measuredIdentity(
     cosineP10: 0.75,
     cosineMinimum: 0.7,
     outputTemporalConsistencyMedian: 0.98,
+  };
+}
+
+function v3Analysis(worker: ObjectiveWorkerResult, createdAt: string) {
+  return {
+    schemaVersion: "ltx-studio-objective-quality.v3" as const,
+    analyzerVersion: "ffprobe-yunet5-sface-avmotion.v3" as const,
+    createdAt,
+    status: "insufficient" as const,
+    technical: worker.technical,
+    face: worker.face,
+    identity: worker.identity,
+    avSync: worker.avSync,
+    capabilities: {
+      avSync: "classical-av-insufficient" as const,
+      identity: worker.identity.status === "measured"
+        ? "sface-raw-measured" as const
+        : "not-applicable" as const,
+      dialogue: "whisper-not-run" as const,
+    },
+    findings: [],
+    limitations: ["Pre-phoneme/viseme cache."],
   };
 }
 
@@ -376,7 +407,7 @@ integrationIt("fails closed when bound identity evidence changes while the worke
   await writeFile(workerScript, [
     "import time",
     "time.sleep(0.05)",
-    `print(${JSON.stringify(JSON.stringify(syntheticWorkerResult))})`,
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
   ].join("\n"));
   const completedJob = job(outputName);
   completedJob.identityEvidence = {
@@ -552,7 +583,7 @@ integrationIt("replaces a v3 cache that used obsolete SFace preprocessing", asyn
     finishedAt: timestamp,
     updatedAt: timestamp,
     error: null,
-    result: buildObjectiveQualityAnalysis(staleWorker, timestamp),
+    result: v3Analysis(staleWorker, timestamp),
   });
   const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
     analysisTempRoot: join(root, "analysis-tmp"),
@@ -566,7 +597,7 @@ integrationIt("replaces a v3 cache that used obsolete SFace preprocessing", asyn
   manager.cancel(outputName, fresh.analysisId);
 }, 20_000);
 
-integrationIt("reuses a completed v3 cache with current SFace and AV preprocessing", async () => {
+integrationIt("replaces a completed v3 cache even with current SFace and AV preprocessing", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v3-current-cache-"));
   roots.push(root);
   const outputName = "current-v3-cache.mp4";
@@ -596,6 +627,51 @@ integrationIt("reuses a completed v3 cache with current SFace and AV preprocessi
     finishedAt: timestamp,
     updatedAt: timestamp,
     error: null,
+    result: v3Analysis(currentWorker, timestamp),
+  });
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-tmp"),
+  });
+
+  const fresh = manager.start(outputName);
+
+  expect(fresh.analysisId).not.toBe(currentAnalysisId);
+  expect(fresh.attempt).toBe(2);
+  expect(fresh.status).toBe("queued");
+  manager.cancel(outputName, fresh.analysisId);
+}, 20_000);
+
+integrationIt("reuses a completed v4 cache when SFace and evaluator configuration are current", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-current-cache-"));
+  roots.push(root);
+  const outputName = "current-v4-cache.mp4";
+  await writeFile(join(root, outputName), "synthetic-output");
+  const completedJob = job(outputName);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const target = library.resolveAnalysisTarget(outputName);
+  const currentWorker = structuredClone(syntheticWorkerResult);
+  currentWorker.identity = measuredIdentity("yunet5-aligncrop-112-track.v2");
+  const timestamp = "2026-07-24T18:33:00.000Z";
+  const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918883";
+  writeOutputAnalysis(root, {
+    schemaVersion: "ltx-studio-output-analysis.v4",
+    evaluatorFingerprint: "manifest-missing.v1",
+    outputName,
+    sizeBytes: target.sizeBytes,
+    modifiedAtMs: target.modifiedAtMs,
+    changedAtMs: target.changedAtMs,
+    fileId: target.fileId,
+    jobId: target.jobId,
+    analysisId: currentAnalysisId,
+    attempt: 1,
+    status: "completed",
+    progress: 100,
+    createdAt: timestamp,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    updatedAt: timestamp,
+    error: null,
     result: buildObjectiveQualityAnalysis(currentWorker, timestamp),
   });
   const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
@@ -607,6 +683,62 @@ integrationIt("reuses a completed v3 cache with current SFace and AV preprocessi
   expect(reused.analysisId).toBe(currentAnalysisId);
   expect(reused.attempt).toBe(1);
   expect(reused.status).toBe("completed");
+}, 20_000);
+
+integrationIt("invalidates a v4 cache when only the evaluator fingerprint changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-pv-cache-"));
+  roots.push(root);
+  const outputName = "pv-manifest-cache.mp4";
+  await writeFile(join(root, outputName), "synthetic-output");
+  const completedJob = job(outputName);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const target = library.resolveAnalysisTarget(outputName);
+  const currentWorker = structuredClone(syntheticWorkerResult);
+  currentWorker.identity = measuredIdentity("yunet5-aligncrop-112-track.v2");
+  const timestamp = "2026-07-24T18:34:00.000Z";
+  const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918884";
+  writeOutputAnalysis(root, {
+    schemaVersion: "ltx-studio-output-analysis.v4",
+    evaluatorFingerprint: "manifest-missing.v1",
+    outputName,
+    sizeBytes: target.sizeBytes,
+    modifiedAtMs: target.modifiedAtMs,
+    changedAtMs: target.changedAtMs,
+    fileId: target.fileId,
+    jobId: target.jobId,
+    analysisId: currentAnalysisId,
+    attempt: 1,
+    status: "completed",
+    progress: 100,
+    createdAt: timestamp,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    updatedAt: timestamp,
+    error: null,
+    result: buildObjectiveQualityAnalysis(currentWorker, timestamp),
+  });
+  let evaluatorState: PhonemeVisemeEvaluatorState = {
+    fingerprint: "manifest-missing.v1",
+    result: unavailablePhonemeVisemeResult(),
+  };
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-tmp"),
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+  });
+
+  expect(manager.start(outputName).analysisId).toBe(currentAnalysisId);
+
+  evaluatorState = {
+    fingerprint: "manifest-missing.v2",
+    result: unavailablePhonemeVisemeResult(),
+  };
+  const fresh = manager.start(outputName);
+
+  expect(fresh.analysisId).not.toBe(currentAnalysisId);
+  expect(fresh.attempt).toBe(2);
+  expect(fresh.status).toBe("queued");
+  manager.cancel(outputName, fresh.analysisId);
 }, 20_000);
 
 it("cleans only stale managed analysis directories during Studio startup", async () => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { phonemeVisemeResultSchema } from "./phonemeVisemeEvaluator.js";
 import { outputNameSchema } from "./pipelines.js";
 
 const nullableFiniteNumber = z.number().finite().nullable();
@@ -146,11 +147,15 @@ export const avSyncRawMetricsSchema = avSyncRawMetricsBaseSchema.superRefine((va
 
 export type AvSyncRawMetrics = z.infer<typeof avSyncRawMetricsSchema>;
 
-export const objectiveWorkerResultSchema = z.object({
+export const objectiveBaseWorkerResultSchema = z.object({
   technical: objectiveTechnicalMetricsSchema,
   face: faceTrackingMetricsSchema,
   identity: identityMetricsSchema,
   avSync: avSyncRawMetricsSchema,
+}).strict();
+
+export const objectiveWorkerResultSchema = objectiveBaseWorkerResultSchema.extend({
+  phonemeViseme: phonemeVisemeResultSchema,
 }).strict();
 
 export type ObjectiveWorkerResult = z.infer<typeof objectiveWorkerResultSchema>;
@@ -235,10 +240,54 @@ const objectiveQualityAnalysisV3Schema = z.object({
   limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
 }).strict();
 
+const objectiveQualityAnalysisV4Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-objective-quality.v4"),
+  analyzerVersion: z.literal("ffprobe-yunet5-sface-avmotion-pv.v4"),
+  createdAt: z.string().datetime({ offset: true }),
+  status: z.enum(["measured", "insufficient"]),
+  technical: objectiveTechnicalMetricsSchema,
+  face: faceTrackingMetricsSchema.nullable(),
+  identity: identityMetricsSchema,
+  avSync: avSyncRawMetricsSchema,
+  phonemeViseme: phonemeVisemeResultSchema,
+  capabilities: z.object({
+    avSync: z.enum([
+      "classical-av-raw-measured",
+      "classical-av-insufficient",
+      "classical-av-failed",
+      "not-applicable",
+    ]),
+    phonemeViseme: z.enum([
+      "product-go-measured",
+      "product-go-insufficient",
+      "legal-hold",
+      "runner-unavailable",
+      "manifest-missing",
+      "failed",
+      "not-applicable",
+    ]),
+    identity: z.enum([
+      "sface-raw-measured",
+      "sface-insufficient",
+      "sface-failed",
+      "reference-provenance-required",
+      "not-applicable",
+    ]),
+    dialogue: z.literal("whisper-not-run"),
+  }).strict(),
+  findings: z.array(z.object({
+    code: z.string().min(1).max(80),
+    level: z.enum(["info", "warning", "error"]),
+    message: z.string().min(1).max(500),
+  }).strict()).max(40),
+  limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
+}).strict();
+
 export const objectiveQualityAnalysisSchema = z.union([
   objectiveQualityAnalysisV1Schema,
   objectiveQualityAnalysisV2Schema,
   objectiveQualityAnalysisV3Schema,
+  objectiveQualityAnalysisV4Schema,
 ]);
 
 export type ObjectiveQualityAnalysis = z.infer<typeof objectiveQualityAnalysisSchema>;
@@ -282,10 +331,18 @@ const outputAnalysisRecordV3Schema = z.object({
   result: objectiveQualityAnalysisV3Schema.nullable(),
 }).strict();
 
+const outputAnalysisRecordV4Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v4"),
+  ...outputAnalysisRecordFields,
+  evaluatorFingerprint: z.string().min(1).max(512),
+  result: objectiveQualityAnalysisV4Schema.nullable(),
+}).strict();
+
 export const outputAnalysisRecordSchema = z.union([
   outputAnalysisRecordV1Schema,
   outputAnalysisRecordV2Schema,
   outputAnalysisRecordV3Schema,
+  outputAnalysisRecordV4Schema,
 ]);
 
 export type OutputAnalysisRecord = z.infer<typeof outputAnalysisRecordSchema>;
