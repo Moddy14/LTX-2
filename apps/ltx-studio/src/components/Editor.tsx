@@ -1,4 +1,4 @@
-import { ChevronDown, Cpu, Dices, Image as ImageIcon, Plus, SlidersHorizontal, Sparkles, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { ChevronDown, Cpu, Dices, FileVideo, Image as ImageIcon, Plus, SlidersHorizontal, Sparkles, Trash2, Undo2, WandSparkles } from "lucide-react";
 
 import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
 import {
@@ -80,13 +80,14 @@ export function Editor({
   onUndoPrompt,
 }: EditorProps) {
   const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
+  const isLipDub = request.mode === "lipdub";
   const guided = ["two-stage", "two-stage-hq", "one-stage", "keyframes", "audio-to-video", "retake"].includes(
     request.mode,
   ) && !(request.mode === "retake" && request.retake.distilled);
-  const supportsSteps = !["distilled", "ic-lora"].includes(request.mode)
+  const supportsSteps = !["distilled", "ic-lora", "lipdub"].includes(request.mode)
     && !(request.mode === "retake" && request.retake.distilled);
   const sourceSelectable = ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(request.mode);
-  const imageEnabled = request.mode !== "retake" && (!sourceSelectable || request.sourceMode === "image");
+  const imageEnabled = request.mode !== "retake" && !isLipDub && (!sourceSelectable || request.sourceMode === "image");
   const visibleTextIntent = /\b(text|schrift|logo|label|etikett|titel|wort|zeichen)\b/i.test(request.prompt);
   const dialogueIntent = request.promptParts.dialogue.trim().length > 0
     || /(?:dialogue|dialog|sagt|spricht|says|speaks|["“][^"”]{2,}["”])/i.test(request.prompt);
@@ -100,12 +101,20 @@ export function Editor({
   const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
   const loraOptions = modelOptions(discoveredModels, "lora");
 
-  const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask") => {
+  const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask" | "lipdub") => {
     onPreview(file.path, file.url);
     if (target === "audio") {
       onChange({ ...request, audio: { ...request.audio, path: file.path, name: file.name } });
     } else if (target === "retake") {
       onChange({ ...request, retake: { ...request.retake, videoPath: file.path, videoName: file.name } });
+    } else if (target === "lipdub") {
+      onChange({
+        ...request,
+        lipDub: {
+          ...request.lipDub,
+          referenceVideo: { ...request.lipDub.referenceVideo, path: file.path, name: file.name },
+        },
+      });
     } else {
       onChange({ ...request, icLora: { ...request.icLora, attentionMaskPath: file.path } });
     }
@@ -379,6 +388,51 @@ export function Editor({
         </section>
       ) : null}
 
+      {isLipDub ? (
+        <section className="editor-section">
+          <SectionHeader title="LipDub Referenz" action={<FileVideo size={18} />} />
+          <SingleMediaInput
+            kind="video"
+            label="Referenzvideo hochladen"
+            value={{ path: request.lipDub.referenceVideo.path, name: request.lipDub.referenceVideo.name }}
+            previewUrl={previews[request.lipDub.referenceVideo.path]}
+            onChange={(file) => applyUpload(file, "lipdub")}
+            onClear={() => onChange({
+              ...request,
+              lipDub: { ...request.lipDub, referenceVideo: { ...request.lipDub.referenceVideo, path: "", name: "" } },
+            })}
+            onPathChange={(path) => onChange({
+              ...request,
+              lipDub: {
+                ...request.lipDub,
+                referenceVideo: {
+                  ...request.lipDub.referenceVideo,
+                  path,
+                  name: path.split("/").at(-1) ?? path,
+                },
+              },
+            })}
+          />
+          {errors["lipDub.referenceVideo.path"] ? <p className="section-error">{errors["lipDub.referenceVideo.path"]}</p> : null}
+          <NumberField
+            label="Referenzstärke"
+            hint={fieldHelp.lipDubReferenceStrength}
+            min={0}
+            max={2}
+            step={0.05}
+            value={request.lipDub.referenceVideo.strength}
+            onChange={(strength) => onChange({
+              ...request,
+              lipDub: {
+                ...request.lipDub,
+                referenceVideo: { ...request.lipDub.referenceVideo, strength: strength ?? 1 },
+              },
+            })}
+          />
+          {errors["promptParts.dialogue"] ? <p className="section-error">{errors["promptParts.dialogue"]}</p> : null}
+        </section>
+      ) : null}
+
       {request.mode === "retake" ? (
         <section className="editor-section">
           <SectionHeader title="Quellvideo" />
@@ -559,7 +613,7 @@ export function Editor({
       <section className="editor-section">
         <SectionHeader title="Modelle" action={<Cpu size={18} />} />
         <div className="field-grid field-grid--2">
-          {["distilled", "ic-lora"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled) ? (
+          {["distilled", "ic-lora", "lipdub"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled) ? (
             <PathPicker
               label="Distilled Checkpoint"
               hint={fieldHelp.distilledCheckpoint}
@@ -622,6 +676,37 @@ export function Editor({
               />
             </div>
           ) : null}
+          {isLipDub ? (
+            <div className="paired-field">
+              <PathPicker
+                label="LipDub IC-LoRA"
+                hint={fieldHelp.lipDubLora}
+                value={request.lipDub.lora.path}
+                options={loraOptions.filter((option) => {
+                  const label = option.label.toLowerCase();
+                  return label.includes("lipdub") || label.includes("lip-dub");
+                })}
+                error={errors["lipDub.lora.path"]}
+                placeholder="/absoluter/pfad/ltx-lipdub-lora.safetensors"
+                onChange={(path) => onChange({
+                  ...request,
+                  lipDub: { ...request.lipDub, lora: { ...request.lipDub.lora, path } },
+                })}
+              />
+              <NumberField
+                label="Stärke"
+                hint={fieldHelp.lipDubLoraStrength}
+                min={-4}
+                max={4}
+                step={0.05}
+                value={request.lipDub.lora.strength}
+                onChange={(strength) => onChange({
+                  ...request,
+                  lipDub: { ...request.lipDub, lora: { ...request.lipDub.lora, strength: strength ?? 1 } },
+                })}
+              />
+            </div>
+          ) : null}
         </div>
         {modelInventory?.truncated ? (
           <p className="advisory advisory--warning">Der Modellscan erreichte seine Sicherheitsgrenze. Zusätzliche Modelle können weiterhin per Pfad gewählt werden.</p>
@@ -629,21 +714,23 @@ export function Editor({
         {modelInventory && modelInventory.errors.length > 0 ? (
           <p className="advisory advisory--warning">Mindestens ein konfiguriertes Modellverzeichnis war nicht lesbar.</p>
         ) : null}
-        <details className="advanced-block">
-          <summary>Weitere LoRAs <ChevronDown size={15} /></summary>
-          <LoraRows
-            loras={request.models.loras}
-            options={loraOptions}
-            onChange={(loras) => onChange({ ...request, models: { ...request.models, loras } })}
-          />
-          {errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
-        </details>
+        {!isLipDub ? (
+          <details className="advanced-block">
+            <summary>Weitere LoRAs <ChevronDown size={15} /></summary>
+            <LoraRows
+              loras={request.models.loras}
+              options={loraOptions}
+              onChange={(loras) => onChange({ ...request, models: { ...request.models, loras } })}
+            />
+            {errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
+          </details>
+        ) : errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
       </section>
 
       {request.mode !== "retake" ? (
         <section className="editor-section">
           <SectionHeader title="Ausgabe" action={<SlidersHorizontal size={18} />} />
-          <div className="field-grid field-grid--2 output-presets">
+          <div className={`field-grid ${isLipDub ? "field-grid--1" : "field-grid--2"} output-presets`}>
             <SelectField
               label="Format-Preset"
               hint={fieldHelp.resolutionPreset}
@@ -657,54 +744,64 @@ export function Editor({
                 if (preset) onChange({ ...request, width: preset.width, height: preset.height });
               }}
             />
-            <SelectField
-              label="Dauer-Preset"
-              hint={fieldHelp.durationPreset}
-              value={durationPreset === null ? "custom" : String(durationPreset)}
-              options={[
-                ...DURATION_PRESETS.map((seconds) => ({ value: String(seconds), label: `${seconds} Sekunden · ${framesForDuration(seconds, request.frameRate)} Frames` })),
-                { value: "custom", label: "Benutzerdefiniert" },
-              ]}
-              onChange={(value) => {
-                if (value === "custom") return;
-                const seconds = Number(value);
-                onChange({
-                  ...request,
-                  numFrames: framesForDuration(seconds, request.frameRate),
-                  longClipAcknowledged: seconds > 10 ? request.longClipAcknowledged : false,
-                });
-              }}
-            />
+            {!isLipDub ? (
+              <SelectField
+                label="Dauer-Preset"
+                hint={fieldHelp.durationPreset}
+                value={durationPreset === null ? "custom" : String(durationPreset)}
+                options={[
+                  ...DURATION_PRESETS.map((seconds) => ({ value: String(seconds), label: `${seconds} Sekunden · ${framesForDuration(seconds, request.frameRate)} Frames` })),
+                  { value: "custom", label: "Benutzerdefiniert" },
+                ]}
+                onChange={(value) => {
+                  if (value === "custom") return;
+                  const seconds = Number(value);
+                  onChange({
+                    ...request,
+                    numFrames: framesForDuration(seconds, request.frameRate),
+                    longClipAcknowledged: seconds > 10 ? request.longClipAcknowledged : false,
+                  });
+                }}
+              />
+            ) : null}
           </div>
-          <div className="field-grid field-grid--4">
+          <div className={isLipDub ? "field-grid field-grid--2" : "field-grid field-grid--4"}>
             <NumberField label="Breite" hint={fieldHelp.width} min={64} max={4096} step={32} value={request.width} error={errors.width} onChange={(width) => onChange({ ...request, width: width ?? 64 })} />
             <NumberField label="Höhe" hint={fieldHelp.height} min={64} max={4096} step={32} value={request.height} onChange={(height) => onChange({ ...request, height: height ?? 64 })} />
-            <NumberField label="Frames" hint={fieldHelp.frames} min={1} max={2049} step={8} value={request.numFrames} error={errors.numFrames} onChange={(numFrames) => {
-              const nextFrames = numFrames ?? 1;
-              onChange({
-                ...request,
-                numFrames: nextFrames,
-                longClipAcknowledged: videoDurationSeconds(nextFrames, request.frameRate) > 10
-                  ? request.longClipAcknowledged
-                  : false,
-              });
-            }} />
-            <NumberField label="FPS" hint={fieldHelp.fps} min={1} max={120} step={1} value={request.frameRate} onChange={(frameRate) => {
-              const nextFrameRate = frameRate ?? 24;
-              onChange({
-                ...request,
-                frameRate: nextFrameRate,
-                numFrames: durationPreset === null
-                  ? request.numFrames
-                  : framesForDuration(durationPreset, nextFrameRate),
-              });
-            }} />
+            {!isLipDub ? (
+              <>
+                <NumberField label="Frames" hint={fieldHelp.frames} min={1} max={2049} step={8} value={request.numFrames} error={errors.numFrames} onChange={(numFrames) => {
+                  const nextFrames = numFrames ?? 1;
+                  onChange({
+                    ...request,
+                    numFrames: nextFrames,
+                    longClipAcknowledged: videoDurationSeconds(nextFrames, request.frameRate) > 10
+                      ? request.longClipAcknowledged
+                      : false,
+                  });
+                }} />
+                <NumberField label="FPS" hint={fieldHelp.fps} min={1} max={120} step={1} value={request.frameRate} onChange={(frameRate) => {
+                  const nextFrameRate = frameRate ?? 24;
+                  onChange({
+                    ...request,
+                    frameRate: nextFrameRate,
+                    numFrames: durationPreset === null
+                      ? request.numFrames
+                      : framesForDuration(durationPreset, nextFrameRate),
+                  });
+                }} />
+              </>
+            ) : null}
           </div>
           <div className={`output-summary ${duration > 20 ? "output-summary--warn" : ""}`}>
-            <strong>{formatDuration(duration)}</strong>
-            <span>{request.width} × {request.height} · {request.numFrames} Frames · {request.frameRate} FPS</span>
+            <strong>{isLipDub ? "Referenzclip" : formatDuration(duration)}</strong>
+            <span>
+              {isLipDub
+                ? `${request.width} × ${request.height} · Dauer und FPS aus dem Referenzvideo`
+                : `${request.width} × ${request.height} · ${request.numFrames} Frames · ${request.frameRate} FPS`}
+            </span>
           </div>
-          {duration > 10 ? (
+          {!isLipDub && duration > 10 ? (
             <Toggle
               label="Langclip bestätigt"
               hint={fieldHelp.longClip}
@@ -713,7 +810,7 @@ export function Editor({
             />
           ) : null}
           {errors.longClipAcknowledged ? <p className="section-error">{errors.longClipAcknowledged}</p> : null}
-          {duration > 20 ? <p className="advisory advisory--warning">Mehr als 20 Sekunden sind ein experimenteller Lauf. Zuerst einen 5-Sekunden-Ausschnitt prüfen.</p> : null}
+          {!isLipDub && duration > 20 ? <p className="advisory advisory--warning">Mehr als 20 Sekunden sind ein experimenteller Lauf. Zuerst einen 5-Sekunden-Ausschnitt prüfen.</p> : null}
         </section>
       ) : null}
 
@@ -739,7 +836,7 @@ export function Editor({
           ) : null}
           <TextField label="Ausgabedatei" hint={fieldHelp.outputName} value={request.outputName} error={errors.outputName} onChange={(outputName) => onChange({ ...request, outputName })} />
         </div>
-        {request.mode !== "one-stage" ? (
+        {request.mode !== "one-stage" && !isLipDub ? (
           <div className="toggle-grid">
             <Toggle label="VAE Tiling" hint={fieldHelp.tiling} checked={request.tiling} onChange={(tiling) => onChange({ ...request, tiling })} />
           </div>

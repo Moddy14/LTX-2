@@ -155,6 +155,38 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(enabled).success).toBe(false);
   });
 
+  it("requires the native LipDub reference contract", () => {
+    const request = validRequest("lipdub");
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.lipDub.referenceVideo.path = "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+
+    request.lipDub.referenceVideo.path = "/inputs/speaker-reference.mp4";
+    request.lipDub.lora.path = "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+
+    request.lipDub.lora.path = "/models/ltx/ltx-lipdub-lora.safetensors";
+    request.prompt = "A portrait with no exact speech.";
+    request.promptParts.dialogue = "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("rejects LipDub inputs that are not sent to the native CLI", () => {
+    const request = validRequest("lipdub");
+    request.images = [{ path: "/inputs/reference.png", name: "reference.png", frameIndex: 0, strength: 1, crf: 33 }];
+    request.models.loras = [{ path: "/models/extra.safetensors", strength: 1 }];
+    const result = generationRequestSchema.safeParse(request);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(expect.arrayContaining([
+        "images",
+        "models.loras",
+      ]));
+    }
+  });
+
   it("turns off LongCat without dropping its stored tuning values", () => {
     const request = validRequest("audio-to-video");
     request.postprocess.longcatLipsync = { enabled: true, resolution: "720p", blend: 0.65 };

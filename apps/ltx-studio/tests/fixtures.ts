@@ -28,6 +28,12 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
   if (mode === "audio-to-video") {
     request.audio = { path: "/inputs/source.wav", name: "source.wav", startTime: 0, maxDuration: 5 };
   }
+  if (mode === "lipdub") {
+    request.promptParts.dialogue = "Das ist ein nativer LTX LipDub Test";
+    request.prompt = 'A close portrait of the speaker saying exactly: "Das ist ein nativer LTX LipDub Test".';
+    request.lipDub.referenceVideo = { path: "/inputs/speaker-reference.mp4", name: "speaker-reference.mp4", strength: 1 };
+    request.lipDub.lora = { path: "/models/ltx/ltx-lipdub-lora.safetensors", strength: 1 };
+  }
   if (mode === "retake") {
     request.retake.videoPath = "/inputs/source.mp4";
     request.retake.videoName = "source.mp4";

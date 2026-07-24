@@ -16,6 +16,7 @@ const MODEL_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
   "ic-lora": 48,
   keyframes: 50,
   "audio-to-video": 50,
+  lipdub: 56,
   retake: 48,
 };
 
@@ -27,6 +28,7 @@ const ACTIVATION_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
   "ic-lora": 18,
   keyframes: 18,
   "audio-to-video": 18,
+  lipdub: 18,
   retake: 14,
 };
 
@@ -35,7 +37,7 @@ const ACTIVATION_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
 const NATIVE_FP8_COLD_LOAD_FACTOR = 0.95;
 
 function selectedCheckpointPath(request: GenerationRequest): string {
-  if (request.mode === "distilled" || request.mode === "ic-lora") {
+  if (request.mode === "distilled" || request.mode === "ic-lora" || request.mode === "lipdub") {
     return request.models.distilledCheckpointPath;
   }
   if (request.mode === "retake" && request.retake.distilled) {
@@ -54,10 +56,12 @@ export function requestComputeUnits(request: GenerationRequest): number {
   const frames = request.mode === "retake"
     ? Math.max(1, Math.round((request.retake.endTime - request.retake.startTime) * 24))
     : request.numFrames;
-  const steps = ["distilled", "ic-lora"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled)
+  const steps = ["distilled", "ic-lora", "lipdub"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled)
     ? 8
     : request.numInferenceSteps;
-  const stageFactor = ["two-stage", "two-stage-hq", "keyframes", "audio-to-video"].includes(request.mode) ? 1.7 : 1;
+  const stageFactor = ["two-stage", "two-stage-hq", "keyframes", "audio-to-video", "lipdub"].includes(request.mode)
+    ? 1.7
+    : 1;
   return Math.max(1, request.width * request.height * frames * steps * stageFactor);
 }
 

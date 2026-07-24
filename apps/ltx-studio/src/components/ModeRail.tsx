@@ -5,6 +5,7 @@ import {
   Film,
   Gauge,
   Images,
+  Mic2,
   ScanLine,
   WandSparkles,
 } from "lucide-react";
@@ -19,6 +20,7 @@ const icons = {
   "ic-lora": ScanLine,
   keyframes: Images,
   "audio-to-video": AudioLines,
+  lipdub: Mic2,
   retake: Blend,
 } as const;
 

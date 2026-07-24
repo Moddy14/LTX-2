@@ -12,6 +12,7 @@ const MODULES: Record<PipelineMode, string> = {
   "ic-lora": "ltx_pipelines.ic_lora",
   keyframes: "ltx_pipelines.keyframe_interpolation",
   "audio-to-video": "ltx_pipelines.a2vid_two_stage",
+  lipdub: "ltx_pipelines.lipdub",
   retake: "ltx_pipelines.retake",
 };
 
@@ -96,7 +97,44 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
     });
   }
 
-  if (request.mode === "retake") {
+  if (request.mode === "lipdub") {
+    args.push(
+      "--distilled-checkpoint-path",
+      request.models.distilledCheckpointPath,
+      "--gemma-root",
+      request.models.gemmaRoot,
+      "--prompt",
+      request.prompt,
+      "--output-path",
+      outputPath,
+      "--seed",
+      String(request.seed),
+      "--height",
+      String(request.height),
+      "--width",
+      String(request.width),
+      "--spatial-upsampler-path",
+      request.models.spatialUpscalerPath,
+      "--reference-video",
+      request.lipDub.referenceVideo.path,
+      "--reference-strength",
+      String(request.lipDub.referenceVideo.strength),
+      "--lora",
+      request.lipDub.lora.path,
+      String(request.lipDub.lora.strength),
+    );
+    appendBoolean(args, request.enhancePrompt, "--enhance-prompt");
+    if (request.quantization.mode !== "none") {
+      args.push("--quantization", request.quantization.mode);
+      if (request.quantization.mode === "fp8-scaled-mm") args.push(request.quantization.amaxPath);
+    }
+    requiredPaths.push(
+      { path: request.models.distilledCheckpointPath, label: "Distilled Checkpoint", kind: "file" },
+      { path: request.models.spatialUpscalerPath, label: "Spatial Upscaler", kind: "file" },
+      { path: request.lipDub.referenceVideo.path, label: "LipDub-Referenzvideo", kind: "file" },
+      { path: request.lipDub.lora.path, label: "LipDub IC-LoRA", kind: "file" },
+    );
+  } else if (request.mode === "retake") {
     const checkpointPath = request.retake.distilled
       ? request.models.distilledCheckpointPath
       : request.models.checkpointPath;
@@ -183,11 +221,13 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
     }
   }
 
-  for (const image of request.images) {
-    requiredPaths.push({ path: image.path, label: `Bild ${image.name}`, kind: "file" });
-  }
-  for (const lora of request.models.loras) {
-    requiredPaths.push({ path: lora.path, label: "LoRA", kind: "file" });
+  if (request.mode !== "lipdub") {
+    for (const image of request.images) {
+      requiredPaths.push({ path: image.path, label: `Bild ${image.name}`, kind: "file" });
+    }
+    for (const lora of request.models.loras) {
+      requiredPaths.push({ path: lora.path, label: "LoRA", kind: "file" });
+    }
   }
   if (request.quantization.mode === "fp8-scaled-mm") {
     requiredPaths.push({ path: request.quantization.amaxPath, label: "AMAX-Datei", kind: "file" });

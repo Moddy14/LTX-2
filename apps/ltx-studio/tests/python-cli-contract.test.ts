@@ -13,6 +13,7 @@ const pipelineFiles = [
   "ic_lora.py",
   "keyframe_interpolation.py",
   "a2vid_two_stage.py",
+  "lipdub.py",
   "retake.py",
 ] as const;
 
@@ -25,7 +26,7 @@ describe("Python CLI source contract", () => {
     expect(source(filename)).toContain("enhance_prompt=args.enhance_prompt");
   });
 
-  it.each(pipelineFiles.filter((filename) => filename !== "ti2vid_one_stage.py"))(
+  it.each(pipelineFiles.filter((filename) => !["ti2vid_one_stage.py", "lipdub.py"].includes(filename)))(
     "wires the VAE tiling switch in %s",
     (filename) => {
       expect(source(filename)).toContain("None if args.disable_tiling else TilingConfig.default()");
@@ -41,9 +42,19 @@ describe("Python CLI source contract", () => {
 
   it("uses the shared typed LoRA parser for Retake", () => {
     const retakeSource = source("retake.py");
-    expect(retakeSource).toContain("default_1_stage_arg_parser(params=params)");
+    expect(retakeSource).toContain("video_editing_arg_parser(distilled=True)");
     expect(retakeSource).toContain("loras=tuple(args.lora) if args.lora else ()");
-    expect(retakeSource).toContain("regenerate_video=not args.no_regenerate_video");
-    expect(retakeSource).toContain("regenerate_audio=not args.no_regenerate_audio");
+    expect(retakeSource).toContain("enhance_prompt=args.enhance_prompt");
+  });
+
+  it("keeps LipDub on its specialized native CLI contract", () => {
+    const lipdubSource = source("lipdub.py");
+    const argsSource = source("utils/args.py");
+    expect(argsSource).toContain("def lipdub_arg_parser");
+    expect(argsSource).toContain('"--reference-video"');
+    expect(lipdubSource).toContain("len(args.lora) != 1");
+    expect(lipdubSource).not.toContain("num_frames=args.num_frames");
+    expect(lipdubSource).not.toContain("frame_rate=args.frame_rate");
+    expect(lipdubSource).not.toContain("negative_prompt=args.negative_prompt");
   });
 });

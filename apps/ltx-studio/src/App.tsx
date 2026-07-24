@@ -77,6 +77,14 @@ function withDiscoveredModelDefaults(request: GenerationRequest, inventory: Mode
         path: request.models.distilledLora.path || find("lora", (name) => name.includes("distilled")),
       },
     },
+    lipDub: {
+      ...request.lipDub,
+      lora: {
+        ...request.lipDub.lora,
+        path: request.lipDub.lora.path
+          || find("lora", (name) => name.includes("lipdub") || name.includes("lip-dub")),
+      },
+    },
   };
 }
 
@@ -201,11 +209,12 @@ export function App() {
       enhancePrompt: current.enhancePrompt,
       sourceMode: current.sourceMode,
       seed: current.seed,
-      models: current.models,
-      images: current.images,
+      models: mode === "lipdub" ? { ...current.models, loras: [] } : current.models,
+      images: mode === "lipdub" ? [] : current.images,
       quantization: current.quantization,
       icLora: current.icLora,
       audio: current.audio,
+      lipDub: current.lipDub,
       postprocess: current.postprocess,
       retake: current.retake,
       continuity: current.continuity,

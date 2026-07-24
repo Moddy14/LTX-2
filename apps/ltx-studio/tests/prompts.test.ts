@@ -70,4 +70,21 @@ describe("local structured prompt composition", () => {
       'The speaking subject speaks clearly with natural lip movement, saying exactly: "Das ist ein nativer LTX-Sprachtest".',
     );
   });
+
+  it("formats LipDub dialogue as exact spoken text with lip movement intent", () => {
+    const lipdubInput = composePromptRequestSchema.parse({
+      ...input,
+      mode: "lipdub",
+      parts: {
+        ...input.parts,
+        dialogue: "LipDub soll exakt diesem Satz folgen",
+        ambience: "",
+        music: "",
+      },
+    });
+
+    expect(composePromptFromParts(lipdubInput).prompt).toContain(
+      'The speaking subject speaks clearly with natural lip movement, saying exactly: "LipDub soll exakt diesem Satz folgen".',
+    );
+  });
 });

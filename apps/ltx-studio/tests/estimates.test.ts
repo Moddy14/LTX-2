@@ -37,6 +37,12 @@ describe("resource and runtime estimates", () => {
     expect(estimateResources(request).memoryGiB).toBe(44);
   });
 
+  it("plans LipDub as a conservative distilled two-stage run", () => {
+    const request = validRequest("lipdub");
+    const estimate = estimateResources(request);
+    expect(estimate.memoryGiB).toBeGreaterThanOrEqual(64);
+  });
+
   it("shows no ETA until two successful comparable runs exist", () => {
     const request = validRequest();
     const oneSample = estimateRequest(request, [

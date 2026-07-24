@@ -10,6 +10,7 @@ export const pipelineModes = [
   "ic-lora",
   "keyframes",
   "audio-to-video",
+  "lipdub",
   "retake",
 ] as const;
 
@@ -151,6 +152,20 @@ export const PIPELINES: readonly PipelineDefinition[] = [
     needsDistilledLora: true,
   },
   {
+    id: "lipdub",
+    label: "LipDub / Lipsync",
+    shortLabel: "LipDub",
+    description: "Spezialisierter Lippen- und Sprachabgleich aus einem Referenzvideo mit Audiospur.",
+    family: "condition",
+    quality: "Lipsync",
+    defaultHeight: 1024,
+    defaultWidth: 576,
+    defaultSteps: 8,
+    needsNegativePrompt: false,
+    needsSpatialUpscaler: true,
+    needsDistilledLora: false,
+  },
+  {
     id: "retake",
     label: "Retake / Bereich ersetzen",
     shortLabel: "Retake",
@@ -254,6 +269,10 @@ export const generationRequestSchema = z
       startTime: z.number().finite().min(0).max(86_400),
       maxDuration: z.number().finite().positive().max(86_400).nullable(),
     }),
+    lipDub: z.object({
+      referenceVideo: videoConditioningSchema,
+      lora: loraSchema,
+    }),
     postprocess: z.object({
       longcatLipsync: z.object({
         enabled: z.boolean(),
@@ -286,7 +305,7 @@ export const generationRequestSchema = z
       requirePath(video.path, ["icLora", "videoConditioning", index, "path"], `Kontrollvideo ${index + 1}`),
     );
 
-    if (["distilled", "ic-lora"].includes(value.mode) || (value.mode === "retake" && value.retake.distilled)) {
+    if (["distilled", "ic-lora", "lipdub"].includes(value.mode) || (value.mode === "retake" && value.retake.distilled)) {
       requirePath(value.models.distilledCheckpointPath, ["models", "distilledCheckpointPath"], "Distilled Checkpoint");
     } else {
       requirePath(value.models.checkpointPath, ["models", "checkpointPath"], "Checkpoint");
@@ -342,6 +361,33 @@ export const generationRequestSchema = z
     if (value.mode === "audio-to-video") {
       requirePath(value.audio.path, ["audio", "path"], "Audiodatei");
     }
+    if (value.mode === "lipdub") {
+      requirePath(value.lipDub.referenceVideo.path, ["lipDub", "referenceVideo", "path"], "LipDub-Referenzvideo");
+      requirePath(value.lipDub.lora.path, ["lipDub", "lora", "path"], "LipDub IC-LoRA");
+      const hasDialogue = value.promptParts.dialogue.trim().length > 0
+        || /(?:["“][^"”]{2,}["”]|speaks|says|spricht|sagt|saying exactly)/i.test(value.prompt);
+      if (!hasDialogue) {
+        context.addIssue({
+          code: "custom",
+          path: ["promptParts", "dialogue"],
+          message: "LipDub braucht einen exakten gesprochenen Text im Dialogfeld oder im Prompt.",
+        });
+      }
+      if (value.images.length > 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["images"],
+          message: "LipDub verwendet das Referenzvideo; zusätzliche Bildkonditionierung wird nicht an die CLI übergeben.",
+        });
+      }
+      if (value.models.loras.length > 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["models", "loras"],
+          message: "LipDub erlaubt genau das eigene LipDub IC-LoRA-Feld, keine weiteren LoRAs.",
+        });
+      }
+    }
     if (value.postprocess.longcatLipsync.enabled) {
       if (value.mode !== "audio-to-video") {
         context.addIssue({
@@ -380,15 +426,17 @@ export const generationRequestSchema = z
           message: `Breite und Höhe müssen durch ${divisor} teilbar sein.`,
         });
       }
-      if ((value.numFrames - 1) % 8 !== 0) {
-        context.addIssue({ code: "custom", path: ["numFrames"], message: "Frames müssen dem Muster 8k+1 folgen." });
-      }
-      if (videoDurationSeconds(value.numFrames, value.frameRate) > 10 && !value.longClipAcknowledged) {
-        context.addIssue({
-          code: "custom",
-          path: ["longClipAcknowledged"],
-          message: "Clips über 10 Sekunden müssen als Langclip bestätigt werden.",
-        });
+      if (value.mode !== "lipdub") {
+        if ((value.numFrames - 1) % 8 !== 0) {
+          context.addIssue({ code: "custom", path: ["numFrames"], message: "Frames müssen dem Muster 8k+1 folgen." });
+        }
+        if (videoDurationSeconds(value.numFrames, value.frameRate) > 10 && !value.longClipAcknowledged) {
+          context.addIssue({
+            code: "custom",
+            path: ["longClipAcknowledged"],
+            message: "Clips über 10 Sekunden müssen als Langclip bestätigt werden.",
+          });
+        }
       }
     }
     if (value.quantization.mode === "fp8-scaled-mm" && !value.quantization.amaxPath) {
@@ -426,7 +474,7 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     prompt: "",
     promptParts: { ...defaultPromptParts },
     negativePrompt: "",
-    enhancePrompt: true,
+    enhancePrompt: mode === "lipdub" ? false : true,
     seed: 10,
     height: definition.defaultHeight,
     width: definition.defaultWidth,
@@ -452,6 +500,10 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     hq: { distilledLoraStrengthStage1: 0.25, distilledLoraStrengthStage2: 0.5 },
     icLora: { videoConditioning: [], attentionMaskPath: "", attentionStrength: 1, skipStage2: false },
     audio: { path: "", name: "", startTime: 0, maxDuration: null },
+    lipDub: {
+      referenceVideo: { path: "", name: "", strength: 1 },
+      lora: { path: "", strength: 1 },
+    },
     postprocess: {
       longcatLipsync: { enabled: false, resolution: "480p", blend: 0.9 },
     },
@@ -509,6 +561,12 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     hq: { ...defaults.hq, ...stored.hq },
     icLora: { ...defaults.icLora, ...stored.icLora },
     audio: { ...defaults.audio, ...stored.audio },
+    lipDub: {
+      ...defaults.lipDub,
+      ...stored.lipDub,
+      referenceVideo: { ...defaults.lipDub.referenceVideo, ...stored.lipDub?.referenceVideo },
+      lora: { ...defaults.lipDub.lora, ...stored.lipDub?.lora },
+    },
     postprocess: {
       ...defaults.postprocess,
       ...stored.postprocess,

@@ -27,6 +27,8 @@ export const fieldHelp = {
     "Wofür: Überspringt den angegebenen Anfang der Audiodatei. Empfehlung: 0 für den Dateianfang oder die exakte Startzeit in Sekunden, zum Beispiel 12,5.",
   audioDuration:
     "Wofür: Begrenzt den verwendeten Audioausschnitt. Empfehlung: leer für automatische Dauer oder eine positive Sekundenangabe passend zur gewünschten Szene.",
+  lipDubReferenceStrength:
+    "Wofür: Gewichtet, wie stark das Referenzvideo Bewegung, Timing und Mundführung vorgibt. Empfehlung: mit 1,0 starten; bei zu starrer Kopplung auf 0,7 bis 0,9 senken.",
   longcatLipsync:
     "Wofür: Rendert zusätzlich mit LongCat eine präziser audiogeführte Mundbewegung und überträgt sie per dynamischem Gesichts- und Mundwinkel-Tracking auf das LTX-Video. Position und Größe folgen dem Mund, die Rotation der stabileren Augen- und Kopfachse. Bei unsicherer Erkennung bleibt der jeweilige LTX-Frame unverändert. Das ist deutlich langsamer, bleibt deshalb optional und wird bei identischem Bild und Audio zwischengespeichert.",
   longcatResolution:
@@ -65,6 +67,10 @@ export const fieldHelp = {
     "Wofür: Pfad zur Distilled-LoRA, die den schnellen Ablauf der Zwei-Stufen-Pipeline unterstützt. Gute Eingabe: kompatible lokale .safetensors-Datei.",
   distilledLoraStrength:
     "Wofür: Gewichtet den Einfluss der Distilled-LoRA. Empfehlung: mit 1,0 starten und nur bei sichtbarer Über- oder Untersteuerung in kleinen Schritten ändern.",
+  lipDubLora:
+    "Wofür: Spezialisierte IC-LoRA für die native LipDub-Pipeline. Gute Eingabe: das offizielle lokale LipDub-LoRA-Modell, nicht eine normale Stil- oder Charakter-LoRA.",
+  lipDubLoraStrength:
+    "Wofür: Regelt den Einfluss der LipDub-IC-LoRA auf Mundbewegung und Referenzbindung. Empfehlung: mit 1,0 starten; nur in kleinen Schritten ändern, wenn der Mund zu schwach oder zu dominant folgt.",
   loraPath:
     "Wofür: Lädt eine zusätzliche Stil-, Charakter- oder Kontroll-LoRA. Gute Eingabe: absoluter Pfad zu einer mit dem LTX-Checkpoint kompatiblen .safetensors-Datei.",
   loraStrength:

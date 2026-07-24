@@ -120,6 +120,8 @@ export function RunPanel({
   const sourcePath =
     request.mode === "retake"
       ? request.retake.videoPath
+      : request.mode === "lipdub"
+        ? request.lipDub.referenceVideo.path
       : request.images[0]?.path || request.icLora.videoConditioning[0]?.path || request.audio.path;
   const sourcePreview = sourcePath ? previews[sourcePath] : null;
   const runBlocked = submitting;
@@ -172,7 +174,7 @@ export function RunPanel({
           )}
           <div className="preview-stage__meta">
             <span>{request.mode === "retake" ? "Quelle" : `${request.width} x ${request.height}`}</span>
-            <span>{duration.toFixed(1)} s</span>
+            <span>{request.mode === "lipdub" ? "Referenzdauer" : `${duration.toFixed(1)} s`}</span>
           </div>
         </div>
       </section>
@@ -211,7 +213,7 @@ export function RunPanel({
                 <span>Pipeline <strong>{PIPELINES.find((item) => item.id === outputRequest.mode)?.shortLabel}</strong></span>
                 <span>Seed <strong>{outputRequest.seed}</strong></span>
                 <span>Format <strong>{outputRequest.width} x {outputRequest.height}</strong></span>
-                <span>Frames <strong>{outputRequest.numFrames} @ {outputRequest.frameRate} fps</strong></span>
+                <span>Frames <strong>{outputRequest.mode === "lipdub" ? "aus Referenzvideo" : `${outputRequest.numFrames} @ ${outputRequest.frameRate} fps`}</strong></span>
                 <span>Schritte <strong>{outputRequest.numInferenceSteps}</strong></span>
                 <span>Quantisierung <strong>{outputRequest.quantization.mode}</strong></span>
               </div>

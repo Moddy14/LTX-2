@@ -12,6 +12,7 @@ const expectedModules = {
   "ic-lora": "ltx_pipelines.ic_lora",
   keyframes: "ltx_pipelines.keyframe_interpolation",
   "audio-to-video": "ltx_pipelines.a2vid_two_stage",
+  lipdub: "ltx_pipelines.lipdub",
   retake: "ltx_pipelines.retake",
 } as const;
 
@@ -20,7 +21,8 @@ describe("buildCommand", () => {
     const plan = buildCommand(validRequest(mode));
     expect(plan.args.slice(0, 2)).toEqual(["-m", expectedModules[mode]]);
     expect(plan.outputPath.endsWith(`ltx-${mode}.mp4`)).toBe(true);
-    expect(plan.args).toContain("--enhance-prompt");
+    if (mode === "lipdub") expect(plan.args).not.toContain("--enhance-prompt");
+    else expect(plan.args).toContain("--enhance-prompt");
   });
 
   it("keeps prompt metacharacters in one argv element", () => {
@@ -86,5 +88,36 @@ describe("buildCommand", () => {
     const audioToVideo = buildCommand(validRequest("audio-to-video")).args;
     expect(audioToVideo).toContain("--video-cfg-guidance-scale");
     expect(audioToVideo).not.toContain("--audio-cfg-guidance-scale");
+  });
+
+  it("emits only the native LipDub CLI contract", () => {
+    const request = validRequest("lipdub");
+    request.models.loras = [{ path: "/models/ignored-style.safetensors", strength: 0.4 }];
+    request.images = [{ path: "/inputs/ignored.png", name: "ignored.png", frameIndex: 0, strength: 1, crf: 33 }];
+    const plan = buildCommand(request);
+    const args = plan.args;
+
+    expect(args.slice(0, 2)).toEqual(["-m", "ltx_pipelines.lipdub"]);
+    expect(args).toEqual(expect.arrayContaining([
+      "--distilled-checkpoint-path",
+      request.models.distilledCheckpointPath,
+      "--reference-video",
+      request.lipDub.referenceVideo.path,
+      "--reference-strength",
+      String(request.lipDub.referenceVideo.strength),
+      "--lora",
+      request.lipDub.lora.path,
+      String(request.lipDub.lora.strength),
+      "--spatial-upsampler-path",
+    ]));
+    expect(args).not.toContain("--num-frames");
+    expect(args).not.toContain("--frame-rate");
+    expect(args).not.toContain("--num-inference-steps");
+    expect(args).not.toContain("--negative-prompt");
+    expect(args).not.toContain("--image");
+    expect(args).not.toContain("--disable-tiling");
+    expect(args).not.toContain("--video-cfg-guidance-scale");
+    expect(args).not.toContain("/models/ignored-style.safetensors");
+    expect(args).not.toContain("/inputs/ignored.png");
   });
 });
