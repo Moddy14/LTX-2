@@ -116,6 +116,23 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
       }],
     }),
   }));
+  await page.route("**/api/lipdub/reference/prepare", (route) => route.fulfill({
+    status: 201,
+    contentType: "application/json",
+    body: JSON.stringify({
+      asset: {
+        id: "11111111-2222-4333-8444-555555555555",
+        path: "/uploads/video/reference-lipdub-prep.mp4",
+        name: "reference-lipdub-prep.mp4",
+        size: 123456,
+        kind: "video",
+        url: "/api/uploads/video/11111111-2222-4333-8444-555555555555.mp4",
+        createdAt: "2026-07-24T16:30:00.000Z",
+      },
+      target: { width: 768, height: 1344, fps: 24 },
+      command: "ffmpeg -i reference.mp4",
+    }),
+  }));
 
   const draft = Buffer.from(JSON.stringify(draftRequest), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
@@ -127,6 +144,54 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
   await page.getByRole("button", { name: "Format 768 x 1344 übernehmen" }).click();
   await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("768");
   await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("1344");
+  await page.getByRole("button", { name: "Referenz vorbereiten" }).click();
+  await expect(page.getByText("reference-lipdub-prep.mp4", { exact: true })).toBeVisible();
+  await expect(page.getByText("Vorbereitete Referenz: 768 x 1344 @ 24 fps.")).toBeVisible();
+});
+
+test("stale LipDub reference preparation does not overwrite a changed editor mode", async ({ page }) => {
+  const draftRequest = createDefaultRequest("lipdub");
+  draftRequest.promptParts.dialogue = "Das ist ein kurzer LipDub Race Test";
+  draftRequest.prompt = 'A single speaker says exactly: "Das ist ein kurzer LipDub Race Test".';
+  draftRequest.lipDub.referenceVideo = { path: "/inputs/reference.mp4", name: "reference.mp4", strength: 1 };
+
+  let releasePreparation: (() => void) | undefined;
+  await page.route("**/api/lipdub/reference/prepare", async (route) => {
+    await new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset: {
+          id: "22222222-3333-4444-8555-666666666666",
+          path: "/uploads/video/stale-lipdub-prep.mp4",
+          name: "stale-lipdub-prep.mp4",
+          size: 123456,
+          kind: "video",
+          url: "/api/uploads/video/22222222-3333-4444-8555-666666666666.mp4",
+          createdAt: "2026-07-24T16:40:00.000Z",
+        },
+        target: { width: 768, height: 1344, fps: 24 },
+        command: "ffmpeg -i reference.mp4",
+      }),
+    });
+  });
+
+  const draft = Buffer.from(JSON.stringify(draftRequest), "utf8").toString("base64url");
+  await page.goto(`/?draft=${draft}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
+  await page.getByRole("button", { name: "Referenz vorbereiten" }).click();
+  await expect.poll(() => typeof releasePreparation === "function").toBe(true);
+  await page.locator(".mode-button").filter({ hasText: "Distilled" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Distilled");
+  const release = releasePreparation;
+  if (!release) throw new Error("LipDub reference preparation request was not captured.");
+  release();
+  await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("1536");
+  await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("1024");
+  await expect(page.getByText("Vorbereitete Referenz: 768 x 1344 @ 24 fps.")).toHaveCount(0);
 });
 
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {
@@ -214,6 +279,19 @@ test("API rejects foreign browser origins and unknown routes", async ({ request 
   expect(missing.status()).toBe(404);
   expect(await missing.json()).toMatchObject({ error: "API-Endpunkt nicht gefunden." });
   expect(missing.headers()["content-security-policy"]).toContain("default-src 'self'");
+
+  const foreignPrep = await request.post("/api/lipdub/reference/prepare", {
+    data: {
+      mode: "lipdub",
+      width: 576,
+      height: 1024,
+      lipDub: { referenceVideo: { path: "/tmp/not-a-studio-asset.mp4" } },
+    },
+  });
+  expect(foreignPrep.status()).toBe(400);
+  expect(await foreignPrep.json()).toMatchObject({
+    error: "LipDub-Referenzvorbereitung ist nur für Videos aus der Studio-Mediathek verfügbar.",
+  });
 });
 
 test("API exposes bounded model inventory and request estimates", async ({ request }) => {

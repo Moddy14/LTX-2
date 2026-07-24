@@ -122,7 +122,7 @@ function sizeCandidatesAround(value: number): number[] {
   return [...candidates].sort((left, right) => left - right);
 }
 
-function recommendedLipDubOutputSize(metadata: VideoMetadata): { width: number; height: number } | null {
+export function recommendedLipDubOutputSize(metadata: VideoMetadata): { width: number; height: number } | null {
   if (metadata.width === null || metadata.height === null) return null;
   const referenceAspect = metadata.width / metadata.height;
   const referenceArea = metadata.width * metadata.height;

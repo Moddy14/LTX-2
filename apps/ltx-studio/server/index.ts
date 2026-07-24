@@ -26,6 +26,7 @@ import {
   uploadRoot,
 } from "./config.js";
 import { isActiveJobStatus, JobConflictError, JobManager, type StudioJob } from "./jobs.js";
+import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
 import { estimateRequest } from "./estimates.js";
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
@@ -79,6 +80,24 @@ const acceptedExtensions: Record<string, Set<string>> = {
   audio: new Set([".wav", ".mp3", ".flac", ".m4a", ".ogg"]),
   mask: new Set([".mp4", ".webm", ".mov", ".mkv"]),
 };
+const lipDubReferenceDimensionSchema = z.number().int().min(64).max(4096).refine(
+  (value) => value % 64 === 0,
+  { message: "Breite und Höhe müssen durch 64 teilbar sein." },
+);
+const lipDubReferencePreparationRequestSchema = z.object({
+  mode: z.literal("lipdub").optional(),
+  width: lipDubReferenceDimensionSchema,
+  height: lipDubReferenceDimensionSchema,
+  lipDub: z.object({
+    referenceVideo: z.object({
+      path: z.string().trim().min(1).max(4096).refine((value) => !value.includes("\0"), {
+        message: "NUL-Zeichen sind nicht erlaubt.",
+      }),
+      name: z.string().trim().max(255).default(""),
+      strength: z.number().finite().min(0).max(2).default(1),
+    }),
+  }),
+});
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -190,6 +209,28 @@ app.post("/api/jobs/plan", (request, response) => {
   });
 });
 
+app.post("/api/lipdub/reference/prepare", async (request, response) => {
+  const payload = lipDubReferencePreparationRequestSchema.parse(request.body);
+  if (!assets.findByPath("video", payload.lipDub.referenceVideo.path)) {
+    return response.status(400).json({
+      error: "LipDub-Referenzvorbereitung ist nur für Videos aus der Studio-Mediathek verfügbar.",
+    });
+  }
+  const prepared = await prepareLipDubReference(payload);
+  let asset;
+  try {
+    asset = assets.add(prepared.file, "video");
+  } catch (error) {
+    unlinkSync(prepared.file.path);
+    throw error;
+  }
+  response.status(201).json({
+    asset,
+    target: prepared.target,
+    command: prepared.command,
+  });
+});
+
 app.get("/api/jobs", (_request, response) => response.json({ jobs: jobs.list() }));
 app.get("/api/outputs", (_request, response) => response.json({ outputs: outputs.list(jobs.list()) }));
 
@@ -279,6 +320,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
   }
   if (error instanceof JobConflictError) {
     return response.status(409).json({ error: error.message });
+  }
+  if (error instanceof LipDubReferencePreparationError) {
+    return response.status(error.statusCode).json({ error: error.message });
   }
   const message = error instanceof Error ? error.message : "Unbekannter Serverfehler";
   response.status(500).json({ error: message });

@@ -1,5 +1,5 @@
 import type { GenerationRequest } from "../shared/pipelines";
-import type { PlanSuggestion } from "../shared/plan";
+import type { PlanSuggestion, PreparedLipDubReference } from "../shared/plan";
 import {
   ApiError,
   type AssetKind,
@@ -118,4 +118,14 @@ export async function getAssets(kind?: AssetKind): Promise<StudioAsset[]> {
     await fetch(`/api/assets${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`),
   );
   return body.assets;
+}
+
+export async function prepareLipDubReference(request: GenerationRequest): Promise<PreparedLipDubReference> {
+  return decode<PreparedLipDubReference>(
+    await fetch("/api/lipdub/reference/prepare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }),
+  );
 }

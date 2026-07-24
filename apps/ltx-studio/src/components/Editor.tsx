@@ -1,6 +1,8 @@
-import { ChevronDown, Cpu, Dices, FileVideo, Image as ImageIcon, Plus, SlidersHorizontal, Sparkles, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { ChevronDown, Cpu, Dices, FileVideo, Image as ImageIcon, LoaderCircle, Plus, SlidersHorizontal, Sparkles, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { useState } from "react";
 
 import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import type { PreparedLipDubReference } from "../../shared/plan";
 import {
   DURATION_PRESETS,
   formatDuration,
@@ -10,6 +12,7 @@ import {
   RESOLUTION_PRESETS,
   videoDurationSeconds,
 } from "../../shared/presets";
+import { prepareLipDubReference as prepareLipDubReferenceAsset } from "../api";
 import { fieldHelp } from "../fieldHelp";
 import type { ModelInventory, ModelInventoryItem, UploadedFile } from "../types";
 import { ImageRows, LoraRows, SingleMediaInput, UploadButton } from "./AssetRows";
@@ -22,6 +25,7 @@ type EditorProps = {
   errors: Record<string, string>;
   previews: Record<string, string>;
   onPreview: (path: string, url: string) => void;
+  onPreparedLipDubReference: (prepared: PreparedLipDubReference, sourcePath: string) => boolean;
   onComposePrompt: () => void;
   promptComposeError: string | null;
   modelInventory: ModelInventory | null;
@@ -73,12 +77,16 @@ export function Editor({
   errors,
   previews,
   onPreview,
+  onPreparedLipDubReference,
   onComposePrompt,
   promptComposeError,
   modelInventory,
   canUndoPrompt,
   onUndoPrompt,
 }: EditorProps) {
+  const [lipDubPrepBusy, setLipDubPrepBusy] = useState(false);
+  const [lipDubPrepError, setLipDubPrepError] = useState<string | null>(null);
+  const [lipDubPrepResult, setLipDubPrepResult] = useState<string | null>(null);
   const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
   const isLipDub = request.mode === "lipdub";
   const guided = ["two-stage", "two-stage-hq", "one-stage", "keyframes", "audio-to-video", "retake"].includes(
@@ -158,6 +166,27 @@ export function Editor({
         ],
       },
     });
+  };
+  const prepareLipDubReference = async () => {
+    const sourcePath = request.lipDub.referenceVideo.path;
+    setLipDubPrepBusy(true);
+    setLipDubPrepError(null);
+    setLipDubPrepResult(null);
+    try {
+      const prepared = await prepareLipDubReferenceAsset(request);
+      const applied = onPreparedLipDubReference(prepared, sourcePath);
+      if (!applied) {
+        setLipDubPrepError("Vorbereitung abgeschlossen, aber nicht übernommen: Modus oder Referenz wurde inzwischen geändert.");
+        return;
+      }
+      setLipDubPrepResult(
+        `Vorbereitete Referenz: ${prepared.target.width} x ${prepared.target.height} @ ${prepared.target.fps} fps.`,
+      );
+    } catch (error) {
+      setLipDubPrepError(error instanceof Error ? error.message : "LipDub-Referenz konnte nicht vorbereitet werden.");
+    } finally {
+      setLipDubPrepBusy(false);
+    }
   };
   const guidanceKeys: Array<"videoGuidance" | "audioGuidance"> =
     request.mode === "audio-to-video" ? ["videoGuidance"] : ["videoGuidance", "audioGuidance"];
@@ -440,6 +469,22 @@ export function Editor({
               },
             })}
           />
+          {request.lipDub.referenceVideo.path ? (
+            <div className="lipdub-reference-actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                title="Referenzvideo für LipDub als konstantes H.264/AAC-MP4 mit 64er-Format vorbereiten"
+                disabled={lipDubPrepBusy}
+                onClick={() => void prepareLipDubReference()}
+              >
+                {lipDubPrepBusy ? <LoaderCircle className="spin" size={16} /> : <WandSparkles size={16} />}
+                Referenz vorbereiten
+              </button>
+            </div>
+          ) : null}
+          {lipDubPrepError ? <p className="section-error" role="alert">{lipDubPrepError}</p> : null}
+          {lipDubPrepResult ? <p className="advisory">{lipDubPrepResult}</p> : null}
           {errors["lipDub.referenceVideo.path"] ? <p className="section-error">{errors["lipDub.referenceVideo.path"]}</p> : null}
           <NumberField
             label="Referenzstärke"

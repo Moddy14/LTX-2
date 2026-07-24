@@ -997,6 +997,20 @@ summary:focus-visible,
   white-space: nowrap;
 }
 
+.lipdub-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.lipdub-reference-actions .button {
+  min-height: 30px;
+  gap: 6px;
+  padding: 0 9px;
+  font-size: 10px;
+}
+
 .lora-row,
 .conditioning-row,
 .mask-row {

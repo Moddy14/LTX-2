@@ -32,6 +32,8 @@ describe("asset library", () => {
       size: 5,
     } as Express.Multer.File, "image");
     expect(store.list("image")).toHaveLength(1);
+    expect(store.findByPath("image", path)).toMatchObject({ name: "reference.png", kind: "image" });
+    expect(store.findByPath("video", path)).toBeNull();
     expect(new AssetStore(stateFile, uploads).list()).toMatchObject([
       { name: "reference.png", kind: "image", path },
     ]);

@@ -4,6 +4,8 @@ import { basename, resolve, sep } from "node:path";
 import { assetKinds, type AssetKind, type StudioAsset } from "../shared/assets.js";
 import { assetsStatePath, uploadRoot } from "./config.js";
 
+export type AssetFile = Pick<Express.Multer.File, "filename" | "path" | "originalname" | "size">;
+
 export class AssetStore {
   private readonly assets = new Map<string, StudioAsset>();
 
@@ -20,7 +22,12 @@ export class AssetStore {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  add(file: Express.Multer.File, kind: AssetKind): StudioAsset {
+  findByPath(kind: AssetKind, path: string): StudioAsset | null {
+    const resolvedPath = resolve(path);
+    return this.list(kind).find((asset) => resolve(asset.path) === resolvedPath) ?? null;
+  }
+
+  add(file: AssetFile, kind: AssetKind): StudioAsset {
     const id = file.filename.replace(/\.[^.]+$/, "");
     const asset: StudioAsset = {
       id,

@@ -1,5 +1,5 @@
 import { Activity, Cpu, FolderClock, MemoryStick, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   createDefaultRequest,
@@ -10,7 +10,7 @@ import {
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines";
-import type { PlanSuggestion } from "../shared/plan";
+import type { PlanSuggestion, PreparedLipDubReference } from "../shared/plan";
 import { estimateResources } from "../shared/estimates";
 import { decodeDraftParameter } from "../shared/drafts";
 import { composePromptFromParts, composePromptRequestSchema } from "../shared/prompts";
@@ -120,6 +120,7 @@ function uniqueMessages(messages: readonly string[]): string[] {
 
 export function App() {
   const [request, setRequest] = useState<GenerationRequest>(restoreRequest);
+  const requestRef = useRef(request);
   const [config, setConfig] = useState<StudioConfig | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
@@ -158,6 +159,10 @@ export function App() {
   const comparisonJobs = comparisonIds
     .map((id) => jobs.find((job) => job.id === id))
     .filter((job): job is StudioJob => Boolean(job?.outputUrl));
+
+  useLayoutEffect(() => {
+    requestRef.current = request;
+  }, [request]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(request));
@@ -436,6 +441,36 @@ export function App() {
     setCommand(null);
   };
 
+  const applyPreparedLipDubReference = (prepared: PreparedLipDubReference, sourcePath: string): boolean => {
+    const currentRequest = requestRef.current;
+    if (currentRequest.mode !== "lipdub" || currentRequest.lipDub.referenceVideo.path !== sourcePath) return false;
+    setPreviews((current) => ({ ...current, [prepared.asset.path]: prepared.asset.url }));
+    setRequest((current) => {
+      if (current.mode !== "lipdub" || current.lipDub.referenceVideo.path !== sourcePath) return current;
+      return {
+        ...current,
+        width: prepared.target.width,
+        height: prepared.target.height,
+        lipDub: {
+          ...current.lipDub,
+          referenceVideo: {
+            ...current.lipDub.referenceVideo,
+            path: prepared.asset.path,
+            name: prepared.asset.name,
+          },
+        },
+      };
+    });
+    setAttempted(false);
+    setServerErrors([]);
+    setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
+    setPreflightSuggestions([]);
+    setCommand(null);
+    return true;
+  };
+
   const activePipeline = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
   const memoryLabel = health?.resources.availableMemoryGiB === null || health?.resources.availableMemoryGiB === undefined
     ? "Unbekannt"
@@ -489,6 +524,7 @@ export function App() {
           errors={fieldErrors}
           previews={previews}
           onPreview={(path, url) => setPreviews((current) => ({ ...current, [path]: url }))}
+          onPreparedLipDubReference={applyPreparedLipDubReference}
           onComposePrompt={handleComposePrompt}
           promptComposeError={promptComposeError}
           modelInventory={modelInventory}
