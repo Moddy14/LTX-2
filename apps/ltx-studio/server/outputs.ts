@@ -10,7 +10,7 @@ import {
 import { join } from "node:path";
 
 import {
-  generationRequestSchema,
+  migrateGenerationRequest,
   outputNameSchema,
   type GenerationRequest,
 } from "../shared/pipelines.js";
@@ -39,7 +39,7 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<OutputSettingsRecord>;
-    const request = generationRequestSchema.safeParse(parsed.request);
+    const request = migrateGenerationRequest(parsed.request);
     if (parsed.schemaVersion !== "ltx-studio-output.v1"
       || parsed.outputName !== outputName
       || typeof parsed.jobId !== "string"
@@ -50,7 +50,7 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
       || !Number.isFinite(parsed.sizeBytes)
       || typeof parsed.modifiedAtMs !== "number"
       || !Number.isFinite(parsed.modifiedAtMs)
-      || !request.success) return null;
+      || !request) return null;
     return {
       schemaVersion: "ltx-studio-output.v1",
       outputName,
@@ -58,7 +58,7 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
       completedAt: parsed.completedAt,
       sizeBytes: parsed.sizeBytes,
       modifiedAtMs: parsed.modifiedAtMs,
-      request: request.data,
+      request,
     };
   } catch {
     return null;

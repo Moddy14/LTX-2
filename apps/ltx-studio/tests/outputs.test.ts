@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -89,5 +89,33 @@ describe("generated output library", () => {
 
     expect(output.settingsAvailable).toBe(true);
     expect(output.request).toEqual(job.request);
+  });
+
+  it("loads older settings sidecars through the current request migration", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T07:00:00.000Z");
+    const outputName = "legacy-settings.mp4";
+    await writeFile(join(root, outputName), "video");
+    const stats = await stat(join(root, outputName));
+    const job = completedJob(outputName, completedAt.toISOString());
+    const legacyRequest = structuredClone(job.request) as Partial<typeof job.request>;
+    delete legacyRequest.lipDub;
+    await writeFile(join(root, `${outputName}.ltx-settings.json`), JSON.stringify({
+      schemaVersion: "ltx-studio-output.v1",
+      outputName,
+      jobId: job.id,
+      completedAt: completedAt.toISOString(),
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      request: legacyRequest,
+    }));
+
+    const output = new OutputLibrary(root).list([job]).find((candidate) => candidate.name === outputName)!;
+
+    expect(output.settingsAvailable).toBe(true);
+    expect(output.request?.lipDub).toMatchObject({
+      referenceVideo: { path: "", name: "", strength: 1 },
+      lora: { path: "", strength: 1 },
+    });
   });
 });
