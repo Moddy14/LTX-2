@@ -107,14 +107,26 @@ export function Editor({
     && lipDubRecommendation
     && !lipDubRecommendation.present
     && (!request.lipDub.lora.path || request.lipDub.lora.path === lipDubRecommendation.localPath);
+  const recommendedLipDubMismatch = isLipDub
+    && lipDubRecommendation?.present
+    && request.lipDub.lora.path
+    && request.lipDub.lora.path !== lipDubRecommendation.localPath;
   const recommendedLipDubUpscalerMissing = isLipDub
     && lipDubUpscalerRecommendation
     && !lipDubUpscalerRecommendation.present
     && (!request.models.spatialUpscalerPath || request.models.spatialUpscalerPath !== lipDubUpscalerRecommendation.localPath);
+  const recommendedLipDubUpscalerMismatch = isLipDub
+    && lipDubUpscalerRecommendation?.present
+    && request.models.spatialUpscalerPath
+    && request.models.spatialUpscalerPath !== lipDubUpscalerRecommendation.localPath;
   const recommendedLipDubDistilledMissing = isLipDub
     && lipDubDistilledRecommendation
     && !lipDubDistilledRecommendation.present
     && (!request.models.distilledCheckpointPath || request.models.distilledCheckpointPath !== lipDubDistilledRecommendation.localPath);
+  const recommendedLipDubDistilledMismatch = isLipDub
+    && lipDubDistilledRecommendation?.present
+    && request.models.distilledCheckpointPath
+    && request.models.distilledCheckpointPath !== lipDubDistilledRecommendation.localPath;
 
   const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask" | "lipdub") => {
     onPreview(file.path, file.url);
@@ -729,14 +741,29 @@ export function Editor({
             Zugriff ist gated und muss im Hugging-Face-Account freigegeben sein.
           </p>
         ) : null}
+        {recommendedLipDubMismatch ? (
+          <p className="advisory advisory--warning">
+            Ausgewählt ist nicht das empfohlene LipDub-LoRA. Für SOTA-LipSync verwenden: {lipDubRecommendation.label} · {lipDubRecommendation.filename}.
+          </p>
+        ) : null}
         {recommendedLipDubDistilledMissing ? (
           <p className="advisory advisory--warning">
             Empfohlen für LipDub: {lipDubDistilledRecommendation.label} · {lipDubDistilledRecommendation.filename}. Quelle: {lipDubDistilledRecommendation.repoId}.
           </p>
         ) : null}
+        {recommendedLipDubDistilledMismatch ? (
+          <p className="advisory advisory--warning">
+            Ausgewählt ist nicht der empfohlene LipDub-Distilled-Checkpoint. Für SOTA-LipSync verwenden: {lipDubDistilledRecommendation.label} · {lipDubDistilledRecommendation.filename}.
+          </p>
+        ) : null}
         {recommendedLipDubUpscalerMissing ? (
           <p className="advisory advisory--warning">
             Empfohlen für LipDub: {lipDubUpscalerRecommendation.label} · {lipDubUpscalerRecommendation.filename}. Quelle: {lipDubUpscalerRecommendation.repoId}.
+          </p>
+        ) : null}
+        {recommendedLipDubUpscalerMismatch ? (
+          <p className="advisory advisory--warning">
+            Ausgewählt ist nicht der empfohlene LipDub-Spatial-Upscaler. Für SOTA-LipSync verwenden: {lipDubUpscalerRecommendation.label} · {lipDubUpscalerRecommendation.filename}.
           </p>
         ) : null}
         {modelInventory?.truncated ? (
