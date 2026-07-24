@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { GenerationRequest, PipelineMode } from "../shared/pipelines.js";
+import type { PlanSuggestion } from "../shared/plan.js";
 import { outputRoot, pythonExecutable } from "./config.js";
 import { probeVideoMetadata, type VideoMetadata } from "./mediaProbe.js";
 
@@ -41,6 +42,8 @@ const LIPDUB_MIN_DIALOGUE_WPM = 65;
 const LIPDUB_MAX_DIALOGUE_WPM = 220;
 const LIPDUB_EXPECTED_DISTILLED_CHECKPOINT = "ltx-2.3-22b-distilled-1.1.safetensors";
 const LIPDUB_EXPECTED_SPATIAL_UPSCALER = "ltx-2.3-spatial-upscaler-x2-1.1.safetensors";
+const LIPDUB_OUTPUT_SIZE_MULTIPLE = 64;
+const LIPDUB_OUTPUT_SIZE_CANDIDATE_RADIUS = 1;
 
 function appendFlag(args: string[], flag: string, value: string | number): void {
   args.push(flag, String(value));
@@ -99,6 +102,42 @@ function appendGuidanceArgs(request: GenerationRequest, args: string[], includeA
 
 function snappedFramesTo8k1(frames: number): number {
   return Math.max(1, Math.floor((Math.max(1, frames) - 1) / 8) * 8 + 1);
+}
+
+function nearestMultiple(value: number, multiple: number): number {
+  return Math.max(multiple, Math.round(value / multiple) * multiple);
+}
+
+function sizeCandidatesAround(value: number): number[] {
+  const center = nearestMultiple(value, LIPDUB_OUTPUT_SIZE_MULTIPLE);
+  const candidates = new Set<number>();
+  for (
+    let offset = -LIPDUB_OUTPUT_SIZE_CANDIDATE_RADIUS;
+    offset <= LIPDUB_OUTPUT_SIZE_CANDIDATE_RADIUS;
+    offset += 1
+  ) {
+    const candidate = center + offset * LIPDUB_OUTPUT_SIZE_MULTIPLE;
+    if (candidate >= LIPDUB_MIN_REFERENCE_DIMENSION && candidate <= 4096) candidates.add(candidate);
+  }
+  return [...candidates].sort((left, right) => left - right);
+}
+
+function recommendedLipDubOutputSize(metadata: VideoMetadata): { width: number; height: number } | null {
+  if (metadata.width === null || metadata.height === null) return null;
+  const referenceAspect = metadata.width / metadata.height;
+  const referenceArea = metadata.width * metadata.height;
+  let best: { width: number; height: number; score: number } | null = null;
+
+  for (const width of sizeCandidatesAround(metadata.width)) {
+    for (const height of sizeCandidatesAround(metadata.height)) {
+      const aspectDrift = Math.abs(Math.log((width / height) / referenceAspect));
+      const areaDrift = Math.abs(Math.log((width * height) / referenceArea));
+      const score = aspectDrift * 100 + areaDrift;
+      if (best === null || score < best.score) best = { width, height, score };
+    }
+  }
+
+  return best ? { width: best.width, height: best.height } : null;
 }
 
 function metadataDurationSeconds(metadata: VideoMetadata): number | null {
@@ -230,8 +269,12 @@ function warnLipDubReference(request: GenerationRequest): string[] {
     const referenceAspect = metadata.width / metadata.height;
     const outputAspect = request.width / request.height;
     const aspectDelta = Math.abs(referenceAspect - outputAspect) / referenceAspect;
+    const recommendedSize = recommendedLipDubOutputSize(metadata);
+    const matchesRecommendedSize = recommendedSize !== null
+      && recommendedSize.width === request.width
+      && recommendedSize.height === request.height;
 
-    if (metadata.width !== request.width || metadata.height !== request.height) {
+    if ((metadata.width !== request.width || metadata.height !== request.height) && !matchesRecommendedSize) {
       warnings.push(
         `LipDub-Referenz ist ${referenceLabel}, Ausgabe ist ${outputLabel}. `
         + "Für höchste Qualität sollte die Ausgabe der Referenzauflösung oder dem nächstliegenden durch 64 teilbaren Format entsprechen.",
@@ -453,4 +496,23 @@ export function validateRequestPlan(request: GenerationRequest, plan: CommandPla
 
 export function warnRequestPlan(request: GenerationRequest): string[] {
   return request.mode === "lipdub" ? warnLipDubReference(request) : [];
+}
+
+export function suggestRequestPlan(request: GenerationRequest): PlanSuggestion[] {
+  if (request.mode !== "lipdub" || !request.lipDub.referenceVideo.path) return [];
+  const metadata = probeVideoMetadata(request.lipDub.referenceVideo.path);
+  if (!metadata) return [];
+  const recommendedSize = recommendedLipDubOutputSize(metadata);
+  if (!recommendedSize) return [];
+  if (recommendedSize.width === request.width && recommendedSize.height === request.height) return [];
+
+  return [{
+    id: "lipdub-reference-format",
+    level: "info",
+    label: `Format ${recommendedSize.width} x ${recommendedSize.height} übernehmen`,
+    message:
+      `Referenzvideo ${metadata.width} x ${metadata.height}; empfohlenes 64er-LipDub-Format `
+      + `${recommendedSize.width} x ${recommendedSize.height} mit möglichst geringer Seitenverhältnisdrift.`,
+    patch: recommendedSize,
+  }];
 }

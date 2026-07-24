@@ -107,6 +107,13 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
       outputPath: "/outputs/lipdub-preflight-test.mp4",
       pathErrors: ["LipDub IC-LoRA: nicht gefunden (/models/lipdub.safetensors)"],
       pathWarnings: ["Die native LipDub-Pipeline snappt 122 Referenzframes auf 121 Frames nach 8k+1; das Clipende kann dadurch wegfallen."],
+      suggestions: [{
+        id: "lipdub-reference-format",
+        level: "info",
+        label: "Format 768 x 1344 übernehmen",
+        message: "Referenzvideo 720 x 1280; empfohlenes 64er-LipDub-Format 768 x 1344 mit möglichst geringer Seitenverhältnisdrift.",
+        patch: { width: 768, height: 1344 },
+      }],
     }),
   }));
 
@@ -115,7 +122,11 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
 
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
   await expect(page.getByRole("alert")).toContainText("LipDub IC-LoRA: nicht gefunden");
-  await expect(page.getByRole("status")).toContainText("snappt 122 Referenzframes");
+  await expect(page.locator(".run-warnings")).toContainText("snappt 122 Referenzframes");
+  await expect(page.locator(".run-suggestions")).toContainText("empfohlenes 64er-LipDub-Format 768 x 1344");
+  await page.getByRole("button", { name: "Format 768 x 1344 übernehmen" }).click();
+  await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("768");
+  await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("1344");
 });
 
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {

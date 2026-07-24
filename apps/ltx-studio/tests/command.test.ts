@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { pipelineModes } from "../shared/pipelines.js";
-import { buildCommand, validateRequestPlan, warnRequestPlan } from "../server/command.js";
+import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan } from "../server/command.js";
 import * as mediaProbe from "../server/mediaProbe.js";
 import { validRequest } from "./fixtures.js";
 
@@ -241,6 +241,49 @@ describe("buildCommand", () => {
       "Referenz-FPS ist 23.976. Die native Ausgabe kodiert derzeit mit ganzzahliger FPS; für präzisen LipSync vorher auf konstante 24, 25 oder 30 FPS transkodieren.",
       "Referenzdauer ist 5.1 s. Für die Kalibrierung zuerst einen 2-5-s-Ausschnitt prüfen, danach dieselben Einstellungen auf längere Clips übertragen.",
     ]));
+  });
+
+  it("suggests the closest high-quality 64-multiple LipDub output format", () => {
+    const request = validRequest("lipdub");
+    request.width = 576;
+    request.height = 1024;
+    vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      width: 720,
+      height: 1280,
+      frames: 121,
+      fps: 24,
+      durationSeconds: 5.04,
+      hasAudio: true,
+    });
+
+    expect(suggestRequestPlan(request)).toEqual([{
+      id: "lipdub-reference-format",
+      level: "info",
+      label: "Format 768 x 1344 übernehmen",
+      message: "Referenzvideo 720 x 1280; empfohlenes 64er-LipDub-Format 768 x 1344 mit möglichst geringer Seitenverhältnisdrift.",
+      patch: { width: 768, height: 1344 },
+    }]);
+
+    request.width = 768;
+    request.height = 1344;
+    expect(suggestRequestPlan(request)).toEqual([]);
+    expect(warnRequestPlan(request)).not.toContain(
+      "LipDub-Referenz ist 720 x 1280, Ausgabe ist 768 x 1344. Für höchste Qualität sollte die Ausgabe der Referenzauflösung oder dem nächstliegenden durch 64 teilbaren Format entsprechen.",
+    );
+  });
+
+  it("does not suggest LipDub output formats outside the request schema limits", () => {
+    const request = validRequest("lipdub");
+    vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      width: 7680,
+      height: 4320,
+      frames: 121,
+      fps: 24,
+      durationSeconds: 5.04,
+      hasAudio: true,
+    });
+
+    expect(suggestRequestPlan(request)).toEqual([]);
   });
 
   it("warns when native LipDub is configured with non-reference model asset versions", () => {

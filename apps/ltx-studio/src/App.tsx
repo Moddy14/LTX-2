@@ -10,6 +10,7 @@ import {
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines";
+import type { PlanSuggestion } from "../shared/plan";
 import { estimateResources } from "../shared/estimates";
 import { decodeDraftParameter } from "../shared/drafts";
 import { composePromptFromParts, composePromptRequestSchema } from "../shared/prompts";
@@ -135,6 +136,7 @@ export function App() {
   const [serverWarnings, setServerWarnings] = useState<string[]>([]);
   const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
   const [preflightWarnings, setPreflightWarnings] = useState<string[]>([]);
+  const [preflightSuggestions, setPreflightSuggestions] = useState<PlanSuggestion[]>([]);
   const [command, setCommand] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [promptComposeError, setPromptComposeError] = useState<string | null>(null);
@@ -221,6 +223,7 @@ export function App() {
     let cancelled = false;
     setPreflightErrors([]);
     setPreflightWarnings([]);
+    setPreflightSuggestions([]);
     if (request.mode !== "lipdub" || !validation.success) return;
     const plannedRequest = validation.data;
     const timer = window.setTimeout(() => {
@@ -229,10 +232,12 @@ export function App() {
         setCommand(plan.command);
         setPreflightErrors(plan.pathErrors);
         setPreflightWarnings(plan.pathWarnings);
+        setPreflightSuggestions(plan.suggestions ?? []);
       }).catch(() => {
         if (cancelled) return;
         setPreflightErrors([]);
         setPreflightWarnings([]);
+        setPreflightSuggestions([]);
       });
     }, 600);
     return () => {
@@ -266,6 +271,7 @@ export function App() {
     setServerWarnings([]);
     setPreflightErrors([]);
     setPreflightWarnings([]);
+    setPreflightSuggestions([]);
     setCommand(null);
   };
 
@@ -302,6 +308,7 @@ export function App() {
       const plan = await planJob(validation.data);
       setCommand(plan.command);
       setServerWarnings(plan.pathWarnings);
+      setPreflightSuggestions(plan.suggestions ?? []);
       if (plan.pathErrors.length > 0) {
         setServerErrors(plan.pathErrors);
         return;
@@ -336,6 +343,7 @@ export function App() {
     setServerWarnings([]);
     setPreflightErrors([]);
     setPreflightWarnings([]);
+    setPreflightSuggestions([]);
     try {
       const variant = await rerunJob(job.id, mode);
       setJobs((current) => [variant, ...current.filter((item) => item.id !== variant.id)]);
@@ -400,6 +408,7 @@ export function App() {
       setServerWarnings([]);
       setPreflightErrors([]);
       setPreflightWarnings([]);
+      setPreflightSuggestions([]);
       return;
     }
     const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(output.request, output.request.mode));
@@ -412,6 +421,18 @@ export function App() {
     setServerWarnings([]);
     setPreflightErrors([]);
     setPreflightWarnings([]);
+    setPreflightSuggestions([]);
+    setCommand(null);
+  };
+
+  const applyPlanSuggestion = (suggestion: PlanSuggestion) => {
+    setRequest((current) => ({ ...current, ...suggestion.patch }));
+    setAttempted(false);
+    setServerErrors([]);
+    setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
+    setPreflightSuggestions([]);
     setCommand(null);
   };
 
@@ -501,6 +522,8 @@ export function App() {
             ? uniqueMessages([...validationMessages, ...serverErrors])
             : uniqueMessages([...preflightErrors, ...serverErrors])}
           warnings={uniqueMessages([...preflightWarnings, ...serverWarnings])}
+          suggestions={preflightSuggestions}
+          onApplySuggestion={applyPlanSuggestion}
           command={command}
           previews={previews}
           comparisonJobs={comparisonJobs}

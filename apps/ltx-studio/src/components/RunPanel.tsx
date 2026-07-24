@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import type { PlanSuggestion } from "../../shared/plan";
 import { videoDurationSeconds } from "../../shared/presets";
 import { isVideoPreviewUrl } from "../../shared/media";
 import type { Health, ResourceEstimate, StudioJob, StudioOutput } from "../types";
@@ -76,6 +77,8 @@ type RunPanelProps = {
   submitting: boolean;
   errors: string[];
   warnings: string[];
+  suggestions: PlanSuggestion[];
+  onApplySuggestion: (suggestion: PlanSuggestion) => void;
   command: string | null;
   previews: Record<string, string>;
   comparisonJobs: StudioJob[];
@@ -103,6 +106,8 @@ export function RunPanel({
   submitting,
   errors,
   warnings,
+  suggestions,
+  onApplySuggestion,
   command,
   previews,
   comparisonJobs,
@@ -386,6 +391,22 @@ export function RunPanel({
         <div className="run-warnings" role="status">
           <AlertTriangle size={17} />
           <div>{warnings.slice(0, 5).map((warning) => <span key={warning}>{warning}</span>)}</div>
+        </div>
+      ) : null}
+
+      {suggestions.length > 0 ? (
+        <div className="run-suggestions" role="status">
+          <SlidersHorizontal size={17} />
+          <div>
+            {suggestions.slice(0, 3).map((suggestion) => (
+              <div className="run-suggestion" key={suggestion.id}>
+                <span>{suggestion.message}</span>
+                <button type="button" className="button button--secondary" onClick={() => onApplySuggestion(suggestion)}>
+                  <SlidersHorizontal size={15} /> {suggestion.label}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

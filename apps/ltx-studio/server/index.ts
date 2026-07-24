@@ -10,7 +10,7 @@ import { assetKinds, type AssetKind } from "../shared/assets.js";
 import { generationRequestSchema, outputNameSchema, PIPELINES } from "../shared/pipelines.js";
 import { admissionClientAvailable } from "./admission.js";
 import { AssetStore } from "./assets.js";
-import { buildCommand, validateRequestPlan, warnRequestPlan } from "./command.js";
+import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan } from "./command.js";
 import {
   appRoot,
   admissionRequired,
@@ -186,6 +186,7 @@ app.post("/api/jobs/plan", (request, response) => {
     outputPath: plan.outputPath,
     pathErrors: validateRequestPlan(payload, plan),
     pathWarnings: warnRequestPlan(payload),
+    suggestions: suggestRequestPlan(payload),
   });
 });
 

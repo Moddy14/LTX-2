@@ -1,4 +1,5 @@
 import type { GenerationRequest } from "../shared/pipelines";
+import type { PlanSuggestion } from "../shared/plan";
 import {
   ApiError,
   type AssetKind,
@@ -63,7 +64,13 @@ export async function createJob(request: GenerationRequest): Promise<StudioJob> 
 
 export async function planJob(
   request: GenerationRequest,
-): Promise<{ command: string; outputPath: string; pathErrors: string[]; pathWarnings: string[] }> {
+): Promise<{
+  command: string;
+  outputPath: string;
+  pathErrors: string[];
+  pathWarnings: string[];
+  suggestions?: PlanSuggestion[];
+}> {
   return decode(
     await fetch("/api/jobs/plan", {
       method: "POST",

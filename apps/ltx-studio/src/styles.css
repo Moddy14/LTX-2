@@ -1611,6 +1611,43 @@ summary:focus-visible,
   line-height: 1.35;
 }
 
+.run-suggestions {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  margin: 11px 0;
+  padding: 9px;
+  color: #225e56;
+  background: #edf7f5;
+  border: 1px solid #9cc8c2;
+  border-radius: 5px;
+}
+
+.run-suggestions > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.run-suggestion {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.run-suggestion .button {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 28px;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
 .run-button {
   width: 100%;
   min-height: 44px;
@@ -2024,6 +2061,7 @@ summary:focus-visible,
   .run-summary,
   .run-errors,
   .run-warnings,
+  .run-suggestions,
   .run-button,
   .job-section,
   .run-details {
