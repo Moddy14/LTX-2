@@ -61,6 +61,9 @@ function withDiscoveredModelDefaults(request: GenerationRequest, inventory: Mode
   const find = (kind: ModelInventory["items"][number]["kind"], predicate: (name: string) => boolean = () => true) =>
     inventory.items.find((item) => item.kind === kind && predicate(item.name.toLowerCase()))?.path ?? "";
   const recommendedLipDub = inventory.recommendations.find((item) => item.id === "lipdub-lora" && item.present);
+  const recommendedLipDubDistilled = inventory.recommendations.find((item) =>
+    item.id === "lipdub-distilled-checkpoint" && item.present,
+  );
   const recommendedLipDubUpscaler = inventory.recommendations.find((item) =>
     item.id === "lipdub-spatial-upscaler" && item.present,
   );
@@ -71,7 +74,9 @@ function withDiscoveredModelDefaults(request: GenerationRequest, inventory: Mode
       checkpointPath: request.models.checkpointPath
         || find("checkpoint", (name) => !name.includes("fp8"))
         || find("checkpoint"),
-      distilledCheckpointPath: request.models.distilledCheckpointPath || find("distilled-checkpoint"),
+      distilledCheckpointPath: request.models.distilledCheckpointPath
+        || recommendedLipDubDistilled?.localPath
+        || find("distilled-checkpoint"),
       gemmaRoot: request.models.gemmaRoot || find("gemma"),
       spatialUpscalerPath: request.models.spatialUpscalerPath
         || recommendedLipDubUpscaler?.localPath

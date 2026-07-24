@@ -101,6 +101,7 @@ export function Editor({
   const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
   const loraOptions = modelOptions(discoveredModels, "lora");
   const lipDubRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-lora");
+  const lipDubDistilledRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint");
   const lipDubUpscalerRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-spatial-upscaler");
   const recommendedLipDubMissing = isLipDub
     && lipDubRecommendation
@@ -110,6 +111,10 @@ export function Editor({
     && lipDubUpscalerRecommendation
     && !lipDubUpscalerRecommendation.present
     && (!request.models.spatialUpscalerPath || request.models.spatialUpscalerPath !== lipDubUpscalerRecommendation.localPath);
+  const recommendedLipDubDistilledMissing = isLipDub
+    && lipDubDistilledRecommendation
+    && !lipDubDistilledRecommendation.present
+    && (!request.models.distilledCheckpointPath || request.models.distilledCheckpointPath !== lipDubDistilledRecommendation.localPath);
 
   const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask" | "lipdub") => {
     onPreview(file.path, file.url);
@@ -722,6 +727,11 @@ export function Editor({
           <p className="advisory advisory--warning">
             Fehlt: {lipDubRecommendation.label} · {lipDubRecommendation.filename}. Quelle: {lipDubRecommendation.repoId};
             Zugriff ist gated und muss im Hugging-Face-Account freigegeben sein.
+          </p>
+        ) : null}
+        {recommendedLipDubDistilledMissing ? (
+          <p className="advisory advisory--warning">
+            Empfohlen für LipDub: {lipDubDistilledRecommendation.label} · {lipDubDistilledRecommendation.filename}. Quelle: {lipDubDistilledRecommendation.repoId}.
           </p>
         ) : null}
         {recommendedLipDubUpscalerMissing ? (

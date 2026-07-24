@@ -47,6 +47,10 @@ describe("model discovery", () => {
       present: false,
       repoId: "Lightricks/LTX-2.3-22b-IC-LoRA-LipDub",
     });
+    expect(inventory.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint")).toMatchObject({
+      present: false,
+      repoId: "Lightricks/LTX-2.3",
+    });
     expect(inventory.recommendations.find((item) => item.id === "lipdub-spatial-upscaler")).toMatchObject({
       present: false,
       repoId: "Lightricks/LTX-2.3",
@@ -80,6 +84,22 @@ describe("model discovery", () => {
     const inventory = await discoverModels([root]);
     expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-spatial-upscaler-x2-1.1.safetensors");
     expect(inventory.recommendations.find((item) => item.id === "lipdub-spatial-upscaler")).toMatchObject({
+      present: true,
+      localPath,
+    });
+  });
+
+  it("marks the LipDub distilled checkpoint recommendation present when the current file exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
+    temporaryRoots.push(root);
+    const repo = join(root, "Lightricks__LTX-2.3");
+    await mkdir(repo);
+    const localPath = join(repo, "ltx-2.3-22b-distilled-1.1.safetensors");
+    await writeFile(localPath, "checkpoint");
+
+    const inventory = await discoverModels([root]);
+    expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-22b-distilled-1.1.safetensors");
+    expect(inventory.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint")).toMatchObject({
       present: true,
       localPath,
     });

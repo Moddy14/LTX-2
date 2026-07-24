@@ -1,7 +1,7 @@
 export type ModelKind = "checkpoint" | "distilled-checkpoint" | "spatial-upscaler" | "lora" | "amax" | "gemma";
 
 export type RecommendedModelAsset = {
-  id: "lipdub-lora" | "lipdub-spatial-upscaler";
+  id: "lipdub-lora" | "lipdub-distilled-checkpoint" | "lipdub-spatial-upscaler";
   kind: ModelKind;
   label: string;
   repoId: string;
@@ -40,6 +40,17 @@ export const recommendedModelAssets = [
       "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-LipDub/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors",
     present: false,
     access: "gated",
+  },
+  {
+    id: "lipdub-distilled-checkpoint",
+    kind: "distilled-checkpoint",
+    label: "LipDub Distilled Checkpoint 1.1",
+    repoId: "Lightricks/LTX-2.3",
+    filename: "ltx-2.3-22b-distilled-1.1.safetensors",
+    localPath:
+      "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors",
+    present: false,
+    access: "public",
   },
   {
     id: "lipdub-spatial-upscaler",
