@@ -1,0 +1,794 @@
+import { ChevronDown, Cpu, Dices, Image as ImageIcon, Plus, SlidersHorizontal, Sparkles, Trash2, Undo2, WandSparkles } from "lucide-react";
+
+import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import {
+  DURATION_PRESETS,
+  formatDuration,
+  framesForDuration,
+  matchingDurationPreset,
+  matchingResolutionPreset,
+  RESOLUTION_PRESETS,
+  videoDurationSeconds,
+} from "../../shared/presets";
+import { fieldHelp } from "../fieldHelp";
+import type { ModelInventory, ModelInventoryItem, UploadedFile } from "../types";
+import { ImageRows, LoraRows, SingleMediaInput, UploadButton } from "./AssetRows";
+import { AssetLibrary } from "./AssetLibrary";
+import { Field, NumberField, PathPicker, SectionHeader, Segmented, SelectField, TextField, Toggle, type PathOption } from "./Controls";
+
+type EditorProps = {
+  request: GenerationRequest;
+  onChange: (request: GenerationRequest) => void;
+  errors: Record<string, string>;
+  previews: Record<string, string>;
+  onPreview: (path: string, url: string) => void;
+  onComposePrompt: () => void;
+  promptComposeError: string | null;
+  modelInventory: ModelInventory | null;
+  canUndoPrompt: boolean;
+  onUndoPrompt: () => void;
+};
+
+function formatModelSize(bytes: number): string {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
+}
+
+function modelOptions(items: readonly ModelInventoryItem[], kind: ModelInventoryItem["kind"]): PathOption[] {
+  return items
+    .filter((item) => item.kind === kind)
+    .map((item) => ({
+      path: item.path,
+      label: `${item.name} · ${formatModelSize(item.sizeBytes)}${item.precision === "unknown" ? "" : ` · ${item.precision.toUpperCase()}`}`,
+    }));
+}
+
+const PROMPT_PART_FIELDS: ReadonlyArray<{
+  key: keyof GenerationRequest["promptParts"];
+  label: string;
+  hint: string;
+  placeholder: string;
+}> = [
+  { key: "subject", label: "Motiv", hint: fieldHelp.promptSubject, placeholder: "Person, Produkt, Tier oder Objekt..." },
+  { key: "action", label: "Handlung", hint: fieldHelp.promptAction, placeholder: "Was geschieht und wie bewegt es sich?" },
+  { key: "environment", label: "Umgebung", hint: fieldHelp.promptEnvironment, placeholder: "Ort, Zeit, Wetter und Hintergrund..." },
+  { key: "camera", label: "Kamera", hint: fieldHelp.promptCamera, placeholder: "Einstellung, Objektiv und Kamerabewegung..." },
+  { key: "lighting", label: "Licht und Look", hint: fieldHelp.promptLighting, placeholder: "Lichtquelle, Kontrast, Farben und Material..." },
+  { key: "dialogue", label: "Dialog", hint: fieldHelp.promptDialogue, placeholder: "Wörtliche Rede mit Sprecher, möglichst in Anführungszeichen..." },
+  { key: "ambience", label: "Geräusche", hint: fieldHelp.promptAmbience, placeholder: "Raumklang und konkrete Umgebungsgeräusche..." },
+  { key: "music", label: "Musik", hint: fieldHelp.promptMusic, placeholder: "Stil, Tempo, Instrumente oder ausdrücklich keine Musik..." },
+];
+
+function updateGuidance(
+  request: GenerationRequest,
+  key: "videoGuidance" | "audioGuidance",
+  field: keyof GenerationRequest["videoGuidance"],
+  value: number | number[],
+): GenerationRequest {
+  return { ...request, [key]: { ...request[key], [field]: value } };
+}
+
+export function Editor({
+  request,
+  onChange,
+  errors,
+  previews,
+  onPreview,
+  onComposePrompt,
+  promptComposeError,
+  modelInventory,
+  canUndoPrompt,
+  onUndoPrompt,
+}: EditorProps) {
+  const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
+  const guided = ["two-stage", "two-stage-hq", "one-stage", "keyframes", "audio-to-video", "retake"].includes(
+    request.mode,
+  ) && !(request.mode === "retake" && request.retake.distilled);
+  const supportsSteps = !["distilled", "ic-lora"].includes(request.mode)
+    && !(request.mode === "retake" && request.retake.distilled);
+  const sourceSelectable = ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(request.mode);
+  const imageEnabled = request.mode !== "retake" && (!sourceSelectable || request.sourceMode === "image");
+  const visibleTextIntent = /\b(text|schrift|logo|label|etikett|titel|wort|zeichen)\b/i.test(request.prompt);
+  const dialogueIntent = request.promptParts.dialogue.trim().length > 0
+    || /(?:dialogue|dialog|sagt|spricht|says|speaks|["“][^"”]{2,}["”])/i.test(request.prompt);
+  const resolutionPreset = matchingResolutionPreset(request.width, request.height);
+  const durationPreset = matchingDurationPreset(request.numFrames, request.frameRate);
+  const duration = videoDurationSeconds(request.numFrames, request.frameRate);
+  const discoveredModels = modelInventory?.items ?? [];
+  const checkpointOptions = modelOptions(discoveredModels, "checkpoint");
+  const distilledCheckpointOptions = modelOptions(discoveredModels, "distilled-checkpoint");
+  const gemmaOptions = modelOptions(discoveredModels, "gemma");
+  const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
+  const loraOptions = modelOptions(discoveredModels, "lora");
+
+  const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask") => {
+    onPreview(file.path, file.url);
+    if (target === "audio") {
+      onChange({ ...request, audio: { ...request.audio, path: file.path, name: file.name } });
+    } else if (target === "retake") {
+      onChange({ ...request, retake: { ...request.retake, videoPath: file.path, videoName: file.name } });
+    } else {
+      onChange({ ...request, icLora: { ...request.icLora, attentionMaskPath: file.path } });
+    }
+  };
+  const addControlVideo = (file: UploadedFile) => {
+    onPreview(file.path, file.url);
+    onChange({
+      ...request,
+      icLora: {
+        ...request.icLora,
+        videoConditioning: [
+          ...request.icLora.videoConditioning,
+          { path: file.path, name: file.name, strength: 1 },
+        ],
+      },
+    });
+  };
+  const guidanceKeys: Array<"videoGuidance" | "audioGuidance"> =
+    request.mode === "audio-to-video" ? ["videoGuidance"] : ["videoGuidance", "audioGuidance"];
+
+  return (
+    <main className="editor">
+      <section className="editor__title-band">
+        <div>
+          <span className="eyebrow">{definition.family === "edit" ? "Bearbeiten" : "Produktion"}</span>
+          <h1>{definition.label}</h1>
+        </div>
+        <span className="quality-mark">{definition.quality}</span>
+      </section>
+
+      <section className="editor-section prompt-section">
+        <SectionHeader title="Prompt" action={<WandSparkles size={18} />} />
+        {sourceSelectable ? (
+          <>
+            <Segmented
+              label="Startpunkt"
+              hint={fieldHelp.sourceMode}
+              value={request.sourceMode}
+              options={[
+                { value: "text", label: "Text zu Video" },
+                { value: "image", label: "Bild zu Video · empfohlen" },
+              ]}
+              onChange={(sourceMode) => onChange({
+                ...request,
+                sourceMode,
+                images: sourceMode === "text" ? [] : request.images,
+              })}
+            />
+            <p className="source-mode-note">
+              {request.sourceMode === "image"
+                ? "Referenzbild stabilisiert Motiv, Komposition und sichtbare Schrift."
+                : "Freie Komposition ausschließlich aus dem Prompt."}
+            </p>
+          </>
+        ) : null}
+        <details className="structured-prompt">
+          <summary>
+            Prompt-Bausteine <ChevronDown size={15} />
+          </summary>
+          <div className="structured-prompt__grid">
+            {PROMPT_PART_FIELDS.map((field) => (
+              <Field key={field.key} label={field.label} hint={field.hint}>
+                <textarea
+                  aria-label={field.label}
+                  value={request.promptParts[field.key]}
+                  maxLength={2_000}
+                  placeholder={field.placeholder}
+                  onChange={(event) => onChange({
+                    ...request,
+                    promptParts: { ...request.promptParts, [field.key]: event.target.value },
+                  })}
+                />
+              </Field>
+            ))}
+          </div>
+          <div className="structured-prompt__actions">
+            <button
+              type="button"
+              className="button button--secondary"
+              disabled={!Object.values(request.promptParts).some((value) => value.trim())}
+              title="Prompt-Bausteine lokal in die positive Beschreibung übernehmen"
+              onClick={onComposePrompt}
+            >
+              <Sparkles size={16} />
+              Bausteine übernehmen
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              title="Letzte Übernahme zurücknehmen"
+              disabled={!canUndoPrompt}
+              onClick={onUndoPrompt}
+            >
+              <Undo2 size={17} />
+            </button>
+          </div>
+          {promptComposeError ? <p className="section-error" role="alert">{promptComposeError}</p> : null}
+        </details>
+        <Field label="Positive Beschreibung" hint={fieldHelp.prompt} error={errors.prompt}>
+          <textarea
+            className="prompt-input"
+            aria-label="Positive Beschreibung"
+            value={request.prompt}
+            maxLength={16_000}
+            placeholder="Szene, Bewegung, Kamera und Ton..."
+            onChange={(event) => onChange({ ...request, prompt: event.target.value })}
+          />
+          <span className="character-count">{request.prompt.length.toLocaleString("de-AT")} / 16.000</span>
+        </Field>
+        {sourceSelectable && request.sourceMode === "text" && visibleTextIntent ? (
+          <p className="advisory advisory--warning">
+            Der Prompt verlangt sichtbare Schrift. Bild-zu-Video mit einer sauberen Textvorlage ist dafür stabiler.
+          </p>
+        ) : null}
+        <Toggle
+          label="Beim Start mit Gemma verbessern"
+          hint={fieldHelp.enhancePrompt}
+          checked={request.enhancePrompt}
+          onChange={(enhancePrompt) => onChange({ ...request, enhancePrompt })}
+        />
+        {dialogueIntent ? (
+          <p className="advisory advisory--warning">
+            Dialog erkannt: LTX erzeugt eine neue Stimme. Eine exakte Sprecheridentität oder Stimmklon-Treue ist nicht garantiert;
+            verwende nur freigegebene Stimmen und prüfe den Wortlaut im Ergebnis. Für eine feste vorhandene Tonspur nutze Audio zu Video.
+          </p>
+        ) : null}
+        <details className="inline-details continuity-block">
+          <summary>
+            Projekt und Kontinuität <ChevronDown size={15} />
+          </summary>
+          <div className="continuity-fields">
+            <TextField
+              label="Projektname"
+              hint={fieldHelp.continuityProject}
+              value={request.continuity.project}
+              maxLength={120}
+              placeholder="Zum Beispiel Kampagne Sommer"
+              onChange={(project) => onChange({ ...request, continuity: { ...request.continuity, project } })}
+            />
+            <Field label="Kontinuitätsnotizen" hint={fieldHelp.continuityNotes}>
+              <textarea
+                aria-label="Kontinuitätsnotizen"
+                value={request.continuity.notes}
+                maxLength={2_000}
+                placeholder="Unveränderliche Merkmale, Farben, Kleidung, Positionen oder Anschlüsse..."
+                onChange={(event) => onChange({
+                  ...request,
+                  continuity: { ...request.continuity, notes: event.target.value },
+                })}
+              />
+            </Field>
+          </div>
+        </details>
+        {(definition.needsNegativePrompt || request.mode === "retake")
+          && !(request.mode === "retake" && request.retake.distilled) ? (
+          <details className="inline-details">
+            <summary>
+              Negativer Prompt <ChevronDown size={15} />
+            </summary>
+            <Field label="Ausschlüsse" hint={fieldHelp.negativePrompt}>
+              <textarea
+                value={request.negativePrompt}
+                aria-label="Ausschlüsse"
+                placeholder="Unerwünschte Merkmale..."
+                onChange={(event) => onChange({ ...request, negativePrompt: event.target.value })}
+              />
+            </Field>
+          </details>
+        ) : null}
+      </section>
+
+      {imageEnabled ? (
+        <section className="editor-section">
+          <SectionHeader
+            title={request.mode === "keyframes" ? "Keyframes" : sourceSelectable ? "Referenzbild" : "Bildkonditionierung"}
+            action={<ImageIcon size={18} />}
+          />
+          <ImageRows
+            images={request.images}
+            previews={previews}
+            onPreview={onPreview}
+            onChange={(images) => onChange({ ...request, images })}
+          />
+          {errors.images ? <p className="section-error">{errors.images}</p> : null}
+        </section>
+      ) : null}
+
+      {request.mode === "audio-to-video" ? (
+        <section className="editor-section">
+          <SectionHeader title="Audiospur" />
+          <SingleMediaInput
+            kind="audio"
+            label="Audio hochladen"
+            value={request.audio}
+            previewUrl={previews[request.audio.path]}
+            onChange={(file) => applyUpload(file, "audio")}
+            onClear={() => onChange({ ...request, audio: { ...request.audio, path: "", name: "" } })}
+            onPathChange={(path) => onChange({
+              ...request,
+              audio: { ...request.audio, path, name: path.split("/").at(-1) ?? path },
+            })}
+          />
+          {errors["audio.path"] ? <p className="section-error">{errors["audio.path"]}</p> : null}
+          <div className="field-grid field-grid--2">
+            <NumberField
+              label="Start (Sekunden)"
+              hint={fieldHelp.audioStart}
+              min={0}
+              step={0.1}
+              value={request.audio.startTime}
+              onChange={(startTime) => onChange({ ...request, audio: { ...request.audio, startTime: startTime ?? 0 } })}
+            />
+            <NumberField
+              label="Maximale Dauer"
+              hint={fieldHelp.audioDuration}
+              min={0.1}
+              step={0.1}
+              placeholder="Automatisch"
+              value={request.audio.maxDuration}
+              onChange={(maxDuration) => onChange({ ...request, audio: { ...request.audio, maxDuration } })}
+            />
+          </div>
+          <Toggle
+            label="LongCat-Lippenpass"
+            hint={fieldHelp.longcatLipsync}
+            checked={request.postprocess.longcatLipsync.enabled}
+            onChange={(enabled) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                longcatLipsync: { ...request.postprocess.longcatLipsync, enabled },
+              },
+            })}
+          />
+          {request.postprocess.longcatLipsync.enabled ? (
+            <div className="field-grid field-grid--2">
+              <SelectField
+                label="LongCat-Auflösung"
+                hint={fieldHelp.longcatResolution}
+                value={request.postprocess.longcatLipsync.resolution}
+                options={[
+                  { value: "480p", label: "480p · empfohlen" },
+                  { value: "720p", label: "720p · langsam" },
+                ]}
+                onChange={(resolution) => onChange({
+                  ...request,
+                  postprocess: {
+                    ...request.postprocess,
+                    longcatLipsync: { ...request.postprocess.longcatLipsync, resolution },
+                  },
+                })}
+              />
+              <NumberField
+                label="Mund-Übergangsbreite"
+                hint={fieldHelp.longcatBlend}
+                min={0}
+                max={1}
+                step={0.05}
+                value={request.postprocess.longcatLipsync.blend}
+                error={errors["postprocess.longcatLipsync.blend"]}
+                onChange={(blend) => onChange({
+                  ...request,
+                  postprocess: {
+                    ...request.postprocess,
+                    longcatLipsync: { ...request.postprocess.longcatLipsync, blend: blend ?? 0.9 },
+                  },
+                })}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {request.mode === "retake" ? (
+        <section className="editor-section">
+          <SectionHeader title="Quellvideo" />
+          <SingleMediaInput
+            kind="video"
+            label="Video hochladen"
+            value={{ path: request.retake.videoPath, name: request.retake.videoName }}
+            previewUrl={previews[request.retake.videoPath]}
+            onChange={(file) => applyUpload(file, "retake")}
+            onClear={() => onChange({ ...request, retake: { ...request.retake, videoPath: "", videoName: "" } })}
+            onPathChange={(videoPath) => onChange({
+              ...request,
+              retake: { ...request.retake, videoPath, videoName: videoPath.split("/").at(-1) ?? videoPath },
+            })}
+          />
+          {errors["retake.videoPath"] ? <p className="section-error">{errors["retake.videoPath"]}</p> : null}
+          <div className="field-grid field-grid--2">
+            <NumberField
+              label="Start"
+              hint={fieldHelp.retakeStart}
+              min={0}
+              step={0.1}
+              value={request.retake.startTime}
+              onChange={(startTime) => onChange({ ...request, retake: { ...request.retake, startTime: startTime ?? 0 } })}
+            />
+            <NumberField
+              label="Ende"
+              hint={fieldHelp.retakeEnd}
+              min={0.1}
+              step={0.1}
+              value={request.retake.endTime}
+              error={errors["retake.endTime"]}
+              onChange={(endTime) => onChange({ ...request, retake: { ...request.retake, endTime: endTime ?? 0.1 } })}
+            />
+          </div>
+          <div className="toggle-grid">
+            <Toggle
+              label="Video regenerieren"
+              hint={fieldHelp.regenerateVideo}
+              checked={request.retake.regenerateVideo}
+              onChange={(regenerateVideo) => onChange({ ...request, retake: { ...request.retake, regenerateVideo } })}
+            />
+            <Toggle
+              label="Audio regenerieren"
+              hint={fieldHelp.regenerateAudio}
+              checked={request.retake.regenerateAudio}
+              onChange={(regenerateAudio) => onChange({ ...request, retake: { ...request.retake, regenerateAudio } })}
+            />
+            <Toggle
+              label="Distilled Schedule"
+              hint={fieldHelp.distilledSchedule}
+              checked={request.retake.distilled}
+              onChange={(distilled) => onChange({ ...request, retake: { ...request.retake, distilled } })}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {request.mode === "ic-lora" ? (
+        <section className="editor-section">
+          <SectionHeader
+            title="IC-LoRA Kontrolle"
+            action={
+              <div className="section-header__actions">
+                <UploadButton
+                  kind="video"
+                  accept="video/*"
+                  label="Kontrollvideo"
+                  hint={fieldHelp.videoUpload}
+                  onUploaded={addControlVideo}
+                />
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => onChange({
+                    ...request,
+                    icLora: {
+                      ...request.icLora,
+                      videoConditioning: [
+                        ...request.icLora.videoConditioning,
+                        { path: "", name: `Kontrollvideo ${request.icLora.videoConditioning.length + 1}`, strength: 1 },
+                      ],
+                    },
+                  })}
+                >
+                  <Plus size={16} /> DGX-Pfad
+                </button>
+              </div>
+            }
+          />
+          <AssetLibrary kind="video" label="Kontrollmediathek" onSelect={addControlVideo} />
+          {request.icLora.videoConditioning.map((video, index) => (
+            <div className="conditioning-row" key={`${video.path}-${index}`}>
+              <video src={previews[video.path]} muted />
+              <TextField
+                label={video.name}
+                hint={fieldHelp.controlVideoPath}
+                value={video.path}
+                placeholder="/absoluter/pfad/video.mp4"
+                onChange={(path) => onChange({
+                  ...request,
+                  icLora: {
+                    ...request.icLora,
+                    videoConditioning: request.icLora.videoConditioning.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, path } : item,
+                    ),
+                  },
+                })}
+              />
+              <NumberField
+                label="Stärke"
+                hint={fieldHelp.controlStrength}
+                min={0}
+                max={2}
+                step={0.05}
+                value={video.strength}
+                onChange={(strength) => onChange({
+                  ...request,
+                  icLora: {
+                    ...request.icLora,
+                    videoConditioning: request.icLora.videoConditioning.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, strength: strength ?? 1 } : item,
+                    ),
+                  },
+                })}
+              />
+              <button
+                type="button"
+                className="icon-button icon-button--danger"
+                title="Kontrollvideo entfernen"
+                onClick={() => onChange({
+                  ...request,
+                  icLora: {
+                    ...request.icLora,
+                    videoConditioning: request.icLora.videoConditioning.filter(
+                      (_, itemIndex) => itemIndex !== index,
+                    ),
+                  },
+                })}
+              >
+                <Trash2 size={17} />
+              </button>
+            </div>
+          ))}
+          {errors["icLora.videoConditioning"] ? <p className="section-error">{errors["icLora.videoConditioning"]}</p> : null}
+          <div className="mask-row">
+            <SingleMediaInput
+              kind="mask"
+              label="Kontrollmaske"
+              value={{ path: request.icLora.attentionMaskPath, name: request.icLora.attentionMaskPath.split("/").at(-1) ?? "" }}
+              previewUrl={previews[request.icLora.attentionMaskPath]}
+              onChange={(file) => applyUpload(file, "mask")}
+              onClear={() => onChange({ ...request, icLora: { ...request.icLora, attentionMaskPath: "" } })}
+              onPathChange={(attentionMaskPath) => onChange({
+                ...request,
+                icLora: { ...request.icLora, attentionMaskPath },
+              })}
+            />
+            <NumberField
+              label="Maskenstärke"
+              hint={fieldHelp.maskStrength}
+              min={0}
+              max={1}
+              step={0.05}
+              value={request.icLora.attentionStrength}
+              onChange={(attentionStrength) => onChange({ ...request, icLora: { ...request.icLora, attentionStrength: attentionStrength ?? 1 } })}
+            />
+          </div>
+          <Toggle
+            label="Stufe 2 überspringen"
+            hint={fieldHelp.skipStage2}
+            checked={request.icLora.skipStage2}
+            onChange={(skipStage2) => onChange({ ...request, icLora: { ...request.icLora, skipStage2 } })}
+          />
+        </section>
+      ) : null}
+
+      <section className="editor-section">
+        <SectionHeader title="Modelle" action={<Cpu size={18} />} />
+        <div className="field-grid field-grid--2">
+          {["distilled", "ic-lora"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled) ? (
+            <PathPicker
+              label="Distilled Checkpoint"
+              hint={fieldHelp.distilledCheckpoint}
+              value={request.models.distilledCheckpointPath}
+              options={distilledCheckpointOptions}
+              error={errors["models.distilledCheckpointPath"]}
+              placeholder="/absoluter/pfad/checkpoint.safetensors"
+              onChange={(distilledCheckpointPath) => onChange({ ...request, models: { ...request.models, distilledCheckpointPath } })}
+            />
+          ) : (
+            <PathPicker
+              label="Checkpoint"
+              hint={fieldHelp.checkpoint}
+              value={request.models.checkpointPath}
+              options={checkpointOptions}
+              error={errors["models.checkpointPath"]}
+              placeholder="/absoluter/pfad/checkpoint.safetensors"
+              onChange={(checkpointPath) => onChange({ ...request, models: { ...request.models, checkpointPath } })}
+            />
+          )}
+          <PathPicker
+            label="Gemma Root"
+            hint={fieldHelp.gemmaRoot}
+            value={request.models.gemmaRoot}
+            options={gemmaOptions}
+            error={errors["models.gemmaRoot"]}
+            placeholder="/absoluter/pfad/gemma"
+            onChange={(gemmaRoot) => onChange({ ...request, models: { ...request.models, gemmaRoot } })}
+          />
+          {definition.needsSpatialUpscaler ? (
+            <PathPicker
+              label="Spatial Upscaler"
+              hint={fieldHelp.spatialUpscaler}
+              value={request.models.spatialUpscalerPath}
+              options={upscalerOptions}
+              error={errors["models.spatialUpscalerPath"]}
+              placeholder="/absoluter/pfad/upscaler.safetensors"
+              onChange={(spatialUpscalerPath) => onChange({ ...request, models: { ...request.models, spatialUpscalerPath } })}
+            />
+          ) : null}
+          {definition.needsDistilledLora ? (
+            <div className="paired-field">
+              <PathPicker
+                label="Distilled LoRA"
+                hint={fieldHelp.distilledLora}
+                value={request.models.distilledLora.path}
+                options={loraOptions.filter((option) => option.label.toLowerCase().includes("distilled"))}
+                error={errors["models.distilledLora.path"]}
+                placeholder="/absoluter/pfad/lora.safetensors"
+                onChange={(path) => onChange({ ...request, models: { ...request.models, distilledLora: { ...request.models.distilledLora, path } } })}
+              />
+              <NumberField
+                label="Stärke"
+                hint={fieldHelp.distilledLoraStrength}
+                min={-4}
+                max={4}
+                step={0.05}
+                value={request.models.distilledLora.strength}
+                onChange={(strength) => onChange({ ...request, models: { ...request.models, distilledLora: { ...request.models.distilledLora, strength: strength ?? 1 } } })}
+              />
+            </div>
+          ) : null}
+        </div>
+        {modelInventory?.truncated ? (
+          <p className="advisory advisory--warning">Der Modellscan erreichte seine Sicherheitsgrenze. Zusätzliche Modelle können weiterhin per Pfad gewählt werden.</p>
+        ) : null}
+        {modelInventory && modelInventory.errors.length > 0 ? (
+          <p className="advisory advisory--warning">Mindestens ein konfiguriertes Modellverzeichnis war nicht lesbar.</p>
+        ) : null}
+        <details className="advanced-block">
+          <summary>Weitere LoRAs <ChevronDown size={15} /></summary>
+          <LoraRows
+            loras={request.models.loras}
+            options={loraOptions}
+            onChange={(loras) => onChange({ ...request, models: { ...request.models, loras } })}
+          />
+          {errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
+        </details>
+      </section>
+
+      {request.mode !== "retake" ? (
+        <section className="editor-section">
+          <SectionHeader title="Ausgabe" action={<SlidersHorizontal size={18} />} />
+          <div className="field-grid field-grid--2 output-presets">
+            <SelectField
+              label="Format-Preset"
+              hint={fieldHelp.resolutionPreset}
+              value={resolutionPreset?.id ?? "custom"}
+              options={[
+                ...RESOLUTION_PRESETS.map((preset) => ({ value: preset.id, label: `${preset.label} · ${preset.width} × ${preset.height}` })),
+                { value: "custom", label: "Benutzerdefiniert" },
+              ]}
+              onChange={(id) => {
+                const preset = RESOLUTION_PRESETS.find((item) => item.id === id);
+                if (preset) onChange({ ...request, width: preset.width, height: preset.height });
+              }}
+            />
+            <SelectField
+              label="Dauer-Preset"
+              hint={fieldHelp.durationPreset}
+              value={durationPreset === null ? "custom" : String(durationPreset)}
+              options={[
+                ...DURATION_PRESETS.map((seconds) => ({ value: String(seconds), label: `${seconds} Sekunden · ${framesForDuration(seconds, request.frameRate)} Frames` })),
+                { value: "custom", label: "Benutzerdefiniert" },
+              ]}
+              onChange={(value) => {
+                if (value === "custom") return;
+                const seconds = Number(value);
+                onChange({
+                  ...request,
+                  numFrames: framesForDuration(seconds, request.frameRate),
+                  longClipAcknowledged: seconds > 10 ? request.longClipAcknowledged : false,
+                });
+              }}
+            />
+          </div>
+          <div className="field-grid field-grid--4">
+            <NumberField label="Breite" hint={fieldHelp.width} min={64} max={4096} step={32} value={request.width} error={errors.width} onChange={(width) => onChange({ ...request, width: width ?? 64 })} />
+            <NumberField label="Höhe" hint={fieldHelp.height} min={64} max={4096} step={32} value={request.height} onChange={(height) => onChange({ ...request, height: height ?? 64 })} />
+            <NumberField label="Frames" hint={fieldHelp.frames} min={1} max={2049} step={8} value={request.numFrames} error={errors.numFrames} onChange={(numFrames) => {
+              const nextFrames = numFrames ?? 1;
+              onChange({
+                ...request,
+                numFrames: nextFrames,
+                longClipAcknowledged: videoDurationSeconds(nextFrames, request.frameRate) > 10
+                  ? request.longClipAcknowledged
+                  : false,
+              });
+            }} />
+            <NumberField label="FPS" hint={fieldHelp.fps} min={1} max={120} step={1} value={request.frameRate} onChange={(frameRate) => {
+              const nextFrameRate = frameRate ?? 24;
+              onChange({
+                ...request,
+                frameRate: nextFrameRate,
+                numFrames: durationPreset === null
+                  ? request.numFrames
+                  : framesForDuration(durationPreset, nextFrameRate),
+              });
+            }} />
+          </div>
+          <div className={`output-summary ${duration > 20 ? "output-summary--warn" : ""}`}>
+            <strong>{formatDuration(duration)}</strong>
+            <span>{request.width} × {request.height} · {request.numFrames} Frames · {request.frameRate} FPS</span>
+          </div>
+          {duration > 10 ? (
+            <Toggle
+              label="Langclip bestätigt"
+              hint={fieldHelp.longClip}
+              checked={request.longClipAcknowledged}
+              onChange={(longClipAcknowledged) => onChange({ ...request, longClipAcknowledged })}
+            />
+          ) : null}
+          {errors.longClipAcknowledged ? <p className="section-error">{errors.longClipAcknowledged}</p> : null}
+          {duration > 20 ? <p className="advisory advisory--warning">Mehr als 20 Sekunden sind ein experimenteller Lauf. Zuerst einen 5-Sekunden-Ausschnitt prüfen.</p> : null}
+        </section>
+      ) : null}
+
+      <section className="editor-section">
+        <SectionHeader title="Laufzeit" action={<Sparkles size={18} />} />
+        <div className="field-grid field-grid--3">
+          <div className="seed-field">
+            <NumberField label="Seed" hint={fieldHelp.seed} min={0} max={Number.MAX_SAFE_INTEGER} step={1} value={request.seed} onChange={(seed) => onChange({ ...request, seed: seed ?? 10 })} />
+            <button
+              type="button"
+              className="icon-button"
+              title="Neuen konkreten Zufalls-Seed erzeugen"
+              onClick={() => {
+                const value = crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;
+                onChange({ ...request, seed: value });
+              }}
+            >
+              <Dices size={17} />
+            </button>
+          </div>
+          {supportsSteps ? (
+            <NumberField label="Schritte" hint={fieldHelp.steps} min={1} max={200} step={1} value={request.numInferenceSteps} onChange={(numInferenceSteps) => onChange({ ...request, numInferenceSteps: numInferenceSteps ?? 1 })} />
+          ) : null}
+          <TextField label="Ausgabedatei" hint={fieldHelp.outputName} value={request.outputName} error={errors.outputName} onChange={(outputName) => onChange({ ...request, outputName })} />
+        </div>
+        {request.mode !== "one-stage" ? (
+          <div className="toggle-grid">
+            <Toggle label="VAE Tiling" hint={fieldHelp.tiling} checked={request.tiling} onChange={(tiling) => onChange({ ...request, tiling })} />
+          </div>
+        ) : null}
+        <Segmented
+          label="Quantisierung"
+          hint={fieldHelp.quantization}
+          value={request.quantization.mode}
+          options={[
+            { value: "none", label: "Aus" },
+            { value: "fp8-cast", label: "FP8 Cast" },
+            { value: "fp8-scaled-mm", label: "FP8 Scaled" },
+          ]}
+          onChange={(mode) => onChange({ ...request, quantization: { ...request.quantization, mode } })}
+        />
+        {request.quantization.mode === "fp8-scaled-mm" ? (
+          <TextField label="AMAX-Datei" hint={fieldHelp.amaxPath} value={request.quantization.amaxPath} error={errors["quantization.amaxPath"]} onChange={(amaxPath) => onChange({ ...request, quantization: { ...request.quantization, amaxPath } })} />
+        ) : null}
+        {request.mode === "two-stage-hq" ? (
+          <div className="field-grid field-grid--2">
+            <NumberField label="LoRA Stufe 1" hint={fieldHelp.hqLoraStage1} min={0} max={2} step={0.05} value={request.hq.distilledLoraStrengthStage1} onChange={(distilledLoraStrengthStage1) => onChange({ ...request, hq: { ...request.hq, distilledLoraStrengthStage1: distilledLoraStrengthStage1 ?? 0.25 } })} />
+            <NumberField label="LoRA Stufe 2" hint={fieldHelp.hqLoraStage2} min={0} max={2} step={0.05} value={request.hq.distilledLoraStrengthStage2} onChange={(distilledLoraStrengthStage2) => onChange({ ...request, hq: { ...request.hq, distilledLoraStrengthStage2: distilledLoraStrengthStage2 ?? 0.5 } })} />
+          </div>
+        ) : null}
+      </section>
+
+      {guided ? (
+        <section className="editor-section">
+          <SectionHeader title="Guidance" />
+          {guidanceKeys.map((key) => (
+            <details className="advanced-block" key={key} open={key === "videoGuidance"}>
+              <summary>{key === "videoGuidance" ? "Video" : "Audio"}<ChevronDown size={15} /></summary>
+              <div className="field-grid field-grid--3">
+                <NumberField label="CFG" hint={fieldHelp.cfg} min={0} max={30} step={0.1} value={request[key].cfgScale} onChange={(value) => onChange(updateGuidance(request, key, "cfgScale", value ?? 0))} />
+                <NumberField label="STG" hint={fieldHelp.stg} min={0} max={10} step={0.1} value={request[key].stgScale} onChange={(value) => onChange(updateGuidance(request, key, "stgScale", value ?? 0))} />
+                <NumberField label="Rescale" hint={fieldHelp.rescale} min={0} max={2} step={0.05} value={request[key].rescaleScale} onChange={(value) => onChange(updateGuidance(request, key, "rescaleScale", value ?? 0))} />
+                <NumberField label="Modalität" hint={fieldHelp.modality} min={0} max={20} step={0.1} value={request[key].modalityScale} onChange={(value) => onChange(updateGuidance(request, key, "modalityScale", value ?? 0))} />
+                <NumberField label="Skip Step" hint={fieldHelp.skipStep} min={0} max={20} step={1} value={request[key].skipStep} onChange={(value) => onChange(updateGuidance(request, key, "skipStep", value ?? 0))} />
+                <TextField
+                  label="STG Blocks"
+                  hint={fieldHelp.stgBlocks}
+                  value={request[key].stgBlocks.join(", ")}
+                  onChange={(value) => onChange(updateGuidance(request, key, "stgBlocks", value.split(",").map((item) => Number.parseInt(item.trim(), 10)).filter(Number.isFinite)))}
+                />
+              </div>
+            </details>
+          ))}
+        </section>
+      ) : null}
+    </main>
+  );
+}

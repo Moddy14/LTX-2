@@ -1,0 +1,76 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  buildAdmissionRequests,
+  retryAfterMs,
+  shouldRetryQueueSubmit,
+} from "../server/admission.js";
+import { validRequest } from "./fixtures.js";
+
+describe("DGX admission contract", () => {
+  it("uses only native LTX admission when Gemma enhancement is enabled", () => {
+    const requests = buildAdmissionRequests(validRequest());
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      runtime: "ltx2_native",
+      job_type: "ltx2_native_two_stage",
+      estimated_memory_gib: 64,
+      resumability: "required",
+      resource_profile: { gpu: true, exclusive_runtime: "ltx2_native", required_gib: 64 },
+    });
+  });
+
+  it("uses the same admission contract when Gemma enhancement is disabled", () => {
+    const request = validRequest("distilled");
+    request.enhancePrompt = false;
+    const requests = buildAdmissionRequests(request);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].job_type).toBe("ltx2_native_distilled");
+  });
+
+  it("does not understate runtime FP8 casting of a BF16 checkpoint", () => {
+    const request = validRequest();
+    request.enhancePrompt = false;
+    request.quantization.mode = "fp8-cast";
+    const [admission] = buildAdmissionRequests(request);
+    expect(admission.estimated_memory_gib).toBe(64);
+    expect(admission.resource_profile.required_gib).toBe(64);
+  });
+
+  it("uses the lower native FP8 estimate shown by the studio", () => {
+    const request = validRequest();
+    request.enhancePrompt = false;
+    request.quantization.mode = "fp8-cast";
+    request.models.checkpointPath = "/models/ltx-2.3-22b-dev-fp8.safetensors";
+    const [admission] = buildAdmissionRequests(request);
+    expect(admission.estimated_memory_gib).toBe(62);
+    expect(admission.resource_profile.required_gib).toBe(62);
+  });
+
+  it("retries orchestrator-controlled qwen pressure windows exactly as instructed", () => {
+    expect(shouldRetryQueueSubmit({
+      decision: "busy_retry",
+      reason: "qwen_eviction_in_progress",
+      client_action: "retry_later",
+      retry_after_seconds: 30,
+    })).toBe(true);
+    expect(retryAfterMs({
+      decision: "busy_retry",
+      reason: "qwen_eviction_in_progress",
+      retry_after_seconds: 30,
+    })).toBe(30_000);
+  });
+
+  it("does not retry requests that require caller-side fixes", () => {
+    expect(shouldRetryQueueSubmit({
+      decision: "rejected_policy",
+      client_action: "fix_request",
+      reason: "unknown_runtime",
+    })).toBe(false);
+    expect(shouldRetryQueueSubmit({
+      decision: "rejected_insufficient_resources",
+      client_action: "free_reclaim_candidates_then_retry",
+      reason: "memory_reclaim_required",
+    })).toBe(false);
+  });
+});

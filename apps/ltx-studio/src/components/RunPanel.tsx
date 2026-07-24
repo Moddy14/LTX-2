@@ -1,0 +1,448 @@
+import {
+  AlertTriangle,
+  Check,
+  CircleStop,
+  Clock3,
+  Columns2,
+  Dices,
+  Download,
+  Film,
+  LoaderCircle,
+  ListVideo,
+  Pause,
+  Play,
+  Repeat2,
+  ScrollText,
+  ShieldCheck,
+  SlidersHorizontal,
+  Terminal,
+  Thermometer,
+  Star,
+  X,
+} from "lucide-react";
+
+import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import { videoDurationSeconds } from "../../shared/presets";
+import { isVideoPreviewUrl } from "../../shared/media";
+import type { Health, ResourceEstimate, StudioJob, StudioOutput } from "../types";
+
+const statusLabels: Record<StudioJob["status"], string> = {
+  queued: "Wartet",
+  running: "Läuft",
+  paused: "Thermisch pausiert",
+  completed: "Fertig",
+  failed: "Fehler",
+  cancelled: "Abgebrochen",
+  interrupted: "Unterbrochen",
+};
+
+function StatusIcon({ status }: { status: StudioJob["status"] }) {
+  if (status === "completed") return <Check size={14} />;
+  if (status === "running") return <LoaderCircle className="spin" size={14} />;
+  if (status === "paused") return <Pause size={14} fill="currentColor" />;
+  if (status === "queued") return <Clock3 size={14} />;
+  if (status === "failed" || status === "interrupted") return <AlertTriangle size={14} />;
+  return <X size={14} />;
+}
+
+function formatRuntime(milliseconds: number | null): string {
+  if (milliseconds === null) return "Noch nicht verfügbar";
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${hours} h ${String(minutes).padStart(2, "0")} min`
+    : `${minutes} min ${String(remainder).padStart(2, "0")} s`;
+}
+
+function formatFileSize(bytes: number): string {
+  return bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(2)} GiB`
+    : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+}
+
+type RunPanelProps = {
+  request: GenerationRequest;
+  health: Health | null;
+  jobs: StudioJob[];
+  outputs: StudioOutput[];
+  selectedJob: StudioJob | null;
+  selectedOutput: StudioOutput | null;
+  onSelectJob: (job: StudioJob) => void;
+  onSelectOutput: (output: StudioOutput) => void;
+  onRun: () => void;
+  onCancel: (id: string) => void;
+  submitting: boolean;
+  errors: string[];
+  command: string | null;
+  previews: Record<string, string>;
+  comparisonJobs: StudioJob[];
+  comparisonIds: string[];
+  onToggleCompare: (job: StudioJob) => void;
+  onRerun: (job: StudioJob, mode: "exact" | "random-seed") => void;
+  onFavorite: (job: StudioJob) => void;
+  onLoadSettings: (job: StudioJob) => void;
+  onLoadOutputSettings: (output: StudioOutput) => void;
+  estimate: ResourceEstimate;
+  requiredStartMemoryGiB: number;
+};
+
+export function RunPanel({
+  request,
+  health,
+  jobs,
+  outputs,
+  selectedJob,
+  selectedOutput,
+  onSelectJob,
+  onSelectOutput,
+  onRun,
+  onCancel,
+  submitting,
+  errors,
+  command,
+  previews,
+  comparisonJobs,
+  comparisonIds,
+  onToggleCompare,
+  onRerun,
+  onFavorite,
+  onLoadSettings,
+  onLoadOutputSettings,
+  estimate,
+  requiredStartMemoryGiB,
+}: RunPanelProps) {
+  const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
+  const duration = request.mode === "retake"
+    ? request.retake.endTime - request.retake.startTime
+    : videoDurationSeconds(request.numFrames, request.frameRate);
+  const sourcePath =
+    request.mode === "retake"
+      ? request.retake.videoPath
+      : request.images[0]?.path || request.icLora.videoConditioning[0]?.path || request.audio.path;
+  const sourcePreview = sourcePath ? previews[sourcePath] : null;
+  const runBlocked = submitting;
+  const runLabel = health?.orchestrator === "missing"
+    ? "DGX-Admission fehlt"
+    : "Generieren";
+  const memoryShortfall = health?.resources.availableMemoryGiB !== null
+    && health?.resources.availableMemoryGiB !== undefined
+    && health.resources.availableMemoryGiB < requiredStartMemoryGiB;
+  const etaLabel = estimate.etaSeconds === null
+    ? estimate.etaSamples > 0 ? "Noch 1 Vergleichslauf nötig" : "Nach 2 erfolgreichen Läufen"
+    : estimate.etaSeconds >= 3600
+      ? `${(estimate.etaSeconds / 3600).toFixed(1)} h`
+      : `${Math.max(1, Math.round(estimate.etaSeconds / 60))} min`;
+  const activeJob = jobs.find((job) => ["queued", "running", "paused"].includes(job.status)) ?? null;
+  const monitorJob = activeJob ?? selectedJob;
+  const monitorRuntime = monitorJob?.startedAt
+    ? monitorJob.runtimeMs ?? Date.now() - Date.parse(monitorJob.startedAt)
+    : null;
+  const outputRequest = selectedOutput?.request ?? null;
+
+  return (
+    <aside className="run-panel">
+      <section className="preview-stage">
+        <div className="preview-stage__media">
+          {comparisonJobs.length === 2 ? (
+            <div className="compare-preview">
+              {comparisonJobs.map((job) => (
+                <div className="compare-preview__item" key={job.id}>
+                  <video src={job.outputUrl ?? undefined} controls muted playsInline />
+                  <span>{job.outputName}</span>
+                </div>
+              ))}
+            </div>
+          ) : selectedOutput ? (
+            <video key={selectedOutput.url} src={selectedOutput.url} controls muted playsInline />
+          ) : selectedJob?.outputUrl ? (
+            <video key={selectedJob.outputUrl} src={selectedJob.outputUrl} controls autoPlay muted playsInline />
+          ) : sourcePreview && request.mode !== "audio-to-video" ? (
+            isVideoPreviewUrl(sourcePreview) ? (
+              <video src={sourcePreview} controls muted playsInline />
+            ) : (
+              <img src={sourcePreview} alt="Eingabemedium" />
+            )
+          ) : (
+            <div className="preview-empty">
+              <Film size={38} strokeWidth={1.3} />
+              <span>{pipeline.shortLabel}</span>
+            </div>
+          )}
+          <div className="preview-stage__meta">
+            <span>{request.mode === "retake" ? "Quelle" : `${request.width} x ${request.height}`}</span>
+            <span>{duration.toFixed(1)} s</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="output-library" aria-label="Erzeugte Videos und Einstellungen">
+        <div className="run-panel__heading">
+          <h2><ListVideo size={16} /> Erzeugte Videos</h2>
+          <span>{outputs.length}</span>
+        </div>
+        {outputs.length > 0 ? (
+          <>
+            <label className="output-library__select">
+              <span>Video auswählen</span>
+              <select
+                aria-label="Erzeugtes Video"
+                value={selectedOutput?.name ?? ""}
+                onChange={(event) => {
+                  const output = outputs.find((candidate) => candidate.name === event.target.value);
+                  if (output) onSelectOutput(output);
+                }}
+              >
+                {outputs.map((output) => (
+                  <option key={output.name} value={output.name}>{output.name}</option>
+                ))}
+              </select>
+            </label>
+            {selectedOutput ? (
+              <div className="output-library__details">
+                <span>{formatFileSize(selectedOutput.sizeBytes)}</span>
+                <span>{new Date(selectedOutput.modifiedAt).toLocaleString("de-AT")}</span>
+                <span>{selectedOutput.settingsAvailable ? "Studio-Einstellungen vorhanden" : "Keine verlässlichen Einstellungen"}</span>
+              </div>
+            ) : null}
+            {outputRequest ? (
+              <div className="output-settings-summary" aria-label="Gespeicherte Videoeinstellungen">
+                <span>Pipeline <strong>{PIPELINES.find((item) => item.id === outputRequest.mode)?.shortLabel}</strong></span>
+                <span>Seed <strong>{outputRequest.seed}</strong></span>
+                <span>Format <strong>{outputRequest.width} x {outputRequest.height}</strong></span>
+                <span>Frames <strong>{outputRequest.numFrames} @ {outputRequest.frameRate} fps</strong></span>
+                <span>Schritte <strong>{outputRequest.numInferenceSteps}</strong></span>
+                <span>Quantisierung <strong>{outputRequest.quantization.mode}</strong></span>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="button output-library__load"
+              disabled={!selectedOutput?.settingsAvailable}
+              onClick={() => {
+                if (selectedOutput) onLoadOutputSettings(selectedOutput);
+              }}
+            >
+              <SlidersHorizontal size={16} /> Alle Einstellungen übernehmen
+            </button>
+          </>
+        ) : (
+          <div className="compact-empty">Noch keine MP4-Ausgabe im Studio-Ordner</div>
+        )}
+      </section>
+
+      <section className={`run-monitor ${activeJob ? "is-live" : ""}`} aria-label="Laufmonitor">
+        <div className="run-panel__heading">
+          <h2>{activeJob ? <LoaderCircle className="spin" size={16} /> : <ScrollText size={16} />} Laufmonitor</h2>
+          <span>{monitorJob ? statusLabels[monitorJob.status] : "Leer"}</span>
+        </div>
+        {monitorJob ? (
+          <>
+            <div className="run-monitor__title">
+              <strong>{monitorJob.outputName}</strong>
+              <span>{formatRuntime(monitorRuntime)}</span>
+            </div>
+            <div className="run-monitor__metrics">
+              <span>Status <strong>{statusLabels[monitorJob.status]}</strong></span>
+              <span>Fortschritt <strong>{monitorJob.progress === null ? "Nicht gemeldet" : `${Math.round(monitorJob.progress)}%`}</strong></span>
+              <span>Pipeline <strong>{PIPELINES.find((item) => item.id === monitorJob.mode)?.shortLabel}</strong></span>
+              <span>Seed <strong>{monitorJob.request.seed}</strong></span>
+            </div>
+            {monitorJob.thermalProfile ? (
+              <div className="run-monitor__thermal">
+                <Thermometer size={15} />
+                <span>Basis {monitorJob.thermalProfile.baselineC.toFixed(1)} °C</span>
+                <span>Aktuell {monitorJob.thermalProfile.currentC === null ? "beendet" : `${monitorJob.thermalProfile.currentC.toFixed(1)} °C`}</span>
+                <span>Peak {monitorJob.thermalProfile.peakC.toFixed(1)} °C</span>
+                <span>Pause ab {monitorJob.thermalProfile.pauseAtC.toFixed(0)} °C</span>
+              </div>
+            ) : null}
+            {monitorJob.cancelledBy === "studio" ? (
+              <p className="run-monitor__notice">Dieser Lauf wurde manuell über die Studio-Abbruchfunktion beendet.</p>
+            ) : null}
+            <p className="run-monitor__latest">{monitorJob.logs.at(-1) ?? "Noch keine Logausgabe"}</p>
+          </>
+        ) : (
+          <div className="compact-empty">Noch kein Lauf vorhanden</div>
+        )}
+      </section>
+
+      <section className="run-summary">
+        <div className="run-summary__line">
+          <span>Pipeline</span>
+          <strong>{pipeline.shortLabel}</strong>
+        </div>
+        <div className="run-summary__line">
+          <span>Gemma-Verbesserung</span>
+          <strong>{request.enhancePrompt ? "Aktiv" : "Aus"}</strong>
+        </div>
+        <div className="run-summary__line">
+          <span>Queue</span>
+          <strong>{health?.queueDepth ?? 0}</strong>
+        </div>
+        <div className="run-summary__line">
+          <span>RAM-Prognose</span>
+          <strong>{estimate.memoryGiB} GiB</strong>
+        </div>
+        <div className="run-summary__line">
+          <span>Ausgabedatei</span>
+          <strong>ca. {estimate.outputGiB.toFixed(2)} GiB</strong>
+        </div>
+        <div className="run-summary__line">
+          <span>ETA</span>
+          <strong>{etaLabel}</strong>
+        </div>
+      </section>
+
+      {memoryShortfall ? (
+        <p className="resource-warning">
+          Prognose plus Restpuffer erfordern {requiredStartMemoryGiB} GiB freien RAM. Der DGX-Orchestrator entscheidet über Warten, Reservierung oder zulässigen Reclaim.
+        </p>
+      ) : null}
+
+      {health?.workloads.length ? (
+        <section className="runtime-lanes" aria-label="Aktive DGX-Laufzeiten">
+          {health.workloads.map((lane) => (
+            <div className="runtime-lane" key={lane.id}>
+              <span className={`runtime-lane__state runtime-lane__state--${lane.state}`} />
+              <strong>{lane.label}</strong>
+              <span>{lane.state.replaceAll("_", " ")}</span>
+              {lane.protected ? <ShieldCheck size={13} aria-label="Geschützt" /> : null}
+            </div>
+          ))}
+        </section>
+      ) : null}
+
+      {selectedJob?.outputUrl ? (
+        <a className="output-download" href={selectedJob.outputUrl} download={selectedJob.outputName}>
+          <Download size={16} /> Ausgabe herunterladen
+        </a>
+      ) : null}
+
+      {selectedJob ? (
+        <div className="job-actions" aria-label="Aktionen für ausgewählten Job">
+          <button
+            type="button"
+            className={`icon-button ${selectedJob.favorite ? "is-active" : ""}`}
+            title={selectedJob.favorite ? "Aus Favoriten entfernen" : "Als Favorit markieren"}
+            aria-pressed={selectedJob.favorite}
+            onClick={() => onFavorite(selectedJob)}
+          >
+            <Star size={17} fill={selectedJob.favorite ? "currentColor" : "none"} />
+          </button>
+          <button
+            type="button"
+            className="button job-action-primary"
+            title="Alle Einstellungen dieses Jobs in den Editor laden"
+            onClick={() => onLoadSettings(selectedJob)}
+          >
+            <SlidersHorizontal size={16} /> Einstellungen übernehmen
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Mit denselben Einstellungen und demselben Seed neu starten"
+            disabled={["queued", "running", "paused"].includes(selectedJob.status)}
+            onClick={() => onRerun(selectedJob, "exact")}
+          >
+            <Repeat2 size={17} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Variante mit neuem konkreten Seed starten"
+            disabled={["queued", "running", "paused"].includes(selectedJob.status)}
+            onClick={() => onRerun(selectedJob, "random-seed")}
+          >
+            <Dices size={17} />
+          </button>
+          <button
+            type="button"
+            className={`icon-button ${comparisonIds.includes(selectedJob.id) ? "is-active" : ""}`}
+            title="Ausgabe zum Vergleich hinzufügen"
+            aria-pressed={comparisonIds.includes(selectedJob.id)}
+            disabled={!selectedJob.outputUrl}
+            onClick={() => onToggleCompare(selectedJob)}
+          >
+            <Columns2 size={17} />
+          </button>
+          <span>Seed {selectedJob.request.seed}</span>
+        </div>
+      ) : null}
+
+      {errors.length > 0 ? (
+        <div className="run-errors" role="alert">
+          <AlertTriangle size={17} />
+          <div>{errors.slice(0, 5).map((error) => <span key={error}>{error}</span>)}</div>
+        </div>
+      ) : null}
+
+      <button type="button" className="run-button" onClick={onRun} disabled={runBlocked}>
+        {submitting ? <LoaderCircle className="spin" size={19} /> : <Play size={19} fill="currentColor" />}
+        {runLabel}
+      </button>
+
+      <section className="job-section">
+        <div className="run-panel__heading">
+          <h2>Jobs</h2>
+          <span>{jobs.length}</span>
+        </div>
+        <div className="job-list">
+          {jobs.length === 0 ? <div className="compact-empty compact-empty--jobs">Noch keine Jobs</div> : null}
+          {jobs.map((job) => (
+            <div key={job.id} className={`job-row ${selectedJob?.id === job.id ? "is-active" : ""}`}>
+              <button type="button" className="job-row__select" onClick={() => onSelectJob(job)}>
+                <span className={`job-status job-status--${job.status}`}><StatusIcon status={job.status} /></span>
+                  <span className="job-row__main">
+                    <strong>{job.outputName}</strong>
+                    <small>{statusLabels[job.status]} · {PIPELINES.find((item) => item.id === job.mode)?.shortLabel} · Seed {job.request.seed}</small>
+                </span>
+                {job.favorite ? <Star className="job-row__favorite" size={13} fill="currentColor" /> : null}
+                {job.progress !== null ? <span className="job-row__progress">{Math.round(job.progress)}%</span> : null}
+              </button>
+              {["queued", "running", "paused"].includes(job.status) ? (
+                <button
+                  type="button"
+                  className="job-row__cancel"
+                  title="Job abbrechen"
+                  onClick={() => onCancel(job.id)}
+                >
+                  <CircleStop size={15} />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {selectedJob ? (
+        <details className="run-details" open>
+          <summary><ScrollText size={16} /> Jobdetails</summary>
+          {selectedJob.error ? <p className="job-error">{selectedJob.error}</p> : null}
+          {selectedJob.cancelledBy === "studio" ? (
+            <p className="job-cancelled">Manuell über die Studio-Abbruchfunktion beendet.</p>
+          ) : null}
+          {selectedJob.variantOf ? <p className="job-lineage">Variante von {selectedJob.variantOf.slice(0, 8)}</p> : null}
+          <dl className="job-facts">
+            <div><dt>Status</dt><dd>{statusLabels[selectedJob.status]}</dd></div>
+            <div><dt>Erstellt</dt><dd>{new Date(selectedJob.createdAt).toLocaleString("de-AT")}</dd></div>
+            <div><dt>Laufzeit</dt><dd>{formatRuntime(selectedJob.runtimeMs)}</dd></div>
+            <div><dt>DGX-Job</dt><dd>{selectedJob.dgxJobId ?? "Noch nicht eingereicht"}</dd></div>
+            <div><dt>Logs</dt><dd>{selectedJob.logs.length} Zeilen</dd></div>
+          </dl>
+          <details className="job-command">
+            <summary><Terminal size={14} /> Vollständiges Kommando</summary>
+            <pre>{selectedJob.command}</pre>
+          </details>
+          <pre>{selectedJob.logs.join("\n") || "Keine Logausgabe"}</pre>
+        </details>
+      ) : command ? (
+        <details className="run-details">
+          <summary><Terminal size={16} /> Kommando</summary>
+          <pre>{command}</pre>
+        </details>
+      ) : null}
+    </aside>
+  );
+}

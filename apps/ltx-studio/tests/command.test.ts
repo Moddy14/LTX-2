@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+
+import { pipelineModes } from "../shared/pipelines.js";
+import { buildCommand } from "../server/command.js";
+import { validRequest } from "./fixtures.js";
+
+const expectedModules = {
+  "two-stage": "ltx_pipelines.ti2vid_two_stages",
+  "two-stage-hq": "ltx_pipelines.ti2vid_two_stages_hq",
+  "one-stage": "ltx_pipelines.ti2vid_one_stage",
+  distilled: "ltx_pipelines.distilled",
+  "ic-lora": "ltx_pipelines.ic_lora",
+  keyframes: "ltx_pipelines.keyframe_interpolation",
+  "audio-to-video": "ltx_pipelines.a2vid_two_stage",
+  retake: "ltx_pipelines.retake",
+} as const;
+
+describe("buildCommand", () => {
+  it.each(pipelineModes)("maps %s to its typed Python module", (mode) => {
+    const plan = buildCommand(validRequest(mode));
+    expect(plan.args.slice(0, 2)).toEqual(["-m", expectedModules[mode]]);
+    expect(plan.outputPath.endsWith(`ltx-${mode}.mp4`)).toBe(true);
+    expect(plan.args).toContain("--enhance-prompt");
+  });
+
+  it("keeps prompt metacharacters in one argv element", () => {
+    const request = validRequest();
+    request.prompt = "camera's move; $(touch /tmp/not-run)";
+    const plan = buildCommand(request);
+    const promptIndex = plan.args.indexOf("--prompt");
+    expect(plan.args[promptIndex + 1]).toBe(request.prompt);
+    expect(plan.executable).not.toMatch(/(?:^|\/)sh$/);
+    expect(plan.displayCommand).toContain("'camera'\"'\"'s move; $(touch /tmp/not-run)'");
+  });
+
+  it("requires Gemma processor metadata only for prompt enhancement", () => {
+    const enhanced = validRequest();
+    const enhancedPaths = buildCommand(enhanced).requiredPaths;
+    expect(enhancedPaths).toContainEqual({
+      path: "/models/gemma/preprocessor_config.json",
+      label: "Gemma Prozessorkonfiguration für Promptverbesserung",
+      kind: "file",
+    });
+
+    enhanced.enhancePrompt = false;
+    expect(buildCommand(enhanced).requiredPaths.map((entry) => entry.path))
+      .not.toContain("/models/gemma/preprocessor_config.json");
+  });
+
+  it("emits the full non-distilled retake contract", () => {
+    const request = validRequest("retake");
+    request.retake.regenerateAudio = false;
+    request.retake.regenerateVideo = false;
+    request.tiling = false;
+    request.models.loras = [{ path: "/models/retake.safetensors", strength: 0.7 }];
+    const args = buildCommand(request).args;
+    expect(args).toEqual(expect.arrayContaining([
+      "--negative-prompt",
+      "--num-inference-steps",
+      "--video-cfg-guidance-scale",
+      "--audio-cfg-guidance-scale",
+      "--no-regenerate-video",
+      "--no-regenerate-audio",
+      "--disable-tiling",
+      "--lora",
+    ]));
+  });
+
+  it("omits ignored guidance and steps in distilled retake mode", () => {
+    const request = validRequest("retake");
+    request.retake.distilled = true;
+    const args = buildCommand(request).args;
+    expect(args).toContain("--distilled");
+    expect(args).toContain(request.models.distilledCheckpointPath);
+    expect(args).not.toContain(request.models.checkpointPath);
+    expect(args).not.toContain("--negative-prompt");
+    expect(args).not.toContain("--num-inference-steps");
+    expect(args).not.toContain("--video-cfg-guidance-scale");
+  });
+
+  it("does not expose tiling or unused audio guidance to incompatible modes", () => {
+    const oneStage = validRequest("one-stage");
+    oneStage.tiling = false;
+    expect(buildCommand(oneStage).args).not.toContain("--disable-tiling");
+
+    const audioToVideo = buildCommand(validRequest("audio-to-video")).args;
+    expect(audioToVideo).toContain("--video-cfg-guidance-scale");
+    expect(audioToVideo).not.toContain("--audio-cfg-guidance-scale");
+  });
+});

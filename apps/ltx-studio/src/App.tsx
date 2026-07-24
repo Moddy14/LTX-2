@@ -1,0 +1,454 @@
+import { Activity, Cpu, FolderClock, MemoryStick, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  createDefaultRequest,
+  generationRequestSchema,
+  mergeGenerationRequest,
+  PIPELINES,
+  withLongCatLipsyncDisabled,
+  type GenerationRequest,
+  type PipelineMode,
+} from "../shared/pipelines";
+import { estimateResources } from "../shared/estimates";
+import { decodeDraftParameter } from "../shared/drafts";
+import { composePromptFromParts, composePromptRequestSchema } from "../shared/prompts";
+import {
+  cancelJob,
+  createJob,
+  getConfig,
+  getHealth,
+  getJobs,
+  getOutputs,
+  getEstimate,
+  getAssets,
+  getModels,
+  planJob,
+  rerunJob,
+  setJobFavorite,
+} from "./api";
+import { Editor } from "./components/Editor";
+import { ModeRail } from "./components/ModeRail";
+import { RunPanel } from "./components/RunPanel";
+import {
+  ApiError,
+  type Health,
+  type ModelInventory,
+  type ResourceEstimate,
+  type StudioConfig,
+  type StudioJob,
+  type StudioOutput,
+} from "./types";
+
+const STORAGE_KEY = "ltx-studio.request.v1";
+
+function restoreRequest(): GenerationRequest {
+  try {
+    const draft = decodeDraftParameter(window.location.search);
+    if (draft !== null) {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.delete("draft");
+      window.history.replaceState(null, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      return withLongCatLipsyncDisabled(mergeGenerationRequest(draft));
+    }
+    return withLongCatLipsyncDisabled(mergeGenerationRequest(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")));
+  } catch {
+    return createDefaultRequest();
+  }
+}
+
+function withDiscoveredModelDefaults(request: GenerationRequest, inventory: ModelInventory): GenerationRequest {
+  const find = (kind: ModelInventory["items"][number]["kind"], predicate: (name: string) => boolean = () => true) =>
+    inventory.items.find((item) => item.kind === kind && predicate(item.name.toLowerCase()))?.path ?? "";
+  return {
+    ...request,
+    models: {
+      ...request.models,
+      checkpointPath: request.models.checkpointPath
+        || find("checkpoint", (name) => !name.includes("fp8"))
+        || find("checkpoint"),
+      distilledCheckpointPath: request.models.distilledCheckpointPath || find("distilled-checkpoint"),
+      gemmaRoot: request.models.gemmaRoot || find("gemma"),
+      spatialUpscalerPath: request.models.spatialUpscalerPath
+        || find("spatial-upscaler", (name) => name.includes("x2"))
+        || find("spatial-upscaler"),
+      distilledLora: {
+        ...request.models.distilledLora,
+        path: request.models.distilledLora.path || find("lora", (name) => name.includes("distilled")),
+      },
+    },
+  };
+}
+
+function nextEditableOutputName(
+  outputName: string,
+  jobs: readonly StudioJob[],
+  outputs: readonly StudioOutput[],
+): string {
+  const base = outputName.replace(/\.mp4$/i, "").replace(/-(?:v|edit)\d+$/i, "");
+  const used = new Set([...jobs.map((job) => job.outputName), ...outputs.map((output) => output.name)]);
+  for (let index = 1; index <= 999; index += 1) {
+    const candidate = `${base}-edit${String(index).padStart(2, "0")}.mp4`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${base}-edit-${Date.now()}.mp4`;
+}
+
+export function App() {
+  const [request, setRequest] = useState<GenerationRequest>(restoreRequest);
+  const [config, setConfig] = useState<StudioConfig | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
+  const [historyEstimate, setHistoryEstimate] = useState<ResourceEstimate | null>(null);
+  const [jobs, setJobs] = useState<StudioJob[]>([]);
+  const [outputs, setOutputs] = useState<StudioOutput[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedOutputName, setSelectedOutputName] = useState<string | null>(null);
+  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [attempted, setAttempted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverErrors, setServerErrors] = useState<string[]>([]);
+  const [command, setCommand] = useState<string | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [promptComposeError, setPromptComposeError] = useState<string | null>(null);
+  const [promptUndo, setPromptUndo] = useState<string | null>(null);
+
+  const validation = useMemo(() => generationRequestSchema.safeParse(request), [request]);
+  const fieldErrors = useMemo(() => {
+    if (!attempted || validation.success) return {};
+    return Object.fromEntries(validation.error.issues.map((issue) => [issue.path.join("."), issue.message]));
+  }, [attempted, validation]);
+  const validationMessages = validation.success ? [] : validation.error.issues.map((issue) => issue.message);
+  const resourceEstimate = historyEstimate ?? estimateResources(request);
+  const requiredStartMemoryGiB = Math.max(
+    config?.runtime.minAvailableGiB ?? 48,
+    resourceEstimate.memoryGiB + (config?.runtime.minResidualMemoryGiB ?? 24),
+  );
+  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
+  const selectedOutput = outputs.find((output) => output.name === selectedOutputName) ?? outputs[0] ?? null;
+  const comparisonJobs = comparisonIds
+    .map((id) => jobs.find((job) => job.id === id))
+    .filter((job): job is StudioJob => Boolean(job?.outputUrl));
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(request));
+  }, [request]);
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      try {
+        const [nextConfig, nextHealth, nextJobs, nextModels, nextAssets, nextOutputs] = await Promise.all([
+          getConfig(),
+          getHealth(),
+          getJobs(),
+          getModels(),
+          getAssets(),
+          getOutputs(),
+        ]);
+        if (!mounted) return;
+        setConfig(nextConfig);
+        setHealth(nextHealth);
+        setJobs(nextJobs);
+        setOutputs(nextOutputs);
+        setModelInventory(nextModels);
+        setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
+        setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
+        setStartupError(null);
+      } catch (error) {
+        if (mounted) setStartupError(error instanceof Error ? error.message : "Studio API nicht erreichbar");
+      }
+    };
+    void refresh();
+    const healthTimer = window.setInterval(() => void getHealth().then(setHealth).catch(() => setHealth(null)), 10_000);
+    const outputsTimer = window.setInterval(() => void getOutputs().then(setOutputs).catch(() => undefined), 10_000);
+    const events = new EventSource("/api/events");
+    events.addEventListener("jobs", (event) => {
+      setJobs(JSON.parse((event as MessageEvent).data) as StudioJob[]);
+      void getOutputs().then(setOutputs).catch(() => undefined);
+    });
+    return () => {
+      mounted = false;
+      window.clearInterval(healthTimer);
+      window.clearInterval(outputsTimer);
+      events.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    setHistoryEstimate(null);
+    if (!validation.success) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void getEstimate(validation.data).then((estimate) => {
+        if (!controller.signal.aborted) setHistoryEstimate(estimate);
+      }).catch(() => undefined);
+    }, 400);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [request, validation]);
+
+  const changeMode = (mode: PipelineMode) => {
+    const modeDefaults = createDefaultRequest(mode);
+    setRequest((current) => ({
+      ...modeDefaults,
+      prompt: current.prompt,
+      promptParts: current.promptParts,
+      negativePrompt: current.negativePrompt,
+      enhancePrompt: current.enhancePrompt,
+      sourceMode: current.sourceMode,
+      seed: current.seed,
+      models: current.models,
+      images: current.images,
+      quantization: current.quantization,
+      icLora: current.icLora,
+      audio: current.audio,
+      postprocess: current.postprocess,
+      retake: current.retake,
+      continuity: current.continuity,
+    }));
+    setAttempted(false);
+    setServerErrors([]);
+    setCommand(null);
+  };
+
+  const updateRequest = (nextRequest: GenerationRequest) => {
+    if (nextRequest.prompt !== request.prompt) setPromptUndo(null);
+    setRequest(nextRequest);
+  };
+
+  const run = async () => {
+    setAttempted(true);
+    setServerErrors([]);
+    if (!validation.success) return;
+    const runtimeErrors: string[] = [];
+    if (!health) runtimeErrors.push("DGX-Status ist noch nicht verfügbar.");
+    else {
+      if (health.engine !== "available") runtimeErrors.push("Python-Engine ist nicht verfügbar.");
+      if (health.orchestrator === "missing") runtimeErrors.push("DGX-Orchestrator Runtime API ist nicht verfügbar.");
+      const requiredDiskGiB = Math.max(1, Math.ceil(resourceEstimate.outputGiB * 3 * 100) / 100);
+      if (health.resources.outputFreeGiB === null) {
+        runtimeErrors.push("Freier Ausgabeplatz ist unbekannt.");
+      } else if (health.resources.outputFreeGiB < requiredDiskGiB) {
+        runtimeErrors.push(
+          `Mindestens ${requiredDiskGiB.toFixed(2)} GiB Ausgabeplatz sind erforderlich; verfügbar sind ${health.resources.outputFreeGiB.toFixed(2)} GiB.`,
+        );
+      }
+    }
+    if (runtimeErrors.length > 0) {
+      setServerErrors(runtimeErrors);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const plan = await planJob(validation.data);
+      setCommand(plan.command);
+      if (plan.pathErrors.length > 0) {
+        setServerErrors(plan.pathErrors);
+        return;
+      }
+      const job = await createJob(validation.data);
+      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      setSelectedJobId(job.id);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setServerErrors(error.issues.length > 0 ? error.issues.map((issue) => issue.message) : [error.message]);
+      } else {
+        setServerErrors([error instanceof Error ? error.message : "Job konnte nicht erstellt werden."]);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    const job = jobs.find((candidate) => candidate.id === id);
+    if (!job || !window.confirm(`Job "${job.outputName}" wirklich abbrechen? Der aktuelle Prozess wird beendet.`)) return;
+    try {
+      const cancelled = await cancelJob(id);
+      setJobs((current) => current.map((job) => job.id === id ? cancelled : job));
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Job konnte nicht abgebrochen werden."]);
+    }
+  };
+
+  const handleRerun = async (job: StudioJob, mode: "exact" | "random-seed") => {
+    setServerErrors([]);
+    try {
+      const variant = await rerunJob(job.id, mode);
+      setJobs((current) => [variant, ...current.filter((item) => item.id !== variant.id)]);
+      setSelectedJobId(variant.id);
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Variante konnte nicht erstellt werden."]);
+    }
+  };
+
+  const handleFavorite = async (job: StudioJob) => {
+    try {
+      const updated = await setJobFavorite(job.id, !job.favorite);
+      setJobs((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Favorit konnte nicht geändert werden."]);
+    }
+  };
+
+  const toggleComparison = (job: StudioJob) => {
+    if (!job.outputUrl) return;
+    setComparisonIds((current) => {
+      if (current.includes(job.id)) return current.filter((id) => id !== job.id);
+      return current.length < 2 ? [...current, job.id] : [current[1], job.id];
+    });
+  };
+
+  const handleComposePrompt = () => {
+    setPromptComposeError(null);
+    try {
+      const compositionInput = composePromptRequestSchema.parse({
+        mode: request.mode,
+        sourceMode: request.sourceMode,
+        currentPrompt: request.prompt,
+        parts: request.promptParts,
+        continuity: request.continuity,
+      });
+      const result = composePromptFromParts(compositionInput);
+      setPromptUndo(request.prompt);
+      setRequest((current) => ({ ...current, prompt: result.prompt }));
+    } catch (error) {
+      setPromptComposeError(error instanceof Error ? error.message : "Prompt-Bausteine konnten nicht übernommen werden.");
+    }
+  };
+
+  const loadJobSettings = (job: StudioJob) => {
+    const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(job.request, job.mode));
+    setRequest({ ...loaded, outputName: nextEditableOutputName(loaded.outputName, jobs, outputs) });
+    const matchingOutput = outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
+    if (matchingOutput) setSelectedOutputName(matchingOutput.name);
+    setPromptUndo(null);
+    setAttempted(false);
+    setServerErrors([]);
+    setCommand(null);
+  };
+
+  const loadOutputSettings = (output: StudioOutput) => {
+    if (!output.request) {
+      setServerErrors(["Für dieses Video ist keine verlässliche Studio-Einstellungshistorie gespeichert."]);
+      return;
+    }
+    const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(output.request, output.request.mode));
+    setRequest({ ...loaded, outputName: nextEditableOutputName(output.name, jobs, outputs) });
+    setSelectedOutputName(output.name);
+    if (output.jobId) setSelectedJobId(output.jobId);
+    setPromptUndo(null);
+    setAttempted(false);
+    setServerErrors([]);
+    setCommand(null);
+  };
+
+  const activePipeline = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
+  const memoryLabel = health?.resources.availableMemoryGiB === null || health?.resources.availableMemoryGiB === undefined
+    ? "Unbekannt"
+    : `${health.resources.availableMemoryGiB.toFixed(1)} GiB`;
+  const memoryPressure = health?.resources.availableMemoryGiB !== null
+    && health?.resources.availableMemoryGiB !== undefined
+    && health.resources.availableMemoryGiB < requiredStartMemoryGiB;
+
+  return (
+    <div className="studio-shell">
+      <header className="topbar">
+        <div className="brand-lockup">
+          <span className="brand-mark"><Sparkles size={19} /></span>
+          <strong>LTX Studio</strong>
+          <span className="version-mark">2.3</span>
+        </div>
+        <div className="topbar__context">
+          <span>{activePipeline.shortLabel}</span>
+          <span className="topbar__divider" />
+          <span>{request.outputName}</span>
+        </div>
+        <div className="health-strip">
+          <span className={`health-item health-item--${health?.qwen === "ready" ? "ok" : "warn"}`} title="Qwen Status">
+            <Activity size={15} /> Qwen
+          </span>
+          <span className={`health-item health-item--${health?.engine === "available" ? "ok" : "warn"}`} title="Python Engine">
+            <Cpu size={15} /> Engine
+          </span>
+          <span className={`health-item health-item--${health?.orchestrator === "missing" ? "blocked" : "ok"}`} title="DGX-Orchestrator Admission">
+            <ShieldCheck size={15} /> Admission
+          </span>
+          <span className={`health-item health-item--${memoryPressure ? "warn" : "ok"}`} title="Verfügbarer Arbeitsspeicher; Startfreigabe erfolgt über die DGX-Queue">
+            <MemoryStick size={15} /> {memoryLabel}
+          </span>
+          <span className="health-item" title="Aktive und wartende Jobs"><FolderClock size={15} /> {health?.queueDepth ?? 0}</span>
+        </div>
+      </header>
+
+      {startupError ? (
+        <div className="startup-error" role="alert">
+          <span>{startupError}</span>
+          <button type="button" className="icon-button" title="Neu laden" onClick={() => window.location.reload()}><RefreshCw size={17} /></button>
+        </div>
+      ) : null}
+
+      <div className="studio-grid">
+        <ModeRail active={request.mode} onChange={changeMode} />
+        <Editor
+          request={request}
+          onChange={updateRequest}
+          errors={fieldErrors}
+          previews={previews}
+          onPreview={(path, url) => setPreviews((current) => ({ ...current, [path]: url }))}
+          onComposePrompt={handleComposePrompt}
+          promptComposeError={promptComposeError}
+          modelInventory={modelInventory}
+          canUndoPrompt={promptUndo !== null}
+          onUndoPrompt={() => {
+            if (promptUndo === null) return;
+            setRequest((current) => ({ ...current, prompt: promptUndo }));
+            setPromptUndo(null);
+          }}
+        />
+        <RunPanel
+          request={request}
+          health={health}
+          jobs={jobs}
+          outputs={outputs}
+          selectedJob={selectedJob}
+          selectedOutput={selectedOutput}
+          onSelectJob={(job) => {
+            setSelectedJobId(job.id);
+            const matchingOutput = outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
+            if (matchingOutput) setSelectedOutputName(matchingOutput.name);
+          }}
+          onSelectOutput={(output) => {
+            setSelectedOutputName(output.name);
+            if (output.jobId) setSelectedJobId(output.jobId);
+          }}
+          onRun={() => void run()}
+          onCancel={(id) => void handleCancel(id)}
+          submitting={submitting}
+          errors={attempted ? [...validationMessages, ...serverErrors] : serverErrors}
+          command={command}
+          previews={previews}
+          comparisonJobs={comparisonJobs}
+          comparisonIds={comparisonIds}
+          estimate={resourceEstimate}
+          requiredStartMemoryGiB={requiredStartMemoryGiB}
+          onToggleCompare={toggleComparison}
+          onRerun={(job, mode) => void handleRerun(job, mode)}
+          onFavorite={(job) => void handleFavorite(job)}
+          onLoadSettings={loadJobSettings}
+          onLoadOutputSettings={loadOutputSettings}
+        />
+      </div>
+
+      {config ? (
+        <span className="sr-only">
+          Render-Startfreigabe erfolgt über die DGX-Orchestrator-Queue; RAM und Swap bleiben sichtbare Zustandswerte.
+        </span>
+      ) : null}
+    </div>
+  );
+}

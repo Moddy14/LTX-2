@@ -122,7 +122,33 @@ For additional guidance on writing a prompt please refer to <https://ltx.io/blog
 
 ### Automatic Prompt Enhancement
 
-LTX-2 pipelines support automatic prompt enhancement via an `enhance_prompt` parameter.
+LTX-2 pipelines support automatic prompt enhancement via an `enhance_prompt` parameter. Enhancement uses an already
+loaded Gemma text encoder. The same model instance first improves the positive prompt and then creates the LTX
+conditioning embeddings. Image-conditioned pipelines also provide their reference image to Gemma.
+
+The CLI flag is `--enhance-prompt`. Prompt enhancement requires a complete Gemma model directory including
+`preprocessor_config.json`.
+
+### LTX Studio
+
+The local production UI covers all eight Python pipeline entry points, media uploads and existing DGX paths, model
+selection, LoRAs, quantization, guidance, VAE tiling, output preview, a serial job queue, cancellation, and logs. It is
+loopback-only and never starts a model merely by opening the page. Every generation is checked by a fail-closed RAM
+gate and the DGX admission client; it never stops or reclaims another application.
+Its runtime thermal guard pauses only the active native LTX process group after three host readings at or above
+90 C and resumes that same in-memory process after the host returns to the run's measured baseline. The guard logs
+the whole-host baseline and peak for workload-specific calibration; it is not a disk checkpoint and cannot survive a
+process or host restart.
+
+```bash
+cd apps/ltx-studio
+npm install
+npm run build
+npm start
+```
+
+Open `http://127.0.0.1:4318`. Configuration is persisted in browser storage and generated media is stored below
+`.ltx-studio/`. See `apps/ltx-studio/README.md` for runtime settings and verification commands.
 
 ## 🔌 ComfyUI Integration
 
