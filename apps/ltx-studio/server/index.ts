@@ -8,6 +8,7 @@ import { z, ZodError } from "zod";
 
 import { assetKinds, type AssetKind } from "../shared/assets.js";
 import { generationRequestSchema, outputNameSchema, PIPELINES } from "../shared/pipelines.js";
+import { qualityReviewInputSchema } from "../shared/quality.js";
 import { admissionClientAvailable } from "./admission.js";
 import { AssetStore } from "./assets.js";
 import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan } from "./command.js";
@@ -31,7 +32,7 @@ import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdu
 import { estimateRequest } from "./estimates.js";
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
-import { OutputLibrary } from "./outputs.js";
+import { OutputLibrary, OutputQualityError } from "./outputs.js";
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
 
@@ -308,6 +309,16 @@ app.get("/api/outputs/:filename", (request, response) => {
   response.type("video/mp4").sendFile(outputPath, { dotfiles: "allow" });
 });
 
+app.put("/api/outputs/:filename/quality-review", (request, response) => {
+  const filename = routeParam(request.params.filename);
+  if (!outputNameSchema.safeParse(filename).success) {
+    return response.status(404).json({ error: "Ausgabe nicht gefunden." });
+  }
+  const payload = qualityReviewInputSchema.parse(request.body);
+  const output = outputs.setQualityReview(filename, payload, jobs.list());
+  response.json({ output });
+});
+
 app.get("/api/events", (request, response) => {
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -346,6 +357,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(409).json({ error: error.message });
   }
   if (error instanceof LipDubReferencePreparationError) {
+    return response.status(error.statusCode).json({ error: error.message });
+  }
+  if (error instanceof OutputQualityError) {
     return response.status(error.statusCode).json({ error: error.message });
   }
   const message = error instanceof Error ? error.message : "Unbekannter Serverfehler";

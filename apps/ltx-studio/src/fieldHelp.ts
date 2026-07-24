@@ -145,4 +145,20 @@ export const fieldHelp = {
     "Wofür: Gruppiert Szenen gedanklich unter einem wiedererkennbaren Projekt. Gute Eingabe: kurzer stabiler Name für Kampagne, Film, Figur oder Produktreihe.",
   continuityNotes:
     "Wofür: Hält unveränderliche Merkmale für Gemma und spätere Varianten fest. Gute Eingabe: exakte Farben, Kleidung, Requisiten, räumliche Positionen und Anschlüsse zwischen Szenen nennen.",
+  qualityReview:
+    "Wofür: Speichert eine reproduzierbare manuelle Qualitätsmessung direkt beim fertigen Sprachvideo. Empfehlung: Video mit Ton vollständig ansehen, jeden Einzelwert unabhängig vergeben und konkrete Fehler in der Notiz festhalten.",
+  qualityLipSync:
+    "Wofür: Bewertet die zeitliche Übereinstimmung von Lauten und sichtbarer Mundbewegung. 10 bedeutet framegenau und glaubwürdig, 5 merklich versetzt, 0 ohne verwertbare Synchronität.",
+  qualityIdentity:
+    "Wofür: Bewertet, wie exakt Gesicht und Person der visuellen Referenz entsprechen. 10 bedeutet stabile Identität über alle Frames; Abzüge für Gesichtsdrift, fremde Merkmale oder wechselnde Proportionen.",
+  qualityMouthNaturalness:
+    "Wofür: Bewertet Mundform, Symmetrie, Zähne, Lippen und Artikulation unabhängig vom Timing. Abzüge für schiefen, aufgesetzten oder anatomisch unplausiblen Mund.",
+  qualitySkinStability:
+    "Wofür: Bewertet Haut und Gewebe um Mund, Nase und Wangen. 10 bedeutet stabil und natürlich; Abzüge für Hüpfen, Flimmern, Schwabbeln oder maskenartige Übergänge.",
+  qualityMotion:
+    "Wofür: Bewertet Kopf-, Gesichts- und Körperbewegung sowie zeitliche Kontinuität. 10 bedeutet flüssige natürliche Bewegung ohne Jitter, Einfrieren oder unerklärliche Sprünge.",
+  qualityAudio:
+    "Wofür: Bewertet Sprachverständlichkeit, Klangqualität und Störfreiheit. 10 bedeutet klare natürliche Sprache ohne Knacken, Verzerrung, Pumpen oder falsches Lautstärkeverhältnis.",
+  qualityNote:
+    "Wofür: Hält sichtbare Fehler und die nächste gezielte Parameteränderung fest. Gute Eingabe: Zeitpunkt, konkrete Beobachtung und vermutete Ursache, zum Beispiel '1,8 s: Lippen 3 Frames zu spät; Referenzstärke 0,9 testen'.",
 } as const;

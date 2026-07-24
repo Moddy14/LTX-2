@@ -270,6 +270,76 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
   await expect(page.getByText(/Vorbereitete Referenz: 768 x 1344/)).toHaveCount(0);
 });
 
+test("speech quality scorecard persists six ratings and remains usable on narrow screens", async ({ page }, testInfo) => {
+  const request = createDefaultRequest("audio-to-video");
+  request.outputName = "speech-quality-scorecard.mp4";
+  request.promptParts.dialogue = "Dieser Satz prüft die Synchronität.";
+  const output = {
+    name: request.outputName,
+    url: `/api/outputs/${request.outputName}`,
+    sizeBytes: 1_048_576,
+    modifiedAt: "2026-07-24T18:00:00.000Z",
+    jobId: "2c8a5dc6-8864-49f7-a639-85caef919999",
+    jobStatus: "completed",
+    request,
+    settingsAvailable: true,
+    qualityReview: null as null | {
+      scores: Record<string, number>;
+      note: string;
+      updatedAt: string;
+    },
+  };
+  let savedReview = output.qualityReview;
+  let receivedBody: unknown;
+
+  await page.route(/\/api\/outputs(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ outputs: [{ ...output, qualityReview: savedReview }] }),
+  }));
+  await page.route("**/api/outputs/*/quality-review", async (route) => {
+    receivedBody = route.request().postDataJSON();
+    savedReview = {
+      ...(receivedBody as { scores: Record<string, number>; note: string }),
+      updatedAt: "2026-07-24T18:05:00.000Z",
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ output: { ...output, qualityReview: savedReview } }),
+    });
+  });
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Manuelle Qualitätsbewertung" })).toBeVisible();
+  await page.getByLabel("LipSync Bewertung").fill("9");
+  await page.getByLabel("Identität Bewertung").fill("8");
+  await page.getByLabel("Mundnatürlichkeit Bewertung").fill("7");
+  await page.getByLabel("Hautstabilität Bewertung").fill("6");
+  await page.getByLabel("Bewegung Bewertung").fill("9");
+  await page.getByLabel("Ton Bewertung").fill("10");
+  await page.getByLabel("Qualitätsnotiz").fill("1,8 s: Lippen noch einen Frame zu spät.");
+  await page.getByRole("button", { name: "Bewertung speichern" }).click();
+
+  await expect(page.locator(".quality-scorecard__footer [role='status']")).toContainText("Bewertung gespeichert");
+  expect(receivedBody).toEqual({
+    scores: {
+      lipSync: 9,
+      identity: 8,
+      mouthNaturalness: 7,
+      skinStability: 6,
+      motion: 9,
+      audio: 10,
+    },
+    note: "1,8 s: Lippen noch einen Frame zu spät.",
+  });
+  await expect(page.locator(".quality-scorecard__summary")).toContainText("8.2 / 10");
+
+  await page.reload();
+  await expect(page.getByLabel("LipSync Bewertung")).toHaveValue("9");
+  await expect(page.getByLabel("Qualitätsnotiz")).toHaveValue("1,8 s: Lippen noch einen Frame zu spät.");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("speech-quality-scorecard.png"), fullPage: true });
+});
+
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {
   await page.getByRole("button", { name: "Bild zu Video · empfohlen" }).click();
   await expect(page.getByRole("heading", { name: "Referenzbild" })).toBeVisible();

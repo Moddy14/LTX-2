@@ -26,6 +26,9 @@ import type { PlanSuggestion } from "../../shared/plan";
 import { videoDurationSeconds } from "../../shared/presets";
 import { isVideoPreviewUrl } from "../../shared/media";
 import type { Health, ResourceEstimate, StudioJob, StudioOutput } from "../types";
+import { qualityReviewAverage, type QualityReviewInput } from "../../shared/quality";
+import { isSpeechQualityCandidate } from "../qualityCandidates";
+import { QualityScorecard } from "./QualityScorecard";
 
 const statusLabels: Record<StudioJob["status"], string> = {
   queued: "Wartet",
@@ -86,6 +89,7 @@ type RunPanelProps = {
   onToggleCompare: (job: StudioJob) => void;
   onRerun: (job: StudioJob, mode: "exact" | "random-seed") => void;
   onFavorite: (job: StudioJob) => void;
+  onSaveQualityReview: (output: StudioOutput, input: QualityReviewInput) => Promise<void>;
   onLoadSettings: (job: StudioJob) => void;
   onLoadOutputSettings: (output: StudioOutput) => void;
   estimate: ResourceEstimate;
@@ -115,6 +119,7 @@ export function RunPanel({
   onToggleCompare,
   onRerun,
   onFavorite,
+  onSaveQualityReview,
   onLoadSettings,
   onLoadOutputSettings,
   estimate,
@@ -149,6 +154,12 @@ export function RunPanel({
     ? monitorJob.runtimeMs ?? Date.now() - Date.parse(monitorJob.startedAt)
     : null;
   const outputRequest = selectedOutput?.request ?? null;
+  const outputForJob = (job: StudioJob) =>
+    outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
+  const qualityAverageForJob = (job: StudioJob): number | null => {
+    const review = outputForJob(job)?.qualityReview;
+    return review ? qualityReviewAverage(review) : null;
+  };
 
   return (
     <aside className="run-panel">
@@ -159,7 +170,12 @@ export function RunPanel({
               {comparisonJobs.map((job) => (
                 <div className="compare-preview__item" key={job.id}>
                   <video src={job.outputUrl ?? undefined} controls muted playsInline />
-                  <span>{job.outputName}</span>
+                  <span>
+                    {job.outputName}
+                    {outputForJob(job)?.qualityReview
+                      ? ` · ${qualityReviewAverage(outputForJob(job)!.qualityReview!).toFixed(1)}/10`
+                      : ""}
+                  </span>
                 </div>
               ))}
             </div>
@@ -204,7 +220,9 @@ export function RunPanel({
                 }}
               >
                 {outputs.map((output) => (
-                  <option key={output.name} value={output.name}>{output.name}</option>
+                  <option key={output.name} value={output.name}>
+                    {output.name}{output.qualityReview ? ` · ${qualityReviewAverage(output.qualityReview).toFixed(1)}/10` : ""}
+                  </option>
                 ))}
               </select>
             </label>
@@ -213,6 +231,9 @@ export function RunPanel({
                 <span>{formatFileSize(selectedOutput.sizeBytes)}</span>
                 <span>{new Date(selectedOutput.modifiedAt).toLocaleString("de-AT")}</span>
                 <span>{selectedOutput.settingsAvailable ? "Studio-Einstellungen vorhanden" : "Keine verlässlichen Einstellungen"}</span>
+                {selectedOutput.qualityReview ? (
+                  <span>Bewertung {qualityReviewAverage(selectedOutput.qualityReview).toFixed(1)} / 10</span>
+                ) : null}
               </div>
             ) : null}
             {outputRequest ? (
@@ -380,6 +401,15 @@ export function RunPanel({
         </div>
       ) : null}
 
+      {comparisonJobs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
+        <QualityScorecard
+          key={selectedOutput.name}
+          output={selectedOutput}
+          outputs={outputs}
+          onSave={onSaveQualityReview}
+        />
+      ) : null}
+
       {errors.length > 0 ? (
         <div className="run-errors" role="alert">
           <AlertTriangle size={17} />
@@ -430,8 +460,13 @@ export function RunPanel({
                     <strong>{job.outputName}</strong>
                     <small>{statusLabels[job.status]} · {PIPELINES.find((item) => item.id === job.mode)?.shortLabel} · Seed {job.request.seed}</small>
                 </span>
-                {job.favorite ? <Star className="job-row__favorite" size={13} fill="currentColor" /> : null}
-                {job.progress !== null ? <span className="job-row__progress">{Math.round(job.progress)}%</span> : null}
+                <span className="job-row__meta">
+                  {job.favorite ? <Star className="job-row__favorite" size={13} fill="currentColor" /> : null}
+                  {qualityAverageForJob(job) !== null ? (
+                    <span className="job-row__score">{qualityAverageForJob(job)!.toFixed(1)}</span>
+                  ) : null}
+                  {job.progress !== null ? <span className="job-row__progress">{Math.round(job.progress)}%</span> : null}
+                </span>
               </button>
               {["queued", "running", "paused"].includes(job.status) ? (
                 <button

@@ -47,6 +47,12 @@ Framezahl Qualitätsvoraussetzungen.
 - Gemeinsames Video-/Audiofenster mit maximal 40 ms tolerierter Drift.
 - Studio-Asset-Grenze für Diagnose und Vorbereitung.
 - Einstellungen aus fertigen Videos können vollständig wieder geladen werden.
+- Persistente 0-bis-10-Scorecard pro Sprachvideo für LipSync, Identität,
+  Mundnatur, Hautstabilität, Bewegung und Audio.
+- Bewertung und Notiz liegen im geprüften MP4-Sidecar und bleiben auch nach
+  Bereinigung der begrenzten Jobhistorie erhalten.
+- Bestwert und Einzelbewertungen sind in Auswahl, Jobliste und 2er-Vergleich
+  sichtbar.
 - LongCat bleibt vorhanden, ist aber standardmäßig aus und kein SOTA-Hauptpfad.
 - DGX-Queue, Thermalwächter und Wiederanlauf bleiben Teil jedes GPU-Laufs.
 
@@ -109,8 +115,8 @@ Jedes Ergebnis erhält getrennte Bewertungen:
 - Bewegung: Kopf- und Gesichtsdynamik bleiben natürlich.
 - Audio: verständlich, sauber und ohne Versatz oder Aussetzer.
 
-Die nächste App-Phase ergänzt dafür eine persistente Scorecard pro Job. Später
-werden objektive Evaluatoren ergänzt:
+Die persistente Scorecard ist als Version 2 des MP4-Einstellungs-Sidecars
+umgesetzt. Später werden objektive Evaluatoren ergänzt:
 
 - Audio-/Video-Offset und Sync-Konfidenz;
 - Identitätsähnlichkeit gegen den Referenzclip;

@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -20,8 +20,12 @@ async function outputRoot(): Promise<string> {
   return root;
 }
 
-function completedJob(outputName: string, finishedAt: string): StudioJob {
-  const request = validRequest();
+function completedJob(
+  outputName: string,
+  finishedAt: string,
+  mode: Parameters<typeof validRequest>[0] = "two-stage",
+): StudioJob {
+  const request = validRequest(mode);
   request.outputName = outputName;
   return {
     id: "2c8a5dc6-8864-49f7-a639-85caef918888",
@@ -66,8 +70,10 @@ describe("generated output library", () => {
 
     expect(studioOutput.settingsAvailable).toBe(true);
     expect(studioOutput.request).toEqual(job.request);
+    expect(studioOutput.qualityReview).toBeNull();
     expect(externalOutput.settingsAvailable).toBe(false);
     expect(externalOutput.request).toBeNull();
+    expect(externalOutput.qualityReview).toBeNull();
 
     await appendFile(join(root, studioName), "changed");
     const modified = library.list([job]).find((output) => output.name === studioName)!;
@@ -117,5 +123,133 @@ describe("generated output library", () => {
       referenceVideo: { path: "", name: "", strength: 1 },
       lora: { path: "", strength: 1 },
     });
+    expect(output.qualityReview).toBeNull();
+  });
+
+  it("keeps completed provenance after the source job leaves bounded history", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T08:00:00.000Z");
+    const outputName = "historic-output.mp4";
+    await writeFile(join(root, outputName), "video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    library.recordCompleted([job]);
+
+    const historic = library.list([]).find((output) => output.name === outputName)!;
+
+    expect(historic.jobStatus).toBe("completed");
+    expect(historic.jobId).toBe(job.id);
+    expect(historic.settingsAvailable).toBe(true);
+  });
+
+  it("persists a validated speech quality scorecard in a v2 sidecar", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:00:00.000Z");
+    const outputName = "speech-scorecard.mp4";
+    await writeFile(join(root, outputName), "video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    library.recordCompleted([job]);
+
+    const updated = library.setQualityReview(outputName, {
+      scores: {
+        lipSync: 8,
+        identity: 9,
+        mouthNaturalness: 7,
+        skinStability: 6,
+        motion: 8,
+        audio: 10,
+      },
+      note: "1,8 s: Lippen leicht zu spät.",
+    }, [job]);
+
+    expect(updated.qualityReview).toMatchObject({
+      scores: {
+        lipSync: 8,
+        identity: 9,
+        mouthNaturalness: 7,
+        skinStability: 6,
+        motion: 8,
+        audio: 10,
+      },
+      note: "1,8 s: Lippen leicht zu spät.",
+    });
+    expect(Number.isFinite(Date.parse(updated.qualityReview!.updatedAt))).toBe(true);
+    const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
+    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v2");
+    expect(sidecar.request).toEqual(job.request);
+    expect(sidecar.qualityReview.scores.lipSync).toBe(8);
+
+    const restored = new OutputLibrary(root).list([job]).find((output) => output.name === outputName)!;
+    expect(restored.qualityReview).toEqual(updated.qualityReview);
+  });
+
+  it("refuses scorecards for external, changed, and non-speech outputs", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:00:00.000Z");
+    const score = {
+      scores: {
+        lipSync: 5,
+        identity: 5,
+        mouthNaturalness: 5,
+        skinStability: 5,
+        motion: 5,
+        audio: 5,
+      },
+      note: "",
+    };
+    const externalName = "external-score.mp4";
+    await writeFile(join(root, externalName), "video");
+    const library = new OutputLibrary(root);
+    expect(() => library.setQualityReview(externalName, score, [])).toThrow("keine passende Studio-Provenienz");
+
+    const silentName = "silent-score.mp4";
+    await writeFile(join(root, silentName), "video");
+    const silentJob = completedJob(silentName, completedAt.toISOString());
+    silentJob.request.promptParts.dialogue = "Dialogtext allein macht diese Pipeline nicht zu einem Sprachvideo.";
+    library.recordCompleted([silentJob]);
+    expect(() => library.setQualityReview(silentName, score, [silentJob])).toThrow("Nur ein fertiges Sprachvideo");
+
+    const changedName = "changed-score.mp4";
+    await writeFile(join(root, changedName), "video");
+    const speechJob = completedJob(changedName, completedAt.toISOString(), "audio-to-video");
+    library.recordCompleted([speechJob]);
+    await appendFile(join(root, changedName), "changed");
+    expect(() => library.setQualityReview(changedName, score, [speechJob])).toThrow("nachträglich verändert");
+  });
+
+  it("ignores invalid quality data while retaining valid v2 provenance", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:00:00.000Z");
+    const outputName = "invalid-scorecard.mp4";
+    await writeFile(join(root, outputName), "video");
+    const stats = await stat(join(root, outputName));
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    await writeFile(join(root, `${outputName}.ltx-settings.json`), JSON.stringify({
+      schemaVersion: "ltx-studio-output.v2",
+      outputName,
+      jobId: job.id,
+      completedAt: completedAt.toISOString(),
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      request: job.request,
+      qualityReview: {
+        scores: {
+          lipSync: 11,
+          identity: 9,
+          mouthNaturalness: 7,
+          skinStability: 6,
+          motion: 8,
+          audio: 10,
+        },
+        note: "invalid",
+        updatedAt: completedAt.toISOString(),
+      },
+    }));
+
+    const output = new OutputLibrary(root).list([job]).find((candidate) => candidate.name === outputName)!;
+    expect(output.settingsAvailable).toBe(true);
+    expect(output.request).toEqual(job.request);
+    expect(output.qualityReview).toBeNull();
   });
 });

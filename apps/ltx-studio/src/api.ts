@@ -1,4 +1,5 @@
 import type { GenerationRequest } from "../shared/pipelines";
+import type { QualityReviewInput } from "../shared/quality";
 import type {
   LipDubReferenceDiagnostics,
   PlanSuggestion,
@@ -109,6 +110,17 @@ export async function setJobFavorite(id: string, favorite: boolean): Promise<Stu
     }),
   );
   return body.job;
+}
+
+export async function setOutputQualityReview(outputName: string, input: QualityReviewInput): Promise<StudioOutput> {
+  const body = await decode<{ output: StudioOutput }>(
+    await fetch(`/api/outputs/${encodeURIComponent(outputName)}/quality-review`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.output;
 }
 
 export async function uploadFile(kind: UploadedFile["kind"], file: File): Promise<UploadedFile> {

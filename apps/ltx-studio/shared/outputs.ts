@@ -1,4 +1,5 @@
 import type { GenerationRequest } from "./pipelines.js";
+import type { JobQualityReview } from "./quality.js";
 
 export type StudioOutput = {
   name: string;
@@ -9,4 +10,5 @@ export type StudioOutput = {
   jobStatus: "completed" | "external";
   request: GenerationRequest | null;
   settingsAvailable: boolean;
+  qualityReview: JobQualityReview | null;
 };

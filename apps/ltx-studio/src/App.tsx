@@ -27,10 +27,13 @@ import {
   planJob,
   rerunJob,
   setJobFavorite,
+  setOutputQualityReview,
 } from "./api";
+import type { QualityReviewInput } from "../shared/quality";
 import { Editor } from "./components/Editor";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
+import { mergeOutputRefresh } from "./outputState";
 import {
   ApiError,
   type Health,
@@ -184,7 +187,7 @@ export function App() {
         setConfig(nextConfig);
         setHealth(nextHealth);
         setJobs(nextJobs);
-        setOutputs(nextOutputs);
+        setOutputs((current) => mergeOutputRefresh(current, nextOutputs));
         setModelInventory(nextModels);
         setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
         setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
@@ -195,11 +198,18 @@ export function App() {
     };
     void refresh();
     const healthTimer = window.setInterval(() => void getHealth().then(setHealth).catch(() => setHealth(null)), 10_000);
-    const outputsTimer = window.setInterval(() => void getOutputs().then(setOutputs).catch(() => undefined), 10_000);
+    const outputsTimer = window.setInterval(
+      () => void getOutputs()
+        .then((next) => setOutputs((current) => mergeOutputRefresh(current, next)))
+        .catch(() => undefined),
+      10_000,
+    );
     const events = new EventSource("/api/events");
     events.addEventListener("jobs", (event) => {
       setJobs(JSON.parse((event as MessageEvent).data) as StudioJob[]);
-      void getOutputs().then(setOutputs).catch(() => undefined);
+      void getOutputs()
+        .then((next) => setOutputs((current) => mergeOutputRefresh(current, next)))
+        .catch(() => undefined);
     });
     return () => {
       mounted = false;
@@ -364,6 +374,20 @@ export function App() {
       setJobs((current) => current.map((item) => item.id === updated.id ? updated : item));
     } catch (error) {
       setServerErrors([error instanceof Error ? error.message : "Favorit konnte nicht geändert werden."]);
+    }
+  };
+
+  const handleQualityReview = async (output: StudioOutput, input: QualityReviewInput) => {
+    setServerErrors([]);
+    try {
+      const updated = await setOutputQualityReview(output.name, input);
+      setOutputs((current) => current.map((item) =>
+        item.name === updated.name ? mergeOutputRefresh([item], [updated])[0] : item,
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Qualitätsbewertung konnte nicht gespeichert werden.";
+      setServerErrors([message]);
+      throw error;
     }
   };
 
@@ -569,6 +593,7 @@ export function App() {
           onToggleCompare={toggleComparison}
           onRerun={(job, mode) => void handleRerun(job, mode)}
           onFavorite={(job) => void handleFavorite(job)}
+          onSaveQualityReview={handleQualityReview}
           onLoadSettings={loadJobSettings}
           onLoadOutputSettings={loadOutputSettings}
         />
