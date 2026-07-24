@@ -21,7 +21,8 @@ test("desktop exposes every production mode and contextual controls", async ({ p
 
   await page.getByRole("button", { name: /Audio Audio-synchron/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
-  await expect(page.getByRole("button", { name: "Audio hochladen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sprachspur hochladen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finale Tonspur hochladen" })).toBeVisible();
   const guidanceSection = page.locator(".editor-section").filter({ has: page.getByRole("heading", { name: "Guidance" }) });
   await expect(guidanceSection.locator(".advanced-block")).toHaveCount(1);
 
@@ -43,6 +44,26 @@ test("desktop exposes every production mode and contextual controls", async ({ p
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);
   await page.screenshot({ path: testInfo.outputPath("studio-desktop.png"), fullPage: true });
+});
+
+test("audio mode separates clean speech conditioning from the optional final mix", async ({ page }, testInfo) => {
+  const audioMode = page.locator(".mode-button").filter({ hasText: "Audio" });
+  await audioMode.scrollIntoViewIfNeeded();
+  await audioMode.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
+  await expect(page.getByRole("button", { name: "Sprachspur hochladen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finale Tonspur hochladen" })).toBeVisible();
+
+  const conditioningHelp = page.getByLabel(/Feldhilfe: Wofür: Diese Spur steuert die Mundbewegung/);
+  await conditioningHelp.focus();
+  await expect(conditioningHelp.getByRole("tooltip")).toContainText("klare Sprache ohne Musik");
+  const finalMixHelp = page.getByLabel(/Feldhilfe: Wofür: Optionale fertige Tonspur/);
+  await finalMixHelp.focus();
+  await expect(finalMixHelp.getByRole("tooltip")).toContainText("gewünschter Musik und Atmosphäre");
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+  await page.screenshot({ path: testInfo.outputPath("audio-conditioning-and-final-mix.png"), fullPage: true });
 });
 
 test("prompt validation stays in context", async ({ page }) => {
@@ -199,7 +220,13 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
     has: page.getByRole("heading", { name: "LipDub Referenz" }),
   }).screenshot({ path: testInfo.outputPath("lipdub-reference-diagnostics.png") });
   await page.getByRole("button", { name: "Kalibrierclip erstellen" }).click();
-  await expect(page.getByText("reference-lipdub-prep.mp4", { exact: true })).toBeVisible();
+  const lipDubReference = page.locator("section.editor-section").filter({
+    has: page.getByRole("heading", { name: "LipDub Referenz" }),
+  });
+  await expect(lipDubReference.locator(".single-media__identity strong")).toContainText(
+    "reference-lipdub-prep.mp4",
+    { timeout: 10_000 },
+  );
   await expect(page.getByText(/Vorbereitete Referenz: 768 x 1344, 97 Frames @ 24 fps/)).toBeVisible();
 });
 
