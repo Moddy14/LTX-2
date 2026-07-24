@@ -30,6 +30,7 @@ from ltx_pipelines.utils.denoisers import GuidedDenoiser, SimpleDenoiser
 from ltx_pipelines.utils.helpers import (
     assert_resolution,
     combined_image_conditionings,
+    conform_latent_length,
     get_device,
 )
 from ltx_pipelines.utils.media_io import decode_audio_from_file, encode_video
@@ -154,7 +155,7 @@ class A2VidPipelineTwoStage:
 
         encoded_audio_latent = self.audio_conditioner(lambda enc: vae_encode_audio(decoded_audio, enc, None))
         audio_shape = AudioLatentShape.from_duration(batch=1, duration=num_frames / frame_rate, channels=8, mel_bins=16)
-        encoded_audio_latent = encoded_audio_latent[:, :, : audio_shape.frames]
+        encoded_audio_latent = conform_latent_length(encoded_audio_latent, audio_shape.frames)
 
         # Stage 1: encode image conditionings with the VAE encoder, then denoise
         # video-only (audio frozen).

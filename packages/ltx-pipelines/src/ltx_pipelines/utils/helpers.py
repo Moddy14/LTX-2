@@ -35,7 +35,7 @@ def cleanup_memory() -> None:
     cleanup_accelerator_memory()
 
 
-def _conform_latent_length(latent: torch.Tensor, expected_frames_count: int) -> torch.Tensor:
+def conform_latent_length(latent: torch.Tensor, expected_frames_count: int) -> torch.Tensor:
     actual_frames = latent.shape[2]
     if actual_frames > expected_frames_count:
         latent = latent[:, :, :expected_frames_count]
@@ -84,7 +84,7 @@ def video_latent_from_file(
     frames = video_preprocess(frame_gen, output_shape.height, output_shape.width, dtype, device)
     latents = video_encoder.tiled_encode(frames, tiling_config or TilingConfig.default())
     required_latent_frames = VideoLatentShape.from_pixel_shape(output_shape).frames
-    return _conform_latent_length(latents, required_latent_frames)
+    return conform_latent_length(latents, required_latent_frames)
 
 
 def audio_latent_from_file(
@@ -117,7 +117,7 @@ def audio_latent_from_file(
         return None
     latents = encode_audio(audio_in, audio_encoder, None).to(device, dtype)
     required_latent_frames = AudioLatentShape.from_video_pixel_shape(output_shape).frames
-    return _conform_latent_length(latents, required_latent_frames)
+    return conform_latent_length(latents, required_latent_frames)
 
 
 def combined_image_conditionings(
