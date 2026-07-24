@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import type { GenerationRequest, PipelineMode } from "../shared/pipelines.js";
 import { outputRoot, pythonExecutable } from "./config.js";
+import { probeVideoMetadata } from "./mediaProbe.js";
 
 const MODULES: Record<PipelineMode, string> = {
   "two-stage": "ltx_pipelines.ti2vid_two_stages",
@@ -254,5 +255,16 @@ export function validatePlanPaths(plan: CommandPlan): string[] {
     }
   }
   if (existsSync(plan.outputPath)) errors.push(`Ausgabedatei existiert bereits (${plan.outputPath})`);
+  return errors;
+}
+
+export function validateRequestPlan(request: GenerationRequest, plan: CommandPlan): string[] {
+  const errors = validatePlanPaths(plan);
+  if (request.mode === "lipdub" && request.lipDub.referenceVideo.path) {
+    const metadata = probeVideoMetadata(request.lipDub.referenceVideo.path);
+    if (metadata?.hasAudio === false) {
+      errors.push(`LipDub-Referenzvideo enthält keine Audiospur (${request.lipDub.referenceVideo.path})`);
+    }
+  }
   return errors;
 }

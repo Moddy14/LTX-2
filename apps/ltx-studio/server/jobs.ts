@@ -16,7 +16,7 @@ import {
   type QueueArtifact,
   type QueueTransitionState,
 } from "./admission.js";
-import { buildCommand, type CommandPlan, validatePlanPaths } from "./command.js";
+import { buildCommand, type CommandPlan, validateRequestPlan } from "./command.js";
 import {
   admissionPythonExecutable,
   appRoot,
@@ -361,7 +361,7 @@ export class JobManager extends EventEmitter {
   }
 
   private async run(job: RuntimeJob): Promise<void> {
-    const pathErrors = validatePlanPaths(job.plan);
+    const pathErrors = validateRequestPlan(job.request, job.plan);
     const hybridEnabled = job.request.postprocess.longcatLipsync.enabled;
     const hybridScript = join(appRoot, "scripts", "longcat-hybrid.py");
     const hybridFaceModel = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");

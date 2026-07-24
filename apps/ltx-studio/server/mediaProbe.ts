@@ -5,6 +5,7 @@ export type VideoMetadata = {
   frames: number | null;
   fps: number | null;
   durationSeconds: number | null;
+  hasAudio: boolean | null;
 };
 
 const metadataCache = new Map<string, { size: number; mtimeMs: number; metadata: VideoMetadata | null }>();
@@ -40,11 +41,9 @@ export function probeVideoMetadata(path: string): VideoMetadata | null {
   const result = spawnSync("ffprobe", [
     "-v",
     "error",
-    "-select_streams",
-    "v:0",
     "-count_frames",
     "-show_entries",
-    "stream=nb_read_frames,nb_frames,avg_frame_rate,r_frame_rate,duration",
+    "stream=codec_type,nb_read_frames,nb_frames,avg_frame_rate,r_frame_rate,duration",
     "-of",
     "json",
     path,
@@ -55,10 +54,12 @@ export function probeVideoMetadata(path: string): VideoMetadata | null {
   }
   try {
     const body = JSON.parse(result.stdout) as { streams?: unknown[] };
-    const stream = Array.isArray(body.streams) ? body.streams[0] as Record<string, unknown> | undefined : undefined;
+    const streams = Array.isArray(body.streams) ? body.streams as Record<string, unknown>[] : [];
+    const stream = streams.find((item) => item.codec_type === "video");
     if (!stream) return null;
     const fps = parseRate(stream.avg_frame_rate) ?? parseRate(stream.r_frame_rate);
     const durationSeconds = positiveNumber(stream.duration);
+    const hasAudio = streams.some((item) => item.codec_type === "audio");
     const frames = Math.round(
       positiveNumber(stream.nb_read_frames)
         ?? positiveNumber(stream.nb_frames)
@@ -68,6 +69,7 @@ export function probeVideoMetadata(path: string): VideoMetadata | null {
       frames: frames > 0 ? frames : null,
       fps,
       durationSeconds,
+      hasAudio,
     };
     metadataCache.set(path, { size: stats.size, mtimeMs: stats.mtimeMs, metadata });
     return metadata;

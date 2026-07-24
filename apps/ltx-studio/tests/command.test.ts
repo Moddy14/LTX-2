@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { pipelineModes } from "../shared/pipelines.js";
-import { buildCommand } from "../server/command.js";
+import { buildCommand, validateRequestPlan } from "../server/command.js";
+import * as mediaProbe from "../server/mediaProbe.js";
 import { validRequest } from "./fixtures.js";
 
 const expectedModules = {
@@ -17,6 +18,8 @@ const expectedModules = {
 } as const;
 
 describe("buildCommand", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it.each(pipelineModes)("maps %s to its typed Python module", (mode) => {
     const plan = buildCommand(validRequest(mode));
     expect(plan.args.slice(0, 2)).toEqual(["-m", expectedModules[mode]]);
@@ -119,5 +122,20 @@ describe("buildCommand", () => {
     expect(args).not.toContain("--video-cfg-guidance-scale");
     expect(args).not.toContain("/models/ignored-style.safetensors");
     expect(args).not.toContain("/inputs/ignored.png");
+  });
+
+  it("rejects a native LipDub reference video without audio before queue start", () => {
+    const request = validRequest("lipdub");
+    const plan = buildCommand(request);
+    vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      frames: 121,
+      fps: 24,
+      durationSeconds: 5.04,
+      hasAudio: false,
+    });
+
+    expect(validateRequestPlan(request, plan)).toContain(
+      `LipDub-Referenzvideo enthält keine Audiospur (${request.lipDub.referenceVideo.path})`,
+    );
   });
 });

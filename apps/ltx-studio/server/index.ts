@@ -10,7 +10,7 @@ import { assetKinds, type AssetKind } from "../shared/assets.js";
 import { generationRequestSchema, outputNameSchema, PIPELINES } from "../shared/pipelines.js";
 import { admissionClientAvailable } from "./admission.js";
 import { AssetStore } from "./assets.js";
-import { buildCommand, validatePlanPaths } from "./command.js";
+import { buildCommand, validateRequestPlan } from "./command.js";
 import {
   appRoot,
   admissionRequired,
@@ -181,7 +181,7 @@ app.get("/api/uploads/:kind/:filename", (request, response) => {
 app.post("/api/jobs/plan", (request, response) => {
   const payload = generationRequestSchema.parse(request.body);
   const plan = buildCommand(payload);
-  response.json({ command: plan.displayCommand, outputPath: plan.outputPath, pathErrors: validatePlanPaths(plan) });
+  response.json({ command: plan.displayCommand, outputPath: plan.outputPath, pathErrors: validateRequestPlan(payload, plan) });
 });
 
 app.get("/api/jobs", (_request, response) => response.json({ jobs: jobs.list() }));

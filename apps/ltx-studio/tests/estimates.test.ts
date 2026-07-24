@@ -53,6 +53,7 @@ describe("resource and runtime estimates", () => {
       frames: 2401,
       fps: 24,
       durationSeconds: 100.04,
+      hasAudio: true,
     });
 
     const sharedEstimate = estimateResources(request);
