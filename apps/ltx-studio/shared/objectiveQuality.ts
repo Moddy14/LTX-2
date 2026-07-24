@@ -61,10 +61,96 @@ export const identityMetricsSchema = z.object({
 
 export type IdentityMetrics = z.infer<typeof identityMetricsSchema>;
 
+const avSyncRawMetricsBaseSchema = z.object({
+  status: z.enum(["measured", "insufficient", "failed", "not-applicable"]),
+  error: z.string().min(1).max(500).nullable(),
+  method: z.literal("classical-audio-mouth-motion.v1"),
+  sampledVideoFrames: z.number().int().min(0),
+  validMotionPairs: z.number().int().min(0),
+  motionCoverage: z.number().finite().min(0).max(1),
+  audioWindowCount: z.number().int().min(0),
+  audioActivityRatio: z.number().finite().min(0).max(1).nullable(),
+  usableAudioActivitySeconds: nonNegativeNumber,
+  mouthCoverageDuringAudioActivity: z.number().finite().min(0).max(1),
+  usableWindowCount: z.number().int().min(0),
+  estimatedAudioLeadMilliseconds: z.number().int().min(-500).max(500).nullable(),
+  lagSearchLimitMilliseconds: z.literal(500),
+  lagResolutionMilliseconds: z.number().int().min(10).max(200).nullable(),
+  effectiveVideoSampleMilliseconds: z.number().finite().min(0).max(200).nullable(),
+  correlationPeak: z.number().finite().min(-1).max(1).nullable(),
+  zeroLagCorrelation: z.number().finite().min(-1).max(1).nullable(),
+  peakProminence: z.number().finite().min(0).max(2).nullable(),
+  peakWidthMilliseconds: z.number().int().min(0).max(1_000).nullable(),
+  featureLagAgreementMilliseconds: z.number().int().min(0).max(1_000).nullable(),
+  windowLagIqrMilliseconds: z.number().int().min(0).max(1_000).nullable(),
+  nullP95Correlation: z.number().finite().min(-1).max(1).nullable(),
+}).strict();
+
+export const avSyncRawMetricsSchema = avSyncRawMetricsBaseSchema.superRefine((value, context) => {
+  if (value.status !== "measured") {
+    if (value.error === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["error"],
+        message: "Nicht gemessene AV-Rohwerte benötigen einen erklärenden Fehlertext.",
+      });
+    }
+    return;
+  }
+  if (value.error !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["error"],
+      message: "Eine gemessene AV-Rohprüfung darf keinen Fehler tragen.",
+    });
+  }
+  const requiredMeasurements = [
+    "audioActivityRatio",
+    "estimatedAudioLeadMilliseconds",
+    "lagResolutionMilliseconds",
+    "effectiveVideoSampleMilliseconds",
+    "correlationPeak",
+    "zeroLagCorrelation",
+    "peakProminence",
+    "peakWidthMilliseconds",
+    "featureLagAgreementMilliseconds",
+    "windowLagIqrMilliseconds",
+    "nullP95Correlation",
+  ] as const;
+  for (const field of requiredMeasurements) {
+    if (value[field] === null) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: "Eine gemessene AV-Rohprüfung benötigt diesen Messwert.",
+      });
+    }
+  }
+  if (value.validMotionPairs < 24 || value.motionCoverage < 0.6) {
+    context.addIssue({
+      code: "custom",
+      path: ["validMotionPairs"],
+      message: "Eine gemessene AV-Rohprüfung benötigt mindestens 24 kontinuierliche Bewegungspaare.",
+    });
+  }
+  if (value.usableAudioActivitySeconds < 1
+    || value.mouthCoverageDuringAudioActivity < 0.7
+    || value.usableWindowCount < 2) {
+    context.addIssue({
+      code: "custom",
+      path: ["usableAudioActivitySeconds"],
+      message: "Eine gemessene AV-Rohprüfung benötigt ausreichend abgedeckte Aktivität und mindestens zwei Fenster.",
+    });
+  }
+});
+
+export type AvSyncRawMetrics = z.infer<typeof avSyncRawMetricsSchema>;
+
 export const objectiveWorkerResultSchema = z.object({
   technical: objectiveTechnicalMetricsSchema,
   face: faceTrackingMetricsSchema,
   identity: identityMetricsSchema,
+  avSync: avSyncRawMetricsSchema,
 }).strict();
 
 export type ObjectiveWorkerResult = z.infer<typeof objectiveWorkerResultSchema>;
@@ -116,9 +202,43 @@ const objectiveQualityAnalysisV2Schema = z.object({
   limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
 }).strict();
 
+const objectiveQualityAnalysisV3Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-objective-quality.v3"),
+  analyzerVersion: z.literal("ffprobe-yunet5-sface-avmotion.v3"),
+  createdAt: z.string().datetime({ offset: true }),
+  status: z.enum(["measured", "insufficient"]),
+  technical: objectiveTechnicalMetricsSchema,
+  face: faceTrackingMetricsSchema.nullable(),
+  identity: identityMetricsSchema,
+  avSync: avSyncRawMetricsSchema,
+  capabilities: z.object({
+    avSync: z.enum([
+      "classical-av-raw-measured",
+      "classical-av-insufficient",
+      "classical-av-failed",
+      "not-applicable",
+    ]),
+    identity: z.enum([
+      "sface-raw-measured",
+      "sface-insufficient",
+      "sface-failed",
+      "reference-provenance-required",
+      "not-applicable",
+    ]),
+    dialogue: z.literal("whisper-not-run"),
+  }).strict(),
+  findings: z.array(z.object({
+    code: z.string().min(1).max(80),
+    level: z.enum(["info", "warning", "error"]),
+    message: z.string().min(1).max(500),
+  }).strict()).max(30),
+  limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
+}).strict();
+
 export const objectiveQualityAnalysisSchema = z.union([
   objectiveQualityAnalysisV1Schema,
   objectiveQualityAnalysisV2Schema,
+  objectiveQualityAnalysisV3Schema,
 ]);
 
 export type ObjectiveQualityAnalysis = z.infer<typeof objectiveQualityAnalysisSchema>;
@@ -156,9 +276,16 @@ const outputAnalysisRecordV2Schema = z.object({
   result: objectiveQualityAnalysisV2Schema.nullable(),
 }).strict();
 
+const outputAnalysisRecordV3Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v3"),
+  ...outputAnalysisRecordFields,
+  result: objectiveQualityAnalysisV3Schema.nullable(),
+}).strict();
+
 export const outputAnalysisRecordSchema = z.union([
   outputAnalysisRecordV1Schema,
   outputAnalysisRecordV2Schema,
+  outputAnalysisRecordV3Schema,
 ]);
 
 export type OutputAnalysisRecord = z.infer<typeof outputAnalysisRecordSchema>;

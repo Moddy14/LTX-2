@@ -162,7 +162,7 @@ export const fieldHelp = {
   qualityNote:
     "Wofür: Hält sichtbare Fehler und die nächste gezielte Parameteränderung fest. Gute Eingabe: Zeitpunkt, konkrete Beobachtung und vermutete Ursache, zum Beispiel '1,8 s: Lippen 3 Frames zu spät; Referenzstärke 0,9 testen'.",
   objectiveAnalysis:
-    "Wofür: Misst den technischen Audio-/Videovertrag, verfolgt Gesicht, Nase und Mund mit CPU-YuNet und vergleicht die Identität mit CPU-SFace, sofern die Referenz beim Render kryptografisch gebunden wurde. Die Rohwerte helfen beim Vergleich identischer Testfälle. Sie sind noch keine kalibrierte 0-bis-10-Note.",
+    "Wofür: Misst den technischen Audio-/Videovertrag, verfolgt Gesicht, Nase und Mund mit CPU-YuNet, vergleicht die Identität mit CPU-SFace und schätzt grobe Audio-Mund-Bewegungsverzögerungen ohne fremden Modell-Checkpoint. Die Rohwerte helfen beim Vergleich identischer Testfälle. Sie sind noch keine kalibrierte 0-bis-10-Note.",
   objectiveFaceDetection:
     "Wofür: Anteil der untersuchten Frames, in denen YuNet ein Gesicht erkennt. Gut: bei einem unverdeckten Einzelporträt nahe 100 %. Ein niedriger Wert kann Verdeckung, Bewegungsunschärfe oder eine ungeeignete Ansicht bedeuten; er ist kein Qualitäts-Score.",
   objectiveGeometryCoverage:
@@ -187,4 +187,28 @@ export const fieldHelp = {
     "Wofür: Differenz der Startzeitstempel von Audio- und Videospur. Gut für den technischen Vertrag: höchstens 40 ms. Dieser Wert misst nicht, ob Laute und Lippenbewegung phonemgenau synchron sind.",
   objectiveAvDurationDelta:
     "Wofür: Differenz zwischen messbarer Audio- und Videospurdauer. Gut für den technischen Vertrag: höchstens 40 ms. Fehlt eine echte Audiodauer, bleibt der Wert ausdrücklich nicht messbar.",
+  objectiveAvMotionLag:
+    "Wofür: Grobe Verzögerung am stärksten gemeinsamen Audio-Onset-/Mundbewegungssignal. Positiv bedeutet, dass die sichtbare Mundbewegung dem Audio folgt; negativ bedeutet, dass sie vorausläuft. Nur bei demselben Testclip vergleichen. Das ist keine Phonem- oder Visemprüfung.",
+  objectiveAvMotionCorrelation:
+    "Wofür: Pearson-Korrelation am besten gefundenen Versatz zwischen Audio-Onsets und stabilisierter Mundbewegung. Höher bedeutet ein klareres gemeinsames Bewegungssignal, nicht automatisch bessere LipSync-Qualität. Musik und Lichtwechsel können den Wert verfälschen.",
+  objectiveAvMotionProminence:
+    "Wofür: Abstand des besten Korrelationspeaks zum stärksten konkurrierenden Peak. Ein größerer Abstand macht die Lag-Schätzung eindeutiger. Der Rohwert ist lokal noch nicht als Qualitätsgrenze kalibriert.",
+  objectiveAvMotionPeakWidth:
+    "Wofür: Breite des nahezu besten Lag-Bereichs. Eine schmale Spitze lokalisiert den Versatz genauer; eine breite Spitze ist zeitlich mehrdeutig. Der Wert ist eine Unsicherheitsanzeige, keine Qualitätsnote.",
+  objectiveAvMotionCoverage:
+    "Wofür: Anteil aufeinanderfolgender Stichproben, für die dieselbe stabilisierte Mundregion verfolgt und optische Bewegung gemessen werden konnte. Gut: bei einem sichtbaren Einzelgesicht nahe 100 %.",
+  objectiveAvAudioActivity:
+    "Wofür: Anteil der Audiofenster mit ausreichend strukturierter Pegel-/Onset-Aktivität. Der Wert bestätigt keine Sprache. Sehr niedrige oder nahezu durchgehend aktive Werte liefern zu wenig zeitliche Struktur; Musik kann den Rohwert verfälschen.",
+  objectiveAvActivityCoverage:
+    "Wofür: Anteil der erwarteten aktiven Audiozeit, für die eine kontinuierlich stabilisierte Mundbewegung vorliegt. Gut: mindestens 70 %. Der Wert verhindert, dass nur stille oder leicht verfolgbare Stellen die Lag-Schätzung tragen.",
+  objectiveAvUsableActivity:
+    "Wofür: Effektive Dauer der aktiven Audiozeit mit verwertbarem Mundtrack. Für den Rohproxy sind mindestens 1,0 Sekunden nötig. Mehr Dauer liefert mehr unabhängige Vergleichsfenster.",
+  objectiveAvResolution:
+    "Wofür: Tatsächliche zeitliche Auflösung der Lag-Suche, abgeleitet aus dem Abstand der untersuchten Videoframes. Sie ist bei 24 FPS ungefähr 42 ms und wird bei ausgedünnter Analyse gröber; kleinere Unterschiede sind nicht belastbar.",
+  objectiveAvFeatureAgreement:
+    "Wofür: Abstand zwischen den getrennt aus optischem Fluss und Erscheinungsänderung geschätzten Lags. Ein kleiner Wert bedeutet, dass zwei unterschiedliche Mundbewegungsmerkmale denselben Zeitbereich unterstützen.",
+  objectiveAvWindowIqr:
+    "Wofür: Interquartilsabstand der Lag-Schätzungen aus mehreren Zeitfenstern. Ein kleiner Wert zeigt zeitlichen Konsens über den Clip; große Werte bedeuten wechselnde oder zufällige Übereinstimmung.",
+  objectiveAvNullP95:
+    "Wofür: 95. Perzentil der besten Scheinkorrelationen nach kontrolliertem zyklischem Verschieben des Audios. Der echte Peak muss diesen Nullmodellwert klar übertreffen, sonst bleibt die Messung unzureichend.",
 } as const;

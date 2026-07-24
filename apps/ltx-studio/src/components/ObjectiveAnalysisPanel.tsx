@@ -44,7 +44,11 @@ export function ObjectiveAnalysisPanel({
   const active = analysis ? ["queued", "running"].includes(analysis.status) : false;
   const result = analysis?.status === "completed" ? analysis.result : null;
   const identity = result?.schemaVersion === "ltx-studio-objective-quality.v2"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v3"
     ? result.identity
+    : null;
+  const avSync = result?.schemaVersion === "ltx-studio-objective-quality.v3"
+    ? result.avSync
     : null;
   const showIdentityMetrics = identity && ["measured", "insufficient"].includes(identity.status);
   const statusLabel = analysis?.status === "completed"
@@ -129,9 +133,75 @@ export function ObjectiveAnalysisPanel({
               " ms",
               0,
             )} help={fieldHelp.objectiveAvDurationDelta} />
+            {avSync ? (
+              <>
+                <MetricRow label="AV-Rohversatz" value={metricWithUnit(
+                  avSync.estimatedAudioLeadMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveAvMotionLag} />
+                <MetricRow label="AV-Zeitauflösung" value={metricWithUnit(
+                  avSync.lagResolutionMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveAvResolution} />
+                <MetricRow label="AV-Korrelation" value={metricWithUnit(
+                  avSync.correlationPeak,
+                  "",
+                  3,
+                )} help={fieldHelp.objectiveAvMotionCorrelation} />
+                <MetricRow label="Nullmodell p95" value={metricWithUnit(
+                  avSync.nullP95Correlation,
+                  "",
+                  3,
+                )} help={fieldHelp.objectiveAvNullP95} />
+                <MetricRow label="AV-Prominenz" value={metricWithUnit(
+                  avSync.peakProminence,
+                  "",
+                  3,
+                )} help={fieldHelp.objectiveAvMotionProminence} />
+                <MetricRow label="AV-Peakbreite" value={metricWithUnit(
+                  avSync.peakWidthMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveAvMotionPeakWidth} />
+                <MetricRow label="Merkmals-Lagabweichung" value={metricWithUnit(
+                  avSync.featureLagAgreementMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveAvFeatureAgreement} />
+                <MetricRow label="Fenster-Lag-IQR" value={metricWithUnit(
+                  avSync.windowLagIqrMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveAvWindowIqr} />
+                <MetricRow label="Mundbewegungsabdeckung" value={percent(
+                  avSync.motionCoverage,
+                )} help={fieldHelp.objectiveAvMotionCoverage} />
+                <MetricRow label="Aktivitätsabdeckung" value={percent(
+                  avSync.mouthCoverageDuringAudioActivity,
+                )} help={fieldHelp.objectiveAvActivityCoverage} />
+                <MetricRow label="Nutzbare Aktivität" value={metricWithUnit(
+                  avSync.usableAudioActivitySeconds,
+                  " s",
+                  2,
+                )} help={fieldHelp.objectiveAvUsableActivity} />
+                <MetricRow label="Audioaktivität" value={avSync.audioActivityRatio === null
+                  ? "Nicht messbar"
+                  : percent(avSync.audioActivityRatio)} help={fieldHelp.objectiveAvAudioActivity} />
+              </>
+            ) : null}
           </div>
           <div className="objective-analysis__capabilities">
-            <span>AV-Sync <strong>AV-Evaluator fehlt</strong></span>
+            <span>AV-Sync <strong>{avSync?.status === "measured"
+              ? "Rohproxy, Phonem offen"
+              : avSync?.status === "failed"
+                ? "Proxy-Fehler"
+                : avSync?.status === "insufficient"
+                  ? "Proxy unzureichend"
+                  : avSync?.status === "not-applicable"
+                    ? "Nicht anwendbar"
+                    : "Phonem-Evaluator fehlt"}</strong></span>
             <span>Identität <strong>{identity?.status === "measured"
               ? "SFace Rohwerte"
               : identity?.status === "failed"

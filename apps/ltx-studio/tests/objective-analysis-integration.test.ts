@@ -73,6 +73,30 @@ const syntheticWorkerResult: ObjectiveWorkerResult = {
     cosineMinimum: null,
     outputTemporalConsistencyMedian: null,
   },
+  avSync: {
+    status: "insufficient",
+    error: "Synthetic worker has no correlated mouth signal.",
+    method: "classical-audio-mouth-motion.v1",
+    sampledVideoFrames: 24,
+    validMotionPairs: 0,
+    motionCoverage: 0,
+    audioWindowCount: 98,
+    audioActivityRatio: 1,
+    usableAudioActivitySeconds: 0,
+    mouthCoverageDuringAudioActivity: 0,
+    usableWindowCount: 0,
+    estimatedAudioLeadMilliseconds: null,
+    lagSearchLimitMilliseconds: 500,
+    lagResolutionMilliseconds: null,
+    effectiveVideoSampleMilliseconds: null,
+    correlationPeak: null,
+    zeroLagCorrelation: null,
+    peakProminence: null,
+    peakWidthMilliseconds: null,
+    featureLagAgreementMilliseconds: null,
+    windowLagIqrMilliseconds: null,
+    nullP95Correlation: null,
+  },
 };
 
 afterEach(async () => {
@@ -107,6 +131,33 @@ function job(
     dgxJobId: null,
     thermalProfile: null,
     identityEvidence: null,
+  };
+}
+
+function measuredIdentity(
+  preprocessingVersion: "yunet5-aligncrop-112.v1" | "yunet5-aligncrop-112-track.v2",
+): ObjectiveWorkerResult["identity"] {
+  return {
+    status: "measured",
+    error: null,
+    modelName: "OpenCV SFace 2021dec",
+    modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    modelRevision: "3d7082438a6e4551e840c9b2bb60b71e8da4b524",
+    preprocessingVersion,
+    embeddingDimensions: 128,
+    referenceCount: 1,
+    sampledReferenceFrames: 1,
+    embeddedReferenceFrames: 1,
+    sampledOutputFrames: 24,
+    matchedOutputFrames: 24,
+    outputCoverage: 1,
+    ambiguousOutputFrames: 0,
+    referenceSelfConsistencyMedian: 1,
+    referenceSelfConsistencyP10: 1,
+    cosineMedian: 0.8,
+    cosineP10: 0.75,
+    cosineMinimum: 0.7,
+    outputTemporalConsistencyMedian: 0.98,
   };
 }
 
@@ -266,6 +317,56 @@ integrationIt("detects variable frame timing from actual frame timestamps", asyn
   expect(result.technical.audioVideoDurationDeltaSeconds).toBeNull();
 }, 20_000);
 
+integrationIt("preserves the signed audio stream PTS offset in the AV lag timebase", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pts-offset-"));
+  roots.push(root);
+  const outputPath = join(root, "audio-offset.mp4");
+  const generated = spawnSync("ffmpeg", [
+    "-v", "error",
+    "-f", "lavfi", "-i", "color=c=black:s=64x64:r=24:d=2",
+    "-itsoffset", "0.125",
+    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2",
+    "-map", "0:v:0",
+    "-map", "1:a:0",
+    "-c:v", "mpeg4",
+    "-c:a", "aac",
+    "-y",
+    outputPath,
+  ], { encoding: "utf8", timeout: 15_000 });
+  expect(generated.status, generated.stderr).toBe(0);
+
+  const code = [
+    "import importlib.util, json, pathlib, sys",
+    `script = pathlib.Path(${JSON.stringify(join(appRoot, "scripts", "analyze-face-quality.py"))})`,
+    "spec = importlib.util.spec_from_file_location('ltx_objective_worker', script)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "technical, signed_offset = module.probe_technical(pathlib.Path(sys.argv[1]))",
+    "from av_sync_proxy import decode_audio_features",
+    "base_times, _, _ = decode_audio_features(pathlib.Path(sys.argv[1]), 0.0)",
+    "shifted_times, _, _ = decode_audio_features(pathlib.Path(sys.argv[1]), signed_offset)",
+    "print(json.dumps({'technical': technical, 'signedOffset': signed_offset, 'decodedShift': float(shifted_times[0] - base_times[0])}))",
+  ].join("\n");
+  const inspected = spawnSync(pythonExecutable, ["-c", code, outputPath], {
+    cwd: join(appRoot, "scripts"),
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  expect(inspected.status, inspected.stderr).toBe(0);
+  const result = JSON.parse(inspected.stdout) as {
+    technical: { audioVideoStartDeltaSeconds: number };
+    signedOffset: number;
+    decodedShift: number;
+  };
+
+  expect(result.signedOffset).toBeGreaterThan(0.08);
+  expect(result.technical.audioVideoStartDeltaSeconds).toBeCloseTo(
+    Math.abs(result.signedOffset),
+    6,
+  );
+  expect(result.decodedShift).toBeCloseTo(result.signedOffset, 6);
+}, 20_000);
+
 integrationIt("fails closed when bound identity evidence changes while the worker is running", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-evidence-race-"));
   roots.push(root);
@@ -372,32 +473,70 @@ integrationIt("replaces a completed pre-track v2 cache with a fresh analysis att
   library.recordCompleted([completedJob]);
   const target = library.resolveAnalysisTarget(outputName);
   const staleWorker = structuredClone(syntheticWorkerResult);
-  staleWorker.identity = {
-    status: "measured",
-    error: null,
-    modelName: "OpenCV SFace 2021dec",
-    modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
-    modelRevision: "3d7082438a6e4551e840c9b2bb60b71e8da4b524",
-    preprocessingVersion: "yunet5-aligncrop-112.v1",
-    embeddingDimensions: 128,
-    referenceCount: 1,
-    sampledReferenceFrames: 1,
-    embeddedReferenceFrames: 1,
-    sampledOutputFrames: 24,
-    matchedOutputFrames: 24,
-    outputCoverage: 1,
-    ambiguousOutputFrames: 0,
-    referenceSelfConsistencyMedian: 1,
-    referenceSelfConsistencyP10: 1,
-    cosineMedian: 0.8,
-    cosineP10: 0.75,
-    cosineMinimum: 0.7,
-    outputTemporalConsistencyMedian: 0.98,
-  };
+  staleWorker.identity = measuredIdentity("yunet5-aligncrop-112.v1");
   const timestamp = "2026-07-24T18:30:00.000Z";
   const staleAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918888";
   writeOutputAnalysis(root, {
     schemaVersion: "ltx-studio-output-analysis.v2",
+    outputName,
+    sizeBytes: target.sizeBytes,
+    modifiedAtMs: target.modifiedAtMs,
+    changedAtMs: target.changedAtMs,
+    fileId: target.fileId,
+    jobId: target.jobId,
+    analysisId: staleAnalysisId,
+    attempt: 1,
+    status: "completed",
+    progress: 100,
+    createdAt: timestamp,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    updatedAt: timestamp,
+    error: null,
+    result: {
+      schemaVersion: "ltx-studio-objective-quality.v2",
+      analyzerVersion: "ffprobe-yunet5-sface.v2",
+      createdAt: timestamp,
+      status: "measured",
+      technical: staleWorker.technical,
+      face: staleWorker.face,
+      identity: staleWorker.identity,
+      capabilities: {
+        avSync: "syncnet-required",
+        identity: "sface-raw-measured",
+        dialogue: "whisper-not-run",
+      },
+      findings: [],
+      limitations: ["Pre-AV-motion cache."],
+    },
+  });
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-tmp"),
+  });
+
+  const fresh = manager.start(outputName);
+
+  expect(fresh.analysisId).not.toBe(staleAnalysisId);
+  expect(fresh.attempt).toBe(2);
+  expect(fresh.status).toBe("queued");
+  manager.cancel(outputName, fresh.analysisId);
+}, 20_000);
+
+integrationIt("replaces a v3 cache that used obsolete SFace preprocessing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-v3-sface-upgrade-"));
+  roots.push(root);
+  const outputName = "stale-v3-sface-cache.mp4";
+  await writeFile(join(root, outputName), "synthetic-output");
+  const completedJob = job(outputName);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const target = library.resolveAnalysisTarget(outputName);
+  const staleWorker = structuredClone(syntheticWorkerResult);
+  staleWorker.identity = measuredIdentity("yunet5-aligncrop-112.v1");
+  const timestamp = "2026-07-24T18:31:00.000Z";
+  const staleAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918881";
+  writeOutputAnalysis(root, {
+    schemaVersion: "ltx-studio-output-analysis.v3",
     outputName,
     sizeBytes: target.sizeBytes,
     modifiedAtMs: target.modifiedAtMs,
@@ -425,6 +564,49 @@ integrationIt("replaces a completed pre-track v2 cache with a fresh analysis att
   expect(fresh.attempt).toBe(2);
   expect(fresh.status).toBe("queued");
   manager.cancel(outputName, fresh.analysisId);
+}, 20_000);
+
+integrationIt("reuses a completed v3 cache with current SFace and AV preprocessing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-v3-current-cache-"));
+  roots.push(root);
+  const outputName = "current-v3-cache.mp4";
+  await writeFile(join(root, outputName), "synthetic-output");
+  const completedJob = job(outputName);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const target = library.resolveAnalysisTarget(outputName);
+  const currentWorker = structuredClone(syntheticWorkerResult);
+  currentWorker.identity = measuredIdentity("yunet5-aligncrop-112-track.v2");
+  const timestamp = "2026-07-24T18:32:00.000Z";
+  const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918882";
+  writeOutputAnalysis(root, {
+    schemaVersion: "ltx-studio-output-analysis.v3",
+    outputName,
+    sizeBytes: target.sizeBytes,
+    modifiedAtMs: target.modifiedAtMs,
+    changedAtMs: target.changedAtMs,
+    fileId: target.fileId,
+    jobId: target.jobId,
+    analysisId: currentAnalysisId,
+    attempt: 1,
+    status: "completed",
+    progress: 100,
+    createdAt: timestamp,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    updatedAt: timestamp,
+    error: null,
+    result: buildObjectiveQualityAnalysis(currentWorker, timestamp),
+  });
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-tmp"),
+  });
+
+  const reused = manager.start(outputName);
+
+  expect(reused.analysisId).toBe(currentAnalysisId);
+  expect(reused.attempt).toBe(1);
+  expect(reused.status).toBe("completed");
 }, 20_000);
 
 it("cleans only stale managed analysis directories during Studio startup", async () => {

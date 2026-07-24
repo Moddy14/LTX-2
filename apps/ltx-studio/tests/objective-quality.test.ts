@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { buildObjectiveQualityAnalysis } from "../server/outputAnalysis.js";
-import type { ObjectiveWorkerResult } from "../shared/objectiveQuality.js";
+import {
+  objectiveWorkerResultSchema,
+  type ObjectiveWorkerResult,
+} from "../shared/objectiveQuality.js";
 
 function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorkerResult {
   return {
@@ -51,17 +54,41 @@ function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorker
       cosineMinimum: 0.8,
       outputTemporalConsistencyMedian: 0.99,
     },
+    avSync: {
+      status: "measured",
+      error: null,
+      method: "classical-audio-mouth-motion.v1",
+      sampledVideoFrames: 96,
+      validMotionPairs: 95,
+      motionCoverage: 1,
+      audioWindowCount: 400,
+      audioActivityRatio: 0.72,
+      usableAudioActivitySeconds: 2.8,
+      mouthCoverageDuringAudioActivity: 1,
+      usableWindowCount: 5,
+      estimatedAudioLeadMilliseconds: 30,
+      lagSearchLimitMilliseconds: 500,
+      lagResolutionMilliseconds: 42,
+      effectiveVideoSampleMilliseconds: 41.667,
+      correlationPeak: 0.67,
+      zeroLagCorrelation: 0.61,
+      peakProminence: 0.12,
+      peakWidthMilliseconds: 84,
+      featureLagAgreementMilliseconds: 42,
+      windowLagIqrMilliseconds: 42,
+      nullP95Correlation: 0.25,
+    },
     ...overrides,
   };
 }
 
 describe("objective output quality", () => {
-  it("reports real SFace raw measurements without inventing SyncNet or SOTA scores", () => {
+  it("reports SFace and classical AV raw measurements without inventing SOTA scores", () => {
     const result = buildObjectiveQualityAnalysis(worker(), "2026-07-24T18:10:00.000Z");
 
     expect(result.status).toBe("measured");
     expect(result.capabilities).toEqual({
-      avSync: "syncnet-required",
+      avSync: "classical-av-raw-measured",
       identity: "sface-raw-measured",
       dialogue: "whisper-not-run",
     });
@@ -70,9 +97,10 @@ describe("objective output quality", () => {
     expect(result).not.toHaveProperty("score");
     expect(result).not.toHaveProperty("rating");
     expect(result.capabilities.avSync).not.toBe("measured");
-    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v2");
-    if (result.schemaVersion === "ltx-studio-objective-quality.v2") {
+    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v3");
+    if (result.schemaVersion === "ltx-studio-objective-quality.v3") {
       expect(result.identity.cosineP10).toBe(0.84);
+      expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
     }
   });
 
@@ -117,6 +145,7 @@ describe("objective output quality", () => {
       expect.objectContaining({ code: "audio-video-start-drift" }),
       expect.objectContaining({ code: "audio-video-duration-drift" }),
     ]));
+    expect(result.status).toBe("insufficient");
   });
 
   it("does not call unknown or variable frame timing a sufficient measurement", () => {
@@ -151,5 +180,58 @@ describe("objective output quality", () => {
       code: "identity-measurement-failed",
       level: "warning",
     }));
+  });
+
+  it("fails closed when the classical AV lag is ambiguous", () => {
+    const baseline = worker();
+    const result = buildObjectiveQualityAnalysis(worker({
+      avSync: {
+        ...baseline.avSync,
+        status: "insufficient",
+        error: "Korrelationspeak ist zu breit.",
+        estimatedAudioLeadMilliseconds: null,
+        correlationPeak: null,
+        zeroLagCorrelation: null,
+        peakProminence: null,
+        peakWidthMilliseconds: null,
+        featureLagAgreementMilliseconds: null,
+        windowLagIqrMilliseconds: null,
+        nullP95Correlation: null,
+      },
+    }));
+
+    expect(result.status).toBe("insufficient");
+    expect(result.capabilities.avSync).toBe("classical-av-insufficient");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "classical-av-sync-insufficient",
+      level: "warning",
+    }));
+    expect(result).not.toHaveProperty("score");
+  });
+
+  it("rejects a measured AV status without its required evidence", () => {
+    const invalid = worker();
+    invalid.avSync = {
+      ...invalid.avSync,
+      error: "Contradictory measured state.",
+      validMotionPairs: 0,
+      motionCoverage: 0,
+      usableAudioActivitySeconds: 0,
+      mouthCoverageDuringAudioActivity: 0,
+      usableWindowCount: 0,
+      estimatedAudioLeadMilliseconds: null,
+      lagResolutionMilliseconds: null,
+      effectiveVideoSampleMilliseconds: null,
+      correlationPeak: null,
+      zeroLagCorrelation: null,
+      peakProminence: null,
+      peakWidthMilliseconds: null,
+      featureLagAgreementMilliseconds: null,
+      windowLagIqrMilliseconds: null,
+      nullP95Correlation: null,
+    };
+
+    expect(objectiveWorkerResultSchema.safeParse(invalid).success).toBe(false);
+    expect(() => buildObjectiveQualityAnalysis(invalid)).toThrow();
   });
 });

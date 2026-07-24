@@ -50,7 +50,7 @@ type OutputAnalysisManagerOptions = {
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
-  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v2" }>;
+  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v3" }>;
 };
 
 function analysisWasCancelled(task: AnalysisTask): boolean {
@@ -59,8 +59,8 @@ function analysisWasCancelled(task: AnalysisTask): boolean {
 
 function completedAnalysisIsCurrent(record: OutputAnalysisRecord): boolean {
   if (record.status !== "completed"
-    || record.schemaVersion !== "ltx-studio-output-analysis.v2"
-    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v2") return false;
+    || record.schemaVersion !== "ltx-studio-output-analysis.v3"
+    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v3") return false;
   const identity = record.result.identity;
   if (["not-applicable", "reference-provenance-missing"].includes(identity.status)) return true;
   return identity.modelSha256 === CURRENT_IDENTITY_MODEL_SHA256
@@ -100,9 +100,10 @@ function revisionOf(target: OutputAnalysisTarget): OutputRevision {
 }
 
 export function buildObjectiveQualityAnalysis(
-  worker: ObjectiveWorkerResult,
+  input: ObjectiveWorkerResult,
   createdAt = now(),
-): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v2" }> {
+): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v3" }> {
+  const worker = objectiveWorkerResultSchema.parse(input);
   const findings: ObjectiveQualityAnalysis["findings"] = [];
   if (worker.technical.hasAudio !== true) {
     findings.push({
@@ -186,6 +187,34 @@ export function buildObjectiveQualityAnalysis(
       message: `SFace-Teilprüfung fehlgeschlagen: ${worker.identity.error ?? "unbekannter Fehler"}`,
     });
   }
+  if (worker.avSync.status === "measured") {
+    const lag = worker.avSync.estimatedAudioLeadMilliseconds;
+    if (lag === null) throw new Error("Gemessener AV-Rohproxy enthält keinen Rohversatz.");
+    const timing = lag > 0
+      ? `${lag} ms Audio-Vorlauf`
+      : lag < 0
+        ? `${Math.abs(lag)} ms Mund-/Video-Vorlauf`
+        : "0 ms Rohversatz";
+    findings.push({
+      code: "classical-av-sync-raw-measured",
+      level: "info",
+      message: `Der klassische AV-Rohproxy fand sein stärkstes gemeinsames Bewegungssignal bei ${timing}.`,
+    });
+  } else if (worker.avSync.status === "insufficient") {
+    findings.push({
+      code: "classical-av-sync-insufficient",
+      level: "warning",
+      message: worker.avSync.error
+        ? `AV-Rohproxy unzureichend: ${worker.avSync.error}`
+        : "Der klassische AV-Rohproxy erhielt kein belastbares Bewegungssignal.",
+    });
+  } else if (worker.avSync.status === "failed") {
+    findings.push({
+      code: "classical-av-sync-failed",
+      level: "warning",
+      message: `AV-Rohproxy fehlgeschlagen: ${worker.avSync.error ?? "unbekannter Fehler"}`,
+    });
+  }
   findings.push({
     code: "calibration-required",
     level: "info",
@@ -193,19 +222,31 @@ export function buildObjectiveQualityAnalysis(
   });
   const sufficient = worker.technical.hasAudio === true
     && worker.technical.constantFrameRate === true
+    && worker.technical.audioVideoStartDeltaSeconds !== null
+    && worker.technical.audioVideoStartDeltaSeconds <= 0.04
+    && worker.technical.audioVideoDurationDeltaSeconds !== null
+    && worker.technical.audioVideoDurationDeltaSeconds <= 0.04
     && worker.face.sampledFrames >= 8
     && worker.face.geometryCoverage >= 0.5
-    && ["measured", "not-applicable"].includes(worker.identity.status);
+    && ["measured", "not-applicable"].includes(worker.identity.status)
+    && worker.avSync.status === "measured";
   return {
-    schemaVersion: "ltx-studio-objective-quality.v2",
-    analyzerVersion: "ffprobe-yunet5-sface.v2",
+    schemaVersion: "ltx-studio-objective-quality.v3",
+    analyzerVersion: "ffprobe-yunet5-sface-avmotion.v3",
     createdAt,
     status: sufficient ? "measured" : "insufficient",
     technical: worker.technical,
     face: worker.face,
     identity: worker.identity,
+    avSync: worker.avSync,
     capabilities: {
-      avSync: "syncnet-required",
+      avSync: worker.avSync.status === "measured"
+        ? "classical-av-raw-measured"
+        : worker.avSync.status === "insufficient"
+          ? "classical-av-insufficient"
+          : worker.avSync.status === "failed"
+            ? "classical-av-failed"
+            : "not-applicable",
       identity: worker.identity.status === "measured"
         ? "sface-raw-measured"
         : worker.identity.status === "insufficient"
@@ -221,7 +262,9 @@ export function buildObjectiveQualityAnalysis(
     limitations: [
       "YuNet liefert fünf Landmarken; die Werte messen Stabilität, aber keine Phonem-Mund-Synchronität.",
       "SFace misst Identitätsähnlichkeit nur gegen während der Generierung kryptografisch gebundene Studio-Referenzen.",
-      "AV-Sync benötigt weiterhin einen lizenzierten und lokal kalibrierten Audio-Video-Synchronisationsevaluator.",
+      "Der klassische AV-Rohproxy korreliert Audio-Onsets mit stabilisierter Mundbewegung; er beweist keine Phonem- oder Visemtreue.",
+      "Musik, Fremdsprache, Verdeckungen und starke Beleuchtungswechsel können den AV-Rohproxy verfälschen.",
+      "Eine SOTA-Aussage benötigt weiterhin einen lizenzierten und lokal kalibrierten Phonem-AV-Evaluator.",
       "Unkalibrierte Rohwerte dürfen keine automatische 10/10- oder SOTA-Freigabe erzeugen.",
     ],
   };
@@ -255,8 +298,8 @@ export class OutputAnalysisManager {
     if (current && ["queued", "running"].includes(current.status)) return current;
     if (current && completedAnalysisIsCurrent(current) && !force) return current;
     const createdAt = now();
-    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v2" }> = {
-      schemaVersion: "ltx-studio-output-analysis.v2",
+    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v3" }> = {
+      schemaVersion: "ltx-studio-output-analysis.v3",
       outputName,
       sizeBytes: target.sizeBytes,
       modifiedAtMs: target.modifiedAtMs,

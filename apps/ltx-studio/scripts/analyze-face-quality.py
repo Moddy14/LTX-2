@@ -17,6 +17,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+SCRIPT_ROOT = Path(__file__).absolute().parent
+if str(SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_ROOT))
+
+from av_sync_proxy import analyze_audio_motion_sync, stabilized_face_patch
+
 FACE_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 IDENTITY_MODEL_SHA256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
 IDENTITY_MODEL_REVISION = "3d7082438a6e4551e840c9b2bb60b71e8da4b524"
@@ -239,7 +245,7 @@ def probe_constant_frame_rate(video_path: Path) -> bool | None:
     return max(abs(delta - center) for delta in deltas) <= tolerance
 
 
-def probe_technical(video_path: Path) -> dict[str, object]:
+def probe_technical(video_path: Path) -> tuple[dict[str, object], float | None]:
     result = subprocess.run(
         [
             "ffprobe",
@@ -283,7 +289,7 @@ def probe_technical(video_path: Path) -> dict[str, object]:
     )
     video_start = finite_number(video.get("start_time"))
     audio_start = finite_number(audio.get("start_time")) if audio else None
-    return {
+    technical = {
         "durationSeconds": video_duration,
         "fps": fps,
         "frames": int(round(frames_value)) if frames_value is not None else None,
@@ -300,6 +306,12 @@ def probe_technical(video_path: Path) -> dict[str, object]:
             else None
         ),
     }
+    signed_audio_start_offset = (
+        audio_start - video_start
+        if video_start is not None and audio_start is not None
+        else None
+    )
+    return technical, signed_audio_start_offset
 
 
 def normalized_geometry(points: object):
@@ -342,7 +354,11 @@ def normalized_geometry(points: object):
     }
 
 
-def analyze(video_path: Path, model_path: Path, max_frames: int) -> dict[str, object]:
+def analyze(
+    video_path: Path,
+    model_path: Path,
+    max_frames: int,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     import cv2
     import numpy as np
 
@@ -365,6 +381,7 @@ def analyze(video_path: Path, model_path: Path, max_frames: int) -> dict[str, ob
     nose_positions: list[tuple[float, object]] = []
     mouth_angles: list[tuple[float, float]] = []
     mouth_spans: list[float] = []
+    tracked_candidates: list[dict[str, object]] = []
     previous_center = None
     frame_index = 0
 
@@ -404,7 +421,15 @@ def analyze(video_path: Path, model_path: Path, max_frames: int) -> dict[str, ob
                     previous_center = points.mean(axis=0)
                     detected += 1
                     confidences.append(float(selected[14]))
-                    face_areas.append(float(selected[2] * selected[3]) / max(float(width * height), 1.0))
+                    area_ratio = float(selected[2] * selected[3]) / max(float(width * height), 1.0)
+                    face_areas.append(area_ratio)
+                    tracked_candidates.append({
+                        "timestamp": timestamp,
+                        "landmarks": points,
+                        "confidence": float(selected[14]),
+                        "area_ratio": area_ratio,
+                        "stabilized_patch": stabilized_face_patch(frame, points),
+                    })
                     geometry = normalized_geometry(points)
                     if geometry is not None:
                         valid += 1
@@ -455,7 +480,7 @@ def analyze(video_path: Path, model_path: Path, max_frames: int) -> dict[str, ob
         "mouthAngleMedianDegrees": median([angle for _time, angle in mouth_angles]),
         "mouthAngleVelocityP95DegreesPerSecond": percentile(mouth_angle_velocities, 0.95),
         "mouthSpanCoefficientOfVariation": coefficient_of_variation(mouth_spans),
-    }
+    }, tracked_candidates
 
 
 def blank_identity(status: str) -> dict[str, object]:
@@ -526,6 +551,7 @@ def detect_face_embeddings(detector: object, recognizer: object, frame: object):
                 dtype=np.float64,
             ),
             "center": np.asarray([x + box_width * 0.5, y + box_height * 0.5], dtype=np.float64),
+            "stabilized_patch": stabilized_face_patch(frame, face[4:14].reshape(5, 2)),
         })
     return candidates
 
@@ -1056,17 +1082,60 @@ def main() -> int:
         except Exception as error:  # noqa: BLE001
             identity = blank_identity("failed")
             identity["error"] = f"{type(error).__name__}: {error}"[:500]
+        technical, audio_start_offset = probe_technical(video_snapshot)
+        if args.identity_status == "available" and identity_sampled_frames > 0:
+            face = face_metrics_from_tracked_candidates(
+                identity_sampled_frames,
+                identity_track,
+            )
+            motion_track = identity_track
+            motion_sampled_frames = identity_sampled_frames
+        else:
+            face, motion_track = analyze(
+                video_snapshot,
+                face_model_snapshot,
+                args.max_frames,
+            )
+            motion_sampled_frames = int(face["sampledFrames"])
+        try:
+            av_sync = analyze_audio_motion_sync(
+                video_snapshot,
+                motion_track,
+                motion_sampled_frames,
+                finite_number(technical["durationSeconds"]),
+                technical["hasAudio"] if isinstance(technical["hasAudio"], bool) else None,
+                audio_start_offset,
+            )
+        except Exception as error:  # noqa: BLE001
+            av_sync = {
+                "status": "failed",
+                "error": f"{type(error).__name__}: {error}"[:500],
+                "method": "classical-audio-mouth-motion.v1",
+                "sampledVideoFrames": motion_sampled_frames,
+                "validMotionPairs": 0,
+                "motionCoverage": 0.0,
+                "audioWindowCount": 0,
+                "audioActivityRatio": None,
+                "usableAudioActivitySeconds": 0.0,
+                "mouthCoverageDuringAudioActivity": 0.0,
+                "usableWindowCount": 0,
+                "estimatedAudioLeadMilliseconds": None,
+                "lagSearchLimitMilliseconds": 500,
+                "lagResolutionMilliseconds": None,
+                "effectiveVideoSampleMilliseconds": None,
+                "correlationPeak": None,
+                "zeroLagCorrelation": None,
+                "peakProminence": None,
+                "peakWidthMilliseconds": None,
+                "featureLagAgreementMilliseconds": None,
+                "windowLagIqrMilliseconds": None,
+                "nullP95Correlation": None,
+            }
         result = {
-            "technical": probe_technical(video_snapshot),
-            "face": (
-                face_metrics_from_tracked_candidates(
-                    identity_sampled_frames,
-                    identity_track,
-                )
-                if args.identity_status == "available" and identity_sampled_frames > 0
-                else analyze(video_snapshot, face_model_snapshot, args.max_frames)
-            ),
+            "technical": technical,
+            "face": face,
             "identity": identity,
+            "avSync": av_sync,
         }
         verify_snapshot(video_snapshot, video_sha256, "Output video")
         verify_snapshot(face_model_snapshot, FACE_MODEL_SHA256, "YuNet model")
