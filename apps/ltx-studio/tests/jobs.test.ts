@@ -6,9 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   isActiveJobStatus,
+  frameProcessLogChunk,
   JobConflictError,
   JobManager,
   MAX_ACTIVE_JOBS,
+  PipelineProgressTracker,
+  progressFromPipelineLog,
   requestsShareLtxBase,
 } from "../server/jobs.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
@@ -41,6 +44,50 @@ describe("job persistence and reservations", () => {
 
   it("treats thermally paused jobs as active", () => {
     expect(isActiveJobStatus("paused")).toBe(true);
+  });
+
+  it("recognizes only complete tqdm records", () => {
+    expect(progressFromPipelineLog(" 87%|########7 | 26/30")).toBe(87);
+    expect(progressFromPipelineLog("100%|##########| 30/30")).toBe(100);
+    expect(progressFromPipelineLog("GPU-Speicher 90% belegt")).toBeNull();
+    expect(progressFromPipelineLog("Checkpoint 42% geladen")).toBeNull();
+    expect(progressFromPipelineLog("Transformer geladen")).toBeNull();
+  });
+
+  it("frames carriage-return tqdm streams across arbitrary chunks", () => {
+    const first = frameProcessLogChunk("", "  7%|#");
+    expect(first.records).toEqual([]);
+    const second = frameProcessLogChunk(
+      first.rest,
+      "      | 2/30\r 10%|##        | 3/30\rGPU-Speicher 90%",
+    );
+    expect(second.records).toEqual([
+      "  7%|#      | 2/30",
+      " 10%|##        | 3/30",
+    ]);
+    expect(frameProcessLogChunk(second.rest, "", true)).toEqual({
+      records: ["GPU-Speicher 90%"],
+      rest: "",
+    });
+  });
+
+  it("maps multiple pipeline phases monotonically below final completion", () => {
+    const tracker = new PipelineProgressTracker(0, 95, 2);
+    const values = [
+      tracker.update("INFO: Building text encoder from /models/gemma"),
+      tracker.update("INFO: Prompt encoding complete"),
+      tracker.update("INFO: Running denoising loop (30 steps, 256x256 97 frames @ 24 fps)"),
+      tracker.update("100%|##########| 30/30"),
+      tracker.update("INFO: Running denoising loop (3 steps, 512x512 97 frames @ 24 fps)"),
+      tracker.update(" 33%|###3      | 1/3"),
+      tracker.update("INFO: Building video decoder from /models/checkpoint"),
+      tracker.update("100%|##########| 2/2"),
+      tracker.update("INFO: Video saved to /outputs/test.mp4"),
+    ].filter((value): value is number => value !== null);
+
+    expect(values).toEqual([...values].sort((left, right) => left - right));
+    expect(values.at(-1)).toBe(95);
+    expect(values).not.toContain(100);
   });
 
   it("rejects two active jobs reserving the same output", async () => {
@@ -207,7 +254,7 @@ describe("job persistence and reservations", () => {
     expect(restored.prompt).toBe(request.prompt);
     expect(restored.outputName).toBe(request.outputName);
     expect(restored.outputUrl).toBeNull();
-    expect(restored.progress).toBe(100);
+    expect(restored.progress).toBe(95);
     expect(restored.logs).toEqual(["valid"]);
     expect(restored.cancelledBy).toBeNull();
     expect(restored.command).toContain("ltx_pipelines.ti2vid_two_stages");

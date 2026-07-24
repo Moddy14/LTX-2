@@ -102,6 +102,7 @@ const MAX_LOG_LINES = 600;
 const MAX_LOG_LINE_LENGTH = 4000;
 const RESOURCE_RETRY_INTERVAL_MS = 10_000;
 const RESOURCE_WAIT_LOG_INTERVAL_MS = 60_000;
+const MAX_RUNNING_PROCESS_PROGRESS = 95;
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
 
 export type VariantMode = "exact" | "random-seed";
@@ -147,6 +148,82 @@ export function isActiveJobStatus(status: JobStatus): boolean {
   return ACTIVE_JOB_STATUSES.includes(status);
 }
 
+type FramedProcessChunk = {
+  records: string[];
+  rest: string;
+};
+
+export function frameProcessLogChunk(buffer: string, chunk: string, flush = false): FramedProcessChunk {
+  const combined = `${buffer}${chunk}`;
+  const parts = combined.split(/\r\n|[\r\n]/);
+  const rest = flush ? "" : parts.pop() ?? "";
+  if (flush && parts.at(-1) !== combined) parts.push("");
+  return {
+    records: parts.filter((part) => part.length > 0),
+    rest,
+  };
+}
+
+export function progressFromPipelineLog(line: string): number | null {
+  const match = line.match(
+    /(?:^|\s)(100|[1-9]?\d(?:\.\d+)?)%\|[^|\r\n]*\|\s*\d+(?:\.\d+)?\/\d+(?:\.\d+)?(?=\s|$)/,
+  );
+  if (!match) return null;
+  return Number.parseFloat(match[1]);
+}
+
+export class PipelineProgressTracker {
+  private denoisingStage = -1;
+  private phase: "preparing" | "denoising" | "decoding" = "preparing";
+  private current: number;
+
+  constructor(
+    private readonly start: number,
+    private readonly end: number,
+    private readonly expectedDenoisingStages: number,
+  ) {
+    this.current = start;
+  }
+
+  update(line: string): number | null {
+    let fraction: number | null = null;
+    if (line.includes("Building text encoder")) {
+      fraction = 0.02;
+    } else if (line.includes("Prompt encoding complete")) {
+      fraction = 0.08;
+    } else if (line.includes("Running denoising loop")) {
+      this.denoisingStage = Math.min(
+        this.expectedDenoisingStages - 1,
+        this.denoisingStage + 1,
+      );
+      this.phase = "denoising";
+      fraction = 0.1 + 0.8 * this.denoisingStage / this.expectedDenoisingStages;
+    } else if (line.includes("Building video decoder")) {
+      this.phase = "decoding";
+      fraction = 0.9;
+    } else if (line.includes("Video saved to")) {
+      fraction = 1;
+    } else {
+      const phaseProgress = progressFromPipelineLog(line);
+      if (phaseProgress === null) return null;
+      const phaseFraction = phaseProgress / 100;
+      if (this.phase === "denoising" && this.denoisingStage >= 0) {
+        fraction = 0.1 + 0.8
+          * (this.denoisingStage + phaseFraction)
+          / this.expectedDenoisingStages;
+      } else if (this.phase === "decoding") {
+        fraction = 0.9 + 0.1 * phaseFraction;
+      } else {
+        return null;
+      }
+    }
+
+    const candidate = this.start + (this.end - this.start) * fraction;
+    this.current = Math.max(this.current, Math.min(this.end, candidate));
+    return this.current;
+  }
+}
+
 function processIsAlive(child: ChildProcess): boolean {
   return child.pid !== undefined && child.exitCode === null && child.signalCode === null;
 }
@@ -177,6 +254,12 @@ const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 function cleanLogLine(line: string): string {
   return line.replaceAll(ANSI_COLOR, "").slice(0, MAX_LOG_LINE_LENGTH);
+}
+
+function expectedDenoisingStages(request: GenerationRequest): number {
+  if (request.mode === "one-stage" || request.mode === "retake") return 1;
+  if (request.mode === "ic-lora" && request.icLora.skipStage2) return 1;
+  return 2;
 }
 
 function thermalProfileFromLogs(logs: unknown): ThermalProfile | null {
@@ -577,7 +660,16 @@ export class JobManager extends EventEmitter {
         return;
       }
       this.changed();
-      this.consumeProcessLogs(job, child);
+      const ltxProgressEnd = hybridEnabled ? 85 : MAX_RUNNING_PROCESS_PROGRESS;
+      this.consumeProcessLogs(
+        job,
+        child,
+        new PipelineProgressTracker(
+          hybridEnabled ? 20 : 0,
+          ltxProgressEnd,
+          expectedDenoisingStages(job.request),
+        ),
+      );
       const stopThermalWatcher = this.watchThermals(job, child, thermalBaselineC);
       const ltxResult = await this.waitForProcess(child);
       stopThermalWatcher();
@@ -598,6 +690,7 @@ export class JobManager extends EventEmitter {
         });
         return;
       }
+      job.progress = Math.max(job.progress ?? 0, ltxProgressEnd);
       await this.transitionDgxJob(job, "completed", {
         current_step: "ltx native pipeline completed",
         artifact: { type: "video", path: ltxOutput, note: hybridEnabled ? "LTX base video before local LongCat compositing" : "final LTX output" },
@@ -605,6 +698,7 @@ export class JobManager extends EventEmitter {
     }
 
     if (hybridEnabled) {
+      job.progress = Math.max(job.progress ?? 0, 85);
       this.appendLog(
         job,
         "LTX-Basisvideo fertig. LongCat-Mundbereich wird mit dynamischen Gesichtslandmarks lokal und zeitgenau eingeblendet.",
@@ -640,6 +734,7 @@ export class JobManager extends EventEmitter {
         );
         return;
       }
+      job.progress = MAX_RUNNING_PROCESS_PROGRESS;
     }
 
     if (!await this.verifyJobIdentityEvidence(job, "nach der vollständigen Ausgabe")) return;
@@ -855,19 +950,38 @@ export class JobManager extends EventEmitter {
     this.changed();
   }
 
-  private consumeProcessLogs(job: RuntimeJob, child: ChildProcess): void {
-    const consume = (chunk: Buffer) => {
-      for (const rawLine of chunk.toString("utf8").split(/\r?\n/)) {
-        if (!rawLine) continue;
+  private consumeProcessLogs(
+    job: RuntimeJob,
+    child: ChildProcess,
+    progressTracker: PipelineProgressTracker | null = null,
+  ): void {
+    const buffers = { stdout: "", stderr: "" };
+    const consumeRecords = (records: string[]): boolean => {
+      let changed = false;
+      for (const rawLine of records) {
         const line = cleanLogLine(rawLine);
+        if (!line) continue;
         this.appendLog(job, line);
-        const match = line.match(/(?:^|\s)(100|[1-9]?\d(?:\.\d+)?)\s*%/);
-        if (match) job.progress = Math.min(100, Number.parseFloat(match[1]));
+        const progress = progressTracker?.update(line) ?? null;
+        if (progress !== null) job.progress = Math.max(job.progress ?? 0, progress);
+        changed = true;
       }
-      this.changed();
+      return changed;
     };
-    child.stdout?.on("data", consume);
-    child.stderr?.on("data", consume);
+    const consume = (stream: keyof typeof buffers) => (chunk: Buffer) => {
+      const framed = frameProcessLogChunk(buffers[stream], chunk.toString("utf8"));
+      buffers[stream] = framed.rest;
+      if (consumeRecords(framed.records)) this.changed();
+    };
+    child.stdout?.on("data", consume("stdout"));
+    child.stderr?.on("data", consume("stderr"));
+    child.once("close", () => {
+      const stdout = frameProcessLogChunk(buffers.stdout, "", true);
+      const stderr = frameProcessLogChunk(buffers.stderr, "", true);
+      buffers.stdout = "";
+      buffers.stderr = "";
+      if (consumeRecords([...stdout.records, ...stderr.records])) this.changed();
+    });
   }
 
   private waitForProcess(child: ChildProcess): Promise<ProcessResult> {
@@ -1099,6 +1213,9 @@ export class JobManager extends EventEmitter {
         }
         const interrupted = status === "interrupted";
         const missingOutput = storedStatus === "completed" && !outputReady;
+        const storedProgress = typeof entry.progress === "number" && Number.isFinite(entry.progress)
+          ? Math.min(100, Math.max(0, entry.progress))
+          : null;
         this.jobs.set(entry.id, {
           ...entry,
           id: entry.id,
@@ -1111,9 +1228,9 @@ export class JobManager extends EventEmitter {
           request: migratedRequest,
           status,
           finishedAt: interrupted ? now() : validTimestamp(entry.finishedAt, null),
-          progress: typeof entry.progress === "number" && Number.isFinite(entry.progress)
-            ? Math.min(100, Math.max(0, entry.progress))
-            : null,
+          progress: status === "completed"
+            ? 100
+            : storedProgress === null ? null : Math.min(MAX_RUNNING_PROCESS_PROGRESS, storedProgress),
           error: interrupted
             ? "Studio wurde während des Jobs neu gestartet."
             : missingOutput
