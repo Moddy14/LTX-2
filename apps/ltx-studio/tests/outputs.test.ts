@@ -74,4 +74,20 @@ describe("generated output library", () => {
     expect(modified.settingsAvailable).toBe(false);
     expect(modified.request).toBeNull();
   });
+
+  it("backfills settings for completed Studio jobs even when filesystem mtime drifted", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T07:00:00.000Z");
+    const driftedMtime = new Date("2026-07-24T08:30:00.000Z");
+    const outputName = "drifted-output.mp4";
+    await writeFile(join(root, outputName), "video");
+    await utimes(join(root, outputName), driftedMtime, driftedMtime);
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, completedAt.toISOString());
+
+    const output = library.list([job]).find((candidate) => candidate.name === outputName)!;
+
+    expect(output.settingsAvailable).toBe(true);
+    expect(output.request).toEqual(job.request);
+  });
 });

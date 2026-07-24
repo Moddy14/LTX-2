@@ -19,7 +19,6 @@ import type { StudioJob } from "./jobs.js";
 
 const SIDECAR_SUFFIX = ".ltx-settings.json";
 const MAX_OUTPUTS = 500;
-const BACKFILL_TIME_TOLERANCE_MS = 120_000;
 
 type OutputSettingsRecord = {
   schemaVersion: "ltx-studio-output.v1";
@@ -76,9 +75,6 @@ export class OutputLibrary {
       if (!existsSync(outputPath) || existsSync(settingsPath(this.root, job.outputName))) continue;
       const stats = statSync(outputPath);
       if (!stats.isFile() || stats.size <= 0) continue;
-      const completedAtMs = Date.parse(job.finishedAt);
-      if (!Number.isFinite(completedAtMs)
-        || Math.abs(stats.mtimeMs - completedAtMs) > BACKFILL_TIME_TOLERANCE_MS) continue;
       const record: OutputSettingsRecord = {
         schemaVersion: "ltx-studio-output.v1",
         outputName: job.outputName,
