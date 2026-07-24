@@ -1,7 +1,7 @@
 export type ModelKind = "checkpoint" | "distilled-checkpoint" | "spatial-upscaler" | "lora" | "amax" | "gemma";
 
 export type RecommendedModelAsset = {
-  id: "lipdub-lora";
+  id: "lipdub-lora" | "lipdub-spatial-upscaler";
   kind: ModelKind;
   label: string;
   repoId: string;
@@ -40,5 +40,16 @@ export const recommendedModelAssets = [
       "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-LipDub/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors",
     present: false,
     access: "gated",
+  },
+  {
+    id: "lipdub-spatial-upscaler",
+    kind: "spatial-upscaler",
+    label: "LipDub Spatial Upscaler x2 1.1",
+    repoId: "Lightricks/LTX-2.3",
+    filename: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+    localPath:
+      "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+    present: false,
+    access: "public",
   },
 ] as const satisfies readonly RecommendedModelAsset[];

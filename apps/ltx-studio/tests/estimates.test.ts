@@ -50,6 +50,8 @@ describe("resource and runtime estimates", () => {
     const request = validRequest("lipdub");
     request.numFrames = 25;
     vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      width: 576,
+      height: 1024,
       frames: 2401,
       fps: 24,
       durationSeconds: 100.04,

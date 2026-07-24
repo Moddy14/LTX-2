@@ -75,6 +75,7 @@ type RunPanelProps = {
   onCancel: (id: string) => void;
   submitting: boolean;
   errors: string[];
+  warnings: string[];
   command: string | null;
   previews: Record<string, string>;
   comparisonJobs: StudioJob[];
@@ -101,6 +102,7 @@ export function RunPanel({
   onCancel,
   submitting,
   errors,
+  warnings,
   command,
   previews,
   comparisonJobs,
@@ -377,6 +379,13 @@ export function RunPanel({
         <div className="run-errors" role="alert">
           <AlertTriangle size={17} />
           <div>{errors.slice(0, 5).map((error) => <span key={error}>{error}</span>)}</div>
+        </div>
+      ) : null}
+
+      {warnings.length > 0 ? (
+        <div className="run-warnings" role="status">
+          <AlertTriangle size={17} />
+          <div>{warnings.slice(0, 5).map((warning) => <span key={warning}>{warning}</span>)}</div>
         </div>
       ) : null}
 

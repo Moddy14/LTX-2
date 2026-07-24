@@ -61,6 +61,9 @@ function withDiscoveredModelDefaults(request: GenerationRequest, inventory: Mode
   const find = (kind: ModelInventory["items"][number]["kind"], predicate: (name: string) => boolean = () => true) =>
     inventory.items.find((item) => item.kind === kind && predicate(item.name.toLowerCase()))?.path ?? "";
   const recommendedLipDub = inventory.recommendations.find((item) => item.id === "lipdub-lora" && item.present);
+  const recommendedLipDubUpscaler = inventory.recommendations.find((item) =>
+    item.id === "lipdub-spatial-upscaler" && item.present,
+  );
   return {
     ...request,
     models: {
@@ -71,6 +74,7 @@ function withDiscoveredModelDefaults(request: GenerationRequest, inventory: Mode
       distilledCheckpointPath: request.models.distilledCheckpointPath || find("distilled-checkpoint"),
       gemmaRoot: request.models.gemmaRoot || find("gemma"),
       spatialUpscalerPath: request.models.spatialUpscalerPath
+        || recommendedLipDubUpscaler?.localPath
         || find("spatial-upscaler", (name) => name.includes("x2"))
         || find("spatial-upscaler"),
       distilledLora: {
@@ -119,6 +123,7 @@ export function App() {
   const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
+  const [serverWarnings, setServerWarnings] = useState<string[]>([]);
   const [command, setCommand] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [promptComposeError, setPromptComposeError] = useState<string | null>(null);
@@ -223,6 +228,7 @@ export function App() {
     }));
     setAttempted(false);
     setServerErrors([]);
+    setServerWarnings([]);
     setCommand(null);
   };
 
@@ -234,6 +240,7 @@ export function App() {
   const run = async () => {
     setAttempted(true);
     setServerErrors([]);
+    setServerWarnings([]);
     if (!validation.success) return;
     const runtimeErrors: string[] = [];
     if (!health) runtimeErrors.push("DGX-Status ist noch nicht verfügbar.");
@@ -257,6 +264,7 @@ export function App() {
     try {
       const plan = await planJob(validation.data);
       setCommand(plan.command);
+      setServerWarnings(plan.pathWarnings);
       if (plan.pathErrors.length > 0) {
         setServerErrors(plan.pathErrors);
         return;
@@ -288,6 +296,7 @@ export function App() {
 
   const handleRerun = async (job: StudioJob, mode: "exact" | "random-seed") => {
     setServerErrors([]);
+    setServerWarnings([]);
     try {
       const variant = await rerunJob(job.id, mode);
       setJobs((current) => [variant, ...current.filter((item) => item.id !== variant.id)]);
@@ -340,12 +349,14 @@ export function App() {
     setPromptUndo(null);
     setAttempted(false);
     setServerErrors([]);
+    setServerWarnings([]);
     setCommand(null);
   };
 
   const loadOutputSettings = (output: StudioOutput) => {
     if (!output.request) {
       setServerErrors(["Für dieses Video ist keine verlässliche Studio-Einstellungshistorie gespeichert."]);
+      setServerWarnings([]);
       return;
     }
     const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(output.request, output.request.mode));
@@ -355,6 +366,7 @@ export function App() {
     setPromptUndo(null);
     setAttempted(false);
     setServerErrors([]);
+    setServerWarnings([]);
     setCommand(null);
   };
 
@@ -441,6 +453,7 @@ export function App() {
           onCancel={(id) => void handleCancel(id)}
           submitting={submitting}
           errors={attempted ? [...validationMessages, ...serverErrors] : serverErrors}
+          warnings={serverWarnings}
           command={command}
           previews={previews}
           comparisonJobs={comparisonJobs}

@@ -1590,6 +1590,27 @@ summary:focus-visible,
   line-height: 1.35;
 }
 
+.run-warnings {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  margin: 11px 0;
+  padding: 9px;
+  color: #724600;
+  background: var(--amber-soft);
+  border: 1px solid #dfbd75;
+  border-radius: 5px;
+}
+
+.run-warnings div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .run-button {
   width: 100%;
   min-height: 44px;
@@ -2002,6 +2023,7 @@ summary:focus-visible,
   .preview-stage,
   .run-summary,
   .run-errors,
+  .run-warnings,
   .run-button,
   .job-section,
   .run-details {

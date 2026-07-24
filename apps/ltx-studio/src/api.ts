@@ -63,7 +63,7 @@ export async function createJob(request: GenerationRequest): Promise<StudioJob> 
 
 export async function planJob(
   request: GenerationRequest,
-): Promise<{ command: string; outputPath: string; pathErrors: string[] }> {
+): Promise<{ command: string; outputPath: string; pathErrors: string[]; pathWarnings: string[] }> {
   return decode(
     await fetch("/api/jobs/plan", {
       method: "POST",

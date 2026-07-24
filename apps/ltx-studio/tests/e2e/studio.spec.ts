@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 test("desktop exposes every production mode and contextual controls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop-only density assertions");
   const modes = page.locator(".mode-button");
-  await expect(modes).toHaveCount(8);
+  await expect(modes).toHaveCount(9);
   await expect(page.locator(".run-button")).toBeVisible();
   await expect(page.getByText("Steuern", { exact: true })).toBeVisible();
   await expect(page.getByText("Bearbeiten", { exact: true })).toBeVisible();
@@ -24,6 +24,11 @@ test("desktop exposes every production mode and contextual controls", async ({ p
   await expect(page.getByRole("button", { name: "Audio hochladen" })).toBeVisible();
   const guidanceSection = page.locator(".editor-section").filter({ has: page.getByRole("heading", { name: "Guidance" }) });
   await expect(guidanceSection.locator(".advanced-block")).toHaveCount(1);
+
+  await page.getByRole("button", { name: /LipDub Lipsync/ }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
+  await expect(page.getByRole("heading", { name: "LipDub Referenz" })).toBeVisible();
+  await expect(page.getByLabel("LipDub IC-LoRA Pfad")).toBeVisible();
 
   await page.getByRole("button", { name: /Retake Nicht-destruktiv/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Retake / Bereich ersetzen");
@@ -147,7 +152,7 @@ test("generated video picker restores every stored setting", async ({ page }) =>
 
 test("mobile keeps all modes reachable without page overflow", async ({ page }, testInfo) => {
   const modes = page.locator(".mode-button");
-  await expect(modes).toHaveCount(8);
+  await expect(modes).toHaveCount(9);
   await modes.last().scrollIntoViewIfNeeded();
   await modes.last().click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Retake / Bereich ersetzen");

@@ -2,6 +2,8 @@ import { statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 export type VideoMetadata = {
+  width: number | null;
+  height: number | null;
   frames: number | null;
   fps: number | null;
   durationSeconds: number | null;
@@ -43,7 +45,7 @@ export function probeVideoMetadata(path: string): VideoMetadata | null {
     "error",
     "-count_frames",
     "-show_entries",
-    "stream=codec_type,nb_read_frames,nb_frames,avg_frame_rate,r_frame_rate,duration",
+    "stream=codec_type,width,height,nb_read_frames,nb_frames,avg_frame_rate,r_frame_rate,duration",
     "-of",
     "json",
     path,
@@ -60,12 +62,16 @@ export function probeVideoMetadata(path: string): VideoMetadata | null {
     const fps = parseRate(stream.avg_frame_rate) ?? parseRate(stream.r_frame_rate);
     const durationSeconds = positiveNumber(stream.duration);
     const hasAudio = streams.some((item) => item.codec_type === "audio");
+    const width = Math.round(positiveNumber(stream.width) ?? 0);
+    const height = Math.round(positiveNumber(stream.height) ?? 0);
     const frames = Math.round(
       positiveNumber(stream.nb_read_frames)
         ?? positiveNumber(stream.nb_frames)
         ?? (durationSeconds !== null && fps !== null ? durationSeconds * fps : 0),
     );
     const metadata = {
+      width: width > 0 ? width : null,
+      height: height > 0 ? height : null,
       frames: frames > 0 ? frames : null,
       fps,
       durationSeconds,

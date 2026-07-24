@@ -47,6 +47,10 @@ describe("model discovery", () => {
       present: false,
       repoId: "Lightricks/LTX-2.3-22b-IC-LoRA-LipDub",
     });
+    expect(inventory.recommendations.find((item) => item.id === "lipdub-spatial-upscaler")).toMatchObject({
+      present: false,
+      repoId: "Lightricks/LTX-2.3",
+    });
   });
 
   it("marks the official LipDub LoRA recommendation present when the file exists", async () => {
@@ -60,6 +64,22 @@ describe("model discovery", () => {
     const inventory = await discoverModels([root]);
     expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors");
     expect(inventory.recommendations.find((item) => item.id === "lipdub-lora")).toMatchObject({
+      present: true,
+      localPath,
+    });
+  });
+
+  it("marks the LipDub spatial upscaler recommendation present when the current file exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
+    temporaryRoots.push(root);
+    const repo = join(root, "Lightricks__LTX-2.3");
+    await mkdir(repo);
+    const localPath = join(repo, "ltx-2.3-spatial-upscaler-x2-1.1.safetensors");
+    await writeFile(localPath, "upscaler");
+
+    const inventory = await discoverModels([root]);
+    expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-spatial-upscaler-x2-1.1.safetensors");
+    expect(inventory.recommendations.find((item) => item.id === "lipdub-spatial-upscaler")).toMatchObject({
       present: true,
       localPath,
     });
