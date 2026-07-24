@@ -18,6 +18,7 @@ import {
 } from "../server/jobs.js";
 import { hybridRoot } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
+import type { ResourceSnapshot } from "../server/system.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -129,6 +130,142 @@ describe("job persistence and reservations", () => {
     expect(cancelled.status).toBe("cancelled");
     expect(cancelled.cancelledBy).toBe("studio");
     expect(cancelled.logs.at(-1)).toContain("Studio-Abbruchfunktion");
+  });
+
+  it("waits for swap before creating a DGX queue lease", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, unknown>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    const snapshots: ResourceSnapshot[] = [
+      {
+        availableMemoryGiB: 80,
+        totalMemoryGiB: 121.69,
+        swapFreeGiB: 3.25,
+        swapTotalGiB: 16,
+        outputFreeGiB: 100,
+      },
+      {
+        availableMemoryGiB: 80,
+        totalMemoryGiB: 121.69,
+        swapFreeGiB: 4.25,
+        swapTotalGiB: 16,
+        outputFreeGiB: 100,
+      },
+    ];
+    Reflect.set(manager, "readStartResourceSnapshot", () => snapshots.shift()!);
+    Reflect.set(manager, "waitForDelay", async () => true);
+
+    const waitForPreAdmission = Reflect.get(manager, "waitForLocalPreAdmissionResources") as (
+      job: unknown,
+    ) => Promise<boolean>;
+
+    expect(await waitForPreAdmission.call(manager, runtimeJob)).toBe(true);
+    expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
+      expect.stringContaining("mindestens 4 GiB"),
+      expect.stringContaining("4.25 GiB Swap"),
+    ]));
+  });
+
+  it("rechecks all resources immediately before an accepted DGX job starts", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-local-start-gate";
+    const transitions: string[] = [];
+    Reflect.set(manager, "readStartResourceSnapshot", () => ({
+      availableMemoryGiB: 121,
+      totalMemoryGiB: 121.69,
+      swapFreeGiB: 4.25,
+      swapTotalGiB: 16,
+      outputFreeGiB: 100,
+    }));
+    Reflect.set(manager, "transitionDgxJob", async (_job: unknown, state: string) => {
+      transitions.push(state);
+      return true;
+    });
+
+    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<boolean>;
+
+    expect(await startAccepted.call(manager, runtimeJob)).toBe(true);
+    expect(transitions).toEqual(["starting"]);
+    expect(manager.get(created.id)?.logs.at(-1)).toContain("100.00 GiB Ausgabeplatz");
+  });
+
+  it("cancels an accepted DGX lease when the immediate RAM recheck fails", async () => {
+    let cancellationResolve!: () => void;
+    const cancellation = new Promise<void>((resolve) => {
+      cancellationResolve = resolve;
+    });
+    const transitions: string[] = [];
+    const manager = new JobManager(await statePath(), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "accepted" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        if (state === "cancelled") cancellationResolve();
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-failed-local-recheck";
+    Reflect.set(manager, "readStartResourceSnapshot", () => ({
+      availableMemoryGiB: 40,
+      totalMemoryGiB: 121.69,
+      swapFreeGiB: 8,
+      swapTotalGiB: 16,
+      outputFreeGiB: 100,
+    }));
+
+    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<boolean>;
+
+    expect(await startAccepted.call(manager, runtimeJob)).toBe(false);
+    await cancellation;
+    expect(transitions).toEqual(["cancelled"]);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "failed",
+      outputUrl: null,
+    });
+    expect(manager.get(created.id)?.error).toContain("lokale Start-Recheck ist fehlgeschlagen");
+  });
+
+  it("does not create a DGX lease after cancellation while waiting for pre-admission resources", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, unknown>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    Reflect.set(manager, "readStartResourceSnapshot", () => ({
+      availableMemoryGiB: 80,
+      totalMemoryGiB: 121.69,
+      swapFreeGiB: 3.25,
+      swapTotalGiB: 16,
+      outputFreeGiB: 100,
+    }));
+    Reflect.set(manager, "waitForDelay", async () => {
+      manager.cancel(created.id);
+      return false;
+    });
+
+    const waitForPreAdmission = Reflect.get(manager, "waitForLocalPreAdmissionResources") as (
+      job: unknown,
+    ) => Promise<boolean>;
+
+    expect(await waitForPreAdmission.call(manager, runtimeJob)).toBe(false);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "cancelled",
+      dgxJobId: null,
+    });
   });
 
   it("cannot resume a cancelled job after an asynchronous evidence hash finishes", async () => {
@@ -452,10 +589,13 @@ describe("job persistence and reservations", () => {
       capture: async () => notApplicableIdentityEvidence(),
       verify: async (evidence) => ({ evidence, error: null }),
     }, {
-      read: async (jobId) => ({
-        schema_version: "dgx-job-read.v0",
-        job: { job_id: jobId, state: "cancelled" },
-      }),
+      read: async (jobId) => {
+        cancellationDeliveredResolve();
+        return {
+          schema_version: "dgx-job-read.v0",
+          job: { job_id: jobId, state: "cancelled" },
+        };
+      },
       transition: async (jobId, state) => {
         transitions.push(state);
         if (state === "running") {
@@ -463,7 +603,6 @@ describe("job persistence and reservations", () => {
           await releaseRunningTransition;
           throw new Error("running transition lost to cancellation");
         }
-        if (state === "cancelled") cancellationDeliveredResolve();
         return {
           schema_version: "dgx-job-transition.v0",
           job: { job_id: jobId, state },
@@ -502,14 +641,80 @@ describe("job persistence and reservations", () => {
     const running = runJob.call(manager, runtimeJob);
     await runningTransitionStarted;
     expect(manager.cancel(created.id)?.status).toBe("cancelled");
-    await cancellationDelivered;
     releaseRunningTransitionResolve();
+    await cancellationDelivered;
     await running;
 
-    expect(transitions).toEqual(["running", "cancelled"]);
+    expect(transitions).toEqual(["running"]);
     expect(manager.get(created.id)).toMatchObject({
       status: "cancelled",
       error: null,
+    });
+  });
+
+  it("serializes cancellation against accepted to starting without launching compute", async () => {
+    let remoteState: "accepted" | "starting" | "failed" = "accepted";
+    let startingTransitionResolve!: () => void;
+    const startingTransition = new Promise<void>((resolve) => {
+      startingTransitionResolve = resolve;
+    });
+    let releaseStartingResolve!: () => void;
+    const releaseStarting = new Promise<void>((resolve) => {
+      releaseStartingResolve = resolve;
+    });
+    let terminalTransitionResolve!: () => void;
+    const terminalTransition = new Promise<void>((resolve) => {
+      terminalTransitionResolve = resolve;
+    });
+    const transitions: string[] = [];
+    const manager = new JobManager(await statePath(), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        if (state === "starting") {
+          startingTransitionResolve();
+          await releaseStarting;
+          remoteState = "starting";
+        } else if (state === "failed") {
+          remoteState = "failed";
+          terminalTransitionResolve();
+        }
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state: remoteState },
+        };
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-starting-cancel-race";
+    Reflect.set(manager, "readStartResourceSnapshot", () => ({
+      availableMemoryGiB: 121,
+      totalMemoryGiB: 121.69,
+      swapFreeGiB: 8,
+      swapTotalGiB: 16,
+      outputFreeGiB: 100,
+    }));
+
+    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<boolean>;
+    const starting = startAccepted.call(manager, runtimeJob);
+    await startingTransition;
+    expect(manager.cancel(created.id)?.status).toBe("cancelled");
+    releaseStartingResolve();
+
+    expect(await starting).toBe(false);
+    await terminalTransition;
+    expect(transitions).toEqual(["starting", "failed"]);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "cancelled",
+      outputUrl: null,
     });
   });
 

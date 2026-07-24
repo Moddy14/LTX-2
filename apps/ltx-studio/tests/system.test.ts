@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   type ResourceSnapshot,
+  validatePreAdmissionResources,
   validateStartResources,
 } from "../server/system.js";
 
@@ -53,5 +54,28 @@ describe("fail-closed start resources", () => {
       { ...healthy, outputFreeGiB: null },
       requirements,
     )).toContain("Ausgabeplatz ist unbekannt");
+  });
+
+  it("checks non-reclaimable swap and disk before queue admission without blocking orchestrator RAM reclaim", () => {
+    const preAdmissionRequirements = {
+      minSwapFreeGiB: 4,
+      outputGiB: 0.5,
+    };
+    expect(validatePreAdmissionResources(
+      { ...healthy, availableMemoryGiB: null },
+      preAdmissionRequirements,
+    )).toBeNull();
+    expect(validatePreAdmissionResources(
+      { ...healthy, swapFreeGiB: null },
+      preAdmissionRequirements,
+    )).toContain("Swap-Status ist unbekannt");
+    expect(validatePreAdmissionResources(
+      { ...healthy, outputFreeGiB: null },
+      preAdmissionRequirements,
+    )).toContain("Ausgabeplatz ist unbekannt");
+    expect(validatePreAdmissionResources(
+      { ...healthy, outputFreeGiB: 1.49 },
+      preAdmissionRequirements,
+    )).toContain("mindestens 1.50 GiB");
   });
 });

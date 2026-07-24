@@ -18,8 +18,37 @@ export type StartResourceRequirements = {
   outputGiB: number;
 };
 
+export type PreAdmissionResourceRequirements = Pick<
+  StartResourceRequirements,
+  "minSwapFreeGiB" | "outputGiB"
+>;
+
 function kibToGiB(value: number): number {
   return Math.round((value / 1024 / 1024) * 100) / 100;
+}
+
+function requiredOutputGiB(outputGiB: number): number {
+  return Math.max(1, Math.ceil(outputGiB * 3 * 100) / 100);
+}
+
+export function validatePreAdmissionResources(
+  resource: ResourceSnapshot,
+  requirements: PreAdmissionResourceRequirements,
+): string | null {
+  if (resource.swapFreeGiB === null) {
+    return "Swap-Status ist unbekannt; Start aus Sicherheitsgründen blockiert.";
+  }
+  if (resource.swapFreeGiB < requirements.minSwapFreeGiB) {
+    return `Nur ${resource.swapFreeGiB.toFixed(2)} GiB Swap frei; mindestens ${requirements.minSwapFreeGiB} GiB sind als Sicherheitsreserve erforderlich.`;
+  }
+  if (resource.outputFreeGiB === null) {
+    return "Freier Ausgabeplatz ist unbekannt; Start aus Sicherheitsgründen blockiert.";
+  }
+  const requiredDiskGiB = requiredOutputGiB(requirements.outputGiB);
+  if (resource.outputFreeGiB < requiredDiskGiB) {
+    return `Nur ${resource.outputFreeGiB.toFixed(2)} GiB Ausgabeplatz frei; erforderlich sind mindestens ${requiredDiskGiB.toFixed(2)} GiB.`;
+  }
+  return null;
 }
 
 export function validateStartResources(
@@ -30,26 +59,13 @@ export function validateStartResources(
     requirements.minAvailableGiB,
     requirements.estimatedMemoryGiB + requirements.minResidualMemoryGiB,
   );
-  const requiredDiskGiB = Math.max(1, Math.ceil(requirements.outputGiB * 3 * 100) / 100);
   if (resource.availableMemoryGiB === null) {
     return "RAM-Status ist unbekannt; Start aus Sicherheitsgründen blockiert.";
-  }
-  if (resource.swapFreeGiB === null) {
-    return "Swap-Status ist unbekannt; Start aus Sicherheitsgründen blockiert.";
-  }
-  if (resource.swapFreeGiB < requirements.minSwapFreeGiB) {
-    return `Nur ${resource.swapFreeGiB.toFixed(2)} GiB Swap frei; mindestens ${requirements.minSwapFreeGiB} GiB sind als Sicherheitsreserve erforderlich.`;
   }
   if (resource.availableMemoryGiB < requiredMemoryGiB) {
     return `Nur ${resource.availableMemoryGiB.toFixed(2)} GiB RAM frei; ${requirements.estimatedMemoryGiB} GiB Prognose plus ${requirements.minResidualMemoryGiB} GiB Restpuffer erfordern ${requiredMemoryGiB} GiB.`;
   }
-  if (resource.outputFreeGiB === null) {
-    return "Freier Ausgabeplatz ist unbekannt; Start aus Sicherheitsgründen blockiert.";
-  }
-  if (resource.outputFreeGiB < requiredDiskGiB) {
-    return `Nur ${resource.outputFreeGiB.toFixed(2)} GiB Ausgabeplatz frei; erforderlich sind mindestens ${requiredDiskGiB.toFixed(2)} GiB.`;
-  }
-  return null;
+  return validatePreAdmissionResources(resource, requirements);
 }
 
 export function readResourceSnapshot(): ResourceSnapshot {
