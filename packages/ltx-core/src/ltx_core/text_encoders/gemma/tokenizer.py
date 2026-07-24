@@ -24,7 +24,13 @@ class LTXVGemmaTokenizer:
             padding_side (PaddingSide, optional): Side to pad on. Defaults to ``PaddingSide.LEFT``.
         """
         self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_path, local_files_only=True, model_max_length=max_length
+            tokenizer_path,
+            local_files_only=True,
+            model_max_length=max_length,
+            # The bundled Gemma SentencePiece model is authoritative. The
+            # generated fast-tokenizer JSON triggers Transformers' Mistral
+            # regex warning and cannot be patched by fix_mistral_regex.
+            use_fast=False,
         )
         self.tokenizer.padding_side = padding_side.value
         if self.tokenizer.pad_token is None:
