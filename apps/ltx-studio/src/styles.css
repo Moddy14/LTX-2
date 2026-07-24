@@ -1011,6 +1011,114 @@ summary:focus-visible,
   font-size: 10px;
 }
 
+.lipdub-diagnostics {
+  margin-top: 10px;
+  padding: 9px 10px;
+  background: #eef0ed;
+  border-left: 3px solid var(--line-strong);
+}
+
+.lipdub-diagnostics--ready {
+  background: #e3f1e9;
+  border-left-color: var(--green);
+}
+
+.lipdub-diagnostics--needs-preparation {
+  background: var(--amber-soft);
+  border-left-color: var(--amber);
+}
+
+.lipdub-diagnostics--blocked {
+  background: var(--red-soft);
+  border-left-color: var(--red);
+}
+
+.lipdub-diagnostics__header,
+.lipdub-diagnostics__header > span {
+  display: flex;
+  align-items: center;
+}
+
+.lipdub-diagnostics__header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lipdub-diagnostics__header > span {
+  gap: 6px;
+}
+
+.lipdub-diagnostics__header strong {
+  font-size: 11px;
+}
+
+.lipdub-diagnostics__status {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.lipdub-diagnostics__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px 10px;
+  margin-top: 9px;
+}
+
+.lipdub-diagnostics__metrics span {
+  min-width: 0;
+}
+
+.lipdub-diagnostics__metrics small,
+.lipdub-diagnostics__metrics strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.lipdub-diagnostics__metrics small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.lipdub-diagnostics__metrics strong {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.lipdub-diagnostics__target {
+  margin: 9px 0 0;
+  color: var(--teal-dark);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.lipdub-diagnostics__findings {
+  display: grid;
+  gap: 4px;
+  margin: 9px 0 0;
+  padding-left: 15px;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.lipdub-diagnostics__findings .is-error {
+  color: var(--red);
+}
+
+.lipdub-diagnostics__findings .is-warning {
+  color: #724600;
+}
+
+.lipdub-preparation {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 .lora-row,
 .conditioning-row,
 .mask-row {
@@ -2137,6 +2245,7 @@ summary:focus-visible,
   }
 
   .output-settings-summary,
+  .lipdub-diagnostics__metrics,
   .run-monitor__metrics,
   .job-facts {
     grid-template-columns: 1fr;

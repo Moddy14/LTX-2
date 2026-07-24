@@ -89,7 +89,7 @@ test("prepared draft link fills the editor without starting a job", async ({ pag
   expect(jobsAfter.jobs).toHaveLength(jobsBefore.jobs.length);
 });
 
-test("LipDub live preflight surfaces plan findings before starting a job", async ({ page }) => {
+test("LipDub live preflight surfaces plan findings before starting a job", async ({ page }, testInfo) => {
   const draftRequest = createDefaultRequest("lipdub");
   draftRequest.promptParts.dialogue = "Das ist ein kurzer LipDub Preflight Test";
   draftRequest.prompt = 'A single speaker says exactly: "Das ist ein kurzer LipDub Preflight Test".';
@@ -116,6 +116,48 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
       }],
     }),
   }));
+  await page.route("**/api/lipdub/reference/inspect", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      status: "blocked",
+      metadata: {
+        width: 720,
+        height: 1280,
+        frames: 122,
+        snappedFrames: 121,
+        droppedFrames: 1,
+        fps: 23.976,
+        durationSeconds: 5.09,
+        modelDurationSeconds: 5.01,
+        hasAudio: true,
+        dialogueWords: 7,
+        dialogueWordsPerMinute: 83,
+        videoCodec: "h264",
+        pixelFormat: "yuv420p",
+        constantFrameRate: true,
+        audioCodec: "aac",
+        audioSampleRate: 48000,
+        audioChannels: 2,
+        audioVideoDurationDeltaSeconds: 0,
+        audioVideoStartDeltaSeconds: 0,
+        videoStreamCount: 1,
+        audioStreamCount: 1,
+      },
+      recommendedTarget: { width: 768, height: 1344, fps: 24 },
+      findings: [
+        {
+          code: "dialogue-too-short",
+          level: "error",
+          message: "Der Dialog ist für die Referenzdauer zu kurz.",
+        },
+        {
+          code: "frame-snap",
+          level: "warning",
+          message: "Die native LipDub-Pipeline würde einen Frame verwerfen.",
+        },
+      ],
+    }),
+  }));
   await page.route("**/api/lipdub/reference/prepare", (route) => route.fulfill({
     status: 201,
     contentType: "application/json",
@@ -129,7 +171,8 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
         url: "/api/uploads/video/11111111-2222-4333-8444-555555555555.mp4",
         createdAt: "2026-07-24T16:30:00.000Z",
       },
-      target: { width: 768, height: 1344, fps: 24 },
+      target: { width: 768, height: 1344, fps: 24, frames: 97, durationSeconds: 4.0416667 },
+      trim: { startSeconds: 0, requestedDurationSeconds: 4.2 },
       command: "ffmpeg -i reference.mp4",
     }),
   }));
@@ -144,9 +187,14 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
   await page.getByRole("button", { name: "Format 768 x 1344 übernehmen" }).click();
   await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("768");
   await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("1344");
-  await page.getByRole("button", { name: "Referenz vorbereiten" }).click();
+  await expect(page.locator(".lipdub-diagnostics")).toContainText("122 → 121");
+  await expect(page.locator(".lipdub-diagnostics")).toContainText("83 WPM");
+  await page.locator("section.editor-section").filter({
+    has: page.getByRole("heading", { name: "LipDub Referenz" }),
+  }).screenshot({ path: testInfo.outputPath("lipdub-reference-diagnostics.png") });
+  await page.getByRole("button", { name: "Kalibrierclip erstellen" }).click();
   await expect(page.getByText("reference-lipdub-prep.mp4", { exact: true })).toBeVisible();
-  await expect(page.getByText("Vorbereitete Referenz: 768 x 1344 @ 24 fps.")).toBeVisible();
+  await expect(page.getByText(/Vorbereitete Referenz: 768 x 1344, 97 Frames @ 24 fps/)).toBeVisible();
 });
 
 test("stale LipDub reference preparation does not overwrite a changed editor mode", async ({ page }) => {
@@ -156,7 +204,32 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
   draftRequest.lipDub.referenceVideo = { path: "/inputs/reference.mp4", name: "reference.mp4", strength: 1 };
 
   let releasePreparation: (() => void) | undefined;
+  let capturedTrimDuration: number | undefined;
+  await page.route("**/api/lipdub/reference/inspect", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      status: "ready",
+      metadata: {
+        width: 768,
+        height: 1344,
+        frames: 73,
+        snappedFrames: 73,
+        droppedFrames: 0,
+        fps: 24,
+        durationSeconds: 3.0416667,
+        modelDurationSeconds: 3,
+        hasAudio: true,
+        dialogueWords: 7,
+        dialogueWordsPerMinute: 104,
+      },
+      recommendedTarget: { width: 768, height: 1344, fps: 24 },
+      findings: [],
+    }),
+  }));
   await page.route("**/api/lipdub/reference/prepare", async (route) => {
+    capturedTrimDuration = (route.request().postDataJSON() as {
+      trim?: { durationSeconds?: number };
+    }).trim?.durationSeconds;
     await new Promise<void>((resolve) => {
       releasePreparation = resolve;
     });
@@ -173,7 +246,8 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
           url: "/api/uploads/video/22222222-3333-4444-8555-666666666666.mp4",
           createdAt: "2026-07-24T16:40:00.000Z",
         },
-        target: { width: 768, height: 1344, fps: 24 },
+        target: { width: 768, height: 1344, fps: 24, frames: 73, durationSeconds: 3.0416667 },
+        trim: { startSeconds: 0, requestedDurationSeconds: 3.0416667 },
         command: "ffmpeg -i reference.mp4",
       }),
     });
@@ -182,8 +256,10 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
   const draft = Buffer.from(JSON.stringify(draftRequest), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
-  await page.getByRole("button", { name: "Referenz vorbereiten" }).click();
+  await expect(page.getByLabel("Clip-Länge")).toHaveValue("3.0416667");
+  await page.getByRole("button", { name: "Kalibrierclip erstellen" }).click();
   await expect.poll(() => typeof releasePreparation === "function").toBe(true);
+  expect(capturedTrimDuration).toBeCloseTo(3.0416667, 6);
   await page.locator(".mode-button").filter({ hasText: "Distilled" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Distilled");
   const release = releasePreparation;
@@ -191,7 +267,7 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
   release();
   await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("1536");
   await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("1024");
-  await expect(page.getByText("Vorbereitete Referenz: 768 x 1344 @ 24 fps.")).toHaveCount(0);
+  await expect(page.getByText(/Vorbereitete Referenz: 768 x 1344/)).toHaveCount(0);
 });
 
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {
@@ -291,6 +367,20 @@ test("API rejects foreign browser origins and unknown routes", async ({ request 
   expect(foreignPrep.status()).toBe(400);
   expect(await foreignPrep.json()).toMatchObject({
     error: "LipDub-Referenzvorbereitung ist nur für Videos aus der Studio-Mediathek verfügbar.",
+  });
+
+  const foreignInspection = await request.post("/api/lipdub/reference/inspect", {
+    data: {
+      path: "/tmp/not-a-studio-asset.mp4",
+      width: 576,
+      height: 1024,
+      dialogue: "",
+      prompt: "",
+    },
+  });
+  expect(foreignInspection.status()).toBe(400);
+  expect(await foreignInspection.json()).toMatchObject({
+    error: "LipDub-Referenzdiagnose ist nur für Videos aus der Studio-Mediathek verfügbar.",
   });
 });
 

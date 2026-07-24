@@ -1,8 +1,25 @@
-import { ChevronDown, Cpu, Dices, FileVideo, Image as ImageIcon, LoaderCircle, Plus, SlidersHorizontal, Sparkles, Trash2, Undo2, WandSparkles } from "lucide-react";
-import { useState } from "react";
+import {
+  ChevronDown,
+  CircleCheck,
+  CircleX,
+  Cpu,
+  Dices,
+  FileVideo,
+  Image as ImageIcon,
+  LoaderCircle,
+  Plus,
+  Scissors,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+  Undo2,
+  WandSparkles,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
-import type { PreparedLipDubReference } from "../../shared/plan";
+import type { LipDubReferenceDiagnostics, PreparedLipDubReference } from "../../shared/plan";
 import {
   DURATION_PRESETS,
   formatDuration,
@@ -12,7 +29,10 @@ import {
   RESOLUTION_PRESETS,
   videoDurationSeconds,
 } from "../../shared/presets";
-import { prepareLipDubReference as prepareLipDubReferenceAsset } from "../api";
+import {
+  inspectLipDubReference as inspectLipDubReferenceAsset,
+  prepareLipDubReference as prepareLipDubReferenceAsset,
+} from "../api";
 import { fieldHelp } from "../fieldHelp";
 import type { ModelInventory, ModelInventoryItem, UploadedFile } from "../types";
 import { ImageRows, LoraRows, SingleMediaInput, UploadButton } from "./AssetRows";
@@ -87,6 +107,12 @@ export function Editor({
   const [lipDubPrepBusy, setLipDubPrepBusy] = useState(false);
   const [lipDubPrepError, setLipDubPrepError] = useState<string | null>(null);
   const [lipDubPrepResult, setLipDubPrepResult] = useState<string | null>(null);
+  const [lipDubDiagnostics, setLipDubDiagnostics] = useState<LipDubReferenceDiagnostics | null>(null);
+  const [lipDubDiagnosticsBusy, setLipDubDiagnosticsBusy] = useState(false);
+  const [lipDubDiagnosticsError, setLipDubDiagnosticsError] = useState<string | null>(null);
+  const [lipDubTrimEnabled, setLipDubTrimEnabled] = useState(true);
+  const [lipDubTrimStart, setLipDubTrimStart] = useState(0);
+  const [lipDubTrimDuration, setLipDubTrimDuration] = useState(4.2);
   const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
   const isLipDub = request.mode === "lipdub";
   const guided = ["two-stage", "two-stage-hq", "one-stage", "keyframes", "audio-to-video", "retake"].includes(
@@ -135,6 +161,72 @@ export function Editor({
     && lipDubDistilledRecommendation?.present
     && request.models.distilledCheckpointPath
     && request.models.distilledCheckpointPath !== lipDubDistilledRecommendation.localPath;
+  const lipDubPreparationBlocked = lipDubDiagnostics?.findings.some((item) => [
+    "reference-unreadable",
+    "audio-missing",
+    "audio-unverified",
+    "duration-unreadable",
+    "duration-too-short",
+    "insufficient-snapped-frames",
+  ].includes(item.code)) ?? false;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLipDubDiagnostics(null);
+    setLipDubDiagnosticsError(null);
+    if (!isLipDub || !request.lipDub.referenceVideo.path) {
+      setLipDubDiagnosticsBusy(false);
+      return;
+    }
+    setLipDubDiagnosticsBusy(true);
+    const timer = window.setTimeout(() => {
+      void inspectLipDubReferenceAsset({
+        path: request.lipDub.referenceVideo.path,
+        width: request.width,
+        height: request.height,
+        dialogue: request.promptParts.dialogue,
+        prompt: request.prompt,
+      }).then((diagnostics) => {
+        if (cancelled) return;
+        setLipDubDiagnostics(diagnostics);
+        const referenceDuration = diagnostics.metadata?.durationSeconds;
+        if (referenceDuration !== null && referenceDuration !== undefined) {
+          if (referenceDuration < 2) setLipDubTrimEnabled(false);
+          setLipDubTrimStart((current) => Math.min(current, Math.max(0, referenceDuration - 2)));
+          setLipDubTrimDuration((current) => Math.min(current, Math.min(5, referenceDuration)));
+        }
+        setLipDubDiagnosticsBusy(false);
+      }).catch((error) => {
+        if (cancelled) return;
+        setLipDubDiagnosticsError(
+          error instanceof Error ? error.message : "LipDub-Referenz konnte nicht geprüft werden.",
+        );
+        setLipDubDiagnosticsBusy(false);
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isLipDub,
+    request.height,
+    request.lipDub.referenceVideo.path,
+    request.prompt,
+    request.promptParts.dialogue,
+    request.width,
+  ]);
+
+  useEffect(() => {
+    setLipDubTrimEnabled(true);
+    setLipDubTrimStart(0);
+    setLipDubTrimDuration(4.2);
+  }, [request.lipDub.referenceVideo.path]);
+
+  const resetLipDubPreparationState = () => {
+    setLipDubPrepError(null);
+    setLipDubPrepResult(null);
+  };
 
   const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask" | "lipdub") => {
     onPreview(file.path, file.url);
@@ -143,6 +235,7 @@ export function Editor({
     } else if (target === "retake") {
       onChange({ ...request, retake: { ...request.retake, videoPath: file.path, videoName: file.name } });
     } else if (target === "lipdub") {
+      resetLipDubPreparationState();
       onChange({
         ...request,
         lipDub: {
@@ -173,14 +266,21 @@ export function Editor({
     setLipDubPrepError(null);
     setLipDubPrepResult(null);
     try {
-      const prepared = await prepareLipDubReferenceAsset(request);
+      const prepared = await prepareLipDubReferenceAsset(
+        request,
+        lipDubTrimEnabled
+          ? { startSeconds: lipDubTrimStart, durationSeconds: lipDubTrimDuration }
+          : undefined,
+      );
       const applied = onPreparedLipDubReference(prepared, sourcePath);
       if (!applied) {
         setLipDubPrepError("Vorbereitung abgeschlossen, aber nicht übernommen: Modus oder Referenz wurde inzwischen geändert.");
         return;
       }
       setLipDubPrepResult(
-        `Vorbereitete Referenz: ${prepared.target.width} x ${prepared.target.height} @ ${prepared.target.fps} fps.`,
+        `Vorbereitete Referenz: ${prepared.target.width} x ${prepared.target.height}, `
+        + `${prepared.target.frames} Frames @ ${prepared.target.fps} fps `
+        + `(${prepared.target.durationSeconds.toFixed(2)} s).`,
       );
     } catch (error) {
       setLipDubPrepError(error instanceof Error ? error.message : "LipDub-Referenz konnte nicht vorbereitet werden.");
@@ -453,34 +553,171 @@ export function Editor({
             value={{ path: request.lipDub.referenceVideo.path, name: request.lipDub.referenceVideo.name }}
             previewUrl={previews[request.lipDub.referenceVideo.path]}
             onChange={(file) => applyUpload(file, "lipdub")}
-            onClear={() => onChange({
-              ...request,
-              lipDub: { ...request.lipDub, referenceVideo: { ...request.lipDub.referenceVideo, path: "", name: "" } },
-            })}
-            onPathChange={(path) => onChange({
-              ...request,
-              lipDub: {
-                ...request.lipDub,
-                referenceVideo: {
-                  ...request.lipDub.referenceVideo,
-                  path,
-                  name: path.split("/").at(-1) ?? path,
+            onClear={() => {
+              resetLipDubPreparationState();
+              onChange({
+                ...request,
+                lipDub: { ...request.lipDub, referenceVideo: { ...request.lipDub.referenceVideo, path: "", name: "" } },
+              });
+            }}
+            onPathChange={(path) => {
+              resetLipDubPreparationState();
+              onChange({
+                ...request,
+                lipDub: {
+                  ...request.lipDub,
+                  referenceVideo: {
+                    ...request.lipDub.referenceVideo,
+                    path,
+                    name: path.split("/").at(-1) ?? path,
+                  },
                 },
-              },
-            })}
+              });
+            }}
           />
           {request.lipDub.referenceVideo.path ? (
-            <div className="lipdub-reference-actions">
-              <button
-                type="button"
-                className="button button--secondary"
-                title="Referenzvideo für LipDub als konstantes H.264/AAC-MP4 mit 64er-Format vorbereiten"
+            <div
+              className={`lipdub-diagnostics lipdub-diagnostics--${lipDubDiagnostics?.status ?? "checking"}`}
+              aria-live="polite"
+            >
+              <div className="lipdub-diagnostics__header">
+                <span>
+                  {lipDubDiagnosticsBusy ? <LoaderCircle className="spin" size={16} /> : null}
+                  {lipDubDiagnostics?.status === "ready" ? <CircleCheck size={16} /> : null}
+                  {lipDubDiagnostics?.status === "needs-preparation" ? <TriangleAlert size={16} /> : null}
+                  {lipDubDiagnostics?.status === "blocked" ? <CircleX size={16} /> : null}
+                  <strong>Referenzdiagnose</strong>
+                </span>
+                <span className="lipdub-diagnostics__status">
+                  {lipDubDiagnosticsBusy
+                    ? "wird geprüft"
+                    : lipDubDiagnostics?.status === "ready"
+                      ? "bereit"
+                      : lipDubDiagnostics?.status === "needs-preparation"
+                        ? "vorbereiten"
+                        : lipDubDiagnostics?.status === "blocked"
+                          ? "blockiert"
+                          : "unbekannt"}
+                </span>
+              </div>
+              {lipDubDiagnostics?.metadata ? (
+                <div className="lipdub-diagnostics__metrics">
+                  <span>
+                    <small>Format</small>
+                    <strong>
+                      {lipDubDiagnostics.metadata.width ?? "?"} x {lipDubDiagnostics.metadata.height ?? "?"}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Bildrate</small>
+                    <strong>
+                      {lipDubDiagnostics.metadata.fps?.toFixed(3) ?? "?"} fps
+                      {lipDubDiagnostics.metadata.constantFrameRate === false ? " · VFR" : ""}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>LTX-Frames</small>
+                    <strong>
+                      {lipDubDiagnostics.metadata.frames ?? "?"}
+                      {lipDubDiagnostics.metadata.snappedFrames !== null
+                        ? ` → ${lipDubDiagnostics.metadata.snappedFrames}`
+                        : ""}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Dauer</small>
+                    <strong>{lipDubDiagnostics.metadata.durationSeconds?.toFixed(2) ?? "?"} s</strong>
+                  </span>
+                  <span>
+                    <small>Audio</small>
+                    <strong>
+                      {lipDubDiagnostics.metadata.hasAudio
+                        ? `${lipDubDiagnostics.metadata.audioSampleRate
+                          ? `${Math.round(lipDubDiagnostics.metadata.audioSampleRate / 1000)} kHz`
+                          : "vorhanden"}`
+                        : "fehlt"}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Dialogtempo</small>
+                    <strong>
+                      {lipDubDiagnostics.metadata.dialogueWordsPerMinute === null
+                        ? "noch offen"
+                        : `${Math.round(lipDubDiagnostics.metadata.dialogueWordsPerMinute)} WPM`}
+                    </strong>
+                  </span>
+                </div>
+              ) : null}
+              {lipDubDiagnostics?.recommendedTarget ? (
+                <p className="lipdub-diagnostics__target">
+                  Ziel: {lipDubDiagnostics.recommendedTarget.width} x {lipDubDiagnostics.recommendedTarget.height}
+                  {" "}· {lipDubDiagnostics.recommendedTarget.fps} fps CFR · exakt 8k+1 Frames
+                </p>
+              ) : null}
+              {lipDubDiagnostics?.findings.length ? (
+                <ul className="lipdub-diagnostics__findings">
+                  {lipDubDiagnostics.findings.map((item) => (
+                    <li key={item.code} className={`is-${item.level}`}>{item.message}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {lipDubDiagnosticsError ? <p className="section-error" role="alert">{lipDubDiagnosticsError}</p> : null}
+            </div>
+          ) : null}
+          {request.lipDub.referenceVideo.path ? (
+            <div className="lipdub-preparation">
+              <Toggle
+                label="Kalibrierclip schneiden"
+                hint={fieldHelp.lipDubCalibrationClip}
+                checked={lipDubTrimEnabled}
                 disabled={lipDubPrepBusy}
-                onClick={() => void prepareLipDubReference()}
-              >
-                {lipDubPrepBusy ? <LoaderCircle className="spin" size={16} /> : <WandSparkles size={16} />}
-                Referenz vorbereiten
-              </button>
+                onChange={setLipDubTrimEnabled}
+              />
+              {lipDubTrimEnabled ? (
+                <div className="field-grid field-grid--2">
+                  <NumberField
+                    label="Clip-Start"
+                    hint={fieldHelp.lipDubCalibrationStart}
+                    min={0}
+                    max={Math.max(0, (lipDubDiagnostics?.metadata?.durationSeconds ?? 2) - 2)}
+                    step={0.1}
+                    value={lipDubTrimStart}
+                    disabled={lipDubPrepBusy}
+                    onChange={(value) => setLipDubTrimStart(value ?? 0)}
+                  />
+                  <NumberField
+                    label="Clip-Länge"
+                    hint={fieldHelp.lipDubCalibrationDuration}
+                    min={2}
+                    max={Math.min(
+                      5,
+                      Math.max(2, (lipDubDiagnostics?.metadata?.durationSeconds ?? 5) - lipDubTrimStart),
+                    )}
+                    step={0.1}
+                    value={lipDubTrimDuration}
+                    disabled={lipDubPrepBusy}
+                    onChange={(value) => setLipDubTrimDuration(value ?? 4.2)}
+                  />
+                </div>
+              ) : null}
+              <div className="lipdub-reference-actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  title={lipDubTrimEnabled
+                    ? "Framegenauen 2-5-s-Kalibrierclip mit CFR, synchronem Audio und 8k+1 Frames erstellen"
+                    : "Gesamte Referenz mit CFR, synchronem Audio und 8k+1 Frames vorbereiten"}
+                  disabled={lipDubPrepBusy || lipDubDiagnosticsBusy || !lipDubDiagnostics || lipDubPreparationBlocked}
+                  onClick={() => void prepareLipDubReference()}
+                >
+                  {lipDubPrepBusy
+                    ? <LoaderCircle className="spin" size={16} />
+                    : lipDubTrimEnabled
+                      ? <Scissors size={16} />
+                      : <WandSparkles size={16} />}
+                  {lipDubTrimEnabled ? "Kalibrierclip erstellen" : "Referenz normalisieren"}
+                </button>
+              </div>
             </div>
           ) : null}
           {lipDubPrepError ? <p className="section-error" role="alert">{lipDubPrepError}</p> : null}

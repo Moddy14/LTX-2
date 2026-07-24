@@ -29,6 +29,12 @@ export const fieldHelp = {
     "Wofür: Begrenzt den verwendeten Audioausschnitt. Empfehlung: leer für automatische Dauer oder eine positive Sekundenangabe passend zur gewünschten Szene.",
   lipDubReferenceStrength:
     "Wofür: Gewichtet, wie stark das Referenzvideo Bewegung, Timing und Mundführung vorgibt. Empfehlung: mit 1,0 starten; bei zu starrer Kopplung auf 0,7 bis 0,9 senken.",
+  lipDubCalibrationClip:
+    "Wofür: Schneidet zuerst einen kurzen, reproduzierbaren Testausschnitt und normalisiert Video und Audio gemeinsam. Empfehlung: eingeschaltet lassen, bis LipSync, Identität und Referenzstärke mit einem 2- bis 5-Sekunden-Clip stimmen.",
+  lipDubCalibrationStart:
+    "Wofür: Startzeit des Kalibrierclips im Referenzvideo. Gute Eingabe: eine ruhige Stelle mit klar sichtbarem Mund, einem Sprecher, ohne Schnitt, Hand oder Haare vor dem Gesicht.",
+  lipDubCalibrationDuration:
+    "Wofür: Gewünschte Länge des Kalibrierclips. Empfehlung: 4,2 Sekunden; die Vorbereitung kürzt geringfügig auf die nächste kleinere 8k+1-Framezahl, damit LTX später keine weiteren Frames verwirft.",
   longcatLipsync:
     "Wofür: Rendert zusätzlich mit LongCat eine präziser audiogeführte Mundbewegung und überträgt sie per dynamischem Gesichts- und Mundwinkel-Tracking auf das LTX-Video. Position und Größe folgen dem Mund, die Rotation der stabileren Augen- und Kopfachse. Bei unsicherer Erkennung bleibt der jeweilige LTX-Frame unverändert. Das ist deutlich langsamer, bleibt deshalb optional und wird bei identischem Bild und Audio zwischengespeichert.",
   longcatResolution:

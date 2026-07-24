@@ -73,6 +73,52 @@ describe("LipDub reference preparation", () => {
       hasAudio: true,
     });
     expect(metadata?.fps).toBeCloseTo(24, 2);
+    expect(prepared.target.frames % 8).toBe(1);
+    expect(metadata?.frames).toBe(prepared.target.frames);
+    expect(metadata?.audioVideoDurationDeltaSeconds ?? 1).toBeLessThanOrEqual(0.04);
+  });
+
+  it("creates an exact 8k+1 calibration clip with video and audio on the same window", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "long-source.mp4");
+    ffmpeg([
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=360x640:rate=30000/1001:duration=6",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=1000:duration=6",
+      "-shortest",
+      "-c:v",
+      "mpeg4",
+      "-c:a",
+      "aac",
+      source,
+    ]);
+
+    const request = validRequest("lipdub");
+    request.lipDub.referenceVideo.path = source;
+    const prepared = await prepareLipDubReference({
+      ...request,
+      trim: { startSeconds: 1, durationSeconds: 4.2 },
+    }, join(root, "uploads"));
+    const metadata = probeVideoMetadata(prepared.file.path);
+
+    expect(prepared.file.originalname).toBe("long-source-lipdub-calibration.mp4");
+    expect(prepared.trim).toEqual({ startSeconds: 1, requestedDurationSeconds: 4.2 });
+    expect(prepared.target).toMatchObject({ fps: 30, frames: 121 });
+    expect(prepared.target.frames % 8).toBe(1);
+    expect(metadata).toMatchObject({
+      frames: prepared.target.frames,
+      fps: 30,
+      hasAudio: true,
+      constantFrameRate: true,
+      audioSampleRate: 48000,
+      audioChannels: 2,
+    });
+    expect(metadata?.audioVideoDurationDeltaSeconds ?? 1).toBeLessThanOrEqual(0.04);
   });
 
   it("refuses to prepare LipDub references without audio", async () => {
@@ -97,5 +143,33 @@ describe("LipDub reference preparation", () => {
     await expect(prepareLipDubReference(request, join(root, "uploads"))).rejects.toThrow(
       LipDubReferencePreparationError,
     );
+  });
+
+  it("refuses calibration windows outside the 2-5 second quality contract", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "source.mp4");
+    ffmpeg([
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=360x640:rate=24:duration=6",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=1000:duration=6",
+      "-shortest",
+      "-c:v",
+      "mpeg4",
+      "-c:a",
+      "aac",
+      source,
+    ]);
+    const request = validRequest("lipdub");
+    request.lipDub.referenceVideo.path = source;
+
+    await expect(prepareLipDubReference({
+      ...request,
+      trim: { startSeconds: 0, durationSeconds: 1.9 },
+    }, join(root, "uploads"))).rejects.toThrow("zwischen 2 und 5 Sekunden");
   });
 });

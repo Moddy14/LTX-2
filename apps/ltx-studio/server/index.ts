@@ -26,6 +26,7 @@ import {
   uploadRoot,
 } from "./config.js";
 import { isActiveJobStatus, JobConflictError, JobManager, type StudioJob } from "./jobs.js";
+import { inspectLipDubReference } from "./lipdubDiagnostics.js";
 import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
 import { estimateRequest } from "./estimates.js";
 import { getModelInventory } from "./models.js";
@@ -84,19 +85,31 @@ const lipDubReferenceDimensionSchema = z.number().int().min(64).max(4096).refine
   (value) => value % 64 === 0,
   { message: "Breite und Höhe müssen durch 64 teilbar sein." },
 );
+const lipDubReferencePathSchema = z.string().trim().min(1).max(4096).refine((value) => !value.includes("\0"), {
+  message: "NUL-Zeichen sind nicht erlaubt.",
+});
+const lipDubReferenceInspectionRequestSchema = z.object({
+  path: lipDubReferencePathSchema,
+  width: lipDubReferenceDimensionSchema,
+  height: lipDubReferenceDimensionSchema,
+  dialogue: z.string().max(20_000).default(""),
+  prompt: z.string().max(20_000).default(""),
+});
 const lipDubReferencePreparationRequestSchema = z.object({
   mode: z.literal("lipdub").optional(),
   width: lipDubReferenceDimensionSchema,
   height: lipDubReferenceDimensionSchema,
   lipDub: z.object({
     referenceVideo: z.object({
-      path: z.string().trim().min(1).max(4096).refine((value) => !value.includes("\0"), {
-        message: "NUL-Zeichen sind nicht erlaubt.",
-      }),
+      path: lipDubReferencePathSchema,
       name: z.string().trim().max(255).default(""),
       strength: z.number().finite().min(0).max(2).default(1),
     }),
   }),
+  trim: z.object({
+    startSeconds: z.number().finite().min(0).max(86_400),
+    durationSeconds: z.number().finite().min(2).max(5),
+  }).optional(),
 });
 
 const upload = multer({
@@ -209,6 +222,16 @@ app.post("/api/jobs/plan", (request, response) => {
   });
 });
 
+app.post("/api/lipdub/reference/inspect", (request, response) => {
+  const payload = lipDubReferenceInspectionRequestSchema.parse(request.body);
+  if (!assets.findByPath("video", payload.path)) {
+    return response.status(400).json({
+      error: "LipDub-Referenzdiagnose ist nur für Videos aus der Studio-Mediathek verfügbar.",
+    });
+  }
+  response.json(inspectLipDubReference(payload));
+});
+
 app.post("/api/lipdub/reference/prepare", async (request, response) => {
   const payload = lipDubReferencePreparationRequestSchema.parse(request.body);
   if (!assets.findByPath("video", payload.lipDub.referenceVideo.path)) {
@@ -227,6 +250,7 @@ app.post("/api/lipdub/reference/prepare", async (request, response) => {
   response.status(201).json({
     asset,
     target: prepared.target,
+    trim: prepared.trim,
     command: prepared.command,
   });
 });
