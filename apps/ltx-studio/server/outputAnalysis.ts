@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -15,26 +16,65 @@ import {
   writeOutputAnalysis,
   type OutputRevision,
 } from "./analysisStore.js";
-import { appRoot, outputRoot, pythonExecutable as defaultPythonExecutable } from "./config.js";
-import { OutputLibrary, type OutputAnalysisTarget } from "./outputs.js";
+import {
+  analysisTempRoot as defaultAnalysisTempRoot,
+  appRoot,
+  outputRoot,
+  pythonExecutable as defaultPythonExecutable,
+} from "./config.js";
+import {
+  type IdentityInputEvidence,
+  type ResolvedIdentityReference,
+} from "./inputEvidence.js";
+import { OutputLibrary, OutputQualityError, type OutputAnalysisTarget } from "./outputs.js";
 
 const MAX_STDOUT_BYTES = 256 * 1024;
 const MAX_STDERR_BYTES = 32 * 1024;
 const ANALYSIS_TIMEOUT_MS = 120_000;
 const TERMINATION_GRACE_MS = 2_000;
+const CURRENT_IDENTITY_MODEL_SHA256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79";
+const CURRENT_IDENTITY_MODEL_REVISION = "3d7082438a6e4551e840c9b2bb60b71e8da4b524";
+const CURRENT_IDENTITY_PREPROCESSING = "yunet5-aligncrop-112-track.v2";
 
 type OutputAnalysisManagerOptions = {
   pythonExecutable?: string;
   workerScript?: string;
   faceModel?: string;
+  identityModel?: string;
+  identityReferenceResolver?: (evidence: IdentityInputEvidence | null) => ResolvedIdentityReference[];
+  identityEvidenceVerifier?: (evidence: IdentityInputEvidence) => Promise<string | null>;
+  analysisTempRoot?: string;
   timeoutMs?: number;
   terminationGraceMs?: number;
 };
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
-  record: OutputAnalysisRecord;
+  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v2" }>;
 };
+
+function analysisWasCancelled(task: AnalysisTask): boolean {
+  return task.record.status === "cancelled";
+}
+
+function completedAnalysisIsCurrent(record: OutputAnalysisRecord): boolean {
+  if (record.status !== "completed"
+    || record.schemaVersion !== "ltx-studio-output-analysis.v2"
+    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v2") return false;
+  const identity = record.result.identity;
+  if (["not-applicable", "reference-provenance-missing"].includes(identity.status)) return true;
+  return identity.modelSha256 === CURRENT_IDENTITY_MODEL_SHA256
+    && identity.modelRevision === CURRENT_IDENTITY_MODEL_REVISION
+    && identity.preprocessingVersion === CURRENT_IDENTITY_PREPROCESSING;
+}
+
+export function cleanupAnalysisTempRoot(root: string): void {
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.name.startsWith("analysis-")) continue;
+    rmSync(join(root, entry.name), { recursive: true, force: true });
+  }
+}
 
 function now(): string {
   return new Date().toISOString();
@@ -62,7 +102,7 @@ function revisionOf(target: OutputAnalysisTarget): OutputRevision {
 export function buildObjectiveQualityAnalysis(
   worker: ObjectiveWorkerResult,
   createdAt = now(),
-): ObjectiveQualityAnalysis {
+): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v2" }> {
   const findings: ObjectiveQualityAnalysis["findings"] = [];
   if (worker.technical.hasAudio !== true) {
     findings.push({
@@ -112,6 +152,40 @@ export function buildObjectiveQualityAnalysis(
       message: `Verwertbare Gesichtsgeometrie lag in ${(worker.face.geometryCoverage * 100).toFixed(0)} % der Stichproben vor.`,
     });
   }
+  if (worker.identity.status === "measured") {
+    if (worker.identity.outputCoverage < 0.8) {
+      findings.push({
+        code: "identity-coverage-incomplete",
+        level: worker.identity.outputCoverage < 0.5 ? "error" : "warning",
+        message: `SFace konnte die gebundene Identität in ${(worker.identity.outputCoverage * 100).toFixed(0)} % der Stichproben vergleichen.`,
+      });
+    }
+    findings.push({
+      code: "identity-calibration-required",
+      level: "info",
+      message: "SFace-Ähnlichkeiten sind echte Rohmessungen, aber noch kein kalibrierter 0-bis-10-Identitätsscore.",
+    });
+  } else if (worker.identity.status === "reference-provenance-missing") {
+    findings.push({
+      code: "identity-reference-provenance-missing",
+      level: "info",
+      message: "Diese Ausgabe besitzt keine während der Generierung verifizierte Identitätsreferenz.",
+    });
+  } else if (worker.identity.status === "insufficient") {
+    findings.push({
+      code: "identity-measurement-insufficient",
+      level: "warning",
+      message: worker.identity.error
+        ? `SFace-Messung unzureichend: ${worker.identity.error}`
+        : "SFace erhielt nicht genügend eindeutige Gesichtsframes für eine belastbare Rohmessung.",
+    });
+  } else if (worker.identity.status === "failed") {
+    findings.push({
+      code: "identity-measurement-failed",
+      level: "warning",
+      message: `SFace-Teilprüfung fehlgeschlagen: ${worker.identity.error ?? "unbekannter Fehler"}`,
+    });
+  }
   findings.push({
     code: "calibration-required",
     level: "info",
@@ -120,23 +194,34 @@ export function buildObjectiveQualityAnalysis(
   const sufficient = worker.technical.hasAudio === true
     && worker.technical.constantFrameRate === true
     && worker.face.sampledFrames >= 8
-    && worker.face.geometryCoverage >= 0.5;
+    && worker.face.geometryCoverage >= 0.5
+    && ["measured", "not-applicable"].includes(worker.identity.status);
   return {
-    schemaVersion: "ltx-studio-objective-quality.v1",
-    analyzerVersion: "ffprobe-yunet5.v1",
+    schemaVersion: "ltx-studio-objective-quality.v2",
+    analyzerVersion: "ffprobe-yunet5-sface.v2",
     createdAt,
     status: sufficient ? "measured" : "insufficient",
     technical: worker.technical,
     face: worker.face,
+    identity: worker.identity,
     capabilities: {
       avSync: "syncnet-required",
-      identity: "face-recognition-model-required",
+      identity: worker.identity.status === "measured"
+        ? "sface-raw-measured"
+        : worker.identity.status === "insufficient"
+          ? "sface-insufficient"
+          : worker.identity.status === "not-applicable"
+            ? "not-applicable"
+            : worker.identity.status === "failed"
+              ? "sface-failed"
+              : "reference-provenance-required",
       dialogue: "whisper-not-run",
     },
     findings,
     limitations: [
       "YuNet liefert fünf Landmarken; die Werte messen Stabilität, aber keine Phonem-Mund-Synchronität.",
-      "AV-Sync benötigt ein kalibriertes SyncNet-Modell und Identität ein separates Face-Recognition-Modell.",
+      "SFace misst Identitätsähnlichkeit nur gegen während der Generierung kryptografisch gebundene Studio-Referenzen.",
+      "AV-Sync benötigt weiterhin einen lizenzierten und lokal kalibrierten Audio-Video-Synchronisationsevaluator.",
       "Unkalibrierte Rohwerte dürfen keine automatische 10/10- oder SOTA-Freigabe erzeugen.",
     ],
   };
@@ -168,10 +253,10 @@ export class OutputAnalysisManager {
     const revision = revisionOf(target);
     const current = readOutputAnalysis(this.root, outputName, revision);
     if (current && ["queued", "running"].includes(current.status)) return current;
-    if (current?.status === "completed" && !force) return current;
+    if (current && completedAnalysisIsCurrent(current) && !force) return current;
     const createdAt = now();
-    const record: OutputAnalysisRecord = {
-      schemaVersion: "ltx-studio-output-analysis.v1",
+    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v2" }> = {
+      schemaVersion: "ltx-studio-output-analysis.v2",
       outputName,
       sizeBytes: target.sizeBytes,
       modifiedAtMs: target.modifiedAtMs,
@@ -197,9 +282,15 @@ export class OutputAnalysisManager {
     return record;
   }
 
-  cancel(outputName: string): OutputAnalysisRecord | null {
+  cancel(outputName: string, expectedAnalysisId: string): OutputAnalysisRecord | null {
     const analysisId = this.activeByOutput.get(outputName);
     if (!analysisId) return this.get(outputName);
+    if (analysisId !== expectedAnalysisId) {
+      throw new OutputQualityError(
+        "Der Analyselauf wurde inzwischen ersetzt; der neuere Lauf wurde nicht abgebrochen.",
+        409,
+      );
+    }
     const task = this.tasks.get(analysisId);
     if (!task) return this.get(outputName);
     const queueIndex = this.queue.indexOf(analysisId);
@@ -258,8 +349,12 @@ export class OutputAnalysisManager {
     };
     writeOutputAnalysis(this.root, task.record);
     try {
+      await this.verifyTaskIdentityEvidence(task, "vor der Analyse");
+      if (analysisWasCancelled(task)) return;
       const worker = await this.runWorker(task);
-      if (task.record.status === "cancelled") return;
+      if (analysisWasCancelled(task)) return;
+      await this.verifyTaskIdentityEvidence(task, "nach der Analyse");
+      if (analysisWasCancelled(task)) return;
       const currentTarget = this.library.resolveAnalysisTarget(task.target.outputName);
       if (currentTarget.sizeBytes !== task.target.sizeBytes
         || Math.abs(currentTarget.modifiedAtMs - task.target.modifiedAtMs) >= 1
@@ -298,21 +393,49 @@ export class OutputAnalysisManager {
     }
   }
 
+  private async verifyTaskIdentityEvidence(task: AnalysisTask, context: string): Promise<void> {
+    if (task.target.identityEvidence?.status !== "verified" || !this.options.identityEvidenceVerifier) return;
+    const error = await this.options.identityEvidenceVerifier(task.target.identityEvidence);
+    if (error) {
+      throw new Error(`Gebundene Identitätsreferenz ${context} verändert: ${error}`);
+    }
+  }
+
   private runWorker(task: AnalysisTask): Promise<ObjectiveWorkerResult> {
     const script = this.options.workerScript ?? join(appRoot, "scripts", "analyze-face-quality.py");
     const faceModel = this.options.faceModel ?? join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
+    const identityModel = this.options.identityModel ?? join(appRoot, "models", "face_recognition_sface_2021dec.onnx");
+    const references = this.options.identityReferenceResolver?.(task.target.identityEvidence) ?? [];
+    const identityStatus = task.target.identityEvidence?.status === "not-applicable"
+      ? "not-applicable"
+      : task.target.identityEvidence?.status === "verified" && references.length > 0
+        ? "available"
+        : "reference-provenance-missing";
     const timeoutMs = this.options.timeoutMs ?? ANALYSIS_TIMEOUT_MS;
     const terminationGraceMs = this.options.terminationGraceMs ?? TERMINATION_GRACE_MS;
+    const workerArgs = [
+      script,
+      "--video",
+      task.target.outputPath,
+      "--face-model",
+      faceModel,
+      "--identity-model",
+      identityModel,
+      "--identity-status",
+      identityStatus,
+      "--max-frames",
+      "240",
+    ];
+    for (const reference of references) {
+      workerArgs.push("--identity-reference", reference.path, reference.sha256);
+    }
+    const analysisTempRoot = this.options.analysisTempRoot ?? defaultAnalysisTempRoot;
+    const analysisTempDir = join(analysisTempRoot, `analysis-${task.record.analysisId}`);
+    mkdirSync(analysisTempRoot, { recursive: true, mode: 0o700 });
+    rmSync(analysisTempDir, { recursive: true, force: true });
+    mkdirSync(analysisTempDir, { recursive: false, mode: 0o700 });
     return new Promise((resolvePromise, rejectPromise) => {
-      const child = spawn(this.options.pythonExecutable ?? defaultPythonExecutable, [
-        script,
-        "--video",
-        task.target.outputPath,
-        "--face-model",
-        faceModel,
-        "--max-frames",
-        "240",
-      ], {
+      const child = spawn(this.options.pythonExecutable ?? defaultPythonExecutable, workerArgs, {
         cwd: appRoot,
         detached: true,
         shell: false,
@@ -321,6 +444,7 @@ export class OutputAnalysisManager {
           CUDA_VISIBLE_DEVICES: "",
           OMP_NUM_THREADS: "2",
           OPENBLAS_NUM_THREADS: "2",
+          LTX_STUDIO_ANALYSIS_TEMP_DIR: analysisTempDir,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -336,6 +460,7 @@ export class OutputAnalysisManager {
         settled = true;
         if (timeout) clearTimeout(timeout);
         if (killTimer) clearTimeout(killTimer);
+        rmSync(analysisTempDir, { recursive: true, force: true });
         if (error) return rejectPromise(error);
         try {
           resolvePromise(objectiveWorkerResultSchema.parse(JSON.parse(stdout)));

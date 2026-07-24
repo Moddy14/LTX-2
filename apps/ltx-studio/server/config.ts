@@ -26,6 +26,7 @@ export const uploadRoot = join(dataRoot, "uploads");
 export const outputRoot = join(dataRoot, "outputs");
 export const hybridRoot = join(dataRoot, "hybrid");
 export const hybridCacheRoot = join(dataRoot, "hybrid-cache");
+export const analysisTempRoot = join(dataRoot, "analysis-tmp");
 export const longcatProjectRoot = resolve(
   process.env.LTX_STUDIO_LONGCAT_ROOT ?? "/home/moddy/projects/longcat-video-avatar-dgx",
 );
@@ -91,7 +92,7 @@ export const modelRoots = (process.env.LTX_STUDIO_MODEL_ROOTS ?? "/home/moddy/LT
   .map((root) => resolve(root));
 
 export function ensureRuntimeDirectories(): void {
-  for (const directory of [dataRoot, uploadRoot, outputRoot, hybridRoot, hybridCacheRoot]) {
+  for (const directory of [dataRoot, uploadRoot, outputRoot, hybridRoot, hybridCacheRoot, analysisTempRoot]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
 }

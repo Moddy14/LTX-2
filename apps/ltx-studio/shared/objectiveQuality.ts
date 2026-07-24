@@ -33,14 +33,43 @@ export const faceTrackingMetricsSchema = z.object({
 
 export type FaceTrackingMetrics = z.infer<typeof faceTrackingMetricsSchema>;
 
+export const identityMetricsSchema = z.object({
+  status: z.enum(["measured", "insufficient", "failed", "not-applicable", "reference-provenance-missing"]),
+  error: z.string().min(1).max(500).nullable(),
+  modelName: z.literal("OpenCV SFace 2021dec").nullable(),
+  modelSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  modelRevision: z.string().regex(/^[0-9a-f]{40}$/).nullable(),
+  preprocessingVersion: z.enum([
+    "yunet5-aligncrop-112.v1",
+    "yunet5-aligncrop-112-track.v2",
+  ]).nullable(),
+  embeddingDimensions: z.number().int().positive().nullable(),
+  referenceCount: z.number().int().min(0),
+  sampledReferenceFrames: z.number().int().min(0),
+  embeddedReferenceFrames: z.number().int().min(0),
+  sampledOutputFrames: z.number().int().min(0),
+  matchedOutputFrames: z.number().int().min(0),
+  outputCoverage: z.number().finite().min(0).max(1),
+  ambiguousOutputFrames: z.number().int().min(0),
+  referenceSelfConsistencyMedian: z.number().finite().min(-1).max(1).nullable(),
+  referenceSelfConsistencyP10: z.number().finite().min(-1).max(1).nullable(),
+  cosineMedian: z.number().finite().min(-1).max(1).nullable(),
+  cosineP10: z.number().finite().min(-1).max(1).nullable(),
+  cosineMinimum: z.number().finite().min(-1).max(1).nullable(),
+  outputTemporalConsistencyMedian: z.number().finite().min(-1).max(1).nullable(),
+}).strict();
+
+export type IdentityMetrics = z.infer<typeof identityMetricsSchema>;
+
 export const objectiveWorkerResultSchema = z.object({
   technical: objectiveTechnicalMetricsSchema,
   face: faceTrackingMetricsSchema,
+  identity: identityMetricsSchema,
 }).strict();
 
 export type ObjectiveWorkerResult = z.infer<typeof objectiveWorkerResultSchema>;
 
-export const objectiveQualityAnalysisSchema = z.object({
+const objectiveQualityAnalysisV1Schema = z.object({
   schemaVersion: z.literal("ltx-studio-objective-quality.v1"),
   analyzerVersion: z.literal("ffprobe-yunet5.v1"),
   createdAt: z.string().datetime({ offset: true }),
@@ -60,10 +89,41 @@ export const objectiveQualityAnalysisSchema = z.object({
   limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
 }).strict();
 
+const objectiveQualityAnalysisV2Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-objective-quality.v2"),
+  analyzerVersion: z.literal("ffprobe-yunet5-sface.v2"),
+  createdAt: z.string().datetime({ offset: true }),
+  status: z.enum(["measured", "insufficient"]),
+  technical: objectiveTechnicalMetricsSchema,
+  face: faceTrackingMetricsSchema.nullable(),
+  identity: identityMetricsSchema,
+  capabilities: z.object({
+    avSync: z.literal("syncnet-required"),
+    identity: z.enum([
+      "sface-raw-measured",
+      "sface-insufficient",
+      "sface-failed",
+      "reference-provenance-required",
+      "not-applicable",
+    ]),
+    dialogue: z.literal("whisper-not-run"),
+  }).strict(),
+  findings: z.array(z.object({
+    code: z.string().min(1).max(80),
+    level: z.enum(["info", "warning", "error"]),
+    message: z.string().min(1).max(500),
+  }).strict()).max(30),
+  limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
+}).strict();
+
+export const objectiveQualityAnalysisSchema = z.union([
+  objectiveQualityAnalysisV1Schema,
+  objectiveQualityAnalysisV2Schema,
+]);
+
 export type ObjectiveQualityAnalysis = z.infer<typeof objectiveQualityAnalysisSchema>;
 
-export const outputAnalysisRecordSchema = z.object({
-  schemaVersion: z.literal("ltx-studio-output-analysis.v1"),
+const outputAnalysisRecordFields = {
   outputName: outputNameSchema,
   sizeBytes: z.number().int().positive(),
   modifiedAtMs: z.number().finite().nonnegative(),
@@ -82,8 +142,24 @@ export const outputAnalysisRecordSchema = z.object({
     code: z.string().min(1).max(80),
     message: z.string().min(1).max(500),
   }).strict().nullable(),
-  result: objectiveQualityAnalysisSchema.nullable(),
+};
+
+const outputAnalysisRecordV1Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v1"),
+  ...outputAnalysisRecordFields,
+  result: objectiveQualityAnalysisV1Schema.nullable(),
 }).strict();
+
+const outputAnalysisRecordV2Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v2"),
+  ...outputAnalysisRecordFields,
+  result: objectiveQualityAnalysisV2Schema.nullable(),
+}).strict();
+
+export const outputAnalysisRecordSchema = z.union([
+  outputAnalysisRecordV1Schema,
+  outputAnalysisRecordV2Schema,
+]);
 
 export type OutputAnalysisRecord = z.infer<typeof outputAnalysisRecordSchema>;
 

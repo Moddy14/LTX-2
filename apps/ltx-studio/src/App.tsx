@@ -423,7 +423,8 @@ export function App() {
   const handleCancelAnalysis = async (output: StudioOutput) => {
     setServerErrors([]);
     try {
-      updateOutputAnalysis(output.name, await cancelOutputAnalysis(output.name));
+      if (!output.analysis) throw new Error("Kein aktiver Analyselauf vorhanden.");
+      updateOutputAnalysis(output.name, await cancelOutputAnalysis(output.name, output.analysis.analysisId));
     } catch (error) {
       setServerErrors([error instanceof Error ? error.message : "Objektive Analyse konnte nicht abgebrochen werden."]);
       throw error;

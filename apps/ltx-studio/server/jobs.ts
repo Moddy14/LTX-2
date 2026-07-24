@@ -40,6 +40,13 @@ import {
 } from "./config.js";
 import { readResourceSnapshot } from "./system.js";
 import { estimateRequest } from "./estimates.js";
+import type { AssetStore } from "./assets.js";
+import {
+  captureIdentityEvidence,
+  normalizeIdentityInputEvidence,
+  verifyIdentityEvidence,
+  type IdentityInputEvidence,
+} from "./inputEvidence.js";
 import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } from "./thermal.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -75,6 +82,7 @@ export type StudioJob = {
   cancelledBy: "studio" | null;
   thermalProfile: ThermalProfile | null;
   dgxJobId: string | null;
+  identityEvidence: IdentityInputEvidence | null;
 };
 
 type RuntimeJob = StudioJob & {
@@ -83,6 +91,10 @@ type RuntimeJob = StudioJob & {
   dgxJobTerminal?: boolean;
 };
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
+type IdentityEvidenceOperations = {
+  capture: typeof captureIdentityEvidence;
+  verify: typeof verifyIdentityEvidence;
+};
 
 const MAX_JOBS = 100;
 export const MAX_ACTIVE_JOBS = 8;
@@ -199,6 +211,11 @@ export class JobManager extends EventEmitter {
   constructor(
     private readonly storagePath = statePath,
     private readonly autoStart = true,
+    private readonly assets: AssetStore | null = null,
+    private readonly identityEvidenceOperations: IdentityEvidenceOperations = {
+      capture: captureIdentityEvidence,
+      verify: verifyIdentityEvidence,
+    },
   ) {
     super();
     this.restore();
@@ -248,6 +265,7 @@ export class JobManager extends EventEmitter {
       cancelledBy: null,
       thermalProfile: null,
       dgxJobId: null,
+      identityEvidence: null,
       plan,
     };
     this.jobs.set(id, job);
@@ -389,10 +407,29 @@ export class JobManager extends EventEmitter {
       return;
     }
 
+    job.identityEvidence = await this.identityEvidenceOperations.capture(job.request, this.assets);
+    if (jobWasCancelled(job)) {
+      this.changed();
+      return;
+    }
+    if (job.identityEvidence.status === "captured") {
+      this.appendLog(
+        job,
+        `${job.identityEvidence.references.length} Identitätsreferenz(en) kryptografisch für diesen Lauf gebunden.`,
+      );
+    } else if (job.identityEvidence.status === "unavailable") {
+      this.appendLog(
+        job,
+        `Identitätsmessung später nicht beweisbar: ${job.identityEvidence.reason ?? "Referenzprovenienz fehlt."}`,
+      );
+    }
+    this.changed();
+
     const stageRoot = join(hybridRoot, job.id);
     const longcatOutput = join(stageRoot, "longcat.mp4");
     const ltxOutput = hybridEnabled ? join(stageRoot, "ltx-base.mp4") : job.plan.outputPath;
     if (hybridEnabled) {
+      if (!await this.verifyJobIdentityEvidence(job, "vor der LongCat-Stufe")) return;
       mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
       this.appendLog(
         job,
@@ -480,6 +517,14 @@ export class JobManager extends EventEmitter {
       this.changed();
     } else {
       if (!await this.waitForDgxQueueStart(job)) return;
+      if (!await this.verifyJobIdentityEvidence(job, "unmittelbar vor dem LTX-Start")) {
+        if (jobWasCancelled(job)) return;
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "identity reference changed before LTX allocation",
+          last_error: job.error ?? "identity reference verification failed",
+        });
+        return;
+      }
       const thermalBaselineC = await this.readThermalBaseline(job);
       if (thermalBaselineC === null) {
         await this.transitionDgxJob(job, "failed", {
@@ -597,6 +642,7 @@ export class JobManager extends EventEmitter {
       }
     }
 
+    if (!await this.verifyJobIdentityEvidence(job, "nach der vollständigen Ausgabe")) return;
     job.status = "completed";
     job.progress = 100;
     job.outputUrl = `/api/jobs/${job.id}/output`;
@@ -620,13 +666,58 @@ export class JobManager extends EventEmitter {
     }
   }
 
+  private async verifyJobIdentityEvidence(job: RuntimeJob, context: string): Promise<boolean> {
+    if (!job.identityEvidence) return true;
+    const result = await this.identityEvidenceOperations.verify(job.identityEvidence, this.assets);
+    if (jobWasCancelled(job)) return false;
+    job.identityEvidence = result.evidence;
+    if (result.error) {
+      this.failJob(job, `Identitätsreferenzprüfung ${context} fehlgeschlagen: ${result.error}`);
+      return false;
+    }
+    if (job.identityEvidence.status === "verified") {
+      this.appendLog(job, `Gebundene Identitätsreferenz ${context} unverändert verifiziert.`);
+      this.changed();
+    }
+    return true;
+  }
+
   private findReusableLtxBase(job: RuntimeJob): RuntimeJob | undefined {
     return [...this.jobs.values()].find((candidate) =>
       candidate.id !== job.id
       && candidate.status === "completed"
       && !candidate.request.postprocess.longcatLipsync.enabled
       && requestsShareLtxBase(candidate.request, job.request)
+      && this.identityEvidenceMatches(candidate.identityEvidence, job.identityEvidence)
       && this.fileReady(candidate.plan.outputPath));
+  }
+
+  private identityEvidenceMatches(
+    left: IdentityInputEvidence | null,
+    right: IdentityInputEvidence | null,
+  ): boolean {
+    if (left?.status !== "verified" || !["captured", "verified"].includes(right?.status ?? "")) return false;
+    return left.source === right?.source
+      && isDeepStrictEqual(
+        left.references.map(({ assetId, kind, sizeBytes, modifiedAtMs, changedAtMs, fileId, sha256 }) => ({
+          assetId,
+          kind,
+          sizeBytes,
+          modifiedAtMs,
+          changedAtMs,
+          fileId,
+          sha256,
+        })),
+        right?.references.map(({ assetId, kind, sizeBytes, modifiedAtMs, changedAtMs, fileId, sha256 }) => ({
+          assetId,
+          kind,
+          sizeBytes,
+          modifiedAtMs,
+          changedAtMs,
+          fileId,
+          sha256,
+        })),
+      );
   }
 
   private async waitForDelay(job: RuntimeJob, delayMs: number): Promise<boolean> {
@@ -1070,6 +1161,7 @@ export class JobManager extends EventEmitter {
           dgxJobId: typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
             ? entry.dgxJobId
             : null,
+          identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
           plan,
         });
       }

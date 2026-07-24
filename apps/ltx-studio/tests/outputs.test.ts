@@ -49,6 +49,7 @@ function completedJob(
     cancelledBy: null,
     dgxJobId: null,
     thermalProfile: null,
+    identityEvidence: null,
   };
 }
 
@@ -129,9 +130,10 @@ describe("generated output library", () => {
     expect(output.qualityReview).toBeNull();
     const migrated = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(migrated).toMatchObject({
-      schemaVersion: "ltx-studio-output.v3",
+      schemaVersion: "ltx-studio-output.v4",
       changedAtMs: expect.any(Number),
       fileId: expect.stringMatching(/^\d+$/),
+      identityEvidence: null,
     });
   });
 
@@ -173,6 +175,47 @@ describe("generated output library", () => {
     expect(() => library.resolveAnalysisTarget(outputName)).toThrow("inhaltsgebundene Studio-Provenienz");
   });
 
+  it("upgrades a strong v3 speech sidecar to v4 without inventing identity evidence", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T07:45:00.000Z");
+    const outputName = "v3-speech.mp4";
+    await writeFile(join(root, outputName), "video");
+    const stats = await stat(join(root, outputName));
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    await writeFile(join(root, `${outputName}.ltx-settings.json`), JSON.stringify({
+      schemaVersion: "ltx-studio-output.v3",
+      outputName,
+      jobId: job.id,
+      completedAt: completedAt.toISOString(),
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      changedAtMs: stats.ctimeMs,
+      fileId: String(stats.ino),
+      request: job.request,
+      qualityReview: null,
+    }));
+    const library = new OutputLibrary(root);
+
+    expect(library.resolveAnalysisTarget(outputName).identityEvidence).toBeNull();
+    library.setQualityReview(outputName, {
+      scores: {
+        lipSync: 5,
+        identity: 5,
+        mouthNaturalness: 5,
+        skinStability: 5,
+        motion: 5,
+        audio: 5,
+      },
+      note: "Alte Ausgabe ohne beweisbare Identitätsreferenz.",
+    }, []);
+
+    const upgraded = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
+    expect(upgraded).toMatchObject({
+      schemaVersion: "ltx-studio-output.v4",
+      identityEvidence: null,
+    });
+  });
+
   it("keeps completed provenance after the source job leaves bounded history", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T08:00:00.000Z");
@@ -189,7 +232,7 @@ describe("generated output library", () => {
     expect(historic.settingsAvailable).toBe(true);
   });
 
-  it("persists a validated speech quality scorecard in a revision-bound v3 sidecar", async () => {
+  it("persists a validated speech quality scorecard in a revision-bound v4 sidecar", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T09:00:00.000Z");
     const outputName = "speech-scorecard.mp4";
@@ -223,7 +266,7 @@ describe("generated output library", () => {
     });
     expect(Number.isFinite(Date.parse(updated.qualityReview!.updatedAt))).toBe(true);
     const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
-    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v3");
+    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v4");
     expect(sidecar.changedAtMs).toEqual(expect.any(Number));
     expect(sidecar.fileId).toMatch(/^\d+$/);
     expect(sidecar.request).toEqual(job.request);
@@ -292,6 +335,38 @@ describe("generated output library", () => {
 
     await appendFile(join(root, outputName), "changed");
     expect(() => library.resolveAnalysisTarget(outputName)).toThrow("nachträglich verändert");
+  });
+
+  it("persists verified identity evidence without persisting a reference path", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:35:00.000Z");
+    const outputName = "speech-identity-evidence.mp4";
+    await writeFile(join(root, outputName), "video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    job.identityEvidence = {
+      schemaVersion: "ltx-studio-identity-evidence.v1",
+      status: "verified",
+      source: "image-conditioning",
+      capturedAt: "2026-07-24T09:30:00.000Z",
+      verifiedAt: "2026-07-24T09:35:00.000Z",
+      reason: null,
+      references: [{
+        assetId: "6d6d624b-12c3-4a97-9e4e-152a69423b6c",
+        kind: "image",
+        sizeBytes: 1_024,
+        modifiedAtMs: 1_721_813_400_000,
+        changedAtMs: 1_721_813_400_001,
+        fileId: "12345",
+        sha256: "a".repeat(64),
+      }],
+    };
+
+    library.recordCompleted([job]);
+    expect(library.resolveAnalysisTarget(outputName).identityEvidence).toEqual(job.identityEvidence);
+    const sidecar = await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8");
+    expect(sidecar).not.toContain("/uploads/");
+    expect(sidecar).toContain(job.identityEvidence.references[0].sha256);
   });
 
   it("drops an analysis when same-sized output bytes replace the original with restored mtime", async () => {

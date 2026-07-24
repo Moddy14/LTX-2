@@ -162,7 +162,7 @@ export const fieldHelp = {
   qualityNote:
     "Wofür: Hält sichtbare Fehler und die nächste gezielte Parameteränderung fest. Gute Eingabe: Zeitpunkt, konkrete Beobachtung und vermutete Ursache, zum Beispiel '1,8 s: Lippen 3 Frames zu spät; Referenzstärke 0,9 testen'.",
   objectiveAnalysis:
-    "Wofür: Misst den technischen Audio-/Videovertrag und verfolgt Gesicht, Nase und Mund mit dem lokalen CPU-YuNet-Modell. Die Rohwerte helfen beim Vergleich identischer Testfälle. Sie sind noch kein LipSync- oder Identitätsurteil; dafür fehlen kalibrierte SyncNet- und Face-Recognition-Modelle.",
+    "Wofür: Misst den technischen Audio-/Videovertrag, verfolgt Gesicht, Nase und Mund mit CPU-YuNet und vergleicht die Identität mit CPU-SFace, sofern die Referenz beim Render kryptografisch gebunden wurde. Die Rohwerte helfen beim Vergleich identischer Testfälle. Sie sind noch keine kalibrierte 0-bis-10-Note.",
   objectiveFaceDetection:
     "Wofür: Anteil der untersuchten Frames, in denen YuNet ein Gesicht erkennt. Gut: bei einem unverdeckten Einzelporträt nahe 100 %. Ein niedriger Wert kann Verdeckung, Bewegungsunschärfe oder eine ungeeignete Ansicht bedeuten; er ist kein Qualitäts-Score.",
   objectiveGeometryCoverage:
@@ -175,6 +175,14 @@ export const fieldHelp = {
     "Wofür: Median der Mundlinie relativ zur Augenlinie in Grad. Werte nahe 0° wirken meist gerade, hängen aber von Perspektive und Anatomie ab. Noch kein Identitäts- oder Qualitätsurteil.",
   objectiveMouthAngleDynamics:
     "Wofür: 95. Perzentil der Änderung des relativen Mundwinkels in Grad pro Sekunde. Starke Spitzen können einen kippenden oder springenden Mund anzeigen. Noch kein kalibrierter Grenzwert.",
+  objectiveIdentityCoverage:
+    "Wofür: Anteil der untersuchten Ausgabeframes, in denen SFace die kryptografisch gebundene Referenzidentität eindeutig vergleichen konnte. Gut: bei einem sichtbaren Einzelgesicht nahe 100 %. Mehrere ähnlich passende Gesichter werden absichtlich als mehrdeutig ausgelassen.",
+  objectiveIdentityMedian:
+    "Wofür: Median der SFace-Cosinusähnlichkeit zwischen Referenz und Ausgabe über alle verwertbaren Frames. Höher bedeutet ähnlicher; 1,000 wäre identisch im Merkmalsraum. Nur mit demselben Modell und derselben Vorverarbeitung vergleichen; noch keine Qualitätsnote.",
+  objectiveIdentityP10:
+    "Wofür: Schlechtestes Dezil der SFace-Cosinusähnlichkeit. 90 % der verwertbaren Frames liegen mindestens auf diesem Wert. Er reagiert stärker auf zeitweilige Identitätsdrift als der Median. Noch kein lokal kalibrierter Grenzwert.",
+  objectiveIdentityMinimum:
+    "Wofür: Niedrigste gemessene SFace-Cosinusähnlichkeit eines eindeutigen Ausgabeframes. Hilfreich zum Finden einzelner Ausreißer, aber empfindlich gegenüber Unschärfe, Pose und Licht. Deshalb nie allein als Bestehensgrenze verwenden.",
   objectiveAvStartDelta:
     "Wofür: Differenz der Startzeitstempel von Audio- und Videospur. Gut für den technischen Vertrag: höchstens 40 ms. Dieser Wert misst nicht, ob Laute und Lippenbewegung phonemgenau synchron sind.",
   objectiveAvDurationDelta:

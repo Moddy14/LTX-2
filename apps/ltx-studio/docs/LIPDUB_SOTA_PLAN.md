@@ -55,13 +55,30 @@ Framezahl Qualitätsvoraussetzungen.
   sichtbar.
 - Asynchrone CPU-Ausgabeanalyse mit ffprobe und YuNet für den technischen
   Audio-/Videovertrag sowie normalisierte Nasen- und Mundgeometrie.
+- Echte CPU-Identitätsmessung mit dem Apache-2.0-lizenzierten OpenCV-SFace-
+  FP32-Modell, gepinnt auf Upstream-Revision und SHA-256.
+- SFace meldet Referenz-/Ausgabeabdeckung, Median, schlechtestes Dezil,
+  Minimum, Referenz-Selbstkonsistenz und zeitliche Ausgabekonsistenz; rohe
+  Embeddings werden nie persistiert.
+- Ein räumlich-zeitlicher Zieltrack verhindert, dass die Messung bei
+  Mehrpersonenbildern pro Frame auf den ähnlichsten Hintergrundakteur springt.
+  SFace sowie Nasen- und Mundgeometrie verwenden denselben Track. Inkonsistente
+  Referenzidentitäten, Mehrpersonen-Referenzvideos und eine verlorene Zielspur
+  ergeben `insufficient`, nicht einen scheinbar guten Mischwert.
+- Visuelle Identitätsreferenzen werden vor dem Render über Studio-Asset-ID,
+  Größe, mtime, ctime, Inode und SHA-256 gebunden und vor sowie nach der
+  Generierung erneut geprüft. Der Analyzer lädt Modelle, Ausgabe und Referenzen
+  nur aus verifizierten Lauf-Snapshots. Snapshots sind auf 2 GiB je Datei und
+  4 GiB gesamt begrenzt, brauchen zusätzlich 512 MiB freien Restplatz und werden
+  serverseitig auch nach Timeout oder Prozessabbruch entfernt. Alte oder externe
+  Referenzen ergeben ausdrücklich `reference-provenance-missing`.
 - Analysezustand und Rohwerte liegen in einem getrennten, atomisch geschriebenen
   Sidecar und sind an Größe, mtime, ctime, Inode und Studio-Job gebunden.
 - Analysequeue, Timeout, Prozessgruppenabbruch, Neustart-Recovery und
   Desktop-/Mobile-Anzeige sind getestet; kein DGX-Modell wird dafür belegt.
-- Unzureichende Messungen, VFR, fehlende Audiodauer und fehlende
-  Evaluatormodelle werden ausdrücklich angezeigt. Unkalibrierte Rohwerte
-  erzeugen keine automatische Qualitätsnote.
+- Unzureichende Messungen, VFR, fehlende Audiodauer, fehlende Provenienz und
+  fehlende Evaluatorstufen werden ausdrücklich angezeigt. Unkalibrierte
+  Rohwerte erzeugen keine automatische Qualitätsnote.
 - LongCat bleibt vorhanden, ist aber standardmäßig aus und kein SOTA-Hauptpfad.
 - DGX-Queue, Thermalwächter und Wiederanlauf bleiben Teil jedes GPU-Laufs.
 
@@ -125,22 +142,33 @@ Jedes Ergebnis erhält getrennte Bewertungen:
 - Audio: verständlich, sauber und ohne Versatz oder Aussetzer.
 
 Die persistente Scorecard liegt im revisionsgebundenen
-MP4-Einstellungs-Sidecar Version 3; Version 1 und 2 werden bei belegbarer
-Job-Provenienz migriert. Der erste objektive Evaluatorblock ist ebenfalls
+MP4-Einstellungs-Sidecar Version 4; ältere Versionen werden bei belegbarer
+Job-Provenienz kompatibel gelesen. Der objektive CPU-Evaluatorblock ist
 umgesetzt:
 
 - Audio-/Video-Start- und Daueroffset aus den echten Streams;
 - Gesichtserkennungs- und Geometrieabdeckung;
 - normalisierte Rohwerte für Nasenbewegung, Nasenbeschleunigung,
-  Mundwinkel und Mundwinkeldynamik.
+  Mundwinkel und Mundwinkeldynamik;
+- revisionsgebundene SFace-Ähnlichkeiten zwischen der tatsächlich verwendeten
+  visuellen Referenz und allen eindeutig verfolgbaren Ausgabeframes.
 
 Noch offen sind die für eine belastbare SOTA-Aussage erforderlichen
 Evaluatoren:
 
-- kalibriertes SyncNet für Offset und Sync-Konfidenz;
-- lizenziertes Face-Recognition-Modell für Identitätsähnlichkeit;
+- rechtlich sauberer und lokal kalibrierter AV-Sync-Evaluator für Offset und
+  Synchronitätskonfidenz;
+- lokale SFace-Positiv-/Impostor-Kalibrierung für belastbare Grenzbereiche;
 - ASR-Abgleich des erzeugten Dialogs;
 - bewegungskompensierte Artefakt- und Flimmererkennung.
+
+Das alte Wav2Lip-/Color-SyncNet-Repository ist auf persönlichen,
+Forschungs- und nichtkommerziellen Einsatz beschränkt und wird deshalb nicht als
+verdeckte Produktionsabhängigkeit eingebaut. Ein AV-Sync-Evaluator wird erst
+aktiviert, wenn Code, Gewichte, Vorverarbeitung und Nutzungsrecht separat
+gepinnt und dokumentiert sind. Synchformer bleibt ebenfalls `research-only`,
+solange die Rechte der mitgelieferten Checkpoints und ihrer MotionFormer-
+Bestandteile nicht widerspruchsfrei belegt sind.
 
 Schwellenwerte werden erst anhand von Positiv- und Negativkontrollen auf dieser
 Maschine kalibriert. Unkalibrierte Zahlen dürfen keine `10/10`-Freigabe geben.

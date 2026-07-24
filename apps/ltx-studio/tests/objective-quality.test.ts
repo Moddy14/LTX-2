@@ -29,18 +29,40 @@ function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorker
       mouthAngleVelocityP95DegreesPerSecond: 33,
       mouthSpanCoefficientOfVariation: 0.024,
     },
+    identity: {
+      status: "measured",
+      error: null,
+      modelName: "OpenCV SFace 2021dec",
+      modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+      modelRevision: "3d7082438a6e4551e840c9b2bb60b71e8da4b524",
+      preprocessingVersion: "yunet5-aligncrop-112.v1",
+      embeddingDimensions: 128,
+      referenceCount: 1,
+      sampledReferenceFrames: 1,
+      embeddedReferenceFrames: 1,
+      sampledOutputFrames: 96,
+      matchedOutputFrames: 96,
+      outputCoverage: 1,
+      ambiguousOutputFrames: 0,
+      referenceSelfConsistencyMedian: 1,
+      referenceSelfConsistencyP10: 1,
+      cosineMedian: 0.87,
+      cosineP10: 0.84,
+      cosineMinimum: 0.8,
+      outputTemporalConsistencyMedian: 0.99,
+    },
     ...overrides,
   };
 }
 
 describe("objective output quality", () => {
-  it("reports raw measurements without inventing SyncNet, identity, or SOTA scores", () => {
+  it("reports real SFace raw measurements without inventing SyncNet or SOTA scores", () => {
     const result = buildObjectiveQualityAnalysis(worker(), "2026-07-24T18:10:00.000Z");
 
     expect(result.status).toBe("measured");
     expect(result.capabilities).toEqual({
       avSync: "syncnet-required",
-      identity: "face-recognition-model-required",
+      identity: "sface-raw-measured",
       dialogue: "whisper-not-run",
     });
     expect(result.face?.noseVelocityP95PerSecond).toBe(2.3);
@@ -48,6 +70,10 @@ describe("objective output quality", () => {
     expect(result).not.toHaveProperty("score");
     expect(result).not.toHaveProperty("rating");
     expect(result.capabilities.avSync).not.toBe("measured");
+    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v2");
+    if (result.schemaVersion === "ltx-studio-objective-quality.v2") {
+      expect(result.identity.cosineP10).toBe(0.84);
+    }
   });
 
   it("marks missing audio and insufficient face geometry explicitly", () => {
@@ -104,5 +130,26 @@ describe("objective output quality", () => {
       }));
       expect(result.status).toBe("insufficient");
     }
+  });
+
+  it("reports an SFace worker failure as an insufficient measurement with its own capability", () => {
+    const baseline = worker();
+    const result = buildObjectiveQualityAnalysis(worker({
+      identity: {
+        ...baseline.identity,
+        status: "failed",
+        error: "RuntimeError: SFace snapshot changed during analysis",
+        cosineMedian: null,
+        cosineP10: null,
+        cosineMinimum: null,
+      },
+    }));
+
+    expect(result.status).toBe("insufficient");
+    expect(result.capabilities.identity).toBe("sface-failed");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "identity-measurement-failed",
+      level: "warning",
+    }));
   });
 });

@@ -27,6 +27,11 @@ export class AssetStore {
     return this.list(kind).find((asset) => resolve(asset.path) === resolvedPath) ?? null;
   }
 
+  findById(kind: AssetKind, id: string): StudioAsset | null {
+    const asset = this.assets.get(id);
+    return asset?.kind === kind ? asset : null;
+  }
+
   add(file: AssetFile, kind: AssetKind): StudioAsset {
     const id = file.filename.replace(/\.[^.]+$/, "");
     const asset: StudioAsset = {

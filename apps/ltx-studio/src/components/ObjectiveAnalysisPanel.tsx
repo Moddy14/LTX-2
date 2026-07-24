@@ -43,6 +43,10 @@ export function ObjectiveAnalysisPanel({
   const analysis = output.analysis;
   const active = analysis ? ["queued", "running"].includes(analysis.status) : false;
   const result = analysis?.status === "completed" ? analysis.result : null;
+  const identity = result?.schemaVersion === "ltx-studio-objective-quality.v2"
+    ? result.identity
+    : null;
+  const showIdentityMetrics = identity && ["measured", "insufficient"].includes(identity.status);
   const statusLabel = analysis?.status === "completed"
     ? result?.status === "measured" ? "Rohwerte erfasst" : "Messung unzureichend"
     : analysis ? statusLabels[analysis.status] : "Nicht gemessen";
@@ -103,6 +107,14 @@ export function ObjectiveAnalysisPanel({
             <MetricRow label="Nasenbeschleunigung p95" value={metricWithUnit(result.face?.noseAccelerationP95PerSecond2 ?? null, " EA/s²")} help={fieldHelp.objectiveNoseAcceleration} />
             <MetricRow label="Mundwinkel Median" value={metricWithUnit(result.face?.mouthAngleMedianDegrees ?? null, "°", 1)} help={fieldHelp.objectiveMouthAngle} />
             <MetricRow label="Mundwinkel-Dynamik p95" value={metricWithUnit(result.face?.mouthAngleVelocityP95DegreesPerSecond ?? null, "°/s", 1)} help={fieldHelp.objectiveMouthAngleDynamics} />
+            {showIdentityMetrics ? (
+              <>
+                <MetricRow label="Identitätsabdeckung" value={percent(identity.outputCoverage)} help={fieldHelp.objectiveIdentityCoverage} />
+                <MetricRow label="Identität Median" value={metricWithUnit(identity.cosineMedian, "", 3)} help={fieldHelp.objectiveIdentityMedian} />
+                <MetricRow label="Identität p10" value={metricWithUnit(identity.cosineP10, "", 3)} help={fieldHelp.objectiveIdentityP10} />
+                <MetricRow label="Identität Minimum" value={metricWithUnit(identity.cosineMinimum, "", 3)} help={fieldHelp.objectiveIdentityMinimum} />
+              </>
+            ) : null}
             <MetricRow label="AV-Startdifferenz" value={metricWithUnit(
               result.technical.audioVideoStartDeltaSeconds === null
                 ? null
@@ -119,8 +131,18 @@ export function ObjectiveAnalysisPanel({
             )} help={fieldHelp.objectiveAvDurationDelta} />
           </div>
           <div className="objective-analysis__capabilities">
-            <span>AV-Sync <strong>SyncNet fehlt</strong></span>
-            <span>Identität <strong>Erkennungsmodell fehlt</strong></span>
+            <span>AV-Sync <strong>AV-Evaluator fehlt</strong></span>
+            <span>Identität <strong>{identity?.status === "measured"
+              ? "SFace Rohwerte"
+              : identity?.status === "failed"
+                ? "Fehler"
+              : identity?.status === "insufficient"
+                ? "Nicht ausreichend"
+                : identity?.status === "not-applicable"
+                  ? "Keine Referenz"
+                  : result?.schemaVersion === "ltx-studio-objective-quality.v1"
+                    ? "Erkennungsmodell fehlt"
+                    : "Provenienz fehlt"}</strong></span>
             <span>Dialogtreue <strong>Whisper nicht ausgeführt</strong></span>
           </div>
           {result.findings.length > 0 ? (

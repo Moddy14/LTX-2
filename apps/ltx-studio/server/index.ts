@@ -15,6 +15,7 @@ import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan 
 import {
   appRoot,
   admissionRequired,
+  analysisTempRoot,
   ensureRuntimeDirectories,
   minAvailableGiB,
   minResidualMemoryGiB,
@@ -33,16 +34,21 @@ import { estimateRequest } from "./estimates.js";
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
 import { OutputLibrary, OutputQualityError } from "./outputs.js";
-import { OutputAnalysisManager } from "./outputAnalysis.js";
+import { cleanupAnalysisTempRoot, OutputAnalysisManager } from "./outputAnalysis.js";
+import { resolveIdentityEvidenceReferences, verifyIdentityEvidence } from "./inputEvidence.js";
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
 
 ensureRuntimeDirectories();
+cleanupAnalysisTempRoot(analysisTempRoot);
 const app = express();
-const jobs = new JobManager();
 const assets = new AssetStore();
+const jobs = new JobManager(undefined, true, assets);
 const outputs = new OutputLibrary(outputRoot);
-const analyses = new OutputAnalysisManager(outputs, () => jobs.list());
+const analyses = new OutputAnalysisManager(outputs, () => jobs.list(), outputRoot, {
+  identityReferenceResolver: (evidence) => resolveIdentityEvidenceReferences(evidence, assets),
+  identityEvidenceVerifier: async (evidence) => (await verifyIdentityEvidence(evidence, assets)).error,
+});
 outputs.recordCompleted(jobs.list());
 jobs.on("changed", (value: StudioJob[]) => outputs.recordCompleted(value));
 const allowedBrowserOrigins = new Set([
@@ -344,7 +350,8 @@ app.post("/api/outputs/:filename/analysis/cancel", (request, response) => {
   if (!outputNameSchema.safeParse(filename).success) {
     return response.status(404).json({ error: "Ausgabe nicht gefunden." });
   }
-  const analysis = analyses.cancel(filename);
+  const payload = z.object({ analysisId: z.string().uuid() }).strict().parse(request.body ?? {});
+  const analysis = analyses.cancel(filename, payload.analysisId);
   if (!analysis) return response.status(404).json({ error: "Keine objektive Analyse vorhanden." });
   response.json({ analysis });
 });

@@ -369,7 +369,7 @@ test("objective speech analysis exposes raw measurements and honest capability g
     const body = route.request().postDataJSON();
     expect(body).toEqual({ force: false });
     output.analysis = {
-      schemaVersion: "ltx-studio-output-analysis.v1",
+      schemaVersion: "ltx-studio-output-analysis.v2",
       outputName: output.name,
       sizeBytes: output.sizeBytes,
       modifiedAtMs: Date.parse(modifiedAt),
@@ -386,8 +386,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
       updatedAt: "2026-07-24T18:05:02.000Z",
       error: null,
       result: {
-        schemaVersion: "ltx-studio-objective-quality.v1",
-        analyzerVersion: "ffprobe-yunet5.v1",
+        schemaVersion: "ltx-studio-objective-quality.v2",
+        analyzerVersion: "ffprobe-yunet5-sface.v2",
         createdAt: "2026-07-24T18:05:02.000Z",
         status: "measured",
         technical: {
@@ -414,9 +414,31 @@ test("objective speech analysis exposes raw measurements and honest capability g
           mouthAngleVelocityP95DegreesPerSecond: 33.019,
           mouthSpanCoefficientOfVariation: 0.024,
         },
+        identity: {
+          status: "measured",
+          error: null,
+          modelName: "OpenCV SFace 2021dec",
+          modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+          modelRevision: "3d7082438a6e4551e840c9b2bb60b71e8da4b524",
+          preprocessingVersion: "yunet5-aligncrop-112.v1",
+          embeddingDimensions: 128,
+          referenceCount: 1,
+          sampledReferenceFrames: 1,
+          embeddedReferenceFrames: 1,
+          sampledOutputFrames: 97,
+          matchedOutputFrames: 97,
+          outputCoverage: 1,
+          ambiguousOutputFrames: 0,
+          referenceSelfConsistencyMedian: 1,
+          referenceSelfConsistencyP10: 1,
+          cosineMedian: 0.87,
+          cosineP10: 0.849,
+          cosineMinimum: 0.803,
+          outputTemporalConsistencyMedian: 0.99,
+        },
         capabilities: {
           avSync: "syncnet-required",
-          identity: "face-recognition-model-required",
+          identity: "sface-raw-measured",
           dialogue: "whisper-not-run",
         },
         findings: [{
@@ -439,7 +461,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(page.locator(".objective-analysis__status")).toHaveText("Rohwerte erfasst");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Gesicht erkannt" }).locator("strong")).toHaveText("100 %");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("1 ms");
-  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(8);
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Identität p10" }).locator("strong")).toHaveText("0.849");
+  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(12);
   const analysisPanelBox = await page.locator(".objective-analysis").boundingBox();
   expect(analysisPanelBox).not.toBeNull();
   for (const index of [0, 1]) {
@@ -457,8 +480,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
       page.viewportSize()!.width,
     );
   }
-  await expect(page.locator(".objective-analysis__capabilities")).toContainText("SyncNet fehlt");
-  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Erkennungsmodell fehlt");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("AV-Evaluator fehlt");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("SFace Rohwerte");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper nicht ausgeführt");
   await expect(page.locator(".objective-analysis__actions")).toContainText("keine DGX-Modellbelegung");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -476,8 +499,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
     status: "completed",
     progress: 100,
     result: {
-      schemaVersion: "ltx-studio-objective-quality.v1",
-      analyzerVersion: "ffprobe-yunet5.v1",
+      schemaVersion: "ltx-studio-objective-quality.v2",
+      analyzerVersion: "ffprobe-yunet5-sface.v2",
       createdAt: "2026-07-24T18:06:00.000Z",
       status: "insufficient",
       technical: {
@@ -504,9 +527,31 @@ test("objective speech analysis exposes raw measurements and honest capability g
         mouthAngleVelocityP95DegreesPerSecond: null,
         mouthSpanCoefficientOfVariation: null,
       },
+      identity: {
+        status: "reference-provenance-missing",
+        error: null,
+        modelName: null,
+        modelSha256: null,
+        modelRevision: null,
+        preprocessingVersion: null,
+        embeddingDimensions: null,
+        referenceCount: 0,
+        sampledReferenceFrames: 0,
+        embeddedReferenceFrames: 0,
+        sampledOutputFrames: 0,
+        matchedOutputFrames: 0,
+        outputCoverage: 0,
+        ambiguousOutputFrames: 0,
+        referenceSelfConsistencyMedian: null,
+        referenceSelfConsistencyP10: null,
+        cosineMedian: null,
+        cosineP10: null,
+        cosineMinimum: null,
+        outputTemporalConsistencyMedian: null,
+      },
       capabilities: {
         avSync: "syncnet-required",
-        identity: "face-recognition-model-required",
+        identity: "reference-provenance-required",
         dialogue: "whisper-not-run",
       },
       findings: [{ code: "face-detection-incomplete", level: "error", message: "Kein Gesicht erkannt." }],

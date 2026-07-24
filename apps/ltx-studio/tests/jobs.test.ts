@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -11,6 +11,7 @@ import {
   MAX_ACTIVE_JOBS,
   requestsShareLtxBase,
 } from "../server/jobs.js";
+import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -57,6 +58,95 @@ describe("job persistence and reservations", () => {
     expect(cancelled.status).toBe("cancelled");
     expect(cancelled.cancelledBy).toBe("studio");
     expect(cancelled.logs.at(-1)).toContain("Studio-Abbruchfunktion");
+  });
+
+  it("cannot resume a cancelled job after an asynchronous evidence hash finishes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-cancel-evidence-"));
+    roots.push(root);
+    const modelRoot = join(root, "models");
+    const gemmaRoot = join(modelRoot, "gemma");
+    await mkdir(gemmaRoot, { recursive: true });
+    const checkpoint = join(modelRoot, "checkpoint.safetensors");
+    await writeFile(checkpoint, "model");
+    await writeFile(join(gemmaRoot, "preprocessor_config.json"), "{}");
+    const request = validRequest("one-stage");
+    request.models.checkpointPath = checkpoint;
+    request.models.gemmaRoot = gemmaRoot;
+    request.outputName = `cancel-evidence-${Date.now()}.mp4`;
+
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let finishResolve!: (value: ReturnType<typeof notApplicableIdentityEvidence>) => void;
+    const finish = new Promise<ReturnType<typeof notApplicableIdentityEvidence>>((resolve) => {
+      finishResolve = resolve;
+    });
+    const manager = new JobManager(join(root, "jobs.json"), true, null, {
+      capture: async () => {
+        enteredResolve();
+        return finish;
+      },
+      verify: async (evidence) => ({ evidence, error: null }),
+    });
+    const created = manager.create(request);
+    await entered;
+
+    manager.cancel(created.id);
+    finishResolve(notApplicableIdentityEvidence());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(manager.get(created.id)).toMatchObject({
+      status: "cancelled",
+      cancelledBy: "studio",
+      outputUrl: null,
+    });
+  });
+
+  it("does not overwrite an orchestrator cancellation with failed during evidence verification", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-cancel-verification-"));
+    roots.push(root);
+    const modelRoot = join(root, "models");
+    const gemmaRoot = join(modelRoot, "gemma");
+    const checkpoint = join(modelRoot, "checkpoint.safetensors");
+    await mkdir(gemmaRoot, { recursive: true });
+    await writeFile(checkpoint, "model");
+    await writeFile(join(gemmaRoot, "preprocessor_config.json"), "{}");
+    const request = validRequest("one-stage");
+    request.models.checkpointPath = checkpoint;
+    request.models.gemmaRoot = gemmaRoot;
+    request.outputName = `cancel-verification-${Date.now()}.mp4`;
+
+    let verificationStartedResolve!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      verificationStartedResolve = resolve;
+    });
+    let finishVerificationResolve!: () => void;
+    const finishVerification = new Promise<void>((resolve) => {
+      finishVerificationResolve = resolve;
+    });
+    const transitions: string[] = [];
+    const manager = new JobManager(join(root, "jobs.json"), true, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => {
+        verificationStartedResolve();
+        await finishVerification;
+        return { evidence, error: null };
+      },
+    });
+    Reflect.set(manager, "waitForDgxQueueStart", async () => true);
+    Reflect.set(manager, "transitionDgxJob", async (_job: unknown, state: string) => {
+      transitions.push(state);
+      return true;
+    });
+    const created = manager.create(request);
+    await verificationStarted;
+
+    manager.cancel(created.id);
+    finishVerificationResolve();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(manager.get(created.id)?.status).toBe("cancelled");
+    expect(transitions).toContain("cancelled");
+    expect(transitions).not.toContain("failed");
   });
 
   it("keeps LongCat available but disables it on rerun variants", async () => {

@@ -135,9 +135,13 @@ export async function startOutputAnalysis(outputName: string, force = false): Pr
   return body.analysis;
 }
 
-export async function cancelOutputAnalysis(outputName: string): Promise<OutputAnalysisRecord> {
+export async function cancelOutputAnalysis(outputName: string, analysisId: string): Promise<OutputAnalysisRecord> {
   const body = await decode<{ analysis: OutputAnalysisRecord }>(
-    await fetch(`/api/outputs/${encodeURIComponent(outputName)}/analysis/cancel`, { method: "POST" }),
+    await fetch(`/api/outputs/${encodeURIComponent(outputName)}/analysis/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ analysisId }),
+    }),
   );
   return body.analysis;
 }
