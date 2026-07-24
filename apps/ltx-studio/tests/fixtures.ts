@@ -26,7 +26,13 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
     ];
   }
   if (mode === "audio-to-video") {
-    request.audio = { path: "/inputs/source.wav", name: "source.wav", startTime: 0, maxDuration: 5 };
+    request.audio = {
+      ...request.audio,
+      path: "/inputs/source.wav",
+      name: "source.wav",
+      startTime: 0,
+      maxDuration: 5,
+    };
   }
   if (mode === "lipdub") {
     request.promptParts.dialogue = "Das ist ein nativer LTX LipDub Test";

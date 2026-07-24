@@ -19,6 +19,10 @@ export const fieldHelp = {
     "Wofür: Verwendet eine bereits auf dem DGX vorhandene Datei ohne Upload. Gute Eingabe: ein absoluter, lesbarer Pfad zur passenden Audio-, Video- oder Maskendatei.",
   audioUpload:
     "Wofür: Lädt eine Audiodatei als zeitliche und akustische Vorlage hoch. Gute Eingabe: für Lipsync zuerst saubere, sprachdominante Mono- oder Stereo-Sprache ohne Musikbett; Musik erst hinzufügen, wenn die Mundbewegung funktioniert.",
+  audioConditioning:
+    "Wofür: Diese Spur steuert die Mundbewegung im nativen Audio-zu-Video-Modell. Gute Eingabe: klare Sprache ohne Musik, Hall oder Rauschen, exakt auf die Videodauer zugeschnitten. Die gelieferte Sprache bleibt im LTX-Ergebnis unverändert.",
+  audioFinalMix:
+    "Wofür: Optionale fertige Tonspur, die nach dem LTX-Render anstelle der reinen Sprachspur eingesetzt wird. Gute Eingabe: derselbe zeitlich ausgerichtete Sprachtext mit gewünschter Musik und Atmosphäre; Anfang und Dauer folgen den Feldern darunter.",
   videoUpload:
     "Wofür: Lädt ein Quell- oder Kontrollvideo in das Studio. Gute Eingabe: ein sauber dekodierbares Video mit passender Dauer und stabiler Bildrate.",
   maskUpload:

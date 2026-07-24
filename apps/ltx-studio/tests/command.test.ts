@@ -93,6 +93,19 @@ describe("buildCommand", () => {
     expect(audioToVideo).not.toContain("--audio-cfg-guidance-scale");
   });
 
+  it("validates an optional final mix without sending it to LTX", () => {
+    const request = validRequest("audio-to-video");
+    request.audio.finalMix = { path: "/inputs/final-mix.wav", name: "final-mix.wav" };
+    const plan = buildCommand(request);
+
+    expect(plan.args).not.toContain(request.audio.finalMix.path);
+    expect(plan.requiredPaths).toContainEqual({
+      path: request.audio.finalMix.path,
+      label: "Finale Tonspur",
+      kind: "file",
+    });
+  });
+
   it("emits only the native LipDub CLI contract", () => {
     const request = validRequest("lipdub");
     request.models.loras = [{ path: "/models/ignored-style.safetensors", strength: 0.4 }];

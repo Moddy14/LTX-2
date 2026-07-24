@@ -276,6 +276,9 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       appendFlag(args, "--audio-start-time", request.audio.startTime);
       if (request.audio.maxDuration !== null) appendFlag(args, "--audio-max-duration", request.audio.maxDuration);
       requiredPaths.push({ path: request.audio.path, label: "Audiodatei", kind: "file" });
+      if (request.audio.finalMix.path) {
+        requiredPaths.push({ path: request.audio.finalMix.path, label: "Finale Tonspur", kind: "file" });
+      }
     }
   }
 

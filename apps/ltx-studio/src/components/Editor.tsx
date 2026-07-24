@@ -228,10 +228,18 @@ export function Editor({
     setLipDubPrepResult(null);
   };
 
-  const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask" | "lipdub") => {
+  const applyUpload = (
+    file: UploadedFile,
+    target: "audio" | "audio-final" | "retake" | "mask" | "lipdub",
+  ) => {
     onPreview(file.path, file.url);
     if (target === "audio") {
       onChange({ ...request, audio: { ...request.audio, path: file.path, name: file.name } });
+    } else if (target === "audio-final") {
+      onChange({
+        ...request,
+        audio: { ...request.audio, finalMix: { path: file.path, name: file.name } },
+      });
     } else if (target === "retake") {
       onChange({ ...request, retake: { ...request.retake, videoPath: file.path, videoName: file.name } });
     } else if (target === "lipdub") {
@@ -463,7 +471,8 @@ export function Editor({
           <SectionHeader title="Audiospur" />
           <SingleMediaInput
             kind="audio"
-            label="Audio hochladen"
+            label="Sprachspur hochladen"
+            hint={fieldHelp.audioConditioning}
             value={request.audio}
             previewUrl={previews[request.audio.path]}
             onChange={(file) => applyUpload(file, "audio")}
@@ -474,6 +483,25 @@ export function Editor({
             })}
           />
           {errors["audio.path"] ? <p className="section-error">{errors["audio.path"]}</p> : null}
+          <SingleMediaInput
+            kind="audio"
+            label="Finale Tonspur hochladen"
+            hint={fieldHelp.audioFinalMix}
+            value={request.audio.finalMix}
+            previewUrl={previews[request.audio.finalMix.path]}
+            onChange={(file) => applyUpload(file, "audio-final")}
+            onClear={() => onChange({
+              ...request,
+              audio: { ...request.audio, finalMix: { path: "", name: "" } },
+            })}
+            onPathChange={(path) => onChange({
+              ...request,
+              audio: {
+                ...request.audio,
+                finalMix: { path, name: path.split("/").at(-1) ?? path },
+              },
+            })}
+          />
           <div className="field-grid field-grid--2">
             <NumberField
               label="Start (Sekunden)"

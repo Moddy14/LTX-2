@@ -268,6 +268,10 @@ export const generationRequestSchema = z
       name: z.string().trim().max(255),
       startTime: z.number().finite().min(0).max(86_400),
       maxDuration: z.number().finite().positive().max(86_400).nullable(),
+      finalMix: z.object({
+        path: pathValue,
+        name: z.string().trim().max(255),
+      }),
     }),
     lipDub: z.object({
       referenceVideo: videoConditioningSchema,
@@ -499,7 +503,13 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     audioGuidance: { ...defaultGuidance, cfgScale: 7 },
     hq: { distilledLoraStrengthStage1: 0.25, distilledLoraStrengthStage2: 0.5 },
     icLora: { videoConditioning: [], attentionMaskPath: "", attentionStrength: 1, skipStage2: false },
-    audio: { path: "", name: "", startTime: 0, maxDuration: null },
+    audio: {
+      path: "",
+      name: "",
+      startTime: 0,
+      maxDuration: null,
+      finalMix: { path: "", name: "" },
+    },
     lipDub: {
       referenceVideo: { path: "", name: "", strength: 1 },
       lora: { path: "", strength: 1 },
@@ -560,7 +570,11 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     audioGuidance: { ...defaults.audioGuidance, ...stored.audioGuidance },
     hq: { ...defaults.hq, ...stored.hq },
     icLora: { ...defaults.icLora, ...stored.icLora },
-    audio: { ...defaults.audio, ...stored.audio },
+    audio: {
+      ...defaults.audio,
+      ...stored.audio,
+      finalMix: { ...defaults.audio.finalMix, ...stored.audio?.finalMix },
+    },
     lipDub: {
       ...defaults.lipDub,
       ...stored.lipDub,

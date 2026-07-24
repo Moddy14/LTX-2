@@ -142,15 +142,28 @@ type SingleMediaProps = {
   kind: "video" | "audio" | "mask";
   value: { path: string; name: string };
   label: string;
+  hint?: string;
   onChange: (file: UploadedFile) => void;
   onClear: () => void;
   onPathChange: (path: string) => void;
   previewUrl?: string;
 };
 
-export function SingleMediaInput({ kind, value, label, onChange, onClear, onPathChange, previewUrl }: SingleMediaProps) {
+export function SingleMediaInput({
+  kind,
+  value,
+  label,
+  hint,
+  onChange,
+  onClear,
+  onPathChange,
+  previewUrl,
+}: SingleMediaProps) {
   const accept = kind === "audio" ? "audio/*" : "video/*";
   const Icon = kind === "audio" ? FileAudio : FileVideo;
+  const fieldHint = hint ?? (kind === "audio"
+    ? fieldHelp.audioUpload
+    : kind === "mask" ? fieldHelp.maskUpload : fieldHelp.videoUpload);
   const [pathDraft, setPathDraft] = useState("");
   return (
     <div className="single-media">
@@ -164,7 +177,7 @@ export function SingleMediaInput({ kind, value, label, onChange, onClear, onPath
             )}
           </div>
           <div className="single-media__identity">
-            <strong>{value.name}</strong>
+            <strong>{value.name} <InfoTooltip text={fieldHint} /></strong>
             <span>{value.path}</span>
           </div>
           <button type="button" className="icon-button icon-button--danger" title="Datei entfernen" onClick={onClear}>
@@ -177,7 +190,7 @@ export function SingleMediaInput({ kind, value, label, onChange, onClear, onPath
             kind={kind}
             accept={accept}
             label={label}
-            hint={kind === "audio" ? fieldHelp.audioUpload : kind === "mask" ? fieldHelp.maskUpload : fieldHelp.videoUpload}
+            hint={fieldHint}
             icon={<Plus size={16} />}
             onUploaded={onChange}
           />

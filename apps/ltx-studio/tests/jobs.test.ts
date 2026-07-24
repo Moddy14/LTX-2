@@ -12,8 +12,11 @@ import {
   MAX_ACTIVE_JOBS,
   PipelineProgressTracker,
   progressFromPipelineLog,
+  publishedOutputIsReusableLtxBase,
   requestsShareLtxBase,
+  resolveRenderOutputPaths,
 } from "../server/jobs.js";
+import { hybridRoot } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
 import { validRequest } from "./fixtures.js";
 
@@ -38,8 +41,29 @@ describe("job persistence and reservations", () => {
     hybrid.postprocess.longcatLipsync.blend = 0.55;
 
     expect(requestsShareLtxBase(original, hybrid)).toBe(true);
+    hybrid.audio.finalMix = { path: "/inputs/final-mix.wav", name: "final-mix.wav" };
+    expect(requestsShareLtxBase(original, hybrid)).toBe(true);
+    expect(publishedOutputIsReusableLtxBase(hybrid, original)).toBe(false);
+    expect(publishedOutputIsReusableLtxBase(original, hybrid)).toBe(true);
     hybrid.seed += 1;
     expect(requestsShareLtxBase(original, hybrid)).toBe(false);
+  });
+
+  it("keeps every pre-remux video outside the public output path", () => {
+    const finalOutput = "/outputs/final.mp4";
+    const stageRoot = "/staging/job";
+
+    expect(resolveRenderOutputPaths(finalOutput, stageRoot, false, true)).toEqual({
+      ltxOutput: "/staging/job/ltx-base.mp4",
+      compositeOutput: "/staging/job/longcat-composite.mp4",
+      remuxInput: "/staging/job/ltx-base.mp4",
+    });
+    expect(resolveRenderOutputPaths(finalOutput, stageRoot, true, true)).toEqual({
+      ltxOutput: "/staging/job/ltx-base.mp4",
+      compositeOutput: "/staging/job/longcat-composite.mp4",
+      remuxInput: "/staging/job/longcat-composite.mp4",
+    });
+    expect(resolveRenderOutputPaths(finalOutput, stageRoot, false, false).ltxOutput).toBe(finalOutput);
   });
 
   it("treats thermally paused jobs as active", () => {
@@ -178,10 +202,21 @@ describe("job persistence and reservations", () => {
         await finishVerification;
         return { evidence, error: null };
       },
-    });
-    Reflect.set(manager, "waitForDgxQueueStart", async () => true);
-    Reflect.set(manager, "transitionDgxJob", async (_job: unknown, state: string) => {
-      transitions.push(state);
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "running" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    Reflect.set(manager, "waitForDgxQueueStart", async (job: { dgxJobId: string | null }) => {
+      job.dgxJobId = "dgx-job-cancel-verification";
       return true;
     });
     const created = manager.create(request);
@@ -194,6 +229,347 @@ describe("job persistence and reservations", () => {
     expect(manager.get(created.id)?.status).toBe("cancelled");
     expect(transitions).toContain("cancelled");
     expect(transitions).not.toContain("failed");
+  });
+
+  it("keeps the DGX job running through final audio and identity verification", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-queue-finalization-"));
+    roots.push(root);
+    const request = validRequest("audio-to-video");
+    request.audio.finalMix = {
+      path: join(root, "final-mix.wav"),
+      name: "final-mix.wav",
+    };
+    request.outputName = `queue-finalization-${Date.now()}.mp4`;
+    const finalOutput = join(root, request.outputName);
+    const events: string[] = [];
+    let verificationCount = 0;
+    let completedTransitionStartedResolve!: () => void;
+    const completedTransitionStarted = new Promise<void>((resolve) => {
+      completedTransitionStartedResolve = resolve;
+    });
+    let releaseCompletedTransitionResolve!: () => void;
+    const releaseCompletedTransition = new Promise<void>((resolve) => {
+      releaseCompletedTransitionResolve = resolve;
+    });
+    let createdId = "";
+    let remoteState: "starting" | "running" | "completed" = "starting";
+    const manager = new JobManager(join(root, "jobs.json"), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => {
+        verificationCount += 1;
+        events.push(verificationCount === 1 ? "pre-identity" : "final-identity");
+        return { evidence, error: null };
+      },
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async (jobId, state) => {
+        if (state === "completed") {
+          expect(events.at(-1)).toBe("final-identity");
+          expect(await readFile(finalOutput, "utf8")).toBe("final-video");
+          expect(manager.get(createdId)?.status).toBe("completed");
+          completedTransitionStartedResolve();
+          await releaseCompletedTransition;
+        }
+        remoteState = state as typeof remoteState;
+        events.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    });
+    const created = manager.create(request);
+    createdId = created.id;
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
+      dgxJobId: string | null;
+      plan: {
+        executable: string;
+        args: string[];
+        outputPath: string;
+        requiredPaths: unknown[];
+      };
+    }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.plan.executable = process.execPath;
+    runtimeJob.plan.args = [
+      "-e",
+      "const fs=require('node:fs');const i=process.argv.indexOf('--output-path');fs.writeFileSync(process.argv[i+1],'ltx-base');",
+      "--",
+      "--output-path",
+      "replaced-by-runner",
+    ];
+    runtimeJob.plan.outputPath = finalOutput;
+    runtimeJob.plan.requiredPaths = [];
+
+    Reflect.set(manager, "waitForDgxQueueStart", async (job: { dgxJobId: string | null }) => {
+      job.dgxJobId = "dgx-job-test";
+      return true;
+    });
+    Reflect.set(manager, "readThermalBaseline", async () => 50);
+    Reflect.set(manager, "watchThermals", () => () => undefined);
+    Reflect.set(
+      manager,
+      "runLoggedProcess",
+      async (_job: unknown, executable: string, args: string[]) => {
+        expect(executable).toBe("ffmpeg");
+        events.push("final-audio-remux");
+        await writeFile(args.at(-1)!, "final-video");
+        return { code: 0, signal: null, error: null };
+      },
+    );
+    const runJob = Reflect.get(manager, "run") as (job: unknown) => Promise<void>;
+    const running = runJob.call(manager, runtimeJob);
+    await completedTransitionStarted;
+    expect(manager.cancel(created.id)?.status).toBe("completed");
+    releaseCompletedTransitionResolve();
+    await running;
+
+    expect(events).toEqual([
+      "pre-identity",
+      "running",
+      "final-audio-remux",
+      "final-identity",
+      "completed",
+    ]);
+    expect(manager.get(created.id)?.status).toBe("completed");
+    await rm(join(hybridRoot, created.id), { recursive: true, force: true });
+  });
+
+  it("reconciles a lost completed response without failing the finished Studio job", async () => {
+    const path = await statePath();
+    let remoteState: "running" | "completed" = "running";
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async (_jobId, state) => {
+        expect(state).toBe("completed");
+        remoteState = "completed";
+        throw new Error("connection closed after commit");
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
+      dgxJobId: string | null;
+      dgxJobTerminal?: boolean;
+      dgxTerminalDelivery?: unknown;
+    }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-lost-response";
+
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: string,
+      metadata?: object,
+    ) => Promise<boolean>;
+    expect(await transition.call(manager, runtimeJob, "completed", {
+      current_step: "finished",
+    })).toBe(true);
+
+    expect(runtimeJob.dgxJobTerminal).toBe(true);
+    expect(runtimeJob.dgxTerminalDelivery).toBeUndefined();
+    expect(manager.get(created.id)?.logs.at(-1)).toContain("per GET abgeglichen");
+  });
+
+  it("persists and redelivers a failed cancelled transition after restart", async () => {
+    const path = await statePath();
+    const identityOperations = {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence: ReturnType<typeof notApplicableIdentityEvidence>) => ({ evidence, error: null }),
+    };
+    const failingOperations = {
+      read: async (jobId: string) => ({
+        schema_version: "dgx-job-read.v0" as const,
+        job: { job_id: jobId, state: "running" as const },
+      }),
+      transition: async () => {
+        throw new Error("temporary connection failure");
+      },
+    };
+    const manager = new JobManager(path, false, null, identityOperations, failingOperations, null);
+    const created = manager.create(validRequest());
+    const firstInternalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    firstInternalJobs.get(created.id)!.dgxJobId = "dgx-job-cancel-retry";
+
+    manager.cancel(created.id);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const pending = JSON.parse(await readFile(path, "utf8")) as Array<{
+      dgxTerminalDelivery?: { state: string; attempts: number; lastError: string | null };
+    }>;
+    expect(pending[0].dgxTerminalDelivery).toMatchObject({
+      state: "cancelled",
+      attempts: 1,
+    });
+    expect(pending[0].dgxTerminalDelivery?.lastError).toContain("temporary connection failure");
+
+    const deliveredStates: string[] = [];
+    const restored = new JobManager(path, false, null, identityOperations, {
+      read: failingOperations.read,
+      transition: async (jobId, state) => {
+        deliveredStates.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    const restoredInternalJobs = Reflect.get(restored, "jobs") as Map<string, unknown>;
+    const restoredJob = restoredInternalJobs.get(created.id)!;
+    const flush = Reflect.get(restored, "flushDgxTerminalDelivery") as (job: unknown) => Promise<boolean>;
+
+    expect(await flush.call(restored, restoredJob)).toBe(true);
+    expect(deliveredStates).toEqual(["cancelled"]);
+    const delivered = JSON.parse(await readFile(path, "utf8")) as Array<{ dgxTerminalDelivery?: unknown }>;
+    expect(delivered[0].dgxTerminalDelivery).toBeUndefined();
+  });
+
+  it("keeps cancellation authoritative while an older running transition is in flight", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-running-cancel-race-"));
+    roots.push(root);
+    const request = validRequest("one-stage");
+    request.outputName = `running-cancel-race-${Date.now()}.mp4`;
+    let runningTransitionStartedResolve!: () => void;
+    const runningTransitionStarted = new Promise<void>((resolve) => {
+      runningTransitionStartedResolve = resolve;
+    });
+    let releaseRunningTransitionResolve!: () => void;
+    const releaseRunningTransition = new Promise<void>((resolve) => {
+      releaseRunningTransitionResolve = resolve;
+    });
+    let cancellationDeliveredResolve!: () => void;
+    const cancellationDelivered = new Promise<void>((resolve) => {
+      cancellationDeliveredResolve = resolve;
+    });
+    const transitions: string[] = [];
+    const manager = new JobManager(join(root, "jobs.json"), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "cancelled" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        if (state === "running") {
+          runningTransitionStartedResolve();
+          await releaseRunningTransition;
+          throw new Error("running transition lost to cancellation");
+        }
+        if (state === "cancelled") cancellationDeliveredResolve();
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    const created = manager.create(request);
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
+      dgxJobId: string | null;
+      plan: {
+        executable: string;
+        args: string[];
+        outputPath: string;
+        requiredPaths: unknown[];
+      };
+    }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.plan.executable = process.execPath;
+    runtimeJob.plan.args = [
+      "-e",
+      "setTimeout(()=>{},10000)",
+      "--",
+      "--output-path",
+      "replaced-by-runner",
+    ];
+    runtimeJob.plan.outputPath = join(root, request.outputName);
+    runtimeJob.plan.requiredPaths = [];
+    Reflect.set(manager, "waitForDgxQueueStart", async (job: { dgxJobId: string | null }) => {
+      job.dgxJobId = "dgx-job-running-cancel-race";
+      return true;
+    });
+    Reflect.set(manager, "readThermalBaseline", async () => 50);
+    Reflect.set(manager, "watchThermals", () => () => undefined);
+
+    const runJob = Reflect.get(manager, "run") as (job: unknown) => Promise<void>;
+    const running = runJob.call(manager, runtimeJob);
+    await runningTransitionStarted;
+    expect(manager.cancel(created.id)?.status).toBe("cancelled");
+    await cancellationDelivered;
+    releaseRunningTransitionResolve();
+    await running;
+
+    expect(transitions).toEqual(["running", "cancelled"]);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "cancelled",
+      error: null,
+    });
+  });
+
+  it("restores pending terminal deliveries beyond the bounded normal history", async () => {
+    const path = await statePath();
+    const pendingId = "00000000-0000-4000-8000-000000000100";
+    const entries = Array.from({ length: 101 }, (_, index) => {
+      const request = validRequest();
+      request.outputName = `history-${index}.mp4`;
+      const id = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      return {
+        id,
+        status: "cancelled",
+        mode: request.mode,
+        prompt: request.prompt,
+        outputName: request.outputName,
+        outputUrl: null,
+        createdAt: new Date(Date.now() - index * 1000).toISOString(),
+        startedAt: null,
+        finishedAt: new Date().toISOString(),
+        progress: null,
+        error: null,
+        logs: [],
+        command: "",
+        request,
+        favorite: false,
+        variantOf: null,
+        runtimeMs: null,
+        cancelledBy: "studio",
+        thermalProfile: null,
+        dgxJobId: index === 100 ? "dgx-job-old-pending" : null,
+        identityEvidence: null,
+        ...(index === 100 ? {
+          dgxTerminalDelivery: {
+            state: "cancelled",
+            metadata: { current_step: "old pending cancellation" },
+            attempts: 3,
+            lastError: "offline",
+            updatedAt: new Date().toISOString(),
+          },
+        } : {}),
+      };
+    });
+    await writeFile(path, JSON.stringify(entries));
+
+    const restored = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "running" },
+      }),
+      transition: async () => {
+        throw new Error("not expected");
+      },
+    }, null);
+
+    expect(restored.list()).toHaveLength(101);
+    expect(restored.get(pendingId)?.dgxJobId).toBe("dgx-job-old-pending");
   });
 
   it("keeps LongCat available but disables it on rerun variants", async () => {

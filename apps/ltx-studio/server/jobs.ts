@@ -1,5 +1,15 @@
 import { EventEmitter } from "node:events";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { randomInt, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
@@ -14,12 +24,14 @@ import {
   submitQueueAdmission,
   transitionQueueJob,
   type QueueArtifact,
+  type QueueJobState,
   type QueueTransitionState,
 } from "./admission.js";
 import { buildCommand, type CommandPlan, validateRequestPlan } from "./command.js";
 import {
   admissionPythonExecutable,
   appRoot,
+  executableAvailable,
   hybridCacheRoot,
   hybridRoot,
   longcatProjectRoot,
@@ -48,6 +60,7 @@ import {
   type IdentityInputEvidence,
 } from "./inputEvidence.js";
 import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } from "./thermal.js";
+import { buildFinalAudioRemuxArgs } from "./audioRemux.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -89,11 +102,34 @@ type RuntimeJob = StudioJob & {
   plan: CommandPlan;
   process?: ChildProcess;
   dgxJobTerminal?: boolean;
+  dgxTerminalDelivery?: DgxTerminalDelivery;
+  dgxTerminalDeliveryInFlight?: Promise<boolean>;
+  dgxTerminalRetry?: NodeJS.Timeout;
 };
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
 type IdentityEvidenceOperations = {
   capture: typeof captureIdentityEvidence;
   verify: typeof verifyIdentityEvidence;
+};
+type DgxTransitionMetadata = {
+  current_step?: string;
+  last_error?: string;
+  artifact?: QueueArtifact;
+};
+type DgxTerminalState = Extract<QueueTransitionState, "completed" | "failed" | "cancelled">;
+type DgxTerminalDelivery = {
+  state: DgxTerminalState;
+  metadata: DgxTransitionMetadata;
+  attempts: number;
+  lastError: string | null;
+  updatedAt: string;
+};
+type PersistedStudioJob = StudioJob & {
+  dgxTerminalDelivery?: DgxTerminalDelivery;
+};
+type DgxQueueOperations = {
+  read: typeof readQueueJob;
+  transition: typeof transitionQueueJob;
 };
 
 const MAX_JOBS = 100;
@@ -103,7 +139,16 @@ const MAX_LOG_LINE_LENGTH = 4000;
 const RESOURCE_RETRY_INTERVAL_MS = 10_000;
 const RESOURCE_WAIT_LOG_INTERVAL_MS = 60_000;
 const MAX_RUNNING_PROCESS_PROGRESS = 95;
+const DEFAULT_DGX_TERMINAL_RETRY_BASE_MS = 5_000;
+const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
+const DGX_TERMINAL_STATES = new Set<DgxTerminalState>(["completed", "failed", "cancelled"]);
+const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
+  "completed",
+  "failed",
+  "cancelled",
+  "rejected",
+]);
 
 export type VariantMode = "exact" | "random-seed";
 
@@ -129,11 +174,43 @@ function ltxBaseComparable(request: GenerationRequest): object {
   delete generation.outputName;
   delete otherPostprocess.longcatLipsync;
   generation.postprocess = otherPostprocess as GenerationRequest["postprocess"];
+  if (generation.audio) {
+    generation.audio = {
+      ...generation.audio,
+      finalMix: { path: "", name: "" },
+    };
+  }
   return generation;
 }
 
 export function requestsShareLtxBase(left: GenerationRequest, right: GenerationRequest): boolean {
   return isDeepStrictEqual(ltxBaseComparable(left), ltxBaseComparable(right));
+}
+
+export function publishedOutputIsReusableLtxBase(
+  source: GenerationRequest,
+  target: GenerationRequest,
+): boolean {
+  return !source.audio.finalMix.path && requestsShareLtxBase(source, target);
+}
+
+export function resolveRenderOutputPaths(
+  finalOutput: string,
+  stageRoot: string,
+  hybridEnabled: boolean,
+  finalAudioMixEnabled: boolean,
+): { ltxOutput: string; compositeOutput: string; remuxInput: string } {
+  const ltxOutput = hybridEnabled || finalAudioMixEnabled
+    ? join(stageRoot, "ltx-base.mp4")
+    : finalOutput;
+  const compositeOutput = finalAudioMixEnabled
+    ? join(stageRoot, "longcat-composite.mp4")
+    : finalOutput;
+  return {
+    ltxOutput,
+    compositeOutput,
+    remuxInput: hybridEnabled ? compositeOutput : ltxOutput,
+  };
 }
 
 function now(): string {
@@ -142,6 +219,49 @@ function now(): string {
 
 function validTimestamp(value: unknown, fallback: string | null): string | null {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : fallback;
+}
+
+function normalizeDgxTerminalDelivery(value: unknown): DgxTerminalDelivery | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<DgxTerminalDelivery>;
+  if (!candidate.state || !DGX_TERMINAL_STATES.has(candidate.state)) return undefined;
+  const metadata = candidate.metadata && typeof candidate.metadata === "object"
+    ? candidate.metadata
+    : {};
+  const artifact = metadata.artifact && typeof metadata.artifact === "object"
+    && typeof metadata.artifact.type === "string"
+    ? {
+        type: metadata.artifact.type.slice(0, 100),
+        ...(typeof metadata.artifact.path === "string" ? { path: metadata.artifact.path } : {}),
+        ...(typeof metadata.artifact.url === "string" ? { url: metadata.artifact.url } : {}),
+        ...(typeof metadata.artifact.size_bytes === "number"
+          && Number.isFinite(metadata.artifact.size_bytes)
+          && metadata.artifact.size_bytes >= 0
+          ? { size_bytes: metadata.artifact.size_bytes }
+          : {}),
+        ...(typeof metadata.artifact.sha256 === "string" ? { sha256: metadata.artifact.sha256.slice(0, 128) } : {}),
+        ...(typeof metadata.artifact.note === "string" ? { note: metadata.artifact.note.slice(0, 1000) } : {}),
+      }
+    : undefined;
+  return {
+    state: candidate.state,
+    metadata: {
+      ...(typeof metadata.current_step === "string"
+        ? { current_step: metadata.current_step.slice(0, 1000) }
+        : {}),
+      ...(typeof metadata.last_error === "string"
+        ? { last_error: metadata.last_error.slice(0, 4000) }
+        : {}),
+      ...(artifact ? { artifact } : {}),
+    },
+    attempts: typeof candidate.attempts === "number"
+      && Number.isInteger(candidate.attempts)
+      && candidate.attempts >= 0
+      ? Math.min(candidate.attempts, 1_000_000)
+      : 0,
+    lastError: typeof candidate.lastError === "string" ? candidate.lastError.slice(0, 4000) : null,
+    updatedAt: validTimestamp(candidate.updatedAt, now())!,
+  };
 }
 
 export function isActiveJobStatus(status: JobStatus): boolean {
@@ -243,12 +363,21 @@ function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): boolea
 }
 
 function publicJob(job: RuntimeJob): StudioJob {
-    const value = { ...job } as Partial<RuntimeJob>;
-    delete value.plan;
-    delete value.process;
-    delete value.dgxJobTerminal;
-    return value as StudioJob;
-  }
+  const value = { ...job } as Partial<RuntimeJob>;
+  delete value.plan;
+  delete value.process;
+  delete value.dgxJobTerminal;
+  delete value.dgxTerminalDelivery;
+  delete value.dgxTerminalDeliveryInFlight;
+  delete value.dgxTerminalRetry;
+  return value as StudioJob;
+}
+
+function persistedJob(job: RuntimeJob): PersistedStudioJob {
+  const value: PersistedStudioJob = publicJob(job);
+  if (job.dgxTerminalDelivery) value.dgxTerminalDelivery = structuredClone(job.dgxTerminalDelivery);
+  return value;
+}
 
 const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
@@ -299,9 +428,15 @@ export class JobManager extends EventEmitter {
       capture: captureIdentityEvidence,
       verify: verifyIdentityEvidence,
     },
+    private readonly dgxQueueOperations: DgxQueueOperations = {
+      read: readQueueJob,
+      transition: transitionQueueJob,
+    },
+    private readonly dgxTerminalRetryBaseMs: number | null = DEFAULT_DGX_TERMINAL_RETRY_BASE_MS,
   ) {
     super();
     this.restore();
+    for (const job of this.jobs.values()) this.scheduleDgxTerminalRetry(job, 0);
   }
 
   list(): StudioJob[] {
@@ -392,6 +527,10 @@ export class JobManager extends EventEmitter {
       const index = this.queue.indexOf(id);
       if (index >= 0) this.queue.splice(index, 1);
       const process = job.process;
+      this.prepareDgxTerminalDelivery(job, "cancelled", {
+        current_step: "cancelled by LTX Studio before local start",
+        last_error: "manual Studio cancellation",
+      });
       job.status = "cancelled";
       job.cancelledBy = "studio";
       job.finishedAt = now();
@@ -403,16 +542,17 @@ export class JobManager extends EventEmitter {
           if (processIsAlive(process)) signalProcessGroup(process, "SIGKILL");
         }, 10_000).unref();
       }
-      void this.transitionDgxJob(job, "cancelled", {
-        current_step: "cancelled by LTX Studio before local start",
-        last_error: "manual Studio cancellation",
-      });
       this.changed();
+      void this.flushDgxTerminalDelivery(job);
       return publicJob(job);
     }
     if (["running", "paused"].includes(job.status)) {
       const wasPaused = job.status === "paused";
       const process = job.process;
+      this.prepareDgxTerminalDelivery(job, "cancelled", {
+        current_step: "cancelled by LTX Studio",
+        last_error: "manual Studio cancellation",
+      });
       job.status = "cancelled";
       job.cancelledBy = "studio";
       job.finishedAt = now();
@@ -425,11 +565,8 @@ export class JobManager extends EventEmitter {
           if (processIsAlive(process)) signalProcessGroup(process, "SIGKILL");
         }, 10_000).unref();
       }
-      void this.transitionDgxJob(job, "cancelled", {
-        current_step: "cancelled by LTX Studio",
-        last_error: "manual Studio cancellation",
-      });
       this.changed();
+      void this.flushDgxTerminalDelivery(job);
     }
     return publicJob(job);
   }
@@ -445,12 +582,11 @@ export class JobManager extends EventEmitter {
       await this.run(job);
     } catch (error) {
       if (this.jobs.get(id)?.status !== "cancelled") {
-        job.status = "failed";
-        job.finishedAt = now();
-        job.error = error instanceof Error ? error.message : "Unerwarteter Fehler im Job-Runner.";
-        this.appendLog(job, `Interner Runner-Fehler: ${job.error}`);
+        const message = `Interner Runner-Fehler: ${
+          error instanceof Error ? error.message : "Unerwarteter Fehler im Job-Runner."
+        }`;
         try {
-          this.changed();
+          await this.failDgxJob(job, message, "unexpected LTX Studio runner failure");
         } catch (persistError) {
           process.stderr.write(`LTX Studio konnte den Fehlerzustand nicht persistieren: ${String(persistError)}\n`);
         }
@@ -464,6 +600,8 @@ export class JobManager extends EventEmitter {
   private async run(job: RuntimeJob): Promise<void> {
     const pathErrors = validateRequestPlan(job.request, job.plan);
     const hybridEnabled = job.request.postprocess.longcatLipsync.enabled;
+    const finalAudioMixEnabled = job.request.mode === "audio-to-video"
+      && Boolean(job.request.audio.finalMix.path);
     const hybridScript = join(appRoot, "scripts", "longcat-hybrid.py");
     const hybridFaceModel = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
     if (hybridEnabled) {
@@ -489,6 +627,14 @@ export class JobManager extends EventEmitter {
       this.changed();
       return;
     }
+    if (finalAudioMixEnabled && !executableAvailable("ffmpeg")) {
+      job.status = "failed";
+      job.finishedAt = now();
+      job.error = "FFmpeg für die finale Tonspur ist nicht verfügbar.";
+      this.appendLog(job, job.error);
+      this.changed();
+      return;
+    }
 
     job.identityEvidence = await this.identityEvidenceOperations.capture(job.request, this.assets);
     if (jobWasCancelled(job)) {
@@ -510,10 +656,17 @@ export class JobManager extends EventEmitter {
 
     const stageRoot = join(hybridRoot, job.id);
     const longcatOutput = join(stageRoot, "longcat.mp4");
-    const ltxOutput = hybridEnabled ? join(stageRoot, "ltx-base.mp4") : job.plan.outputPath;
+    const { ltxOutput, compositeOutput, remuxInput } = resolveRenderOutputPaths(
+      job.plan.outputPath,
+      stageRoot,
+      hybridEnabled,
+      finalAudioMixEnabled,
+    );
+    if (hybridEnabled || finalAudioMixEnabled) {
+      mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
+    }
     if (hybridEnabled) {
       if (!await this.verifyJobIdentityEvidence(job, "vor der LongCat-Stufe")) return;
-      mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
       this.appendLog(
         job,
         "Optionaler LongCat-Lippenpass aktiv: zuerst Mundspur, danach LTX und lokales Mund-Compositing.",
@@ -648,6 +801,7 @@ export class JobManager extends EventEmitter {
       });
       job.process = child;
       if (!await this.transitionDgxJob(job, "running", { current_step: "ltx native pipeline running" })) {
+        if (jobWasCancelled(job)) return;
         signalProcessGroup(child, "SIGTERM");
         setTimeout(() => {
           if (processIsAlive(child)) signalProcessGroup(child, "SIGKILL");
@@ -660,7 +814,9 @@ export class JobManager extends EventEmitter {
         return;
       }
       this.changed();
-      const ltxProgressEnd = hybridEnabled ? 85 : MAX_RUNNING_PROCESS_PROGRESS;
+      const ltxProgressEnd = hybridEnabled
+        ? finalAudioMixEnabled ? 80 : 85
+        : finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
       this.consumeProcessLogs(
         job,
         child,
@@ -691,14 +847,11 @@ export class JobManager extends EventEmitter {
         return;
       }
       job.progress = Math.max(job.progress ?? 0, ltxProgressEnd);
-      await this.transitionDgxJob(job, "completed", {
-        current_step: "ltx native pipeline completed",
-        artifact: { type: "video", path: ltxOutput, note: hybridEnabled ? "LTX base video before local LongCat compositing" : "final LTX output" },
-      });
     }
 
     if (hybridEnabled) {
-      job.progress = Math.max(job.progress ?? 0, 85);
+      const compositeStart = finalAudioMixEnabled ? 80 : 85;
+      job.progress = Math.max(job.progress ?? 0, compositeStart);
       this.appendLog(
         job,
         "LTX-Basisvideo fertig. LongCat-Mundbereich wird mit dynamischen Gesichtslandmarks lokal und zeitgenau eingeblendet.",
@@ -714,7 +867,7 @@ export class JobManager extends EventEmitter {
           "--longcat",
           longcatOutput,
           "--output",
-          job.plan.outputPath,
+          compositeOutput,
           "--blend",
           String(job.request.postprocess.longcatLipsync.blend),
           "--face-model",
@@ -726,18 +879,90 @@ export class JobManager extends EventEmitter {
         },
       );
       if (jobWasCancelled(job)) return;
-      if (compositeResult.error || compositeResult.code !== 0 || !this.fileReady(job.plan.outputPath)) {
-        this.failJob(
+      if (compositeResult.error || compositeResult.code !== 0 || !this.fileReady(compositeOutput)) {
+        await this.failDgxJob(
           job,
           compositeResult.error?.message
             ?? `LongCat-Compositing beendet mit Code ${String(compositeResult.code)}${compositeResult.signal ? ` (${compositeResult.signal})` : ""}.`,
+          "LongCat compositing failed",
+        );
+        return;
+      }
+      job.progress = finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
+    }
+
+    if (finalAudioMixEnabled) {
+      const remuxPath = join(stageRoot, "final-audio-remux.tmp");
+      rmSync(remuxPath, { force: true });
+      this.appendLog(job, "Finale Tonspur wird zeitgleich an das vollständig gerenderte Video gebunden.");
+      const remuxResult = await this.runLoggedProcess(
+        job,
+        "ffmpeg",
+        buildFinalAudioRemuxArgs({
+          sourceAudioPath: job.request.audio.finalMix.path,
+          sourceStartTime: job.request.audio.startTime,
+          sourceMaxDuration: job.request.audio.maxDuration,
+          videoPath: remuxInput,
+          outputPath: remuxPath,
+        }),
+        {
+          cwd: repoRoot,
+          env: { ...process.env },
+        },
+      );
+      if (jobWasCancelled(job)) {
+        rmSync(remuxPath, { force: true });
+        return;
+      }
+      if (remuxResult.error || remuxResult.code !== 0 || !this.fileReady(remuxPath)) {
+        rmSync(remuxPath, { force: true });
+        await this.failDgxJob(
+          job,
+          remuxResult.error?.message
+            ?? `Finale Tonspur konnte nicht eingebunden werden (Code ${String(remuxResult.code)}`
+              + `${remuxResult.signal ? `, ${remuxResult.signal}` : ""}).`,
+          "final audio remux failed",
+        );
+        return;
+      }
+      try {
+        renameSync(remuxPath, job.plan.outputPath);
+      } catch (error) {
+        rmSync(remuxPath, { force: true });
+        await this.failDgxJob(
+          job,
+          `Finale Tonspur konnte nicht atomar übernommen werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          "final audio artifact promotion failed",
         );
         return;
       }
       job.progress = MAX_RUNNING_PROCESS_PROGRESS;
+      this.appendLog(job, "Finale Tonspur erfolgreich eingebunden; die LTX-Sprachkonditionierung bleibt unverändert belegt.");
+      this.changed();
     }
 
-    if (!await this.verifyJobIdentityEvidence(job, "nach der vollständigen Ausgabe")) return;
+    if (!await this.verifyJobIdentityEvidence(job, "nach der vollständigen Ausgabe")) {
+      if (!jobWasCancelled(job)) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "final identity evidence verification failed",
+          last_error: job.error ?? "identity evidence verification failed",
+        });
+      }
+      return;
+    }
+    const completionMetadata: DgxTransitionMetadata = {
+      current_step: "all LTX Studio processing and identity verification completed",
+      artifact: {
+        type: "video",
+        path: job.plan.outputPath,
+        note: finalAudioMixEnabled
+          ? "final LTX Studio output with separately remuxed audio"
+          : hybridEnabled ? "final LTX Studio output after LongCat compositing" : "final LTX Studio output",
+      },
+    };
+    this.prepareDgxTerminalDelivery(job, "completed", completionMetadata);
     job.status = "completed";
     job.progress = 100;
     job.outputUrl = `/api/jobs/${job.id}/output`;
@@ -750,6 +975,7 @@ export class JobManager extends EventEmitter {
         : "Video erfolgreich erzeugt.",
     );
     this.changed();
+    await this.flushDgxTerminalDelivery(job);
   }
 
   private fileReady(path: string): boolean {
@@ -782,7 +1008,7 @@ export class JobManager extends EventEmitter {
       candidate.id !== job.id
       && candidate.status === "completed"
       && !candidate.request.postprocess.longcatLipsync.enabled
-      && requestsShareLtxBase(candidate.request, job.request)
+      && publishedOutputIsReusableLtxBase(candidate.request, job.request)
       && this.identityEvidenceMatches(candidate.identityEvidence, job.identityEvidence)
       && this.fileReady(candidate.plan.outputPath));
   }
@@ -851,6 +1077,7 @@ export class JobManager extends EventEmitter {
         this.changed();
         const started = await this.transitionDgxJob(job, "starting", { current_step: "thermal start gate before LTX allocation" });
         if (!started) {
+          if (jobWasCancelled(job)) return false;
           this.failJob(job, "DGX-Queue-Start-Fence wurde nicht freigegeben.");
           return false;
         }
@@ -890,7 +1117,7 @@ export class JobManager extends EventEmitter {
       if (!await this.waitForDelay(job, delayMs)) return false;
       let response;
       try {
-        response = await readQueueJob(job.dgxJobId);
+        response = await this.dgxQueueOperations.read(job.dgxJobId);
       } catch (error) {
         this.failJob(job, error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.");
         return false;
@@ -900,6 +1127,7 @@ export class JobManager extends EventEmitter {
       if (queueJob.state === "accepted") {
         const started = await this.transitionDgxJob(job, "starting", { current_step: "thermal start gate before LTX allocation" });
         if (!started) {
+          if (jobWasCancelled(job)) return false;
           this.failJob(job, "DGX-Queue-Start-Fence wurde nicht freigegeben.");
           return false;
         }
@@ -910,6 +1138,7 @@ export class JobManager extends EventEmitter {
         continue;
       }
       if (["cancelled", "completed", "failed", "rejected"].includes(queueJob.state)) {
+        job.dgxJobTerminal = true;
         this.failJob(job, `DGX-Queue-Job ist terminal: ${queueJob.state}${queueJob.last_error ? ` - ${queueJob.last_error}` : ""}`);
         return false;
       }
@@ -921,13 +1150,18 @@ export class JobManager extends EventEmitter {
   private async transitionDgxJob(
     job: RuntimeJob,
     state: QueueTransitionState,
-    metadata: { current_step?: string; last_error?: string; artifact?: QueueArtifact } = {},
+    metadata: DgxTransitionMetadata = {},
   ): Promise<boolean> {
     if (!job.dgxJobId || job.dgxJobTerminal) return true;
+    if (DGX_TERMINAL_STATES.has(state as DgxTerminalState)) {
+      this.prepareDgxTerminalDelivery(job, state as DgxTerminalState, metadata);
+      this.changed();
+      const delivered = await this.flushDgxTerminalDelivery(job);
+      return delivered || Boolean(job.dgxTerminalDelivery);
+    }
     try {
-      const response = await transitionQueueJob(job.dgxJobId, state, metadata);
+      const response = await this.dgxQueueOperations.transition(job.dgxJobId, state, metadata);
       this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
-      if (["completed", "failed", "cancelled"].includes(response.job.state)) job.dgxJobTerminal = true;
       this.changed();
       return true;
     } catch (error) {
@@ -940,7 +1174,145 @@ export class JobManager extends EventEmitter {
     }
   }
 
+  private prepareDgxTerminalDelivery(
+    job: RuntimeJob,
+    state: DgxTerminalState,
+    metadata: DgxTransitionMetadata,
+  ): void {
+    if (!job.dgxJobId || job.dgxJobTerminal) return;
+    if (job.dgxTerminalDelivery && job.dgxTerminalDelivery.state !== state) {
+      this.appendLog(
+        job,
+        `DGX-Terminalzustand ${job.dgxTerminalDelivery.state} ist bereits zur Zustellung vorgemerkt; ${state} wird nicht darübergeschrieben.`,
+      );
+      return;
+    }
+    job.dgxTerminalDelivery = {
+      state,
+      metadata: {
+        ...job.dgxTerminalDelivery?.metadata,
+        ...metadata,
+      },
+      attempts: job.dgxTerminalDelivery?.attempts ?? 0,
+      lastError: job.dgxTerminalDelivery?.lastError ?? null,
+      updatedAt: now(),
+    };
+  }
+
+  private async flushDgxTerminalDelivery(job: RuntimeJob): Promise<boolean> {
+    if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
+    if (job.dgxTerminalDeliveryInFlight) return job.dgxTerminalDeliveryInFlight;
+    if (job.dgxTerminalRetry) {
+      clearTimeout(job.dgxTerminalRetry);
+      delete job.dgxTerminalRetry;
+    }
+    const deliveryPromise = this.attemptDgxTerminalDelivery(job);
+    job.dgxTerminalDeliveryInFlight = deliveryPromise;
+    try {
+      return await deliveryPromise;
+    } finally {
+      if (job.dgxTerminalDeliveryInFlight === deliveryPromise) {
+        delete job.dgxTerminalDeliveryInFlight;
+      }
+    }
+  }
+
+  private async attemptDgxTerminalDelivery(job: RuntimeJob): Promise<boolean> {
+    const delivery = job.dgxTerminalDelivery;
+    const jobId = job.dgxJobId;
+    if (!delivery || !jobId) return true;
+    delivery.attempts += 1;
+    delivery.updatedAt = now();
+    this.changed();
+    try {
+      const response = await this.dgxQueueOperations.transition(jobId, delivery.state, delivery.metadata);
+      if (response.job.state !== delivery.state) {
+        throw new Error(`DGX Runtime API bestätigte ${response.job.state} statt ${delivery.state}.`);
+      }
+      this.confirmDgxTerminalDelivery(job, response.job.state, "PATCH bestätigt");
+      return true;
+    } catch (transitionError) {
+      const transitionMessage = transitionError instanceof Error ? transitionError.message : String(transitionError);
+      try {
+        const response = await this.dgxQueueOperations.read(jobId);
+        if (response.job.state === delivery.state) {
+          this.confirmDgxTerminalDelivery(job, response.job.state, "nach verlorener PATCH-Antwort per GET abgeglichen");
+          return true;
+        }
+        if (DGX_REMOTE_TERMINAL_STATES.has(response.job.state)) {
+          job.dgxJobTerminal = true;
+          delete job.dgxTerminalDelivery;
+          this.appendLog(
+            job,
+            `DGX-Terminalabweichung: lokal war ${delivery.state} vorgemerkt, der Orchestrator meldet ${response.job.state}.`,
+          );
+          this.changed();
+          return false;
+        }
+        this.deferDgxTerminalDelivery(
+          job,
+          `${transitionMessage}; Remote-Zustand nach Abgleich: ${response.job.state}`,
+        );
+        return false;
+      } catch (readError) {
+        const readMessage = readError instanceof Error ? readError.message : String(readError);
+        this.deferDgxTerminalDelivery(job, `${transitionMessage}; Statusabgleich fehlgeschlagen: ${readMessage}`);
+        return false;
+      }
+    }
+  }
+
+  private confirmDgxTerminalDelivery(
+    job: RuntimeJob,
+    state: DgxTerminalState,
+    detail: string,
+  ): void {
+    if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
+    delete job.dgxTerminalRetry;
+    delete job.dgxTerminalDelivery;
+    job.dgxJobTerminal = true;
+    this.appendLog(job, `DGX-Queue-State: ${job.dgxJobId} -> ${state} (${detail}).`);
+    this.changed();
+  }
+
+  private deferDgxTerminalDelivery(job: RuntimeJob, error: string): void {
+    if (!job.dgxTerminalDelivery) return;
+    job.dgxTerminalDelivery.lastError = error;
+    job.dgxTerminalDelivery.updatedAt = now();
+    this.appendLog(
+      job,
+      `DGX-Terminalmeldung ${job.dgxTerminalDelivery.state} noch nicht bestätigt; Zustellung bleibt vorgemerkt: ${error}`,
+    );
+    this.changed();
+    this.scheduleDgxTerminalRetry(job);
+  }
+
+  private scheduleDgxTerminalRetry(job: RuntimeJob, delayOverrideMs?: number): void {
+    if (
+      this.dgxTerminalRetryBaseMs === null
+      || !job.dgxTerminalDelivery
+      || job.dgxJobTerminal
+      || job.dgxTerminalRetry
+    ) {
+      return;
+    }
+    const exponentialDelay = Math.min(
+      MAX_DGX_TERMINAL_RETRY_MS,
+      this.dgxTerminalRetryBaseMs * 2 ** Math.min(6, job.dgxTerminalDelivery.attempts),
+    );
+    const delayMs = delayOverrideMs ?? exponentialDelay;
+    job.dgxTerminalRetry = setTimeout(() => {
+      delete job.dgxTerminalRetry;
+      void this.flushDgxTerminalDelivery(job);
+    }, delayMs);
+    job.dgxTerminalRetry.unref();
+  }
+
   private failJob(job: RuntimeJob, message: string): void {
+    this.prepareDgxTerminalDelivery(job, "failed", {
+      current_step: "LTX Studio job failed",
+      last_error: message,
+    });
     job.status = "failed";
     job.error = message;
     job.finishedAt = now();
@@ -948,6 +1320,16 @@ export class JobManager extends EventEmitter {
     this.appendLog(job, message);
     delete job.process;
     this.changed();
+    this.scheduleDgxTerminalRetry(job, 0);
+  }
+
+  private async failDgxJob(job: RuntimeJob, message: string, currentStep: string): Promise<void> {
+    this.prepareDgxTerminalDelivery(job, "failed", {
+      current_step: currentStep,
+      last_error: message,
+    });
+    this.failJob(job, message);
+    await this.flushDgxTerminalDelivery(job);
   }
 
   private consumeProcessLogs(
@@ -1041,13 +1423,10 @@ export class JobManager extends EventEmitter {
       );
       return maxC;
     }
-    job.status = "failed";
-    job.finishedAt = now();
-    job.error = maxC === null
+    const error = maxC === null
       ? "Temperatur ist nicht messbar; LTX-Start aus Sicherheitsgründen blockiert."
       : `Host bereits bei ${maxC.toFixed(1)} °C; kein LTX-Start an oder über der Hardware-Pausenschwelle von ${thermalPauseC.toFixed(0)} °C.`;
-    this.appendLog(job, job.error);
-    this.changed();
+    this.failJob(job, error);
     return null;
   }
 
@@ -1185,7 +1564,10 @@ export class JobManager extends EventEmitter {
 
   private persist(): void {
     const temporaryPath = `${this.storagePath}.tmp`;
-    writeFileSync(temporaryPath, JSON.stringify(this.list(), null, 2), { mode: 0o600 });
+    const values = [...this.jobs.values()]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(persistedJob);
+    writeFileSync(temporaryPath, JSON.stringify(values, null, 2), { mode: 0o600 });
     chmodSync(temporaryPath, 0o600);
     renameSync(temporaryPath, this.storagePath);
   }
@@ -1193,8 +1575,13 @@ export class JobManager extends EventEmitter {
   private restore(): void {
     if (!existsSync(this.storagePath)) return;
     try {
-      const stored = JSON.parse(readFileSync(this.storagePath, "utf8")) as StudioJob[];
-      for (const entry of stored.slice(0, MAX_JOBS)) {
+      const stored = JSON.parse(readFileSync(this.storagePath, "utf8")) as PersistedStudioJob[];
+      const retained = [
+        ...stored.slice(0, MAX_JOBS),
+        ...stored.slice(MAX_JOBS).filter((entry) =>
+          normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery) !== undefined),
+      ];
+      for (const entry of retained) {
         const migratedRequest = migrateGenerationRequest(entry.request);
         if (!migratedRequest || typeof entry.id !== "string" || !/^[0-9a-f-]{36}$/i.test(entry.id)) continue;
         const storedStatus: JobStatus = ["queued", "running", "paused", "completed", "failed", "cancelled", "interrupted"]
@@ -1215,6 +1602,9 @@ export class JobManager extends EventEmitter {
         const missingOutput = storedStatus === "completed" && !outputReady;
         const storedProgress = typeof entry.progress === "number" && Number.isFinite(entry.progress)
           ? Math.min(100, Math.max(0, entry.progress))
+          : null;
+        const dgxJobId = typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
+          ? entry.dgxJobId
           : null;
         this.jobs.set(entry.id, {
           ...entry,
@@ -1275,9 +1665,10 @@ export class JobManager extends EventEmitter {
                 updatedAt: validTimestamp(entry.thermalProfile.updatedAt, now())!,
               }
             : thermalProfileFromLogs(entry.logs),
-          dgxJobId: typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
-            ? entry.dgxJobId
-            : null,
+          dgxJobId,
+          dgxTerminalDelivery: dgxJobId
+            ? normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery)
+            : undefined,
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
           plan,
         });
@@ -1290,7 +1681,7 @@ export class JobManager extends EventEmitter {
   private trimHistory(): void {
     const entries = [...this.jobs.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     for (const job of entries.slice(MAX_JOBS)) {
-      if (!isActiveJobStatus(job.status)) this.jobs.delete(job.id);
+      if (!isActiveJobStatus(job.status) && !job.dgxTerminalDelivery) this.jobs.delete(job.id);
     }
   }
 }

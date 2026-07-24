@@ -28,6 +28,24 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
   });
 
+  it("migrates audio jobs created before separate final mixes existed", () => {
+    const legacy = structuredClone(validRequest("audio-to-video")) as unknown as {
+      audio: {
+        path: string;
+        name: string;
+        startTime: number;
+        maxDuration: number | null;
+        finalMix?: GenerationRequest["audio"]["finalMix"];
+      };
+    };
+    delete legacy.audio.finalMix;
+
+    const migrated = mergeGenerationRequest(legacy);
+
+    expect(migrated.audio.finalMix).toEqual({ path: "", name: "" });
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+  });
+
   it("strips removed top-level fields while preserving valid legacy values", () => {
     const legacy = {
       ...validRequest(),
