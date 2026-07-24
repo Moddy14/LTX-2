@@ -161,4 +161,22 @@ export const fieldHelp = {
     "Wofür: Bewertet Sprachverständlichkeit, Klangqualität und Störfreiheit. 10 bedeutet klare natürliche Sprache ohne Knacken, Verzerrung, Pumpen oder falsches Lautstärkeverhältnis.",
   qualityNote:
     "Wofür: Hält sichtbare Fehler und die nächste gezielte Parameteränderung fest. Gute Eingabe: Zeitpunkt, konkrete Beobachtung und vermutete Ursache, zum Beispiel '1,8 s: Lippen 3 Frames zu spät; Referenzstärke 0,9 testen'.",
+  objectiveAnalysis:
+    "Wofür: Misst den technischen Audio-/Videovertrag und verfolgt Gesicht, Nase und Mund mit dem lokalen CPU-YuNet-Modell. Die Rohwerte helfen beim Vergleich identischer Testfälle. Sie sind noch kein LipSync- oder Identitätsurteil; dafür fehlen kalibrierte SyncNet- und Face-Recognition-Modelle.",
+  objectiveFaceDetection:
+    "Wofür: Anteil der untersuchten Frames, in denen YuNet ein Gesicht erkennt. Gut: bei einem unverdeckten Einzelporträt nahe 100 %. Ein niedriger Wert kann Verdeckung, Bewegungsunschärfe oder eine ungeeignete Ansicht bedeuten; er ist kein Qualitäts-Score.",
+  objectiveGeometryCoverage:
+    "Wofür: Anteil der Frames mit ausreichend stabilen Augen-, Nasen- und Mundpunkten für Geometriemessungen. Gut: bei einem frontalen Test nahe 100 %. Noch kein kalibrierter Grenzwert.",
+  objectiveNoseVelocity:
+    "Wofür: 95. Perzentil der Nasenbewegung, normiert auf den Augenabstand pro Sekunde. Einzelne Spitzen werden damit sichtbar. Niedriger ist nicht automatisch besser, weil natürliche Kopfbewegung dazugehört; nur gleiche Testfälle vergleichen.",
+  objectiveNoseAcceleration:
+    "Wofür: 95. Perzentil der Änderung der normalisierten Nasengeschwindigkeit in Augenabständen pro Sekunde². Hohe Ausreißer können eine springende Nasenspitze anzeigen. Noch kein kalibrierter Grenzwert.",
+  objectiveMouthAngle:
+    "Wofür: Median der Mundlinie relativ zur Augenlinie in Grad. Werte nahe 0° wirken meist gerade, hängen aber von Perspektive und Anatomie ab. Noch kein Identitäts- oder Qualitätsurteil.",
+  objectiveMouthAngleDynamics:
+    "Wofür: 95. Perzentil der Änderung des relativen Mundwinkels in Grad pro Sekunde. Starke Spitzen können einen kippenden oder springenden Mund anzeigen. Noch kein kalibrierter Grenzwert.",
+  objectiveAvStartDelta:
+    "Wofür: Differenz der Startzeitstempel von Audio- und Videospur. Gut für den technischen Vertrag: höchstens 40 ms. Dieser Wert misst nicht, ob Laute und Lippenbewegung phonemgenau synchron sind.",
+  objectiveAvDurationDelta:
+    "Wofür: Differenz zwischen messbarer Audio- und Videospurdauer. Gut für den technischen Vertrag: höchstens 40 ms. Fehlt eine echte Audiodauer, bleibt der Wert ausdrücklich nicht messbar.",
 } as const;

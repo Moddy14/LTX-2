@@ -1,5 +1,6 @@
 import type { GenerationRequest } from "../shared/pipelines";
 import type { QualityReviewInput } from "../shared/quality";
+import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
 import type {
   LipDubReferenceDiagnostics,
   PlanSuggestion,
@@ -121,6 +122,24 @@ export async function setOutputQualityReview(outputName: string, input: QualityR
     }),
   );
   return body.output;
+}
+
+export async function startOutputAnalysis(outputName: string, force = false): Promise<OutputAnalysisRecord> {
+  const body = await decode<{ analysis: OutputAnalysisRecord }>(
+    await fetch(`/api/outputs/${encodeURIComponent(outputName)}/analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force }),
+    }),
+  );
+  return body.analysis;
+}
+
+export async function cancelOutputAnalysis(outputName: string): Promise<OutputAnalysisRecord> {
+  const body = await decode<{ analysis: OutputAnalysisRecord }>(
+    await fetch(`/api/outputs/${encodeURIComponent(outputName)}/analysis/cancel`, { method: "POST" }),
+  );
+  return body.analysis;
 }
 
 export async function uploadFile(kind: UploadedFile["kind"], file: File): Promise<UploadedFile> {

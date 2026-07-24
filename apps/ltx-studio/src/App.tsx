@@ -28,12 +28,15 @@ import {
   rerunJob,
   setJobFavorite,
   setOutputQualityReview,
+  startOutputAnalysis,
+  cancelOutputAnalysis,
 } from "./api";
 import type { QualityReviewInput } from "../shared/quality";
+import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
 import { Editor } from "./components/Editor";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
-import { mergeOutputRefresh } from "./outputState";
+import { mergeOutputAnalysis, mergeOutputRefresh } from "./outputState";
 import {
   ApiError,
   type Health,
@@ -220,6 +223,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!outputs.some((output) => output.analysis && ["queued", "running"].includes(output.analysis.status))) return;
+    const timer = window.setInterval(() => {
+      void getOutputs()
+        .then((next) => setOutputs((current) => mergeOutputRefresh(current, next)))
+        .catch(() => undefined);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [outputs]);
+
+  useEffect(() => {
     setHistoryEstimate(null);
     if (!validation.success) return;
     const controller = new AbortController();
@@ -387,6 +400,32 @@ export function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Qualitätsbewertung konnte nicht gespeichert werden.";
       setServerErrors([message]);
+      throw error;
+    }
+  };
+
+  const updateOutputAnalysis = (outputName: string, analysis: OutputAnalysisRecord) => {
+    setOutputs((current) => current.map((output) =>
+      output.name === outputName ? mergeOutputAnalysis(output, analysis) : output,
+    ));
+  };
+
+  const handleStartAnalysis = async (output: StudioOutput, force = false) => {
+    setServerErrors([]);
+    try {
+      updateOutputAnalysis(output.name, await startOutputAnalysis(output.name, force));
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Objektive Analyse konnte nicht gestartet werden."]);
+      throw error;
+    }
+  };
+
+  const handleCancelAnalysis = async (output: StudioOutput) => {
+    setServerErrors([]);
+    try {
+      updateOutputAnalysis(output.name, await cancelOutputAnalysis(output.name));
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Objektive Analyse konnte nicht abgebrochen werden."]);
       throw error;
     }
   };
@@ -594,6 +633,8 @@ export function App() {
           onRerun={(job, mode) => void handleRerun(job, mode)}
           onFavorite={(job) => void handleFavorite(job)}
           onSaveQualityReview={handleQualityReview}
+          onStartAnalysis={handleStartAnalysis}
+          onCancelAnalysis={handleCancelAnalysis}
           onLoadSettings={loadJobSettings}
           onLoadOutputSettings={loadOutputSettings}
         />

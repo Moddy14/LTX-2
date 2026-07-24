@@ -29,6 +29,7 @@ import type { Health, ResourceEstimate, StudioJob, StudioOutput } from "../types
 import { qualityReviewAverage, type QualityReviewInput } from "../../shared/quality";
 import { isSpeechQualityCandidate } from "../qualityCandidates";
 import { QualityScorecard } from "./QualityScorecard";
+import { ObjectiveAnalysisPanel } from "./ObjectiveAnalysisPanel";
 
 const statusLabels: Record<StudioJob["status"], string> = {
   queued: "Wartet",
@@ -90,6 +91,8 @@ type RunPanelProps = {
   onRerun: (job: StudioJob, mode: "exact" | "random-seed") => void;
   onFavorite: (job: StudioJob) => void;
   onSaveQualityReview: (output: StudioOutput, input: QualityReviewInput) => Promise<void>;
+  onStartAnalysis: (output: StudioOutput, force?: boolean) => Promise<void>;
+  onCancelAnalysis: (output: StudioOutput) => Promise<void>;
   onLoadSettings: (job: StudioJob) => void;
   onLoadOutputSettings: (output: StudioOutput) => void;
   estimate: ResourceEstimate;
@@ -120,6 +123,8 @@ export function RunPanel({
   onRerun,
   onFavorite,
   onSaveQualityReview,
+  onStartAnalysis,
+  onCancelAnalysis,
   onLoadSettings,
   onLoadOutputSettings,
   estimate,
@@ -233,6 +238,11 @@ export function RunPanel({
                 <span>{selectedOutput.settingsAvailable ? "Studio-Einstellungen vorhanden" : "Keine verlässlichen Einstellungen"}</span>
                 {selectedOutput.qualityReview ? (
                   <span>Bewertung {qualityReviewAverage(selectedOutput.qualityReview).toFixed(1)} / 10</span>
+                ) : null}
+                {selectedOutput.analysis?.status === "completed" ? (
+                  <span>{selectedOutput.analysis.result?.status === "measured"
+                    ? "Objektive Rohwerte erfasst"
+                    : "Objektive Messung unzureichend"}</span>
                 ) : null}
               </div>
             ) : null}
@@ -402,12 +412,20 @@ export function RunPanel({
       ) : null}
 
       {comparisonJobs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
-        <QualityScorecard
-          key={selectedOutput.name}
-          output={selectedOutput}
-          outputs={outputs}
-          onSave={onSaveQualityReview}
-        />
+        <>
+          <QualityScorecard
+            key={`manual-${selectedOutput.name}`}
+            output={selectedOutput}
+            outputs={outputs}
+            onSave={onSaveQualityReview}
+          />
+          <ObjectiveAnalysisPanel
+            key={`objective-${selectedOutput.name}-${selectedOutput.fileId}-${selectedOutput.changedAt}`}
+            output={selectedOutput}
+            onStart={onStartAnalysis}
+            onCancel={onCancelAnalysis}
+          />
+        </>
       ) : null}
 
       {errors.length > 0 ? (

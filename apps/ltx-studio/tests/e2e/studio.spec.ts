@@ -279,6 +279,8 @@ test("speech quality scorecard persists six ratings and remains usable on narrow
     url: `/api/outputs/${request.outputName}`,
     sizeBytes: 1_048_576,
     modifiedAt: "2026-07-24T18:00:00.000Z",
+    changedAt: "2026-07-24T18:00:01.000Z",
+    fileId: "12345",
     jobId: "2c8a5dc6-8864-49f7-a639-85caef919999",
     jobStatus: "completed",
     request,
@@ -288,6 +290,7 @@ test("speech quality scorecard persists six ratings and remains usable on narrow
       note: string;
       updatedAt: string;
     },
+    analysis: null,
   };
   let savedReview = output.qualityReview;
   let receivedBody: unknown;
@@ -338,6 +341,182 @@ test("speech quality scorecard persists six ratings and remains usable on narrow
   await expect(page.getByLabel("Qualitätsnotiz")).toHaveValue("1,8 s: Lippen noch einen Frame zu spät.");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("speech-quality-scorecard.png"), fullPage: true });
+});
+
+test("objective speech analysis exposes raw measurements and honest capability gaps", async ({ page }, testInfo) => {
+  const request = createDefaultRequest("audio-to-video");
+  request.outputName = "speech-objective-analysis.mp4";
+  const modifiedAt = "2026-07-24T18:00:00.000Z";
+  const output = {
+    name: request.outputName,
+    url: `/api/outputs/${request.outputName}`,
+    sizeBytes: 1_048_576,
+    modifiedAt,
+    changedAt: "2026-07-24T18:00:01.000Z",
+    fileId: "12345",
+    jobId: "2c8a5dc6-8864-49f7-a639-85caef919999",
+    jobStatus: "completed",
+    request,
+    settingsAvailable: true,
+    qualityReview: null,
+    analysis: null as null | Record<string, unknown>,
+  };
+  await page.route(/\/api\/outputs(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ outputs: [output] }),
+  }));
+  await page.route("**/api/outputs/*/analysis", async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body).toEqual({ force: false });
+    output.analysis = {
+      schemaVersion: "ltx-studio-output-analysis.v1",
+      outputName: output.name,
+      sizeBytes: output.sizeBytes,
+      modifiedAtMs: Date.parse(modifiedAt),
+      changedAtMs: Date.parse(output.changedAt),
+      fileId: output.fileId,
+      jobId: output.jobId,
+      analysisId: "3c8a5dc6-8864-49f7-a639-85caef919999",
+      attempt: 1,
+      status: "completed",
+      progress: 100,
+      createdAt: "2026-07-24T18:05:00.000Z",
+      startedAt: "2026-07-24T18:05:01.000Z",
+      finishedAt: "2026-07-24T18:05:02.000Z",
+      updatedAt: "2026-07-24T18:05:02.000Z",
+      error: null,
+      result: {
+        schemaVersion: "ltx-studio-objective-quality.v1",
+        analyzerVersion: "ffprobe-yunet5.v1",
+        createdAt: "2026-07-24T18:05:02.000Z",
+        status: "measured",
+        technical: {
+          durationSeconds: 4.041667,
+          fps: 24,
+          frames: 97,
+          hasAudio: true,
+          constantFrameRate: true,
+          audioVideoDurationDeltaSeconds: 0.000667,
+          audioVideoStartDeltaSeconds: 0,
+        },
+        face: {
+          sampledFrames: 97,
+          detectedFrames: 97,
+          validGeometryFrames: 97,
+          detectionCoverage: 1,
+          geometryCoverage: 1,
+          medianConfidence: 0.939,
+          medianEyeSpanPixels: 74.26,
+          medianFaceAreaRatio: 0.129,
+          noseVelocityP95PerSecond: 2.324,
+          noseAccelerationP95PerSecond2: 70.132,
+          mouthAngleMedianDegrees: 1.243,
+          mouthAngleVelocityP95DegreesPerSecond: 33.019,
+          mouthSpanCoefficientOfVariation: 0.024,
+        },
+        capabilities: {
+          avSync: "syncnet-required",
+          identity: "face-recognition-model-required",
+          dialogue: "whisper-not-run",
+        },
+        findings: [{
+          code: "calibration-required",
+          level: "info",
+          message: "Dynamikwerte sind Rohmessungen und benötigen lokale Kontrollen.",
+        }],
+        limitations: ["YuNet misst Stabilität, aber keine Phonem-Mund-Synchronität."],
+      },
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: output.analysis }),
+    });
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Objektiv analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Objektive Ausgabeanalyse" })).toBeVisible();
+  await expect(page.locator(".objective-analysis__status")).toHaveText("Rohwerte erfasst");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Gesicht erkannt" }).locator("strong")).toHaveText("100 %");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("1 ms");
+  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(8);
+  const analysisPanelBox = await page.locator(".objective-analysis").boundingBox();
+  expect(analysisPanelBox).not.toBeNull();
+  for (const index of [0, 1]) {
+    const metricTooltip = page.locator(".objective-analysis__metric").nth(index).locator(".tooltip");
+    await metricTooltip.hover();
+    const tooltipContent = metricTooltip.locator(".tooltip__content");
+    await expect(tooltipContent).toContainText("Wofür:");
+    const tooltipBox = await tooltipContent.boundingBox();
+    expect(tooltipBox).not.toBeNull();
+    expect(tooltipBox!.x).toBeGreaterThanOrEqual(analysisPanelBox!.x);
+    expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(
+      analysisPanelBox!.x + analysisPanelBox!.width + 1,
+    );
+    expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(
+      page.viewportSize()!.width,
+    );
+  }
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("SyncNet fehlt");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Erkennungsmodell fehlt");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper nicht ausgeführt");
+  await expect(page.locator(".objective-analysis__actions")).toContainText("keine DGX-Modellbelegung");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("speech-objective-analysis.png"), fullPage: true });
+
+  const measuredAnalysis = output.analysis;
+  if (!measuredAnalysis) throw new Error("Objective analysis response was not captured.");
+  output.analysis = { ...measuredAnalysis, status: "running", progress: 10, result: null };
+  await page.reload();
+  await expect(page.locator(".objective-analysis__progress")).toHaveText("CPU-Analyse läuft");
+  await expect(page.locator(".objective-analysis__progress")).not.toContainText("%");
+
+  output.analysis = {
+    ...measuredAnalysis,
+    status: "completed",
+    progress: 100,
+    result: {
+      schemaVersion: "ltx-studio-objective-quality.v1",
+      analyzerVersion: "ffprobe-yunet5.v1",
+      createdAt: "2026-07-24T18:06:00.000Z",
+      status: "insufficient",
+      technical: {
+        durationSeconds: 1,
+        fps: 24,
+        frames: 24,
+        hasAudio: true,
+        constantFrameRate: true,
+        audioVideoDurationDeltaSeconds: null,
+        audioVideoStartDeltaSeconds: 0,
+      },
+      face: {
+        sampledFrames: 24,
+        detectedFrames: 0,
+        validGeometryFrames: 0,
+        detectionCoverage: 0,
+        geometryCoverage: 0,
+        medianConfidence: null,
+        medianEyeSpanPixels: null,
+        medianFaceAreaRatio: null,
+        noseVelocityP95PerSecond: null,
+        noseAccelerationP95PerSecond2: null,
+        mouthAngleMedianDegrees: null,
+        mouthAngleVelocityP95DegreesPerSecond: null,
+        mouthSpanCoefficientOfVariation: null,
+      },
+      capabilities: {
+        avSync: "syncnet-required",
+        identity: "face-recognition-model-required",
+        dialogue: "whisper-not-run",
+      },
+      findings: [{ code: "face-detection-incomplete", level: "error", message: "Kein Gesicht erkannt." }],
+      limitations: ["YuNet konnte keine verwertbare Gesichtsgeometrie messen."],
+    },
+  };
+  await page.reload();
+  await expect(page.locator(".objective-analysis__status")).toHaveText("Messung unzureichend");
+  await expect(page.locator(".output-library__details")).toContainText("Objektive Messung unzureichend");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("Nicht messbar");
 });
 
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {

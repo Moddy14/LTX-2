@@ -53,6 +53,15 @@ Framezahl Qualitätsvoraussetzungen.
   Bereinigung der begrenzten Jobhistorie erhalten.
 - Bestwert und Einzelbewertungen sind in Auswahl, Jobliste und 2er-Vergleich
   sichtbar.
+- Asynchrone CPU-Ausgabeanalyse mit ffprobe und YuNet für den technischen
+  Audio-/Videovertrag sowie normalisierte Nasen- und Mundgeometrie.
+- Analysezustand und Rohwerte liegen in einem getrennten, atomisch geschriebenen
+  Sidecar und sind an Größe, mtime, ctime, Inode und Studio-Job gebunden.
+- Analysequeue, Timeout, Prozessgruppenabbruch, Neustart-Recovery und
+  Desktop-/Mobile-Anzeige sind getestet; kein DGX-Modell wird dafür belegt.
+- Unzureichende Messungen, VFR, fehlende Audiodauer und fehlende
+  Evaluatormodelle werden ausdrücklich angezeigt. Unkalibrierte Rohwerte
+  erzeugen keine automatische Qualitätsnote.
 - LongCat bleibt vorhanden, ist aber standardmäßig aus und kein SOTA-Hauptpfad.
 - DGX-Queue, Thermalwächter und Wiederanlauf bleiben Teil jedes GPU-Laufs.
 
@@ -115,14 +124,23 @@ Jedes Ergebnis erhält getrennte Bewertungen:
 - Bewegung: Kopf- und Gesichtsdynamik bleiben natürlich.
 - Audio: verständlich, sauber und ohne Versatz oder Aussetzer.
 
-Die persistente Scorecard ist als Version 2 des MP4-Einstellungs-Sidecars
-umgesetzt. Später werden objektive Evaluatoren ergänzt:
+Die persistente Scorecard liegt im revisionsgebundenen
+MP4-Einstellungs-Sidecar Version 3; Version 1 und 2 werden bei belegbarer
+Job-Provenienz migriert. Der erste objektive Evaluatorblock ist ebenfalls
+umgesetzt:
 
-- Audio-/Video-Offset und Sync-Konfidenz;
-- Identitätsähnlichkeit gegen den Referenzclip;
-- Landmark-Stabilität von Mund, Nase und Kiefer;
+- Audio-/Video-Start- und Daueroffset aus den echten Streams;
+- Gesichtserkennungs- und Geometrieabdeckung;
+- normalisierte Rohwerte für Nasenbewegung, Nasenbeschleunigung,
+  Mundwinkel und Mundwinkeldynamik.
+
+Noch offen sind die für eine belastbare SOTA-Aussage erforderlichen
+Evaluatoren:
+
+- kalibriertes SyncNet für Offset und Sync-Konfidenz;
+- lizenziertes Face-Recognition-Modell für Identitätsähnlichkeit;
 - ASR-Abgleich des erzeugten Dialogs;
-- Artefakt- und Flimmererkennung.
+- bewegungskompensierte Artefakt- und Flimmererkennung.
 
 Schwellenwerte werden erst anhand von Positiv- und Negativkontrollen auf dieser
 Maschine kalibriert. Unkalibrierte Zahlen dürfen keine `10/10`-Freigabe geben.

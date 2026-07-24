@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { StudioJob } from "../server/jobs.js";
+import { writeOutputAnalysis } from "../server/analysisStore.js";
 import { OutputLibrary } from "../server/outputs.js";
 import { validRequest } from "./fixtures.js";
 
@@ -71,9 +72,11 @@ describe("generated output library", () => {
     expect(studioOutput.settingsAvailable).toBe(true);
     expect(studioOutput.request).toEqual(job.request);
     expect(studioOutput.qualityReview).toBeNull();
+    expect(studioOutput.analysis).toBeNull();
     expect(externalOutput.settingsAvailable).toBe(false);
     expect(externalOutput.request).toBeNull();
     expect(externalOutput.qualityReview).toBeNull();
+    expect(externalOutput.analysis).toBeNull();
 
     await appendFile(join(root, studioName), "changed");
     const modified = library.list([job]).find((output) => output.name === studioName)!;
@@ -124,6 +127,50 @@ describe("generated output library", () => {
       lora: { path: "", strength: 1 },
     });
     expect(output.qualityReview).toBeNull();
+    const migrated = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
+    expect(migrated).toMatchObject({
+      schemaVersion: "ltx-studio-output.v3",
+      changedAtMs: expect.any(Number),
+      fileId: expect.stringMatching(/^\d+$/),
+    });
+  });
+
+  it("keeps legacy settings readable but refuses objective analysis without strong provenance", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T07:30:00.000Z");
+    const outputName = "legacy-unbound-speech.mp4";
+    await writeFile(join(root, outputName), "video");
+    const stats = await stat(join(root, outputName));
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    await writeFile(join(root, `${outputName}.ltx-settings.json`), JSON.stringify({
+      schemaVersion: "ltx-studio-output.v2",
+      outputName,
+      jobId: job.id,
+      completedAt: completedAt.toISOString(),
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      request: job.request,
+      qualityReview: null,
+    }));
+    const library = new OutputLibrary(root);
+
+    expect(library.list([]).find((output) => output.name === outputName)?.settingsAvailable).toBe(true);
+    library.setQualityReview(outputName, {
+      scores: {
+        lipSync: 5,
+        identity: 5,
+        mouthNaturalness: 5,
+        skinStability: 5,
+        motion: 5,
+        audio: 5,
+      },
+      note: "Legacy darf dadurch keine starke Provenienz erhalten.",
+    }, []);
+    const afterReview = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
+    expect(afterReview.schemaVersion).toBe("ltx-studio-output.v2");
+    expect(afterReview.changedAtMs).toBeUndefined();
+    expect(afterReview.fileId).toBeUndefined();
+    expect(() => library.resolveAnalysisTarget(outputName)).toThrow("inhaltsgebundene Studio-Provenienz");
   });
 
   it("keeps completed provenance after the source job leaves bounded history", async () => {
@@ -142,7 +189,7 @@ describe("generated output library", () => {
     expect(historic.settingsAvailable).toBe(true);
   });
 
-  it("persists a validated speech quality scorecard in a v2 sidecar", async () => {
+  it("persists a validated speech quality scorecard in a revision-bound v3 sidecar", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T09:00:00.000Z");
     const outputName = "speech-scorecard.mp4";
@@ -176,7 +223,9 @@ describe("generated output library", () => {
     });
     expect(Number.isFinite(Date.parse(updated.qualityReview!.updatedAt))).toBe(true);
     const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
-    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v2");
+    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v3");
+    expect(sidecar.changedAtMs).toEqual(expect.any(Number));
+    expect(sidecar.fileId).toMatch(/^\d+$/);
     expect(sidecar.request).toEqual(job.request);
     expect(sidecar.qualityReview.scores.lipSync).toBe(8);
 
@@ -216,6 +265,73 @@ describe("generated output library", () => {
     library.recordCompleted([speechJob]);
     await appendFile(join(root, changedName), "changed");
     expect(() => library.setQualityReview(changedName, score, [speechJob])).toThrow("nachträglich verändert");
+  });
+
+  it("resolves analysis targets only for unchanged Studio speech outputs", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:30:00.000Z");
+    const outputName = "speech-analysis.mp4";
+    await writeFile(join(root, outputName), "video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, completedAt.toISOString(), "lipdub");
+    library.recordCompleted([job]);
+
+    expect(library.resolveAnalysisTarget(outputName)).toMatchObject({
+      outputName,
+      jobId: job.id,
+      request: { mode: "lipdub" },
+    });
+
+    const silentName = "silent-analysis.mp4";
+    await writeFile(join(root, silentName), "video");
+    const silentJob = completedJob(silentName, completedAt.toISOString(), "two-stage");
+    library.recordCompleted([silentJob]);
+    expect(() => library.resolveAnalysisTarget(silentName)).toThrow(
+      "Nur ein fertiges Audio- oder LipDub-Video",
+    );
+
+    await appendFile(join(root, outputName), "changed");
+    expect(() => library.resolveAnalysisTarget(outputName)).toThrow("nachträglich verändert");
+  });
+
+  it("drops an analysis when same-sized output bytes replace the original with restored mtime", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:45:00.000Z");
+    const outputName = "content-revision.mp4";
+    const outputPath = join(root, outputName);
+    await writeFile(outputPath, "video-a");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    library.recordCompleted([job]);
+    const target = library.resolveAnalysisTarget(outputName);
+    writeOutputAnalysis(root, {
+      schemaVersion: "ltx-studio-output-analysis.v1",
+      outputName,
+      sizeBytes: target.sizeBytes,
+      modifiedAtMs: target.modifiedAtMs,
+      changedAtMs: target.changedAtMs,
+      fileId: target.fileId,
+      jobId: target.jobId,
+      analysisId: "3c8a5dc6-8864-49f7-a639-85caef918888",
+      attempt: 1,
+      status: "failed",
+      progress: 10,
+      createdAt: "2026-07-24T09:45:01.000Z",
+      startedAt: "2026-07-24T09:45:01.000Z",
+      finishedAt: "2026-07-24T09:45:02.000Z",
+      updatedAt: "2026-07-24T09:45:02.000Z",
+      error: { code: "test", message: "Test record." },
+      result: null,
+    });
+    expect(library.list([job]).find((output) => output.name === outputName)?.analysis).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await writeFile(outputPath, "video-b");
+    await utimes(outputPath, target.modifiedAtMs / 1_000, target.modifiedAtMs / 1_000);
+
+    const replaced = library.list([job]).find((output) => output.name === outputName);
+    expect(replaced?.settingsAvailable).toBe(false);
+    expect(replaced?.analysis).toBeNull();
   });
 
   it("ignores invalid quality data while retaining valid v2 provenance", async () => {

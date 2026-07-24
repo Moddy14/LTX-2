@@ -33,6 +33,7 @@ import { estimateRequest } from "./estimates.js";
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
 import { OutputLibrary, OutputQualityError } from "./outputs.js";
+import { OutputAnalysisManager } from "./outputAnalysis.js";
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
 
@@ -41,6 +42,7 @@ const app = express();
 const jobs = new JobManager();
 const assets = new AssetStore();
 const outputs = new OutputLibrary(outputRoot);
+const analyses = new OutputAnalysisManager(outputs, () => jobs.list());
 outputs.recordCompleted(jobs.list());
 jobs.on("changed", (value: StudioJob[]) => outputs.recordCompleted(value));
 const allowedBrowserOrigins = new Set([
@@ -317,6 +319,34 @@ app.put("/api/outputs/:filename/quality-review", (request, response) => {
   const payload = qualityReviewInputSchema.parse(request.body);
   const output = outputs.setQualityReview(filename, payload, jobs.list());
   response.json({ output });
+});
+
+app.get("/api/outputs/:filename/analysis", (request, response) => {
+  const filename = routeParam(request.params.filename);
+  if (!outputNameSchema.safeParse(filename).success) {
+    return response.status(404).json({ error: "Ausgabe nicht gefunden." });
+  }
+  response.json({ analysis: analyses.get(filename) });
+});
+
+app.post("/api/outputs/:filename/analysis", (request, response) => {
+  const filename = routeParam(request.params.filename);
+  if (!outputNameSchema.safeParse(filename).success) {
+    return response.status(404).json({ error: "Ausgabe nicht gefunden." });
+  }
+  const payload = z.object({ force: z.boolean().default(false) }).strict().parse(request.body ?? {});
+  const analysis = analyses.start(filename, payload.force);
+  response.status(["queued", "running"].includes(analysis.status) ? 202 : 200).json({ analysis });
+});
+
+app.post("/api/outputs/:filename/analysis/cancel", (request, response) => {
+  const filename = routeParam(request.params.filename);
+  if (!outputNameSchema.safeParse(filename).success) {
+    return response.status(404).json({ error: "Ausgabe nicht gefunden." });
+  }
+  const analysis = analyses.cancel(filename);
+  if (!analysis) return response.status(404).json({ error: "Keine objektive Analyse vorhanden." });
+  response.json({ analysis });
 });
 
 app.get("/api/events", (request, response) => {
