@@ -100,6 +100,11 @@ export function Editor({
   const gemmaOptions = modelOptions(discoveredModels, "gemma");
   const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
   const loraOptions = modelOptions(discoveredModels, "lora");
+  const lipDubRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-lora");
+  const recommendedLipDubMissing = isLipDub
+    && lipDubRecommendation
+    && !lipDubRecommendation.present
+    && (!request.lipDub.lora.path || request.lipDub.lora.path === lipDubRecommendation.localPath);
 
   const applyUpload = (file: UploadedFile, target: "audio" | "retake" | "mask" | "lipdub") => {
     onPreview(file.path, file.url);
@@ -708,6 +713,12 @@ export function Editor({
             </div>
           ) : null}
         </div>
+        {recommendedLipDubMissing ? (
+          <p className="advisory advisory--warning">
+            Fehlt: {lipDubRecommendation.label} · {lipDubRecommendation.filename}. Quelle: {lipDubRecommendation.repoId};
+            Zugriff ist gated und muss im Hugging-Face-Account freigegeben sein.
+          </p>
+        ) : null}
         {modelInventory?.truncated ? (
           <p className="advisory advisory--warning">Der Modellscan erreichte seine Sicherheitsgrenze. Zusätzliche Modelle können weiterhin per Pfad gewählt werden.</p>
         ) : null}

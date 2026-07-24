@@ -60,6 +60,7 @@ function restoreRequest(): GenerationRequest {
 function withDiscoveredModelDefaults(request: GenerationRequest, inventory: ModelInventory): GenerationRequest {
   const find = (kind: ModelInventory["items"][number]["kind"], predicate: (name: string) => boolean = () => true) =>
     inventory.items.find((item) => item.kind === kind && predicate(item.name.toLowerCase()))?.path ?? "";
+  const recommendedLipDub = inventory.recommendations.find((item) => item.id === "lipdub-lora" && item.present);
   return {
     ...request,
     models: {
@@ -82,6 +83,7 @@ function withDiscoveredModelDefaults(request: GenerationRequest, inventory: Mode
       lora: {
         ...request.lipDub.lora,
         path: request.lipDub.lora.path
+          || recommendedLipDub?.localPath
           || find("lora", (name) => name.includes("lipdub") || name.includes("lip-dub")),
       },
     },
@@ -206,7 +208,7 @@ export function App() {
       prompt: current.prompt,
       promptParts: current.promptParts,
       negativePrompt: current.negativePrompt,
-      enhancePrompt: current.enhancePrompt,
+      enhancePrompt: mode === "lipdub" ? false : current.enhancePrompt,
       sourceMode: current.sourceMode,
       seed: current.seed,
       models: mode === "lipdub" ? { ...current.models, loras: [] } : current.models,

@@ -100,8 +100,8 @@ const TRANSIENT_REASONS = new Set([
   "qwen_pressure_evicted_for_blocked_job",
 ]);
 
-export function buildAdmissionRequests(request: GenerationRequest): AdmissionRequest[] {
-  const requestMemoryGiB = estimateResources(request).memoryGiB;
+export function buildAdmissionRequests(request: GenerationRequest, estimatedMemoryGiB?: number): AdmissionRequest[] {
+  const requestMemoryGiB = estimatedMemoryGiB ?? estimateResources(request).memoryGiB;
   return [{
     requested_by: "ltx-studio",
     source_app: "LTX Studio",
@@ -146,8 +146,11 @@ export function shouldRetryQueueSubmit(decision: AdmissionDecision): boolean {
   return typeof decision.reason === "string" && TRANSIENT_REASONS.has(decision.reason);
 }
 
-export async function submitQueueAdmission(request: GenerationRequest): Promise<QueueSubmitResponse> {
-  const [admissionRequest] = buildAdmissionRequests(request);
+export async function submitQueueAdmission(
+  request: GenerationRequest,
+  estimatedMemoryGiB?: number,
+): Promise<QueueSubmitResponse> {
+  const [admissionRequest] = buildAdmissionRequests(request, estimatedMemoryGiB);
   return runtimeApiJson("POST", "/dgx/queue/submit", admissionRequest, { timeoutMs: 120_000 });
 }
 

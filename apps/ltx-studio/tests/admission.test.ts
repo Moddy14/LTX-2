@@ -47,6 +47,16 @@ describe("DGX admission contract", () => {
     expect(admission.resource_profile.required_gib).toBe(62);
   });
 
+  it("accepts a server-side media-aware estimate for native LipDub admission", () => {
+    const request = validRequest("lipdub");
+    const [admission] = buildAdmissionRequests(request, 82);
+    expect(admission).toMatchObject({
+      job_type: "ltx2_native_lipdub",
+      estimated_memory_gib: 82,
+      resource_profile: { required_gib: 82 },
+    });
+  });
+
   it("retries orchestrator-controlled qwen pressure windows exactly as instructed", () => {
     expect(shouldRetryQueueSubmit({
       decision: "busy_retry",

@@ -68,7 +68,7 @@ export const fieldHelp = {
   distilledLoraStrength:
     "Wofür: Gewichtet den Einfluss der Distilled-LoRA. Empfehlung: mit 1,0 starten und nur bei sichtbarer Über- oder Untersteuerung in kleinen Schritten ändern.",
   lipDubLora:
-    "Wofür: Spezialisierte IC-LoRA für die native LipDub-Pipeline. Gute Eingabe: das offizielle lokale LipDub-LoRA-Modell, nicht eine normale Stil- oder Charakter-LoRA.",
+    "Wofür: Spezialisierte IC-LoRA für die native LipDub-Pipeline. Gute Eingabe: das offizielle lokale Lightricks-LipDub-LoRA-Modell, nicht eine normale Stil- oder Charakter-LoRA. Das Modell ist gated und muss im Hugging-Face-Account freigegeben sein.",
   lipDubLoraStrength:
     "Wofür: Regelt den Einfluss der LipDub-IC-LoRA auf Mundbewegung und Referenzbindung. Empfehlung: mit 1,0 starten; nur in kleinen Schritten ändern, wenn der Mund zu schwach oder zu dominant folgt.",
   loraPath:

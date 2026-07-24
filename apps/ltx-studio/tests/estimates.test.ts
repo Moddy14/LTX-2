@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { estimateResources } from "../shared/estimates.js";
 import { estimateRequest } from "../server/estimates.js";
+import * as mediaProbe from "../server/mediaProbe.js";
 import { validRequest } from "./fixtures.js";
 
 describe("resource and runtime estimates", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("keeps the standard two-stage memory contract conservative", () => {
     const request = validRequest();
     expect(estimateResources(request).memoryGiB).toBe(64);
@@ -41,6 +44,22 @@ describe("resource and runtime estimates", () => {
     const request = validRequest("lipdub");
     const estimate = estimateResources(request);
     expect(estimate.memoryGiB).toBeGreaterThanOrEqual(64);
+  });
+
+  it("sizes native LipDub server estimates from the reference video instead of the UI frame proxy", () => {
+    const request = validRequest("lipdub");
+    request.numFrames = 25;
+    vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      frames: 2401,
+      fps: 24,
+      durationSeconds: 100.04,
+    });
+
+    const sharedEstimate = estimateResources(request);
+    const serverEstimate = estimateRequest(request, []);
+
+    expect(serverEstimate.memoryGiB).toBeGreaterThan(sharedEstimate.memoryGiB);
+    expect(serverEstimate.outputGiB).toBeGreaterThan(sharedEstimate.outputGiB);
   });
 
   it("shows no ETA until two successful comparable runs exist", () => {

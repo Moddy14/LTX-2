@@ -18,6 +18,7 @@ describe("model discovery", () => {
     expect(classifyModelFile("/models/ltx-2.3-22b-distilled.safetensors")).toBe("distilled-checkpoint");
     expect(classifyModelFile("/models/ltx-spatial-upscaler-x2.safetensors")).toBe("spatial-upscaler");
     expect(classifyModelFile("/models/ltx-distilled-lora.safetensors")).toBe("lora");
+    expect(classifyModelFile("/models/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors")).toBe("lora");
     expect(classifyModelFile("/models/model-00001-of-00005.safetensors")).toBeNull();
     expect(classifyModelFile("/models/ltx-temporal-upscaler.safetensors")).toBeNull();
   });
@@ -42,6 +43,26 @@ describe("model discovery", () => {
       ["gemma", "gemma"],
     ]);
     expect(inventory.items[0].precision).toBe("fp8");
+    expect(inventory.recommendations.find((item) => item.id === "lipdub-lora")).toMatchObject({
+      present: false,
+      repoId: "Lightricks/LTX-2.3-22b-IC-LoRA-LipDub",
+    });
+  });
+
+  it("marks the official LipDub LoRA recommendation present when the file exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
+    temporaryRoots.push(root);
+    const repo = join(root, "Lightricks__LTX-2.3-22b-IC-LoRA-LipDub");
+    await mkdir(repo);
+    const localPath = join(repo, "ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors");
+    await writeFile(localPath, "lora");
+
+    const inventory = await discoverModels([root]);
+    expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors");
+    expect(inventory.recommendations.find((item) => item.id === "lipdub-lora")).toMatchObject({
+      present: true,
+      localPath,
+    });
   });
 
   it("reports unreadable roots without failing the whole inventory", async () => {

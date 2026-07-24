@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 
-import type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models.js";
+import { recommendedModelAssets, type ModelInventory, type ModelInventoryItem, type ModelKind } from "../shared/models.js";
 import { modelRoots } from "./config.js";
 
 const MAX_ENTRIES = 5_000;
@@ -39,6 +39,20 @@ async function inventoryItem(kind: ModelKind, path: string): Promise<ModelInvent
     modifiedAt: details.mtime.toISOString(),
     precision: kind === "gemma" ? "unknown" : precisionFor(path),
   };
+}
+
+function modelRecommendations(items: readonly ModelInventoryItem[]): ModelInventory["recommendations"] {
+  return recommendedModelAssets.map((asset) => {
+    const match = items.find((item) =>
+      item.kind === asset.kind
+      && (item.name === asset.filename || item.path === asset.localPath),
+    );
+    return {
+      ...asset,
+      localPath: match?.path ?? asset.localPath,
+      present: Boolean(match),
+    };
+  });
 }
 
 export async function discoverModels(roots: readonly string[] = modelRoots): Promise<ModelInventory> {
@@ -86,6 +100,7 @@ export async function discoverModels(roots: readonly string[] = modelRoots): Pro
     truncated: truncated || pending.length > 0 || visited >= MAX_ENTRIES,
     errors,
     items,
+    recommendations: modelRecommendations(items),
   };
 }
 

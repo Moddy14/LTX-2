@@ -39,6 +39,7 @@ import {
   thermalUnreadablePolls,
 } from "./config.js";
 import { readResourceSnapshot } from "./system.js";
+import { estimateRequest } from "./estimates.js";
 import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } from "./thermal.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -643,7 +644,9 @@ export class JobManager extends EventEmitter {
       let response;
       try {
         this.appendLog(job, "DGX-Queue: Renderbedarf wird beim Orchestrator eingereicht; laufende Anwendungen werden nicht direkt beendet.");
-        response = await submitQueueAdmission(job.request);
+        const estimate = estimateRequest(job.request, this.list());
+        this.appendLog(job, `DGX-Queue: Ressourcenprognose ${estimate.memoryGiB} GiB RAM, ${estimate.outputGiB.toFixed(2)} GiB Ausgabe.`);
+        response = await submitQueueAdmission(job.request, estimate.memoryGiB);
       } catch (error) {
         if (jobWasCancelled(job)) return false;
         this.failJob(job, error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.");
