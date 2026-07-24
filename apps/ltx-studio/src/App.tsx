@@ -113,6 +113,10 @@ function nextEditableOutputName(
   return `${base}-edit-${Date.now()}.mp4`;
 }
 
+function uniqueMessages(messages: readonly string[]): string[] {
+  return [...new Set(messages)];
+}
+
 export function App() {
   const [request, setRequest] = useState<GenerationRequest>(restoreRequest);
   const [config, setConfig] = useState<StudioConfig | null>(null);
@@ -129,6 +133,8 @@ export function App() {
   const [submitting, setSubmitting] = useState(false);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [serverWarnings, setServerWarnings] = useState<string[]>([]);
+  const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
+  const [preflightWarnings, setPreflightWarnings] = useState<string[]>([]);
   const [command, setCommand] = useState<string | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [promptComposeError, setPromptComposeError] = useState<string | null>(null);
@@ -211,6 +217,30 @@ export function App() {
     };
   }, [request, validation]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
+    if (request.mode !== "lipdub" || !validation.success) return;
+    const plannedRequest = validation.data;
+    const timer = window.setTimeout(() => {
+      void planJob(plannedRequest).then((plan) => {
+        if (cancelled) return;
+        setCommand(plan.command);
+        setPreflightErrors(plan.pathErrors);
+        setPreflightWarnings(plan.pathWarnings);
+      }).catch(() => {
+        if (cancelled) return;
+        setPreflightErrors([]);
+        setPreflightWarnings([]);
+      });
+    }, 600);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [request, validation]);
+
   const changeMode = (mode: PipelineMode) => {
     const modeDefaults = createDefaultRequest(mode);
     setRequest((current) => ({
@@ -234,6 +264,8 @@ export function App() {
     setAttempted(false);
     setServerErrors([]);
     setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
     setCommand(null);
   };
 
@@ -302,6 +334,8 @@ export function App() {
   const handleRerun = async (job: StudioJob, mode: "exact" | "random-seed") => {
     setServerErrors([]);
     setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
     try {
       const variant = await rerunJob(job.id, mode);
       setJobs((current) => [variant, ...current.filter((item) => item.id !== variant.id)]);
@@ -355,6 +389,8 @@ export function App() {
     setAttempted(false);
     setServerErrors([]);
     setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
     setCommand(null);
   };
 
@@ -362,6 +398,8 @@ export function App() {
     if (!output.request) {
       setServerErrors(["Für dieses Video ist keine verlässliche Studio-Einstellungshistorie gespeichert."]);
       setServerWarnings([]);
+      setPreflightErrors([]);
+      setPreflightWarnings([]);
       return;
     }
     const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(output.request, output.request.mode));
@@ -372,6 +410,8 @@ export function App() {
     setAttempted(false);
     setServerErrors([]);
     setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
     setCommand(null);
   };
 
@@ -457,8 +497,10 @@ export function App() {
           onRun={() => void run()}
           onCancel={(id) => void handleCancel(id)}
           submitting={submitting}
-          errors={attempted ? [...validationMessages, ...serverErrors] : serverErrors}
-          warnings={serverWarnings}
+          errors={attempted
+            ? uniqueMessages([...validationMessages, ...serverErrors])
+            : uniqueMessages([...preflightErrors, ...serverErrors])}
+          warnings={uniqueMessages([...preflightWarnings, ...serverWarnings])}
           command={command}
           previews={previews}
           comparisonJobs={comparisonJobs}

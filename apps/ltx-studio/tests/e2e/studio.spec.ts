@@ -89,6 +89,35 @@ test("prepared draft link fills the editor without starting a job", async ({ pag
   expect(jobsAfter.jobs).toHaveLength(jobsBefore.jobs.length);
 });
 
+test("LipDub live preflight surfaces plan findings before starting a job", async ({ page }) => {
+  const draftRequest = createDefaultRequest("lipdub");
+  draftRequest.promptParts.dialogue = "Das ist ein kurzer LipDub Preflight Test";
+  draftRequest.prompt = 'A single speaker says exactly: "Das ist ein kurzer LipDub Preflight Test".';
+  draftRequest.outputName = "lipdub-preflight-test.mp4";
+  draftRequest.models.distilledCheckpointPath = "/models/ltx-2.3-22b-distilled-1.1.safetensors";
+  draftRequest.models.gemmaRoot = "/models/gemma";
+  draftRequest.models.spatialUpscalerPath = "/models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors";
+  draftRequest.lipDub.referenceVideo = { path: "/inputs/reference.mp4", name: "reference.mp4", strength: 1 };
+  draftRequest.lipDub.lora = { path: "/models/lipdub.safetensors", strength: 1 };
+
+  await page.route("**/api/jobs/plan", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      command: "python -m ltx_pipelines.lipdub",
+      outputPath: "/outputs/lipdub-preflight-test.mp4",
+      pathErrors: ["LipDub IC-LoRA: nicht gefunden (/models/lipdub.safetensors)"],
+      pathWarnings: ["Die native LipDub-Pipeline snappt 122 Referenzframes auf 121 Frames nach 8k+1; das Clipende kann dadurch wegfallen."],
+    }),
+  }));
+
+  const draft = Buffer.from(JSON.stringify(draftRequest), "utf8").toString("base64url");
+  await page.goto(`/?draft=${draft}`);
+
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
+  await expect(page.getByRole("alert")).toContainText("LipDub IC-LoRA: nicht gefunden");
+  await expect(page.getByRole("status")).toContainText("snappt 122 Referenzframes");
+});
+
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {
   await page.getByRole("button", { name: "Bild zu Video · empfohlen" }).click();
   await expect(page.getByRole("heading", { name: "Referenzbild" })).toBeVisible();
