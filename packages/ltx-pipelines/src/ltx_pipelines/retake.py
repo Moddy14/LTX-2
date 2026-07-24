@@ -220,6 +220,7 @@ class RetakePipeline:
         contexts = self.prompt_encoder(
             prompts_to_encode,
             enhance_first_prompt=enhance_prompt,
+            enhance_prompt_image=video_path,
             enhance_prompt_seed=seed,
         )
 
@@ -321,7 +322,7 @@ def main() -> None:
         offload_mode=args.offload_mode,
     )
     params = detect_params(args.distilled_checkpoint_path)
-    tiling_config = TilingConfig.default()
+    tiling_config = None if args.disable_tiling else TilingConfig.default()
     video_iter, audio = pipeline(
         video_path=args.video_path,
         prompt=args.prompt,
@@ -330,6 +331,7 @@ def main() -> None:
         seed=args.seed,
         video_guider_params=params.video_guider_params,
         audio_guider_params=params.audio_guider_params,
+        enhance_prompt=args.enhance_prompt,
         tiling_config=tiling_config,
         max_batch_size=args.max_batch_size,
     )

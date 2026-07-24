@@ -349,7 +349,19 @@ def basic_arg_parser(
         ),
     )
 
-    parser.add_argument("--enhance-prompt", action="store_true")
+    parser.add_argument(
+        "--enhance-prompt",
+        action="store_true",
+        help=(
+            "Enhance the prompt before generation with the same Gemma text encoder that is loaded for encoding. "
+            "Image-conditioned pipelines use the first conditioning image when one is provided."
+        ),
+    )
+    parser.add_argument(
+        "--disable-tiling",
+        action="store_true",
+        help="Disable tiled VAE decoding/encoding where supported. This can reduce overhead on small smoke tests.",
+    )
 
     def _positive_int(value: str) -> int:
         try:

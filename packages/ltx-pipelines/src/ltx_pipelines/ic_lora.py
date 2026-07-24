@@ -184,7 +184,7 @@ class ICLoraPipeline:
             frame_rate: Output video frame rate.
             images: List of (path, frame_idx, strength) tuples for image conditioning.
             video_conditioning: List of (path, strength) tuples for IC-LoRA video conditioning.
-            enhance_prompt: Whether to enhance the prompt using the text encoder.
+            enhance_prompt: Whether to enhance the prompt with the Gemma text encoder before conditioning.
             tiling_config: Optional tiling configuration for VAE decoding.
             conditioning_attention_strength: Scale factor for IC-LoRA conditioning attention.
                 Controls how strongly the conditioning video influences the output.
@@ -217,7 +217,13 @@ class ICLoraPipeline:
         (ctx_p,) = self.prompt_encoder(
             [prompt],
             enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=images[0][0] if len(images) > 0 else None,
+            enhance_prompt_image=(
+                images[0][0]
+                if len(images) > 0
+                else video_conditioning[0][0]
+                if len(video_conditioning) > 0
+                else None
+            ),
             enhance_prompt_seed=seed,
         )
         video_context, audio_context = ctx_p.video_encoding, ctx_p.audio_encoding
@@ -428,7 +434,7 @@ def main() -> None:
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
     )
-    tiling_config = TilingConfig.default()
+    tiling_config = None if args.disable_tiling else TilingConfig.default()
     video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
     video, audio = pipeline(
         prompt=args.prompt,
@@ -443,6 +449,7 @@ def main() -> None:
         conditioning_attention_strength=conditioning_attention_strength,
         skip_stage_2=args.skip_stage_2,
         conditioning_attention_mask=conditioning_attention_mask,
+        enhance_prompt=args.enhance_prompt,
     )
 
     encode_video(

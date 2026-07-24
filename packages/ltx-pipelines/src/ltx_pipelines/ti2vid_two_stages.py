@@ -260,7 +260,7 @@ def main() -> None:
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
     )
-    tiling_config = TilingConfig.default()
+    tiling_config = None if args.disable_tiling else TilingConfig.default()
     video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
     video, audio = pipeline(
         prompt=args.prompt,
@@ -289,6 +289,7 @@ def main() -> None:
         ),
         images=args.images,
         tiling_config=tiling_config,
+        enhance_prompt=args.enhance_prompt,
         max_batch_size=args.max_batch_size,
     )
 

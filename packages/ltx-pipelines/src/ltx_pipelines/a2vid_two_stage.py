@@ -142,7 +142,7 @@ class A2VidPipelineTwoStage:
         ctx_p, ctx_n = self.prompt_encoder(
             [prompt, negative_prompt],
             enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=images[0][0] if len(images) > 0 else None,
+            enhance_prompt_image=images[0][0] if len(images) > 0 else audio_path,
         )
         v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
         v_context_n, _ = ctx_n.video_encoding, ctx_n.audio_encoding
@@ -291,7 +291,7 @@ def main() -> None:
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
     )
-    tiling_config = TilingConfig.default()
+    tiling_config = None if args.disable_tiling else TilingConfig.default()
     video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
     video, audio = pipeline(
         prompt=args.prompt,

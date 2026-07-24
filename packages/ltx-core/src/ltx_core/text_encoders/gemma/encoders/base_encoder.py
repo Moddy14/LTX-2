@@ -65,6 +65,10 @@ class GemmaTextEncoder(torch.nn.Module):
         max_new_tokens: int = 512,
         seed: int = 10,
     ) -> str:
+        if self.processor is None:
+            raise RuntimeError(
+                "Prompt enhancement requires a Gemma processor; preprocessor_config.json was not found in the Gemma root."
+            )
         text = self.processor.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
         model_inputs = self.processor(
@@ -188,13 +192,18 @@ def _pad_inputs_for_attention_alignment(
 
 def module_ops_from_gemma_root(gemma_root: str) -> tuple[ModuleOps, ...]:
     tokenizer_root = str(find_matching_file(gemma_root, "tokenizer.model").parent)
-    processor_root = str(find_matching_file(gemma_root, "preprocessor_config.json").parent)
+    try:
+        processor_root = str(find_matching_file(gemma_root, "preprocessor_config.json").parent)
+    except FileNotFoundError:
+        processor_root = None
 
     def load_tokenizer(module: GemmaTextEncoder) -> GemmaTextEncoder:
         module.tokenizer = LTXVGemmaTokenizer(tokenizer_root, 1024)
         return module
 
     def load_processor(module: GemmaTextEncoder) -> GemmaTextEncoder:
+        if processor_root is None:
+            return module
         image_processor = AutoImageProcessor.from_pretrained(processor_root, local_files_only=True, use_fast=False)
         if not module.tokenizer:
             raise ValueError("Tokenizer model operation must be performed before processor model operation")
@@ -208,7 +217,11 @@ def module_ops_from_gemma_root(gemma_root: str) -> tuple[ModuleOps, ...]:
     )
     processor_load_ops = ModuleOps(
         "ProcessorLoad",
-        matcher=lambda module: isinstance(module, GemmaTextEncoder) and module.processor is None,
+        matcher=lambda module: processor_root is not None
+        and isinstance(module, GemmaTextEncoder)
+        and module.processor is None,
         mutator=load_processor,
     )
+    if processor_root is None:
+        return (tokenizer_load_ops,)
     return (tokenizer_load_ops, processor_load_ops)

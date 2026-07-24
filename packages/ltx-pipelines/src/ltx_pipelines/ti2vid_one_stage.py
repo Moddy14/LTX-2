@@ -230,6 +230,7 @@ def main() -> None:
             stg_blocks=args.audio_stg_blocks,
         ),
         images=args.images,
+        enhance_prompt=args.enhance_prompt,
         max_batch_size=args.max_batch_size,
     )
 
