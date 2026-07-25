@@ -59,7 +59,7 @@ describe("model discovery", () => {
     });
   });
 
-  it("marks the official LipDub LoRA recommendation present when the file exists", async () => {
+  it("rejects a same-named LipDub LoRA stub that does not match the official size", async () => {
     const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
     temporaryRoots.push(root);
     const repo = join(root, "Lightricks__LTX-2.3-22b-IC-LoRA-LipDub");
@@ -70,12 +70,13 @@ describe("model discovery", () => {
     const inventory = await discoverModels([root]);
     expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors");
     expect(inventory.recommendations.find((item) => item.id === "lipdub-lora")).toMatchObject({
-      present: true,
+      present: false,
       localPath,
+      integrity: "size-mismatch",
     });
   });
 
-  it("marks the LipDub spatial upscaler recommendation present when the current file exists", async () => {
+  it("rejects a same-named LipDub upscaler stub with the wrong size", async () => {
     const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
     temporaryRoots.push(root);
     const repo = join(root, "Lightricks__LTX-2.3");
@@ -86,12 +87,13 @@ describe("model discovery", () => {
     const inventory = await discoverModels([root]);
     expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-spatial-upscaler-x2-1.1.safetensors");
     expect(inventory.recommendations.find((item) => item.id === "lipdub-spatial-upscaler")).toMatchObject({
-      present: true,
+      present: false,
       localPath,
+      integrity: "size-mismatch",
     });
   });
 
-  it("marks the LipDub distilled checkpoint recommendation present when the current file exists", async () => {
+  it("rejects a same-named LipDub checkpoint stub with the wrong size", async () => {
     const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
     temporaryRoots.push(root);
     const repo = join(root, "Lightricks__LTX-2.3");
@@ -102,8 +104,9 @@ describe("model discovery", () => {
     const inventory = await discoverModels([root]);
     expect(inventory.items.map((item) => item.name)).toContain("ltx-2.3-22b-distilled-1.1.safetensors");
     expect(inventory.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint")).toMatchObject({
-      present: true,
+      present: false,
       localPath,
+      integrity: "size-mismatch",
     });
   });
 

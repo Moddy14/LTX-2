@@ -142,7 +142,11 @@ export function decisionMessage(decision: AdmissionDecision | QueueJobSummary): 
 export function retryAfterMs(decision: AdmissionDecision | QueueJobSummary): number {
   const seconds = "retry_after_seconds" in decision && typeof decision.retry_after_seconds === "number"
     ? decision.retry_after_seconds
-    : 30;
+    : decision.decision === "rejected_insufficient_resources"
+      && "client_action" in decision
+      && decision.client_action === "retry_when_resources_free"
+      ? 900
+      : 30;
   return Math.max(0, seconds * 1000);
 }
 

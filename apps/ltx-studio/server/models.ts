@@ -1,8 +1,15 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 
-import { recommendedModelAssets, type ModelInventory, type ModelInventoryItem, type ModelKind } from "../shared/models.js";
+import {
+  recommendedModelAssets,
+  type ModelInventory,
+  type ModelInventoryItem,
+  type ModelKind,
+  type RecommendedModelAsset,
+} from "../shared/models.js";
 import { modelRoots } from "./config.js";
+import { captureProvenanceFile } from "./runProvenance.js";
 
 const MAX_ENTRIES = 5_000;
 const MAX_DEPTH = 5;
@@ -41,18 +48,52 @@ async function inventoryItem(kind: ModelKind, path: string): Promise<ModelInvent
   };
 }
 
-function modelRecommendations(items: readonly ModelInventoryItem[]): ModelInventory["recommendations"] {
-  return recommendedModelAssets.map((asset) => {
+async function modelRecommendations(items: readonly ModelInventoryItem[]): Promise<ModelInventory["recommendations"]> {
+  return Promise.all(recommendedModelAssets.map(async (rawAsset) => {
+    const asset: RecommendedModelAsset = rawAsset;
     const match = items.find((item) =>
       item.kind === asset.kind
       && (item.name === asset.filename || item.path === asset.localPath),
     );
+    if (!match) {
+      return {
+        ...asset,
+        actualSha256: null,
+        integrity: "missing" as const,
+        present: false,
+      };
+    }
+    if (asset.expectedSizeBytes !== undefined && match.sizeBytes !== asset.expectedSizeBytes) {
+      return {
+        ...asset,
+        localPath: match.path,
+        actualSha256: null,
+        integrity: "size-mismatch" as const,
+        present: false,
+      };
+    }
+    if (asset.expectedSha256) {
+      const actualSha256 = (await captureProvenanceFile(
+        match.path,
+        `model-inventory:${asset.id}`,
+      )).sha256;
+      const verified = actualSha256 === asset.expectedSha256;
+      return {
+        ...asset,
+        localPath: match.path,
+        actualSha256,
+        integrity: verified ? "verified" as const : "sha256-mismatch" as const,
+        present: verified,
+      };
+    }
     return {
       ...asset,
-      localPath: match?.path ?? asset.localPath,
-      present: Boolean(match),
+      localPath: match.path,
+      actualSha256: null,
+      integrity: "unverified" as const,
+      present: true,
     };
-  });
+  }));
 }
 
 export async function discoverModels(roots: readonly string[] = modelRoots): Promise<ModelInventory> {
@@ -100,7 +141,7 @@ export async function discoverModels(roots: readonly string[] = modelRoots): Pro
     truncated: truncated || pending.length > 0 || visited >= MAX_ENTRIES,
     errors,
     items,
-    recommendations: modelRecommendations(items),
+    recommendations: await modelRecommendations(items),
   };
 }
 

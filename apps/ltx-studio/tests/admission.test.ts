@@ -78,6 +78,17 @@ describe("DGX admission contract", () => {
     })).toBe(30_000);
   });
 
+  it("uses the documented 15-minute fallback for resource waits without a server delay", () => {
+    const decision = {
+      decision: "rejected_insufficient_resources",
+      client_action: "retry_when_resources_free",
+      reason: "insufficient_memory",
+    };
+    expect(shouldRetryQueueSubmit(decision)).toBe(true);
+    expect(retryAfterMs(decision)).toBe(900_000);
+    expect(retryAfterMs({ ...decision, retry_after_seconds: 120 })).toBe(120_000);
+  });
+
   it("does not retry requests that require caller-side fixes", () => {
     expect(shouldRetryQueueSubmit({
       decision: "rejected_policy",
