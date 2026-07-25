@@ -153,11 +153,11 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "lipdub",
-    label: "LipDub / Lipsync",
+    label: "LipDub / Text-Redubbing",
     shortLabel: "LipDub",
-    description: "Spezialisierter Lippen- und Sprachabgleich aus einem Referenzvideo mit Audiospur.",
+    description: "Erzeugt Video und Ton aus einem Referenzvideo mit Audiospur und einem neuen Zieltext.",
     family: "condition",
-    quality: "Lipsync",
+    quality: "Redubbing",
     defaultHeight: 1024,
     defaultWidth: 576,
     defaultSteps: 8,
@@ -276,6 +276,8 @@ export const generationRequestSchema = z
     lipDub: z.object({
       referenceVideo: videoConditioningSchema,
       lora: loraSchema,
+      targetLanguage: withoutNul(z.string().trim().max(80)),
+      singleSpeakerAcknowledged: z.boolean(),
     }),
     postprocess: z.object({
       longcatLipsync: z.object({
@@ -513,6 +515,8 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     lipDub: {
       referenceVideo: { path: "", name: "", strength: 1 },
       lora: { path: "", strength: 1 },
+      targetLanguage: "",
+      singleSpeakerAcknowledged: false,
     },
     postprocess: {
       longcatLipsync: { enabled: false, resolution: "480p", blend: 0.9 },

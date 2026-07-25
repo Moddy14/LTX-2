@@ -46,6 +46,25 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
   });
 
+  it("keeps legacy LipDub jobs readable while requiring the new contract only at plan time", () => {
+    const legacy = structuredClone(validRequest("lipdub")) as unknown as {
+      lipDub: {
+        referenceVideo: GenerationRequest["lipDub"]["referenceVideo"];
+        lora: GenerationRequest["lipDub"]["lora"];
+        targetLanguage?: string;
+        singleSpeakerAcknowledged?: boolean;
+      };
+    };
+    delete legacy.lipDub.targetLanguage;
+    delete legacy.lipDub.singleSpeakerAcknowledged;
+
+    const migrated = mergeGenerationRequest(legacy);
+
+    expect(migrated.lipDub.targetLanguage).toBe("");
+    expect(migrated.lipDub.singleSpeakerAcknowledged).toBe(false);
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+  });
+
   it("strips removed top-level fields while preserving valid legacy values", () => {
     const legacy = {
       ...validRequest(),

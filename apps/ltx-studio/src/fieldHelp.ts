@@ -35,6 +35,10 @@ export const fieldHelp = {
     "Wofür: Diese Spur steuert die Mundbewegung im nativen Audio-zu-Video-Modell. Gute Eingabe: klare Sprache ohne Musik, Hall oder Rauschen, exakt auf die Videodauer zugeschnitten. Die gelieferte Sprache bleibt im LTX-Ergebnis unverändert.",
   audioFinalMix:
     "Wofür: Optionale fertige Tonspur, die nach dem LTX-Render anstelle der reinen Sprachspur eingesetzt wird. Gute Eingabe: derselbe zeitlich ausgerichtete Sprachtext mit gewünschter Musik und Atmosphäre; Anfang und Dauer folgen den Feldern darunter.",
+  lipDubTargetLanguage:
+    "Wofür: Nennt die Sprache, in der das offizielle LipDub-Modell den neuen Dialog erzeugen soll. Gute Eingabe: ein eindeutiger Sprachname wie Deutsch, Englisch oder Japanisch; den Dialog im üblichen Schriftsystem dieser Sprache eingeben.",
+  lipDubSingleSpeaker:
+    "Wofür: Bestätigt die Modellvoraussetzung, dass im Referenzclip genau eine sichtbare Person spricht. Einschalten nur bei einem einzelnen Sprecher; mehrere Sprecher, Stimmen aus dem Off oder überlappende Sprache sind für diesen Modus ungeeignet.",
   videoUpload:
     "Wofür: Lädt ein Quell- oder Kontrollvideo in das Studio. Gute Eingabe: ein sauber dekodierbares Video mit passender Dauer und stabiler Bildrate.",
   maskUpload:

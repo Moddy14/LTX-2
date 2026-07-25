@@ -26,9 +26,11 @@ test("desktop exposes every production mode and contextual controls", async ({ p
   const guidanceSection = page.locator(".editor-section").filter({ has: page.getByRole("heading", { name: "Guidance" }) });
   await expect(guidanceSection.locator(".advanced-block")).toHaveCount(1);
 
-  await page.getByRole("button", { name: /LipDub Lipsync/ }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
+  await page.getByRole("button", { name: /LipDub Redubbing/ }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Text-Redubbing");
   await expect(page.getByRole("heading", { name: "LipDub Referenz" })).toBeVisible();
+  await expect(page.getByLabel("Zielsprache")).toBeVisible();
+  await expect(page.getByLabel("Genau ein Sprecher bestätigt")).toBeVisible();
   await expect(page.getByLabel("LipDub IC-LoRA Pfad")).toBeVisible();
 
   await page.getByRole("button", { name: /Retake Nicht-destruktiv/ }).click();
@@ -155,6 +157,8 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
   draftRequest.models.spatialUpscalerPath = "/models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors";
   draftRequest.lipDub.referenceVideo = { path: "/inputs/reference.mp4", name: "reference.mp4", strength: 1 };
   draftRequest.lipDub.lora = { path: "/models/lipdub.safetensors", strength: 1 };
+  draftRequest.lipDub.targetLanguage = "Deutsch";
+  draftRequest.lipDub.singleSpeakerAcknowledged = true;
 
   await page.route("**/api/jobs/plan", (route) => route.fulfill({
     contentType: "application/json",
@@ -236,7 +240,10 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
   const draft = Buffer.from(JSON.stringify(draftRequest), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
 
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Text-Redubbing");
+  await expect(page.getByLabel("Zielsprache")).toHaveValue("Deutsch");
+  await expect(page.getByLabel("Genau ein Sprecher bestätigt")).toBeChecked();
+  await expect(page.getByText(/übernimmt keine separate Ziel-Audiodatei/)).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("LipDub IC-LoRA: nicht gefunden");
   await expect(page.locator(".run-warnings")).toContainText("snappt 122 Referenzframes");
   await expect(page.locator(".run-suggestions")).toContainText("empfohlenes 64er-LipDub-Format 768 x 1344");
@@ -264,6 +271,8 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
   draftRequest.promptParts.dialogue = "Das ist ein kurzer LipDub Race Test";
   draftRequest.prompt = 'A single speaker says exactly: "Das ist ein kurzer LipDub Race Test".';
   draftRequest.lipDub.referenceVideo = { path: "/inputs/reference.mp4", name: "reference.mp4", strength: 1 };
+  draftRequest.lipDub.targetLanguage = "Deutsch";
+  draftRequest.lipDub.singleSpeakerAcknowledged = true;
 
   let releasePreparation: (() => void) | undefined;
   let capturedTrimDuration: number | undefined;
@@ -317,7 +326,7 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
 
   const draft = Buffer.from(JSON.stringify(draftRequest), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Lipsync");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Text-Redubbing");
   await expect(page.getByLabel("Clip-Länge")).toHaveValue("3.0416667");
   await page.getByRole("button", { name: "Kalibrierclip erstellen" }).click();
   await expect.poll(() => typeof releasePreparation === "function").toBe(true);

@@ -575,6 +575,30 @@ export function Editor({
       {isLipDub ? (
         <section className="editor-section">
           <SectionHeader title="LipDub Referenz" action={<FileVideo size={18} />} />
+          <p className="advisory">
+            Der offizielle LipDub-Modus erzeugt Video und Ton gemeinsam aus dem Referenzclip und dem neuen
+            Zieltext. Er übernimmt keine separate Ziel-Audiodatei.
+          </p>
+          <TextField
+            label="Zielsprache"
+            hint={fieldHelp.lipDubTargetLanguage}
+            value={request.lipDub.targetLanguage}
+            placeholder="z. B. Deutsch"
+            maxLength={80}
+            onChange={(targetLanguage) => onChange({
+              ...request,
+              lipDub: { ...request.lipDub, targetLanguage },
+            })}
+          />
+          <Toggle
+            label="Genau ein Sprecher bestätigt"
+            hint={fieldHelp.lipDubSingleSpeaker}
+            checked={request.lipDub.singleSpeakerAcknowledged}
+            onChange={(singleSpeakerAcknowledged) => onChange({
+              ...request,
+              lipDub: { ...request.lipDub, singleSpeakerAcknowledged },
+            })}
+          />
           <SingleMediaInput
             kind="video"
             label="Referenzvideo hochladen"
@@ -667,7 +691,7 @@ export function Editor({
                     </strong>
                   </span>
                   <span>
-                    <small>Dialogtempo</small>
+                    <small>Zieldialog-Tempo</small>
                     <strong>
                       {lipDubDiagnostics.metadata.dialogueWordsPerMinute === null
                         ? "noch offen"

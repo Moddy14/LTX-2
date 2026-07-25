@@ -39,6 +39,8 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
     request.prompt = 'A close portrait of the speaker saying exactly: "Das ist ein nativer LTX LipDub Test".';
     request.lipDub.referenceVideo = { path: "/inputs/speaker-reference.mp4", name: "speaker-reference.mp4", strength: 1 };
     request.lipDub.lora = { path: "/models/ltx/ltx-lipdub-lora.safetensors", strength: 1 };
+    request.lipDub.targetLanguage = "Deutsch";
+    request.lipDub.singleSpeakerAcknowledged = true;
   }
   if (mode === "retake") {
     request.retake.videoPath = "/inputs/source.mp4";

@@ -111,11 +111,34 @@ function lipDubInspectionInput(request: GenerationRequest): LipDubReferenceInspe
   };
 }
 
+function lipDubPrompt(request: GenerationRequest): string {
+  const lines = [
+    request.prompt.trim(),
+    "",
+    "Redubbing constraints:",
+    `- Target language: ${request.lipDub.targetLanguage.trim()}.`,
+    "- Exactly one visible person speaks.",
+    "- Speak the target dialogue in the target language's native script.",
+  ];
+  const dialogue = request.promptParts.dialogue.trim();
+  if (dialogue) lines.push(`- Target dialogue (verbatim): ${JSON.stringify(dialogue)}.`);
+  return lines.join("\n");
+}
+
 function validateLipDubReference(request: GenerationRequest): string[] {
-  if (!request.lipDub.referenceVideo.path) return [];
-  return inspectLipDubReference(lipDubInspectionInput(request)).findings
-    .filter((item) => item.level === "error")
-    .map((item) => item.message);
+  const errors: string[] = [];
+  if (!request.lipDub.targetLanguage.trim()) {
+    errors.push("LipDub-Zielsprache fehlt.");
+  }
+  if (!request.lipDub.singleSpeakerAcknowledged) {
+    errors.push("LipDub erfordert die Bestätigung, dass im Referenzclip genau eine Person spricht.");
+  }
+  if (request.lipDub.referenceVideo.path) {
+    errors.push(...inspectLipDubReference(lipDubInspectionInput(request)).findings
+      .filter((item) => item.level === "error")
+      .map((item) => item.message));
+  }
+  return errors;
 }
 
 function warnLipDubReference(request: GenerationRequest): string[] {
@@ -162,7 +185,7 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       "--gemma-root",
       request.models.gemmaRoot,
       "--prompt",
-      request.prompt,
+      lipDubPrompt(request),
       "--output-path",
       outputPath,
       "--seed",

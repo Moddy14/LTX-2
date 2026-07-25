@@ -4,9 +4,12 @@ Stand: 2026-07-24
 
 ## Ziel
 
-Die native LTX-2.3-LipDub-Pipeline soll Sprache, Mundbewegung und Identität so
-stabil verbinden, dass sie gegenüber dem bisherigen nativen A2V-Pfad und dem
-optionalen LongCat-Mund-Compositing reproduzierbar überlegen ist.
+Die native LTX-2.3-LipDub-Pipeline soll textgesteuertes Redubbing,
+Mundbewegung und Identität so stabil verbinden, dass sie gegenüber dem
+bisherigen nativen A2V-Pfad und dem optionalen LongCat-Mund-Compositing
+reproduzierbar überlegen ist. Der offizielle Pfad erzeugt Video und Audio
+gemeinsam aus Referenzclip und Zieltext; er nimmt keine separate Ziel-Audiodatei
+für wort- und timinggetreuen Audio-Lipsync entgegen.
 
 Der SOTA-Claim ist auf einzelne erwachsene Sprecher in deutschen oder
 englischen, 2 bis 5 Sekunden langen CFR-Clips bei 24, 25 oder 30 FPS begrenzt:
@@ -42,6 +45,8 @@ Der native LipDub-Pfad benötigt:
 - einen vollständigen Gemma-Root
 - `ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors`
 - ein Referenzvideo mit Video- und Audiospur
+- eine explizite Zielsprache und einen Zieltext in deren üblichem Schriftsystem
+- genau einen sichtbaren Sprecher
 
 Frames und FPS kommen ausschließlich aus dem Referenzvideo. Die Pipeline
 snappt Frames nach unten auf `8k+1` und kodiert die Ausgabe mit ganzzahliger
@@ -50,11 +55,13 @@ Framezahl Qualitätsvoraussetzungen.
 
 ## Erledigter Unterbau
 
-- Eigener Studio-Modus `LipDub / Lipsync` mit dem nativen CLI-Vertrag.
+- Eigener Studio-Modus `LipDub / Text-Redubbing` mit dem nativen CLI-Vertrag.
+- Explizite Zielsprache, Ein-Sprecher-Bestätigung und wortgetreuer Zieltext im
+  effektiven CLI-Prompt.
 - Promptverbesserung im LipDub-Modus standardmäßig aus.
 - Genau ein LipDub-IC-LoRA; keine zusätzlichen Stil-LoRAs oder Bilder.
 - Modellinventar mit offiziellen Dateinamen und Readiness-Gates.
-- Video-/Audio-, Dauer-, FPS-, Frame-, Format- und Dialogtempo-Prüfung.
+- Video-/Audio-, Dauer-, FPS-, Frame-, Format- und Zieldialogtempo-Prüfung.
 - Strukturierte Referenzdiagnose in der Oberfläche.
 - Vorbereitungsweg für H.264, AAC 48 kHz Stereo, CFR und `8k+1`.
 - Optionaler, framegenauer 2- bis 5-Sekunden-Kalibrierclip.

@@ -135,6 +135,46 @@ describe("buildCommand", () => {
     expect(args).not.toContain("--video-cfg-guidance-scale");
     expect(args).not.toContain("/models/ignored-style.safetensors");
     expect(args).not.toContain("/inputs/ignored.png");
+    const promptIndex = args.indexOf("--prompt");
+    expect(args[promptIndex + 1]).toContain("Target language: Deutsch.");
+    expect(args[promptIndex + 1]).toContain("Exactly one visible person speaks.");
+    expect(args[promptIndex + 1]).toContain(
+      'Target dialogue (verbatim): "Das ist ein nativer LTX LipDub Test".',
+    );
+  });
+
+  it("blocks a native LipDub rerun until its explicit language and speaker contract is confirmed", () => {
+    const request = validRequest("lipdub");
+    request.lipDub.targetLanguage = "";
+    request.lipDub.singleSpeakerAcknowledged = false;
+    const plan = buildCommand(request);
+    vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      width: 576,
+      height: 1024,
+      frames: 121,
+      fps: 24,
+      durationSeconds: 5.04,
+      hasAudio: true,
+    });
+
+    expect(validateRequestPlan(request, plan)).toEqual(expect.arrayContaining([
+      "LipDub-Zielsprache fehlt.",
+      "LipDub erfordert die Bestätigung, dass im Referenzclip genau eine Person spricht.",
+    ]));
+  });
+
+  it("preserves a legacy LipDub target dialogue that exists only in the free prompt", () => {
+    const request = validRequest("lipdub");
+    request.promptParts.dialogue = "";
+    request.prompt = 'A single speaker says exactly: "Dieser Altbestand bleibt erhalten."';
+
+    const args = buildCommand(request).args;
+    const promptIndex = args.indexOf("--prompt");
+    const effectivePrompt = args[promptIndex + 1];
+
+    expect(effectivePrompt).toContain(request.prompt);
+    expect(effectivePrompt).toContain("Target language: Deutsch.");
+    expect(effectivePrompt).not.toContain("Target dialogue (verbatim):");
   });
 
   it("rejects a native LipDub reference video without audio before queue start", () => {
