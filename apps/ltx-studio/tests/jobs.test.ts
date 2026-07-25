@@ -919,7 +919,7 @@ describe("job persistence and reservations", () => {
     expect(restored.get(pendingId)?.dgxJobId).toBe("dgx-job-old-pending");
   });
 
-  it("keeps LongCat available but disables it on rerun variants", async () => {
+  it("preserves an explicitly enabled LongCat pass on exact reruns", async () => {
     const manager = new JobManager(await statePath(), false);
     const request = validRequest("audio-to-video");
     request.images = [{ path: "/inputs/face.png", name: "face.png", frameIndex: 0, strength: 1, crf: 33 }];
@@ -932,7 +932,7 @@ describe("job persistence and reservations", () => {
     const variant = manager.rerun(created.id, "exact");
 
     expect(variant?.request.postprocess.longcatLipsync).toEqual({
-      enabled: false,
+      enabled: true,
       resolution: "720p",
       blend: 0.65,
     });

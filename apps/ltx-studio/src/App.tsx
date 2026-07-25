@@ -6,7 +6,6 @@ import {
   generationRequestSchema,
   mergeGenerationRequest,
   PIPELINES,
-  withLongCatLipsyncDisabled,
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines";
@@ -56,9 +55,9 @@ function restoreRequest(): GenerationRequest {
       const currentUrl = new URL(window.location.href);
       currentUrl.searchParams.delete("draft");
       window.history.replaceState(null, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-      return withLongCatLipsyncDisabled(mergeGenerationRequest(draft));
+      return mergeGenerationRequest(draft);
     }
-    return withLongCatLipsyncDisabled(mergeGenerationRequest(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")));
+    return mergeGenerationRequest(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null"));
   } catch {
     return createDefaultRequest();
   }
@@ -458,7 +457,7 @@ export function App() {
   };
 
   const loadJobSettings = (job: StudioJob) => {
-    const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(job.request, job.mode));
+    const loaded = mergeGenerationRequest(job.request, job.mode);
     setRequest({ ...loaded, outputName: nextEditableOutputName(loaded.outputName, jobs, outputs) });
     const matchingOutput = outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
     if (matchingOutput) setSelectedOutputName(matchingOutput.name);
@@ -480,7 +479,7 @@ export function App() {
       setPreflightSuggestions([]);
       return;
     }
-    const loaded = withLongCatLipsyncDisabled(mergeGenerationRequest(output.request, output.request.mode));
+    const loaded = mergeGenerationRequest(output.request, output.request.mode);
     setRequest({ ...loaded, outputName: nextEditableOutputName(output.name, jobs, outputs) });
     setSelectedOutputName(output.name);
     if (output.jobId) setSelectedJobId(output.jobId);

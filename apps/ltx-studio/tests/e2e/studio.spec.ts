@@ -116,6 +116,35 @@ test("prepared draft link fills the editor without starting a job", async ({ pag
   expect(jobsAfter.jobs).toHaveLength(jobsBefore.jobs.length);
 });
 
+test("explicit LongCat settings survive draft and local editor restoration", async ({ page }) => {
+  const request = createDefaultRequest("audio-to-video");
+  request.outputName = "longcat-restoration.mp4";
+  request.images = [{
+    path: "/inputs/face.png",
+    name: "face.png",
+    frameIndex: 0,
+    strength: 1,
+    crf: 33,
+  }];
+  request.audio.path = "/inputs/speech.wav";
+  request.audio.name = "speech.wav";
+  request.postprocess.longcatLipsync = {
+    enabled: true,
+    resolution: "720p",
+    blend: 0.65,
+  };
+  const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+
+  await page.goto(`/?draft=${draft}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
+  await expect(page.getByLabel("LongCat-Lippenpass")).toBeChecked();
+  await expect(page.getByLabel("LongCat-Auflösung")).toHaveValue("720p");
+  await expect(page.getByLabel("Mund-Übergangsbreite")).toHaveValue("0.65");
+  await page.reload();
+  await expect(page.getByLabel("LongCat-Lippenpass")).toBeChecked();
+  await expect(page.getByLabel("LongCat-Auflösung")).toHaveValue("720p");
+});
+
 test("LipDub live preflight surfaces plan findings before starting a job", async ({ page }, testInfo) => {
   const draftRequest = createDefaultRequest("lipdub");
   draftRequest.promptParts.dialogue = "Das ist ein kurzer LipDub Preflight Test";
@@ -859,7 +888,7 @@ test("field help explains purpose and recommended input", async ({ page }) => {
 });
 
 test("generated video picker restores every stored setting", async ({ page }) => {
-  const stored = createDefaultRequest("distilled");
+  const stored = createDefaultRequest("audio-to-video");
   stored.outputName = "picker-source.mp4";
   stored.seed = 987654;
   stored.width = 320;
@@ -867,6 +896,7 @@ test("generated video picker restores every stored setting", async ({ page }) =>
   stored.numFrames = 25;
   stored.numInferenceSteps = 8;
   stored.quantization.mode = "fp8-cast";
+  stored.postprocess.longcatLipsync.enabled = true;
   await page.route("**/api/outputs", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
@@ -893,6 +923,7 @@ test("generated video picker restores every stored setting", async ({ page }) =>
   await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("320");
   await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("576");
   await expect(page.getByRole("button", { name: "FP8 Cast" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("LongCat-Lippenpass")).toBeChecked();
 });
 
 test("mobile keeps all modes reachable without page overflow", async ({ page }, testInfo) => {

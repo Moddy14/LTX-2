@@ -15,7 +15,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { migrateGenerationRequest, withLongCatLipsyncDisabled, type GenerationRequest } from "../shared/pipelines.js";
+import { migrateGenerationRequest, type GenerationRequest } from "../shared/pipelines.js";
 import {
   decisionMessage,
   readQueueJob,
@@ -522,7 +522,7 @@ export class JobManager extends EventEmitter {
     if (!source || isActiveJobStatus(source.status)) return undefined;
     const unavailable = (name: string) =>
       [...this.jobs.values()].some((job) => job.outputName === name) || existsSync(join(outputRoot, name));
-    const request = withLongCatLipsyncDisabled(structuredClone(source.request));
+    const request = structuredClone(source.request);
     request.outputName = nextVariantOutputName(source.outputName, unavailable);
     if (mode === "random-seed") request.seed = randomInt(0, 2_147_483_647);
     return this.create(request, { variantOf: source.variantOf ?? source.id });
