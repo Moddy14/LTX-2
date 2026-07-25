@@ -151,6 +151,9 @@ export class ExperimentStore {
       changedRequestPaths,
       createdAt,
       frozenAt: null,
+      supersededAt: null,
+      supersededReason: null,
+      replacementExperimentId: null,
       protocolSha256: null,
       arms: [
         {
@@ -201,6 +204,42 @@ export class ExperimentStore {
     });
     this.write(frozen);
     return frozen;
+  }
+
+  supersede(
+    id: string,
+    reason: string,
+    replacementExperimentId: string | null,
+    supersededAt = new Date().toISOString(),
+  ): ControlledExperiment {
+    const current = this.require(id);
+    if (current.status === "superseded") {
+      throw new ExperimentConflictError("Das Experiment ist bereits stillgelegt.");
+    }
+    if (current.arms.some((arm) => arm.jobId || arm.attemptJobIds.length > 0)) {
+      throw new ExperimentConflictError(
+        "Ein Experiment mit gestarteten oder früher gebundenen Armen darf nicht stillgelegt werden.",
+      );
+    }
+    if (replacementExperimentId === id) {
+      throw new ExperimentConflictError("Ein Experiment kann sich nicht selbst ersetzen.");
+    }
+    if (replacementExperimentId) {
+      const replacement = this.require(replacementExperimentId);
+      if (replacement.status !== "frozen" || !replacement.protocolSha256) {
+        throw new ExperimentConflictError("Das Ersatzexperiment muss bereits eingefroren sein.");
+      }
+      this.assertFrozenIntegrity(replacement);
+    }
+    const superseded = controlledExperimentSchema.parse({
+      ...current,
+      status: "superseded",
+      supersededAt,
+      supersededReason: reason,
+      replacementExperimentId,
+    });
+    this.write(superseded);
+    return superseded;
   }
 
   bindingFor(

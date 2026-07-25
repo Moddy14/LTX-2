@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { estimateResources } from "../shared/estimates.js";
+import {
+  estimateResources,
+  requiredStartMemoryForRequests,
+} from "../shared/estimates.js";
 import { estimateRequest } from "../server/estimates.js";
 import * as mediaProbe from "../server/mediaProbe.js";
 import { validRequest } from "./fixtures.js";
@@ -44,6 +47,29 @@ describe("resource and runtime estimates", () => {
     const request = validRequest("lipdub");
     const estimate = estimateResources(request);
     expect(estimate.memoryGiB).toBeGreaterThanOrEqual(64);
+  });
+
+  it("uses the most demanding experiment arm for the visible RAM gate", () => {
+    const baseline = validRequest("audio-to-video");
+    baseline.width = 512;
+    baseline.height = 512;
+    const higherResolutionCandidate = structuredClone(baseline);
+    higherResolutionCandidate.width = 1920;
+    higherResolutionCandidate.height = 1088;
+    const candidateEstimate = estimateResources(higherResolutionCandidate).memoryGiB;
+
+    expect(candidateEstimate).toBeGreaterThan(estimateResources(baseline).memoryGiB);
+    expect(requiredStartMemoryForRequests(
+      [baseline, higherResolutionCandidate],
+      { minAvailableGiB: 48, minResidualMemoryGiB: 24 },
+    )).toBe(candidateEstimate + 24);
+  });
+
+  it("does not claim a local RAM gate for LipDub before the server probes the reference", () => {
+    expect(requiredStartMemoryForRequests(
+      [validRequest("lipdub")],
+      { minAvailableGiB: 48, minResidualMemoryGiB: 24 },
+    )).toBeNull();
   });
 
   it("sizes native LipDub server estimates from the reference video instead of the UI frame proxy", () => {

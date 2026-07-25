@@ -21,6 +21,7 @@ import { hybridRoot, repoRoot } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
 import type { ResourceSnapshot } from "../server/system.js";
 import type { RunProvenance } from "../shared/provenance.js";
+import { RuntimeApiError } from "../server/runtimeApi.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -723,6 +724,114 @@ describe("job persistence and reservations", () => {
     expect(runtimeJob.dgxJobTerminal).toBe(true);
     expect(runtimeJob.dgxTerminalDelivery).toBeUndefined();
     expect(manager.get(created.id)?.logs.at(-1)).toContain("per GET abgeglichen");
+  });
+
+  it("waits on a Qwen start fence while the remote job remains accepted", async () => {
+    const path = await statePath();
+    let transitions = 0;
+    let remoteState: "accepted" | "starting" = "accepted";
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async (jobId, state) => {
+        transitions += 1;
+        if (transitions === 1) {
+          throw new RuntimeApiError("lease_cordon", 409, {
+            error: "qwen_gate_active",
+            retry_after_seconds: 30,
+          });
+        }
+        remoteState = "starting";
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    Reflect.set(manager, "waitForDelay", async () => true);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-qwen-fence";
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+      metadata?: object,
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(true);
+    expect(transitions).toBe(2);
+    expect(manager.get(created.id)?.logs.join("\n")).toContain("Queue-Job bleibt accepted");
+  });
+
+  it("reconciles a dropped starting response before retrying the transition", async () => {
+    const path = await statePath();
+    let transitions = 0;
+    let remoteState: "accepted" | "starting" = "accepted";
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async () => {
+        transitions += 1;
+        remoteState = "starting";
+        throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-lost-starting-response";
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(true);
+    expect(transitions).toBe(1);
+    expect(manager.get(created.id)?.logs.at(-1)).toContain("bereits starting");
+  });
+
+  it("does not retry a non-Qwen transition conflict", async () => {
+    const path = await statePath();
+    let reads = 0;
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => {
+        reads += 1;
+        return {
+          schema_version: "dgx-job-read.v0",
+          job: { job_id: jobId, state: "accepted" as const },
+        };
+      },
+      transition: async () => {
+        throw new RuntimeApiError("invalid transition", 409, {
+          error: "invalid_transition",
+        });
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-invalid-transition";
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(false);
+    expect(reads).toBe(0);
   });
 
   it("persists and redelivers a failed cancelled transition after restart", async () => {

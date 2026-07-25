@@ -1,9 +1,13 @@
 import {
+  ArchiveX,
+  BarChart3,
   CircleCheck,
   FlaskConical,
   LoaderCircle,
   LockKeyhole,
   Play,
+  ScanSearch,
+  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -15,8 +19,9 @@ import {
   type ExperimentVariableId,
 } from "../../shared/experiments";
 import type { GenerationRequest } from "../../shared/pipelines";
+import { requiredStartMemoryForRequests } from "../../shared/estimates";
 import { fieldHelp } from "../fieldHelp";
-import type { StudioJob, StudioOutput } from "../types";
+import type { Health, StudioJob, StudioOutput } from "../types";
 import { InfoTooltip, NumberField, SelectField, TextField } from "./Controls";
 
 type ExperimentPanelProps = {
@@ -25,9 +30,17 @@ type ExperimentPanelProps = {
   experiments: ControlledExperiment[];
   jobs: StudioJob[];
   outputs: StudioOutput[];
+  health: Health | null;
+  runtimeGate: {
+    minAvailableGiB: number;
+    minResidualMemoryGiB: number;
+    minSwapFreeGiB: number;
+  } | null;
   onCreate: (input: ExperimentCreateInput) => Promise<void>;
   onFreeze: (id: string) => Promise<void>;
   onLaunch: (id: string, arm: "baseline" | "candidate") => Promise<void>;
+  onAnalyze: (output: StudioOutput) => Promise<void>;
+  onCompare: (outputs: [StudioOutput, StudioOutput]) => void;
 };
 
 function availableVariables(request: GenerationRequest): ExperimentVariableId[] {
@@ -98,15 +111,78 @@ function jobStatus(
   return labels[job.status];
 }
 
+function experimentValue(
+  request: GenerationRequest,
+  candidate: ExperimentCandidate,
+): string {
+  switch (candidate.variable) {
+    case "a2v-guidance":
+      return request.videoGuidance.modalityScale.toFixed(2).replace(/\.?0+$/, "");
+    case "reference-image-strength":
+      return (request.images[0]?.strength ?? 0).toFixed(2).replace(/\.?0+$/, "");
+    case "reference-image-crf":
+      return String(request.images[0]?.crf ?? 0);
+    case "lipdub-reference-strength":
+      return request.lipDub.referenceVideo.strength.toFixed(2).replace(/\.?0+$/, "");
+    case "replicate-seed":
+      return String(request.seed);
+    case "resolution":
+      return `${request.width} x ${request.height}`;
+  }
+}
+
+function outputForArm(
+  experiment: ControlledExperiment,
+  arm: 0 | 1,
+  outputs: StudioOutput[],
+): StudioOutput | undefined {
+  const selected = experiment.arms[arm];
+  return outputs.find((output) =>
+    output.name === selected.request.outputName
+    && output.jobId === selected.jobId
+    && output.experiment?.experimentId === experiment.id
+    && output.experiment.protocolSha256 === experiment.protocolSha256
+    && output.experiment.arm === selected.arm
+    && output.experiment.requestSha256 === selected.requestSha256
+    && output.experimentRequestVerified === true
+    && Boolean(output.provenance?.verifiedAt),
+  );
+}
+
+function currentAnalysisCompleted(output: StudioOutput | undefined): boolean {
+  return output?.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
+    && output.analysis.status === "completed"
+    && output.analysis.result?.schemaVersion === "ltx-studio-objective-quality.v6";
+}
+
+function evaluatorStatusLabel(health: Health | null): string {
+  const evaluator = health?.evaluators.phonemeViseme;
+  if (!evaluator) return "Status fehlt";
+  if (evaluator.status === "measured") return "bereit";
+  if (evaluator.status === "insufficient") return "Messung unzureichend";
+  if (evaluator.status === "failed") return "Messung fehlgeschlagen";
+  if (evaluator.status === "not-applicable") return "nicht anwendbar";
+  const blockerLabels: Record<string, string> = {
+    "legal-hold": "rechtlich gesperrt",
+    "manifest-missing": "Modellfreigabe fehlt",
+    "runner-unavailable": "Evaluator fehlt",
+  };
+  return blockerLabels[evaluator.blockerCode] ?? "nicht verfügbar";
+}
+
 export function ExperimentPanel({
   request,
   requestValid,
   experiments,
   jobs,
   outputs,
+  health,
+  runtimeGate,
   onCreate,
   onFreeze,
   onLaunch,
+  onAnalyze,
+  onCompare,
 }: ExperimentPanelProps) {
   const variables = useMemo(() => availableVariables(request), [request]);
   const [title, setTitle] = useState("");
@@ -243,31 +319,66 @@ export function ExperimentPanel({
             const candidateRetryable = Boolean(
               candidateJob && ["failed", "cancelled", "interrupted"].includes(candidateJob.status),
             );
-            const baselineOutput = outputs.find((output) =>
-              output.name === baseline.request.outputName
-              && output.jobId === baseline.jobId
-              && output.experiment?.experimentId === experiment.id
-              && output.experiment.protocolSha256 === experiment.protocolSha256
-              && output.experiment.arm === "baseline"
-              && output.experiment.requestSha256 === baseline.requestSha256
-              && Boolean(output.provenance?.verifiedAt),
-            );
+            const baselineOutput = outputForArm(experiment, 0, outputs);
+            const candidateOutput = outputForArm(experiment, 1, outputs);
             const candidateEnabled = (
               baselineJob?.status === "completed"
               && Boolean(baselineJob.runProvenance?.verifiedAt)
             ) || Boolean(baselineOutput);
+            const requiredMemoryGiB = requiredStartMemoryForRequests(
+              experiment.arms.map((arm) => arm.request),
+              {
+                minAvailableGiB: runtimeGate?.minAvailableGiB ?? 48,
+                minResidualMemoryGiB: runtimeGate?.minResidualMemoryGiB ?? 24,
+              },
+            );
+            const gateUnknownMessages = requiredMemoryGiB === null
+              ? ["LipDub-RAM wird beim Armstart aus dem Referenzvideo geprüft"]
+              : [];
+            const gateMessages = health === null
+              ? ["Live-Ressourcenstatus fehlt"]
+              : [
+                  health.resources.swapFreeGiB === null
+                    ? "Swap nicht messbar"
+                    : health.resources.swapFreeGiB < (runtimeGate?.minSwapFreeGiB ?? 4)
+                      ? `Swap ${health.resources.swapFreeGiB.toFixed(2)} / ${(runtimeGate?.minSwapFreeGiB ?? 4).toFixed(2)} GiB`
+                      : null,
+                  health.resources.availableMemoryGiB === null
+                    ? "RAM nicht messbar"
+                    : requiredMemoryGiB !== null
+                      && health.resources.availableMemoryGiB < requiredMemoryGiB
+                      ? `RAM ${health.resources.availableMemoryGiB.toFixed(1)} / ${requiredMemoryGiB.toFixed(1)} GiB`
+                      : null,
+                  health.orchestrator === "missing" ? "Orchestrator nicht erreichbar" : null,
+                ].filter((message): message is string => Boolean(message));
+            const phonemeViseme = health?.evaluators.phonemeViseme;
+            const analysesCompleted = currentAnalysisCompleted(baselineOutput)
+              && currentAnalysisCompleted(candidateOutput);
+            const outputsReady = Boolean(baselineOutput && candidateOutput);
             return (
               <article className="experiment-item" key={experiment.id}>
                 <div className="experiment-item__heading">
                   <strong>{experiment.title}</strong>
                   <span className={`experiment-status is-${experiment.status}`}>
-                    {experiment.status === "frozen" ? <LockKeyhole size={13} /> : <FlaskConical size={13} />}
-                    {experiment.status === "frozen" ? "Eingefroren" : "Draft"}
+                    {experiment.status === "frozen"
+                      ? <LockKeyhole size={13} />
+                      : experiment.status === "superseded"
+                        ? <ArchiveX size={13} />
+                        : <FlaskConical size={13} />}
+                    {experiment.status === "frozen"
+                      ? "Eingefroren"
+                      : experiment.status === "superseded"
+                        ? "Stillgelegt"
+                        : "Draft"}
                   </span>
                 </div>
                 <div className="experiment-item__facts">
                   <span>{experimentVariableLabels[experiment.candidate.variable]}</span>
                   <span>{experiment.kind === "replicate" ? "Replikat" : "Einzelfaktor"}</span>
+                  <span>Seed {baseline.request.seed}</span>
+                  <span>
+                    LongCat {baseline.request.postprocess.longcatLipsync.enabled ? "an" : "aus"}
+                  </span>
                   <span>{experiment.changedRequestPaths.join(", ")}</span>
                 </div>
                 {experiment.protocolSha256 ? (
@@ -276,9 +387,46 @@ export function ExperimentPanel({
                     <InfoTooltip text={fieldHelp.experimentProtocolHash} />
                   </p>
                 ) : null}
+                {experiment.status === "superseded" ? (
+                  <p className="experiment-superseded">
+                    {experiment.supersededReason}
+                    {experiment.replacementExperimentId
+                      ? ` · Ersatz ${experiment.replacementExperimentId.slice(0, 8)}`
+                      : ""}
+                  </p>
+                ) : null}
                 <div className="experiment-arms">
-                  <span>A · {jobStatus(baseline.jobId, baseline.request.outputName, jobs, outputs)}</span>
-                  <span>B · {jobStatus(candidate.jobId, candidate.request.outputName, jobs, outputs)}</span>
+                  <span>
+                    A · {experimentValue(baseline.request, experiment.candidate)}
+                    {" · "}{jobStatus(baseline.jobId, baseline.request.outputName, jobs, outputs)}
+                  </span>
+                  <span>
+                    B · {experimentValue(candidate.request, experiment.candidate)}
+                    {" · "}{jobStatus(candidate.jobId, candidate.request.outputName, jobs, outputs)}
+                  </span>
+                </div>
+                <div className="experiment-gates">
+                  {gateMessages.length > 0 ? (
+                    <span className="is-waiting">
+                      <TriangleAlert size={14} /> Start wartet: {gateMessages.join(" · ")}
+                    </span>
+                  ) : gateUnknownMessages.length > 0 ? (
+                    <span className="is-waiting">
+                      <TriangleAlert size={14} /> Startprüfung offen: {gateUnknownMessages.join(" · ")}
+                    </span>
+                  ) : (
+                    <span className="is-ready"><CircleCheck size={14} /> Lokale Startgates bereit</span>
+                  )}
+                  <span className={phonemeViseme?.status === "measured" ? "is-ready" : "is-waiting"}>
+                    {phonemeViseme?.status === "measured"
+                      ? <CircleCheck size={14} />
+                      : <TriangleAlert size={14} />}
+                    Phonem/Visem: {evaluatorStatusLabel(health)}
+                    <InfoTooltip
+                      text={phonemeViseme?.message
+                        ?? "Der Phonem-/Visem-Evaluator prüft zeitliche Zuordnung und Mundformen. Ohne freigegebenen Evaluator bleibt der SOTA-Nachweis blockiert."}
+                    />
+                  </span>
                 </div>
                 <div className="experiment-actions">
                   {experiment.status === "draft" ? (
@@ -333,6 +481,41 @@ export function ExperimentPanel({
                   ) : null}
                   {baseline.jobId && candidate.jobId ? (
                     <span className="experiment-bound"><CircleCheck size={15} /> Beide Arme gebunden</span>
+                  ) : null}
+                  {baselineOutput && candidateOutput && !analysesCompleted ? (
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      disabled={busyAction !== null}
+                      onClick={() => void action(`analyze-${experiment.id}`, async () => {
+                        for (const output of [baselineOutput, candidateOutput]) {
+                          if (
+                            !currentAnalysisCompleted(output)
+                            && (!output.analysis || !["queued", "running"].includes(output.analysis.status))
+                          ) {
+                            await onAnalyze(output);
+                          }
+                        }
+                      })}
+                    >
+                      {busyAction === `analyze-${experiment.id}`
+                        ? <LoaderCircle className="spin" size={16} />
+                        : <ScanSearch size={16} />}
+                      Beide analysieren
+                    </button>
+                  ) : null}
+                  {outputsReady ? (
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      disabled={busyAction !== null || !analysesCompleted}
+                      title={analysesCompleted
+                        ? "Baseline und Kandidat in eingefrorener Reihenfolge vergleichen"
+                        : "Erst beide objektiven Analysen abschließen"}
+                      onClick={() => onCompare([baselineOutput!, candidateOutput!])}
+                    >
+                      <BarChart3 size={16} /> Protokollvergleich
+                    </button>
                   ) : null}
                 </div>
               </article>

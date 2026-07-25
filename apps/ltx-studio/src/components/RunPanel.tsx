@@ -25,7 +25,13 @@ import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
 import type { PlanSuggestion } from "../../shared/plan";
 import { videoDurationSeconds } from "../../shared/presets";
 import { isVideoPreviewUrl } from "../../shared/media";
-import type { Health, ResourceEstimate, StudioJob, StudioOutput } from "../types";
+import type {
+  Health,
+  ResourceEstimate,
+  StudioConfig,
+  StudioJob,
+  StudioOutput,
+} from "../types";
 import { qualityReviewAverage, type QualityReviewInput } from "../../shared/quality";
 import type {
   ControlledExperiment,
@@ -96,6 +102,7 @@ type RunPanelProps = {
   comparisonOutputs: StudioOutput[];
   comparisonNames: string[];
   onToggleCompare: (output: StudioOutput) => void;
+  onCompareExperiment: (outputs: [StudioOutput, StudioOutput]) => void;
   onRerun: (job: StudioJob, mode: "exact" | "random-seed") => void;
   onFavorite: (job: StudioJob) => void;
   onSaveQualityReview: (output: StudioOutput, input: QualityReviewInput) => Promise<void>;
@@ -109,6 +116,7 @@ type RunPanelProps = {
   onLaunchExperiment: (id: string, arm: "baseline" | "candidate") => Promise<void>;
   estimate: ResourceEstimate;
   requiredStartMemoryGiB: number;
+  runtimeGate: StudioConfig["runtime"] | null;
 };
 
 export function RunPanel({
@@ -133,6 +141,7 @@ export function RunPanel({
   comparisonOutputs,
   comparisonNames,
   onToggleCompare,
+  onCompareExperiment,
   onRerun,
   onFavorite,
   onSaveQualityReview,
@@ -146,6 +155,7 @@ export function RunPanel({
   onLaunchExperiment,
   estimate,
   requiredStartMemoryGiB,
+  runtimeGate,
 }: RunPanelProps) {
   const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
   const duration = request.mode === "retake"
@@ -309,9 +319,13 @@ export function RunPanel({
         experiments={experiments}
         jobs={jobs}
         outputs={outputs}
+        health={health}
+        runtimeGate={runtimeGate}
         onCreate={onCreateExperiment}
         onFreeze={onFreezeExperiment}
         onLaunch={onLaunchExperiment}
+        onAnalyze={(output) => onStartAnalysis(output)}
+        onCompare={onCompareExperiment}
       />
 
       <section className={`run-monitor ${activeJob ? "is-live" : ""}`} aria-label="Laufmonitor">

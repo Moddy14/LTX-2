@@ -79,6 +79,7 @@ import {
   normalizeRunProvenance,
   verifyRunProvenance,
 } from "./runProvenance.js";
+import { RuntimeApiError } from "./runtimeApi.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -169,6 +170,7 @@ const RESOURCE_WAIT_LOG_INTERVAL_MS = 60_000;
 const MAX_RUNNING_PROCESS_PROGRESS = 95;
 const DEFAULT_DGX_TERMINAL_RETRY_BASE_MS = 5_000;
 const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
+const DGX_START_FENCE_RETRY_MS = 30_000;
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
 const DGX_TERMINAL_STATES = new Set<DgxTerminalState>(["completed", "failed", "cancelled"]);
 const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
@@ -177,6 +179,32 @@ const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
   "cancelled",
   "rejected",
 ]);
+
+function runtimePayloadError(error: RuntimeApiError): string | null {
+  if (!error.payload || typeof error.payload !== "object") return null;
+  const value = (error.payload as Record<string, unknown>).error;
+  return typeof value === "string" ? value : null;
+}
+
+function retryableStartFenceDelayMs(error: unknown): number | null {
+  if (error instanceof RuntimeApiError) {
+    if (error.statusCode === 409 && runtimePayloadError(error) === "qwen_gate_active") {
+      const payload = error.payload as Record<string, unknown>;
+      const seconds = payload.retry_after_seconds;
+      return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+        ? Math.max(1_000, seconds * 1_000)
+        : DGX_START_FENCE_RETRY_MS;
+    }
+    if (error.statusCode === null && /timeout/i.test(error.message)) {
+      return DGX_START_FENCE_RETRY_MS;
+    }
+    return null;
+  }
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  return ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT"].includes(String(error.code))
+    ? DGX_START_FENCE_RETRY_MS
+    : null;
+}
 
 export type VariantMode = "exact" | "random-seed";
 
@@ -1383,19 +1411,32 @@ export class JobManager extends EventEmitter {
     }
     if (job.dgxStateTransitionInFlight) return job.dgxStateTransitionInFlight;
     const transitionPromise = (async () => {
-      try {
-        const response = await this.dgxQueueOperations.transition(job.dgxJobId!, state, metadata);
-        this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
-        this.changed();
-        return true;
-      } catch (error) {
-        this.appendLog(
-          job,
-          `DGX-Queue-State konnte nicht auf ${state} gesetzt werden: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        this.changed();
-        return false;
+      while (isActiveJobStatus(job.status)) {
+        try {
+          const response = await this.dgxQueueOperations.transition(job.dgxJobId!, state, metadata);
+          this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
+          this.changed();
+          return true;
+        } catch (error) {
+          const retryDelayMs = state === "starting" ? retryableStartFenceDelayMs(error) : null;
+          if (retryDelayMs === null) {
+            this.appendLog(
+              job,
+              `DGX-Queue-State konnte nicht auf ${state} gesetzt werden: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            this.changed();
+            return false;
+          }
+          const reconciled = await this.reconcileRetryableStartingFence(
+            job,
+            error,
+            retryDelayMs,
+          );
+          if (reconciled === "applied") return true;
+          if (reconciled === "failed") return false;
+        }
       }
+      return false;
     })();
     job.dgxStateTransitionInFlight = transitionPromise;
     try {
@@ -1405,6 +1446,66 @@ export class JobManager extends EventEmitter {
         delete job.dgxStateTransitionInFlight;
       }
     }
+  }
+
+  private async reconcileRetryableStartingFence(
+    job: RuntimeJob,
+    transitionError: unknown,
+    retryDelayMs: number,
+  ): Promise<"applied" | "retry" | "failed"> {
+    const detail = transitionError instanceof Error
+      ? transitionError.message
+      : String(transitionError);
+    while (isActiveJobStatus(job.status) && job.dgxJobId) {
+      let remote;
+      try {
+        remote = (await this.dgxQueueOperations.read(job.dgxJobId)).job;
+      } catch (error) {
+        this.appendLog(
+          job,
+          `DGX-Start-Fence antwortete nicht (${detail}); der Queue-State ist vorübergehend nicht lesbar: ${
+            error instanceof Error ? error.message : String(error)
+          }. Nächste Prüfung in ${(retryDelayMs / 1000).toFixed(0)} s.`,
+        );
+        this.changed();
+        if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
+        continue;
+      }
+      if (remote.state === "starting" || remote.state === "running") {
+        this.appendLog(
+          job,
+          `DGX-Start-Fence per GET abgeglichen: ${remote.job_id} ist bereits ${remote.state}.`,
+        );
+        this.changed();
+        return "applied";
+      }
+      if (remote.state === "accepted") {
+        this.appendLog(
+          job,
+          `DGX-Start-Fence wartet beim Orchestrator (${detail}); Queue-Job bleibt accepted. `
+            + `Neuer Versuch in ${(retryDelayMs / 1000).toFixed(0)} s.`,
+        );
+        this.changed();
+        if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
+        return "retry";
+      }
+      if (remote.state === "queued") {
+        this.appendLog(
+          job,
+          `DGX-Start-Fence wurde wieder auf queued gesetzt; nächste Prüfung in ${(retryDelayMs / 1000).toFixed(0)} s.`,
+        );
+        this.changed();
+        if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
+        continue;
+      }
+      this.appendLog(
+        job,
+        `DGX-Start-Fence kann nicht fortgesetzt werden: ${remote.job_id} ist ${remote.state}.`,
+      );
+      this.changed();
+      return "failed";
+    }
+    return "failed";
   }
 
   private prepareDgxTerminalDelivery(

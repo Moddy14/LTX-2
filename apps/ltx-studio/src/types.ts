@@ -26,6 +26,14 @@ export type Health = {
     protected: boolean;
     estimatedMemoryGiB: number | null;
   }>;
+  evaluators: {
+    phonemeViseme: {
+      status: "measured" | "insufficient" | "not-available" | "failed" | "not-applicable";
+      blockerCode: string;
+      message: string | null;
+      productGo: "passed" | "blocked";
+    };
+  };
   queueDepth: number;
 };
 

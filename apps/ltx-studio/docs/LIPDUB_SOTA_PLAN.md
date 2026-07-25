@@ -171,6 +171,23 @@ Framezahl Qualitätsvoraussetzungen.
   eingefrorenen Protokolls, exakt den registrierten Request-Diff, identische
   nicht ablatierte Eingaben, Generationsmodelle, Code- und Runtimezustände sowie
   denselben Evaluator-Fingerprint.
+- Die Oberfläche normalisiert einen gebundenen Vergleich unabhängig von der
+  Klickreihenfolge immer auf Baseline A und Kandidat B. Eine unzureichende
+  Gesamtanalyse bleibt bei neutralen Rohdeltas und darf keine grüne oder rote
+  Verbesserungsrichtung erzeugen.
+- Das Experimentpanel zeigt die eingefrorenen A/B-Werte, Seed, LongCat-Zustand,
+  aktuelle RAM-/Swap-/Orchestrator-Startgates und den tatsächlichen
+  Phonem-/Visem-Evaluatorblocker. Verifizierte Outputs können gemeinsam
+  analysiert und erst danach protokollgeordnet verglichen werden.
+- Ein noch nie gestartetes, eingefrorenes Protokoll kann unveränderlich als
+  stillgelegt markiert und mit einem bereits eingefrorenen Ersatz verknüpft
+  werden. Sein ursprünglicher Protokoll-Hash bleibt erhalten; nach einem
+  gebundenen oder versuchten Lauf ist die Stilllegung gesperrt.
+- Der Queue-Start behandelt ausschließlich `qwen_gate_active` und begrenzte
+  Runtime-API-Transportfehler als vorübergehend. Nach einer verlorenen
+  `accepted -> starting`-Antwort wird der Remote-State gelesen; ein bereits
+  gestarteter Job wird nicht ein zweites Mal gepatcht. Fremde Konflikte bleiben
+  Fehler.
 
 ## Aktueller Blocker
 
@@ -181,6 +198,20 @@ Das offizielle gated LipDub-LoRA fehlt lokal:
 Der Studio-Modellcheck darf diesen Zustand nicht übergehen. Codex akzeptiert
 keine Modelllizenz stellvertretend. Nach Freigabe durch den Benutzer darf der
 Download ausschließlich über den DGX-Modell- und Orchestratorweg erfolgen.
+
+Die offizielle Repository-Freigabe verlangt, dass der Benutzer bei Hugging Face
+angemeldet ist, die Modellbedingungen für
+`Lightricks/LTX-2.3-22b-IC-LoRA-LipDub` selbst akzeptiert und anschließend ein
+Lesetoken mit Zugriff auf gated Repositories bereitstellt. Die erwartete Datei
+ist 2,47 GB groß. Distilled-Checkpoint 1.1 und Spatial Upscaler 1.1 sind lokal
+bereits vorhanden.
+
+Zusätzlich ist vor dem ersten offiziellen LipDub-Lauf die lokale Runtime zu
+bereinigen: Die editierbaren Pipelinequellen melden 1.1.7, während installierte
+Paketmetadaten 1.0.0 melden. Der aktuelle Torch-Build warnt auf dem GB10 zudem
+für Compute Capability 12.1 bei offiziell bis 12.0 ausgewiesenem Support. Diese
+Drifts sind kein Qualitätsnachweis und müssen durch einen reproduzierbaren
+Preflight beziehungsweise einen kompatiblen Runtime-Build geschlossen werden.
 
 ## Referenzset
 

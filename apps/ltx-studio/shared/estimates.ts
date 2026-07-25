@@ -8,6 +8,11 @@ export type ResourceEstimate = {
   etaSamples: number;
 };
 
+export type StartMemoryGate = {
+  minAvailableGiB: number;
+  minResidualMemoryGiB: number;
+};
+
 const MODEL_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
   "two-stage": 50,
   "two-stage-hq": 58,
@@ -88,4 +93,19 @@ export function estimateResources(request: GenerationRequest): ResourceEstimate 
   const outputGiB = Math.max(0.01, Math.ceil(((videoBytes + audioBytes) / 1024 ** 3) * 100) / 100);
 
   return { memoryGiB, outputGiB, etaSeconds: null, etaSamples: 0 };
+}
+
+export function requiredStartMemoryForRequests(
+  requests: readonly GenerationRequest[],
+  gate: StartMemoryGate,
+): number | null {
+  if (requests.some((request) => request.mode === "lipdub")) return null;
+  const largestEstimateGiB = requests.reduce(
+    (largest, request) => Math.max(largest, estimateResources(request).memoryGiB),
+    0,
+  );
+  return Math.max(
+    gate.minAvailableGiB,
+    largestEstimateGiB + gate.minResidualMemoryGiB,
+  );
 }

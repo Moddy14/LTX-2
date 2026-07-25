@@ -124,6 +124,73 @@ describe("controlled experiment contract", () => {
     expect(completed.arms.map((arm) => arm.jobId)).toEqual([baselineJobId, candidateJobId]);
   });
 
+  it("keeps an unused frozen protocol immutable while marking its replacement", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const obsolete = store.freeze(store.create({
+      title: "Irreführende Metadaten",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const replacementRequest = baselineRequest();
+    replacementRequest.outputName = "neutral-guidance-test.mp4";
+    replacementRequest.continuity.notes = "Nur A2V Guidance unterscheidet die Arme.";
+    const replacement = store.freeze(store.create({
+      title: "Neutral beschrifteter Ersatz",
+      baselineRequest: replacementRequest,
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+
+    const superseded = store.supersede(
+      obsolete.id,
+      "Dateiname und Notiz nannten in beiden Armen Guidance 5.",
+      replacement.id,
+      "2026-07-25T05:00:00.000Z",
+    );
+    expect(superseded).toMatchObject({
+      status: "superseded",
+      supersededAt: "2026-07-25T05:00:00.000Z",
+      replacementExperimentId: replacement.id,
+    });
+    expect(superseded.protocolSha256).toBe(obsolete.protocolSha256);
+    expect(() => store.bindingFor(obsolete.id, "baseline")).toThrow("muss vor dem Start eingefroren");
+  });
+
+  it("does not supersede an experiment after an arm was bound", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const frozen = store.freeze(store.create({
+      title: "Bereits gestarteter Plan",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    store.attachJob(frozen.id, "baseline", "11111111-1111-4111-8111-111111111111");
+
+    expect(() => store.supersede(frozen.id, "Nicht mehr verwenden.", null))
+      .toThrow("gestarteten oder früher gebundenen Armen");
+  });
+
+  it("does not link a replacement whose frozen protocol was modified", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const obsolete = store.freeze(store.create({
+      title: "Alter Plan",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const replacement = store.freeze(store.create({
+      title: "Manipulierter Ersatz",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const path = join(root, `${replacement.id}.json`);
+    const persisted = JSON.parse(await readFile(path, "utf8"));
+    persisted.arms[0].request.prompt = "Nach dem Freeze verändert";
+    await writeFile(path, JSON.stringify(persisted));
+
+    expect(() => store.supersede(obsolete.id, "Ersatz geplant.", replacement.id))
+      .toThrow("nicht mehr hashkonsistent");
+    expect(store.get(obsolete.id)?.status).toBe("frozen");
+  });
+
   it("revalidates every frozen hash immediately before binding a run", async () => {
     const root = await experimentRoot();
     const store = new ExperimentStore(root);

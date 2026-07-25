@@ -178,6 +178,9 @@ test("controlled experiments freeze one variable before either arm can run", asy
       changedRequestPaths: ["videoGuidance.modalityScale"],
       createdAt: "2026-07-25T04:00:00.000Z",
       frozenAt: status === "frozen" ? "2026-07-25T04:01:00.000Z" : null,
+      supersededAt: null,
+      supersededReason: null,
+      replacementExperimentId: null,
       protocolSha256: status === "frozen" ? "a".repeat(64) : null,
       arms: [
         {
@@ -186,6 +189,7 @@ test("controlled experiments freeze one variable before either arm can run", asy
           requestSha256: "b".repeat(64),
           settingsSha256: "c".repeat(64),
           jobId: null,
+          attemptJobIds: [],
         },
         {
           arm: "candidate" as const,
@@ -193,6 +197,7 @@ test("controlled experiments freeze one variable before either arm can run", asy
           requestSha256: "d".repeat(64),
           settingsSha256: "e".repeat(64),
           jobId: null,
+          attemptJobIds: [],
         },
       ] as const,
     };
@@ -219,6 +224,35 @@ test("controlled experiments freeze one variable before either arm can run", asy
     experiment = buildExperiment("frozen");
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ experiment }) });
   });
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "ready",
+        resources: {
+          availableMemoryGiB: 96,
+          totalMemoryGiB: 128,
+          swapFreeGiB: 8,
+          swapTotalGiB: 8,
+          outputFreeGiB: 512,
+        },
+        engine: "available",
+        orchestrator: "available",
+        qwen: "ready",
+        runtimeOverall: "ready",
+        workloads: [],
+        evaluators: {
+          phonemeViseme: {
+            status: "not-available",
+            blockerCode: "manifest-missing",
+            message: "Kein rechtlich freigegebener Phonem-/Visem-Evaluator konfiguriert.",
+            productGo: "blocked",
+          },
+        },
+        queueDepth: 0,
+      }),
+    });
+  });
 
   const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
@@ -231,6 +265,12 @@ test("controlled experiments freeze one variable before either arm can run", asy
   await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Einfrieren" }).click();
   await expect(page.getByText("Eingefroren", { exact: true })).toBeVisible();
+  await expect(page.locator(".experiment-arms")).toContainText("A · 5");
+  await expect(page.locator(".experiment-arms")).toContainText("B · 3");
+  await expect(page.locator(".experiment-item__facts")).toContainText(`Seed ${request.seed}`);
+  await expect(page.locator(".experiment-item__facts")).toContainText("LongCat aus");
+  await expect(page.locator(".experiment-gates")).toContainText("Phonem/Visem: Modellfreigabe fehlt");
+  await expect(page.locator(".experiment-gates")).toContainText(/Lokale Startgates bereit|Start wartet/);
   await expect(page.getByRole("button", { name: "Baseline starten" })).toBeVisible();
   await expect(page.getByText(/SOTA-Evidence bleibt bis zu allen Product-Gates blockiert/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -1095,12 +1135,15 @@ test("durable outputs provide a gated objective comparison after job history is 
   }));
   await page.reload();
 
-  await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
   await page.getByLabel("Erzeugtes Video").selectOption("comparison-b.mp4");
+  await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
+  await page.getByLabel("Erzeugtes Video").selectOption("comparison-a.mp4");
   await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
 
   await expect(page.getByRole("heading", { name: "Objektiver A/B-Vergleich" })).toBeVisible();
   await expect(page.locator(".objective-comparison__heading")).toContainText("Vergleichbar");
+  await expect(page.locator(".objective-comparison__names span").nth(0)).toContainText("comparison-a.mp4");
+  await expect(page.locator(".objective-comparison__names span").nth(1)).toContainText("comparison-b.mp4");
   await expect(page.getByRole("table", { name: "Abweichende Einstellungen" })).toContainText("A2V Guidance");
   await expect(page.getByRole("table", { name: "Abweichende Einstellungen" })).toContainText("5");
   await expect(page.getByRole("table", { name: "Abweichende Einstellungen" })).toContainText("3");
@@ -1363,6 +1406,14 @@ test("API persists and freezes a controlled experiment before any render can sta
 });
 
 test("API exposes bounded model inventory and request estimates", async ({ request }) => {
+  const health = await request.get("/api/health");
+  expect(health.ok()).toBe(true);
+  expect((await health.json()).evaluators.phonemeViseme).toMatchObject({
+    status: "not-available",
+    blockerCode: "manifest-missing",
+    productGo: "blocked",
+  });
+
   const models = await request.get("/api/models");
   expect(models.ok()).toBe(true);
   const inventory = await models.json();

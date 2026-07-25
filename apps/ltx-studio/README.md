@@ -25,6 +25,11 @@ checked again every ten seconds; path, runtime, and schema failures remain termi
 signals the process group belonging to the job being cancelled. It does not stop, unload, or reclaim external
 applications. Active Avatar, Qwen, and ComfyUI lanes are displayed without lifecycle controls.
 
+The queue start fence treats only the documented `qwen_gate_active` conflict and bounded Runtime API transport failures
+as retryable. After a failed `accepted -> starting` request, Studio reads the authoritative remote state before retrying:
+an already `starting` or `running` job proceeds without a duplicate transition, `accepted` waits, and unrelated conflicts
+remain terminal. This also contains the failure mode where the Runtime API closes a request without an HTTP response.
+
 During generation, the runner measures the hottest plausible host sensor from sysfs every ten seconds. Three
 consecutive readings at or above 90 C pause only the detached LTX process group with `SIGSTOP`. Five readings below
 that run's pre-launch thermal baseline resume the same process with `SIGCONT`, preserving its in-memory Python and
@@ -75,6 +80,12 @@ hash multi-gigabyte model files on the Node event loop and never treats manifest
 `Runner fehlt`, and the result remains blocked until a bounded evaluator worker independently verifies model,
 mapping, dataset-freeze, legal-approval, tune, and sealed-holdout attestations before inference. The checkpoint-free
 motion proxy never produces a 10/10 or SOTA claim.
+
+Controlled experiments are immutable after freezing. The UI shows both arm values, seed, LongCat state, local start
+gates, and phoneme/viseme evaluator readiness. A protocol comparison always orders the registered baseline before the
+candidate, regardless of output selection order. An experiment that has never bound an arm may be marked superseded
+without changing its frozen protocol hash and may point to an already frozen replacement; any attempted or bound run
+prevents superseding it. Overall-insufficient analyses display neutral raw deltas instead of directional quality trends.
 
 ## Verify
 

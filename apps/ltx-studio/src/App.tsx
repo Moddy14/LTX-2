@@ -34,6 +34,8 @@ import {
   getExperiments,
   launchExperimentArm,
 } from "./api";
+import { protocolOrderedComparisonOutputs } from "./objectiveComparison";
+import { RefreshFence } from "./refreshFence";
 import type { QualityReviewInput } from "../shared/quality";
 import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
 import type {
@@ -141,6 +143,7 @@ export function App() {
   const [jobs, setJobs] = useState<StudioJob[]>([]);
   const [outputs, setOutputs] = useState<StudioOutput[]>([]);
   const [experiments, setExperiments] = useState<ControlledExperiment[]>([]);
+  const experimentRefreshFence = useRef(new RefreshFence());
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedOutputName, setSelectedOutputName] = useState<string | null>(null);
   const [comparisonNames, setComparisonNames] = useState<string[]>([]);
@@ -170,9 +173,11 @@ export function App() {
   );
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
   const selectedOutput = outputs.find((output) => output.name === selectedOutputName) ?? outputs[0] ?? null;
-  const comparisonOutputs = comparisonNames
-    .map((name) => outputs.find((output) => output.name === name))
-    .filter((output): output is StudioOutput => Boolean(output));
+  const comparisonOutputs = protocolOrderedComparisonOutputs(
+    comparisonNames
+      .map((name) => outputs.find((output) => output.name === name))
+      .filter((output): output is StudioOutput => Boolean(output)),
+  );
 
   useLayoutEffect(() => {
     requestRef.current = request;
@@ -185,6 +190,7 @@ export function App() {
   useEffect(() => {
     let mounted = true;
     const refresh = async () => {
+      const experimentSnapshot = experimentRefreshFence.current.snapshot();
       try {
         const [
           nextConfig,
@@ -208,7 +214,9 @@ export function App() {
         setHealth(nextHealth);
         setJobs(nextJobs);
         setOutputs((current) => mergeOutputRefresh(current, nextOutputs));
-        setExperiments(nextExperiments);
+        if (experimentRefreshFence.current.accepts(experimentSnapshot)) {
+          setExperiments(nextExperiments);
+        }
         setModelInventory(nextModels);
         setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
         setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
@@ -226,7 +234,14 @@ export function App() {
       10_000,
     );
     const experimentsTimer = window.setInterval(
-      () => void getExperiments().then(setExperiments).catch(() => undefined),
+      () => {
+        const snapshot = experimentRefreshFence.current.snapshot();
+        void getExperiments()
+          .then((next) => {
+            if (experimentRefreshFence.current.accepts(snapshot)) setExperiments(next);
+          })
+          .catch(() => undefined);
+      },
       10_000,
     );
     const events = new EventSource("/api/events");
@@ -414,20 +429,41 @@ export function App() {
   };
 
   const handleCreateExperiment = async (input: ExperimentCreateInput) => {
-    const experiment = await createExperimentApi(input);
-    setExperiments((current) => [experiment, ...current.filter((item) => item.id !== experiment.id)]);
+    const finishMutation = experimentRefreshFence.current.beginMutation();
+    try {
+      const experiment = await createExperimentApi(input);
+      finishMutation();
+      setExperiments((current) => [experiment, ...current.filter((item) => item.id !== experiment.id)]);
+    } catch (error) {
+      finishMutation();
+      throw error;
+    }
   };
 
   const handleFreezeExperiment = async (id: string) => {
-    const experiment = await freezeExperimentApi(id);
-    setExperiments((current) => current.map((item) => item.id === id ? experiment : item));
+    const finishMutation = experimentRefreshFence.current.beginMutation();
+    try {
+      const experiment = await freezeExperimentApi(id);
+      finishMutation();
+      setExperiments((current) => current.map((item) => item.id === id ? experiment : item));
+    } catch (error) {
+      finishMutation();
+      throw error;
+    }
   };
 
   const handleLaunchExperiment = async (id: string, arm: "baseline" | "candidate") => {
-    const launched = await launchExperimentArm(id, arm);
-    setExperiments((current) => current.map((item) => item.id === id ? launched.experiment : item));
-    setJobs((current) => [launched.job, ...current.filter((item) => item.id !== launched.job.id)]);
-    setSelectedJobId(launched.job.id);
+    const finishMutation = experimentRefreshFence.current.beginMutation();
+    try {
+      const launched = await launchExperimentArm(id, arm);
+      finishMutation();
+      setExperiments((current) => current.map((item) => item.id === id ? launched.experiment : item));
+      setJobs((current) => [launched.job, ...current.filter((item) => item.id !== launched.job.id)]);
+      setSelectedJobId(launched.job.id);
+    } catch (error) {
+      finishMutation();
+      throw error;
+    }
   };
 
   const handleQualityReview = async (output: StudioOutput, input: QualityReviewInput) => {
@@ -670,7 +706,12 @@ export function App() {
           comparisonNames={comparisonNames}
           estimate={resourceEstimate}
           requiredStartMemoryGiB={requiredStartMemoryGiB}
+          runtimeGate={config?.runtime ?? null}
           onToggleCompare={toggleComparison}
+          onCompareExperiment={(experimentOutputs) => {
+            setComparisonNames(experimentOutputs.map((output) => output.name));
+            setSelectedOutputName(experimentOutputs[1].name);
+          }}
           onRerun={(job, mode) => void handleRerun(job, mode)}
           onFavorite={(job) => void handleFavorite(job)}
           onSaveQualityReview={handleQualityReview}

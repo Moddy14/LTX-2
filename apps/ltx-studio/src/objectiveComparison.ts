@@ -27,6 +27,24 @@ export type ComparisonCompatibility = {
   reasons: string[];
 };
 
+export function protocolOrderedComparisonOutputs(
+  outputs: readonly StudioOutput[],
+): StudioOutput[] {
+  if (outputs.length !== 2) return [...outputs];
+  const [first, second] = outputs;
+  const firstBinding = first.experiment;
+  const secondBinding = second.experiment;
+  const sameProtocol = firstBinding
+    && secondBinding
+    && firstBinding.experimentId === secondBinding.experimentId
+    && firstBinding.protocolSha256 === secondBinding.protocolSha256;
+  if (!sameProtocol) return [...outputs];
+  if (firstBinding.arm === "candidate" && secondBinding.arm === "baseline") {
+    return [second, first];
+  }
+  return [...outputs];
+}
+
 function completedResult(output: StudioOutput): ObjectiveQualityAnalysis | null {
   return output.analysis?.status === "completed" ? output.analysis.result : null;
 }
@@ -150,6 +168,9 @@ export function comparisonCompatibility(
   if (!left || !right) {
     reasons.push("Beide objektiven Analysen müssen abgeschlossen sein.");
     return { comparable: false, reasons };
+  }
+  if (left.status !== "measured" || right.status !== "measured") {
+    reasons.push("Beide Gesamtanalysen müssen alle Product-Gates erfüllen; unzureichende Analysen bleiben neutrale Rohwerte.");
   }
   if (left.analyzerVersion !== right.analyzerVersion) {
     reasons.push("Analyzer-Versionen unterscheiden sich.");

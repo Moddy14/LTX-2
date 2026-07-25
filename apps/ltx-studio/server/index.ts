@@ -55,6 +55,7 @@ import { resolveIdentityEvidenceReferences, verifyIdentityEvidence } from "./inp
 import { captureProvenanceFile, verifyProvenanceFileEvidence } from "./runProvenance.js";
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
+import { resolvePhonemeVisemeEvaluatorState } from "./evaluatorManifest.js";
 
 ensureRuntimeDirectories();
 cleanupAnalysisTempRoot(analysisTempRoot);
@@ -223,6 +224,7 @@ app.get("/api/config", (_request, response) => {
 
 app.get("/api/health", async (_request, response) => {
   const resources = readResourceSnapshot();
+  const phonemeViseme = resolvePhonemeVisemeEvaluatorState().result;
   let runtimeStatus;
   let orchestratorReachable = false;
   try {
@@ -239,6 +241,14 @@ app.get("/api/health", async (_request, response) => {
     qwen: runtimeStatus.qwen,
     runtimeOverall: runtimeStatus.overall,
     workloads: runtimeStatus.workloads,
+    evaluators: {
+      phonemeViseme: {
+        status: phonemeViseme.status,
+        blockerCode: phonemeViseme.blockerCode,
+        message: phonemeViseme.error,
+        productGo: phonemeViseme.productGo.status,
+      },
+    },
     queueDepth: jobs.list().filter((job) => isActiveJobStatus(job.status)).length,
   });
 });
@@ -421,6 +431,20 @@ app.post("/api/experiments", (request, response) => {
 
 app.post("/api/experiments/:id/freeze", (request, response) => {
   response.json({ experiment: experiments.freeze(request.params.id) });
+});
+
+app.post("/api/experiments/:id/supersede", (request, response) => {
+  const payload = z.object({
+    reason: z.string().trim().min(1).max(500),
+    replacementExperimentId: z.string().uuid().nullable().default(null),
+  }).strict().parse(request.body ?? {});
+  response.json({
+    experiment: experiments.supersede(
+      request.params.id,
+      payload.reason,
+      payload.replacementExperimentId,
+    ),
+  });
 });
 
 app.post("/api/experiments/:id/runs/:arm", async (request, response) => {

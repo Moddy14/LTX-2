@@ -8,6 +8,7 @@ import {
   metricDelta,
   metricTrend,
   objectiveComparisonMetrics,
+  protocolOrderedComparisonOutputs,
   settingsDifferences,
 } from "../src/objectiveComparison.js";
 import { validRequest } from "./fixtures.js";
@@ -51,6 +52,7 @@ function output(
       result: {
         schemaVersion: "ltx-studio-objective-quality.v4",
         analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
+        status: "measured",
         technical: {
           audioVideoDurationDeltaSeconds: 0.01,
         },
@@ -246,6 +248,31 @@ describe("objective A/B comparison", () => {
     expect(compatibility.reasons).toContain(
       "Der tatsächliche Request-Diff entspricht nicht der eingefrorenen Einzelfaktoränderung.",
     );
+  });
+
+  it("orders a bound experiment as baseline then candidate regardless of click order", () => {
+    const baseline = output("a.mp4");
+    const candidate = output("b.mp4");
+    bindGuidanceExperiment(baseline, candidate);
+
+    expect(protocolOrderedComparisonOutputs([candidate, baseline]).map((item) => item.name))
+      .toEqual(["a.mp4", "b.mp4"]);
+  });
+
+  it("keeps insufficient completed analyses in neutral raw-value mode", () => {
+    const baseline = output("a.mp4");
+    const candidate = output("b.mp4");
+    bindGuidanceExperiment(baseline, candidate);
+    candidate.analysis!.result!.status = "insufficient";
+
+    const compatibility = comparisonCompatibility(baseline, candidate);
+    expect(compatibility.comparable).toBe(false);
+    expect(compatibility.reasons).toContain(
+      "Beide Gesamtanalysen müssen alle Product-Gates erfüllen; unzureichende Analysen bleiben neutrale Rohwerte.",
+    );
+    const identity = objectiveComparisonMetrics(baseline, candidate)
+      .find((metric) => metric.id === "identity-median")!;
+    expect(metricTrend(identity, compatibility.comparable)).toBe("neutral");
   });
 
   it("keeps technically similar but unregistered outputs in raw-value mode", () => {

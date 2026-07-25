@@ -71,6 +71,21 @@ export async function freezeExperiment(id: string): Promise<ControlledExperiment
   return body.experiment;
 }
 
+export async function supersedeExperiment(
+  id: string,
+  reason: string,
+  replacementExperimentId: string | null = null,
+): Promise<ControlledExperiment> {
+  const body = await decode<{ experiment: ControlledExperiment }>(
+    await fetch(`/api/experiments/${id}/supersede`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason, replacementExperimentId }),
+    }),
+  );
+  return body.experiment;
+}
+
 export async function launchExperimentArm(
   id: string,
   arm: "baseline" | "candidate",

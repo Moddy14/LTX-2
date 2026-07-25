@@ -64,18 +64,41 @@ export const controlledExperimentSchema = z.object({
   id: z.string().uuid(),
   title: z.string().trim().min(1).max(120),
   claimScope: z.literal("development"),
-  status: z.enum(["draft", "frozen"]),
+  status: z.enum(["draft", "frozen", "superseded"]),
   kind: z.enum(["ablation", "replicate"]),
   candidate: experimentCandidateSchema,
   changedRequestPaths: z.array(z.string().min(1).max(240)).min(1).max(8),
   createdAt: timestampSchema,
   frozenAt: timestampSchema.nullable(),
+  supersededAt: timestampSchema.nullable().default(null),
+  supersededReason: z.string().trim().min(1).max(500).nullable().default(null),
+  replacementExperimentId: z.string().uuid().nullable().default(null),
   protocolSha256: sha256Schema.nullable(),
   arms: z.tuple([
     experimentRunArmSchema.extend({ arm: z.literal("baseline") }),
     experimentRunArmSchema.extend({ arm: z.literal("candidate") }),
   ]),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.status === "superseded") {
+    if (!value.supersededAt || !value.supersededReason) {
+      context.addIssue({
+        code: "custom",
+        path: ["supersededAt"],
+        message: "Ein stillgelegtes Experiment benötigt Zeitpunkt und Begründung.",
+      });
+    }
+  } else if (
+    value.supersededAt !== null
+    || value.supersededReason !== null
+    || value.replacementExperimentId !== null
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["status"],
+      message: "Nur stillgelegte Experimente dürfen Stilllegungsmetadaten tragen.",
+    });
+  }
+});
 
 export type ControlledExperiment = z.infer<typeof controlledExperimentSchema>;
 
