@@ -150,9 +150,9 @@ function outputForArm(
 }
 
 function currentAnalysisCompleted(output: StudioOutput | undefined): boolean {
-  return output?.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
+  return output?.analysis?.schemaVersion === "ltx-studio-output-analysis.v7"
     && output.analysis.status === "completed"
-    && output.analysis.result?.schemaVersion === "ltx-studio-objective-quality.v6";
+    && output.analysis.result?.schemaVersion === "ltx-studio-objective-quality.v7";
 }
 
 function evaluatorStatusLabel(health: Health | null): string {

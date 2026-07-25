@@ -4,12 +4,13 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
-  objectiveBaseWorkerResultSchema,
+  objectiveBaseWorkerResultV7Schema,
   objectiveWorkerResultSchema,
   type ObjectiveQualityAnalysis,
   type ObjectiveWorkerResult,
   type OutputAnalysisRecord,
 } from "../shared/objectiveQuality.js";
+import { mouthSkinMeasurementIsSufficient } from "../shared/mouthSkinSufficiency.js";
 import type { StudioJob } from "./jobs.js";
 import {
   readOutputAnalysis,
@@ -63,7 +64,7 @@ type OutputAnalysisManagerOptions = {
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
-  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v6" }>;
+  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v7" }>;
   evaluatorState: PhonemeVisemeEvaluatorState;
   dialogueEvaluatorState: DialogueEvaluatorState;
   evaluatorFingerprint: string;
@@ -84,8 +85,8 @@ function completedAnalysisIsCurrent(
     dialogueEvaluatorState,
   );
   if (record.status !== "completed"
-    || record.schemaVersion !== "ltx-studio-output-analysis.v6"
-    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v6"
+    || record.schemaVersion !== "ltx-studio-output-analysis.v7"
+    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v7"
     || record.evaluatorFingerprint !== evaluatorFingerprint
     || record.conditioningAudioSha256 !== (conditioningAudioEvidence(target)?.sha256 ?? null)
     || record.expectedDialogueSha256 !== expectedDialogueSha256(target)
@@ -120,7 +121,7 @@ export function combinedEvaluatorFingerprint(
   dialogueEvaluatorState: DialogueEvaluatorState,
 ): string {
   return createHash("sha256").update(JSON.stringify({
-    analyzer: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6",
+    analyzer: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv-artifact.v7",
     phonemeViseme: evaluatorState.fingerprint,
     dialogue: dialogueEvaluatorState.fingerprint,
   })).digest("hex");
@@ -169,7 +170,7 @@ function revisionOf(target: OutputAnalysisTarget): OutputRevision {
 export function buildObjectiveQualityAnalysis(
   input: ObjectiveWorkerResult,
   createdAt = now(),
-): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v6" }> {
+): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v7" }> {
   const worker = objectiveWorkerResultSchema.parse(input);
   const findings: ObjectiveQualityAnalysis["findings"] = [];
   if (worker.technical.hasAudio !== true) {
@@ -218,6 +219,28 @@ export function buildObjectiveQualityAnalysis(
       code: "landmark-geometry-incomplete",
       level: worker.face.geometryCoverage < 0.5 ? "error" : "warning",
       message: `Verwertbare Gesichtsgeometrie lag in ${(worker.face.geometryCoverage * 100).toFixed(0)} % der Stichproben vor.`,
+    });
+  }
+  const mouthSkinMeasurementSufficient = mouthSkinMeasurementIsSufficient(worker.face);
+  if (mouthSkinMeasurementSufficient) {
+    findings.push({
+      code: "mouth-skin-stability-raw-measured",
+      level: "info",
+      message: `Mundhaut-Texturrest Raum-p95/Zeit-p95 ${worker.face.mouthSkinWarpResidualP95!.toFixed(3)}, `
+        + `lokale Flussdeformation Raum-p95/Zeit-p95 ${worker.face.mouthSkinFlowDeformationP95!.toFixed(3)} `
+        + `bei ${(worker.face.mouthSkinPairCoverage * 100).toFixed(0)} % Paar- und `
+        + `${(worker.face.mouthSkinValidPixelCoverageP10! * 100).toFixed(0)} % Pixelabdeckung p10.`,
+    });
+  } else {
+    const pixelCoverage = worker.face.mouthSkinValidPixelCoverageP10 === null
+      ? "nicht messbar"
+      : `${(worker.face.mouthSkinValidPixelCoverageP10 * 100).toFixed(0)} %`;
+    findings.push({
+      code: "mouth-skin-stability-insufficient",
+      level: "warning",
+      message: `Mundhaut-Rohmessung unzureichend: ${worker.face.mouthSkinPairCount} Paare, `
+        + `${(worker.face.mouthSkinPairCoverage * 100).toFixed(0)} % Paarabdeckung und `
+        + `${pixelCoverage} Pixelabdeckung p10; erforderlich sind mindestens 8 Paare, 50 % Paar- und 60 % Pixelabdeckung.`,
     });
   }
   if (worker.identity.status === "measured") {
@@ -388,8 +411,8 @@ export function buildObjectiveQualityAnalysis(
     && worker.phonemeViseme.status === "measured"
     && ["measured", "not-applicable"].includes(worker.dialogue.status);
   return {
-    schemaVersion: "ltx-studio-objective-quality.v6",
-    analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6",
+    schemaVersion: "ltx-studio-objective-quality.v7",
+    analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv-artifact.v7",
     createdAt,
     status: sufficient ? "measured" : "insufficient",
     technical: worker.technical,
@@ -451,6 +474,7 @@ export function buildObjectiveQualityAnalysis(
     findings,
     limitations: [
       "YuNet liefert fünf Landmarken; die Werte messen Stabilität, aber keine Phonem-Mund-Synchronität.",
+      "Texturrest und Helligkeitsdelta messen photometrische Inkonsistenz nach vorwärts/rückwärts-konsistenter Bewegungsanpassung; die lokale Deformation entfernt zuvor die beste globale affine Kopfbewegung. Paar- und Pixelabdeckung gaten die Evidenz. Alle Werte bleiben unkalibrierte Vergleichsrohwerte.",
       "SFace misst Identitätsähnlichkeit nur gegen während der Generierung kryptografisch gebundene Studio-Referenzen.",
       "Die getrennten Rohproxys korrelieren Audio-Onsets des Endmixes beziehungsweise der hashgebundenen Konditionierungs-Spur mit stabilisierter Mundbewegung; sie beweisen keine Phonem- oder Visemtreue.",
       "Whisper misst Worttreue und richtet den gespeicherten Wortlaut grob an der Audiospur aus; Wortfenster und YuNet-Mundbewegung sind keine Phonem-/Visemklassifikation.",
@@ -502,8 +526,8 @@ export class OutputAnalysisManager {
       target,
     ) && !force) return current;
     const createdAt = now();
-    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v6" }> = {
-      schemaVersion: "ltx-studio-output-analysis.v6",
+    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v7" }> = {
+      schemaVersion: "ltx-studio-output-analysis.v7",
       evaluatorFingerprint,
       conditioningAudioSha256: conditioningAudioEvidence(target)?.sha256 ?? null,
       expectedDialogueSha256: expectedDialogueSha256(target),
@@ -773,7 +797,7 @@ export class OutputAnalysisManager {
         rmSync(analysisTempDir, { recursive: true, force: true });
         if (error) return rejectPromise(error);
         try {
-          const baseWorker = objectiveBaseWorkerResultSchema.parse(JSON.parse(stdout));
+          const baseWorker = objectiveBaseWorkerResultV7Schema.parse(JSON.parse(stdout));
           resolvePromise(objectiveWorkerResultSchema.parse({
             ...baseWorker,
             phonemeViseme: task.evaluatorState.result,

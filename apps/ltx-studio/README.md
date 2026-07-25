@@ -25,6 +25,15 @@ checked again every ten seconds; path, runtime, and schema failures remain termi
 signals the process group belonging to the job being cancelled. It does not stop, unload, or reclaim external
 applications. Active Avatar, Qwen, and ComfyUI lanes are displayed without lifecycle controls.
 
+Resource admission is deliberately two-phase. Before queue submission, Studio checks the non-orchestrated output
+filesystem only, so low RAM or swap cannot hide the job from the Orchestrator and prevent its owned Qwen pressure
+policy from running. After the Orchestrator accepts the job, Studio still waits fail-closed for the full RAM, swap,
+and output-space gate. It does not transition the remote job to `starting` and does not spawn Python until every
+local start requirement passes. The accepted wait remains visible and can be cancelled through the normal Studio
+job action. Studio polls the authoritative remote job while it waits and releases/re-submits an accepted lease after
+20 minutes, safely below the Orchestrator's 30-minute accepted-job reaper. A Studio restart durably schedules
+`cancelled` delivery for every remote lease that was still active.
+
 The queue start fence treats only the documented `qwen_gate_active` conflict and bounded Runtime API transport failures
 as retryable. After a failed `accepted -> starting` request, Studio reads the authoritative remote state before retrying:
 an already `starting` or `running` job proceeds without a duplicate transition, `accepted` waits, and unrelated conflicts
@@ -79,7 +88,13 @@ measured result. This build parses a structurally complete `release-candidate` m
 hash multi-gigabyte model files on the Node event loop and never treats manifest text as Product-GO. The UI reports
 `Runner fehlt`, and the result remains blocked until a bounded evaluator worker independently verifies model,
 mapping, dataset-freeze, legal-approval, tune, and sealed-holdout attestations before inference. The checkpoint-free
-motion proxy never produces a 10/10 or SOTA claim.
+motion proxy never produces a 10/10 or SOTA claim. The CPU analyzer also reports an uncalibrated, forward/backward
+consistent dense-motion texture residual, luminance delta, and local deformation after removing the best global
+affine head motion estimated from a wider stable face region outside the mouth core. Deformation uses only pixels
+whose complete 3x3 flow neighborhood passed the consistency gate. Pair coverage and the p10 usable-pixel
+coverage must both pass evidence floors. The spatial-p95/temporal-p95 values help compare mouth-edge, local
+deformation, and flicker behavior between otherwise controlled runs, but remain neutral raw measurements until
+speaker-, lighting-, and motion-stratified calibration exists.
 
 Controlled experiments are immutable after freezing. The UI shows both arm values, seed, LongCat state, local start
 gates, and phoneme/viseme evaluator readiness. A protocol comparison always orders the registered baseline before the

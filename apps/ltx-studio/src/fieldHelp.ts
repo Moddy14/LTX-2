@@ -195,6 +195,16 @@ export const fieldHelp = {
     "Wofür: Median der Mundlinie relativ zur Augenlinie in Grad. Werte nahe 0° wirken meist gerade, hängen aber von Perspektive und Anatomie ab. Noch kein Identitäts- oder Qualitätsurteil.",
   objectiveMouthAngleDynamics:
     "Wofür: 95. Perzentil der Änderung des relativen Mundwinkels in Grad pro Sekunde. Starke Spitzen können einen kippenden oder springenden Mund anzeigen. Noch kein kalibrierter Grenzwert.",
+  objectiveMouthSkinCoverage:
+    "Wofür: Anteil aller aufeinanderfolgenden Video-Stichproben, in denen die stabilisierte Hautzone um Mund und Nase mit vorwärts/rückwärts-konsistentem Bewegungsfeld verglichen werden konnte. Für einen belastbaren Rohvergleich sind mindestens acht Paare und 50 % Abdeckung nötig; näher an 100 % ist besser.",
+  objectiveMouthSkinPixelCoverage:
+    "Wofür: 10. Perzentil des pro Bildpaar tatsächlich verwertbaren Anteils der Hautring-Pixel nach Masken-, Rand-, Okklusions- und Vorwärts-/Rückwärtsprüfung. Für einen belastbaren Rohvergleich müssen selbst die schwächeren Paare mindestens 60 % erreichen.",
+  objectiveMouthSkinWarpResidual:
+    "Wofür: Zuerst wird pro Bildpaar das räumliche 95. Perzentil des verbleibenden photometrischen Texturfehlers gebildet, danach das zeitliche 95. Perzentil dieser Paarwerte. Optische Bewegung und eine gleichmäßige Helligkeitsverschiebung sind kompensiert. Höhere Rohwerte können Fremdmundkanten oder Flimmern anzeigen. Erst nach lokaler Kalibrierung bewerten.",
+  objectiveMouthSkinLuminance:
+    "Wofür: 95. Perzentil der Helligkeitsänderung in der bewegungskompensierten Hautzone um Mund und Nase. Hohe Werte können Flimmern anzeigen, reagieren aber auch auf echte Lichtwechsel. Deshalb nur identische Testfälle vergleichen und noch nicht als Qualitätsnote verwenden.",
+  objectiveMouthSkinFlowDeformation:
+    "Wofür: Die beste globale affine Kopfbewegung wird aus einer stabilen Gesichtsregion außerhalb des Mundkerns geschätzt und entfernt. Danach wird pro Bildpaar das räumliche 95. Perzentil des symmetrischen lokalen Deformationstensors und daraus das zeitliche 95. Perzentil gebildet. Nur Pixel mit vollständig gültiger 3×3-Flow-Nachbarschaft zählen. Lokales Verziehen kann den unkalibrierten Rohwert erhöhen.",
   objectiveIdentityCoverage:
     "Wofür: Anteil der untersuchten Ausgabeframes, in denen SFace die kryptografisch gebundene Referenzidentität eindeutig vergleichen konnte. Gut: bei einem sichtbaren Einzelgesicht nahe 100 %. Mehrere ähnlich passende Gesichter werden absichtlich als mehrdeutig ausgelassen.",
   objectiveIdentityMedian:

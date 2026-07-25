@@ -19,7 +19,10 @@ import {
 } from "../server/outputAnalysis.js";
 import type { DialogueEvaluatorState } from "../server/dialogueEvaluator.js";
 import { OutputLibrary } from "../server/outputs.js";
-import type { ObjectiveWorkerResult } from "../shared/objectiveQuality.js";
+import {
+  faceTrackingMetricsSchema,
+  type ObjectiveWorkerResult,
+} from "../shared/objectiveQuality.js";
 import { unavailablePhonemeVisemeResult } from "../shared/phonemeVisemeEvaluator.js";
 import { notApplicableDialogueEvaluation } from "../shared/dialogueEvaluator.js";
 import { validRequest } from "./fixtures.js";
@@ -67,6 +70,13 @@ const syntheticWorkerResult: ObjectiveWorkerResult = {
     mouthAngleMedianDegrees: 0,
     mouthAngleVelocityP95DegreesPerSecond: 1,
     mouthSpanCoefficientOfVariation: 0.01,
+    mouthSkinPairCount: 23,
+    mouthSkinPairCoverage: 1,
+    mouthSkinWarpResidualMedian: 0.01,
+    mouthSkinWarpResidualP95: 0.02,
+    mouthSkinLuminanceDeltaP95: 0.01,
+    mouthSkinFlowDeformationP95: 0.03,
+    mouthSkinValidPixelCoverageP10: 0.9,
   },
   identity: {
     status: "not-applicable",
@@ -191,6 +201,10 @@ function measuredIdentity(
   };
 }
 
+function legacyFace(face: ObjectiveWorkerResult["face"]) {
+  return faceTrackingMetricsSchema.strip().parse(face);
+}
+
 function v3Analysis(worker: ObjectiveWorkerResult, createdAt: string) {
   return {
     schemaVersion: "ltx-studio-objective-quality.v3" as const,
@@ -198,7 +212,7 @@ function v3Analysis(worker: ObjectiveWorkerResult, createdAt: string) {
     createdAt,
     status: "insufficient" as const,
     technical: worker.technical,
-    face: worker.face,
+    face: legacyFace(worker.face),
     identity: worker.identity,
     avSync: worker.avSync,
     capabilities: {
@@ -210,6 +224,16 @@ function v3Analysis(worker: ObjectiveWorkerResult, createdAt: string) {
     },
     findings: [],
     limitations: ["Pre-phoneme/viseme cache."],
+  };
+}
+
+function v6Analysis(worker: ObjectiveWorkerResult, createdAt: string) {
+  const current = buildObjectiveQualityAnalysis(worker, createdAt);
+  return {
+    ...current,
+    schemaVersion: "ltx-studio-objective-quality.v6" as const,
+    analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6" as const,
+    face: legacyFace(current.face),
   };
 }
 
@@ -378,6 +402,91 @@ integrationIt("detects variable frame timing from actual frame timestamps", asyn
   expect(result.technical.constantFrameRate).toBe(false);
   expect(result.technical.audioVideoDurationDeltaSeconds).toBeNull();
 }, 20_000);
+
+integrationIt("distinguishes stable mouth skin from synthetic local texture wobble", () => {
+  const code = [
+    "import importlib.util, json, pathlib, cv2, numpy as np",
+    `script = pathlib.Path(${JSON.stringify(join(appRoot, "scripts", "analyze-face-quality.py"))})`,
+    "spec = importlib.util.spec_from_file_location('ltx_objective_worker', script)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "y, x = np.mgrid[0:96, 0:96].astype(np.float32)",
+    "base = np.clip(45 + x * 1.3 + y * 0.7 + 18 * np.sin(x / 5) + 12 * np.cos(y / 7), 0, 255).astype(np.uint8)",
+    "stable = [{'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': base.copy()} for i in range(12)]",
+    "rng = np.random.default_rng(20260725)",
+    "wobbly = []",
+    "for i in range(12):",
+    "    patch = base.copy()",
+    "    noise = rng.integers(-70, 71, size=(38, 72), dtype=np.int16)",
+    "    patch[42:80, 12:84] = np.clip(patch[42:80, 12:84].astype(np.int16) + noise, 0, 255).astype(np.uint8)",
+    "    wobbly.append({'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': patch})",
+    "bright = [{'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': np.clip(base.astype(np.int16) + i * 5, 0, 255).astype(np.uint8)} for i in range(12)]",
+    "translated = [{'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': cv2.warpAffine(base, np.float32([[1, 0, i * 0.35], [0, 1, 0]]), (96, 96), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)} for i in range(12)]",
+    "deformed = [{'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': cv2.remap(base, x + 2.5 * np.sin(y / 7 + i * 0.45), y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)} for i in range(12)]",
+    "rotated = [{'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': cv2.warpAffine(base, cv2.getRotationMatrix2D((48, 48), i * 0.15, 1), (96, 96), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)} for i in range(12)]",
+    "sparse = [{'sampleIndex': i * 2, 'timestamp': i / 24, 'stabilized_patch': base.copy()} for i in range(6)]",
+    "temporal = [{'sampleIndex': i, 'timestamp': i / 24, 'stabilized_patch': base.copy()} for i in range(50)]",
+    "temporal[25]['stabilized_patch'] = rng.integers(0, 256, size=(96, 96), dtype=np.uint8)",
+    "original_flow = cv2.calcOpticalFlowFarneback",
+    "flow_calls = [0]",
+    "def sparse_consistency_flow(_left, _right, *_args, **_kwargs):",
+    "    flow_calls[0] += 1",
+    "    flow = np.zeros((96, 96, 2), dtype=np.float32)",
+    "    if flow_calls[0] % 2 == 0:",
+    "        flow[..., 0] = 10",
+    "        flow[40:86, 28:68, 0] = 0",
+    "    return flow",
+    "cv2.calcOpticalFlowFarneback = sparse_consistency_flow",
+    "pixel_sparse = module.mouth_skin_stability(stable, 12)",
+    "neighbor_calls = [0]",
+    "def invalid_neighbor_flow(_left, _right, *_args, **_kwargs):",
+    "    neighbor_calls[0] += 1",
+    "    flow = np.zeros((96, 96, 2), dtype=np.float32)",
+    "    if neighbor_calls[0] % 2 == 1:",
+    "        flow[:, ::12, 0] = 5",
+    "    return flow",
+    "cv2.calcOpticalFlowFarneback = invalid_neighbor_flow",
+    "neighbor_contaminated = module.mouth_skin_stability(stable, 12)",
+    "cv2.calcOpticalFlowFarneback = original_flow",
+    "print(json.dumps({'stable': module.mouth_skin_stability(stable, 12), 'wobbly': module.mouth_skin_stability(wobbly, 12), 'bright': module.mouth_skin_stability(bright, 12), 'translated': module.mouth_skin_stability(translated, 12), 'deformed': module.mouth_skin_stability(deformed, 12), 'rotated': module.mouth_skin_stability(rotated, 12), 'sparse': module.mouth_skin_stability(sparse, 12), 'pixelSparse': pixel_sparse, 'neighborContaminated': neighbor_contaminated, 'temporal': module.mouth_skin_stability(temporal, 50)}))",
+  ].join("\n");
+  const inspected = spawnSync(pythonExecutable, ["-c", code], {
+    cwd: join(appRoot, "scripts"),
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  expect(inspected.status, inspected.stderr).toBe(0);
+  const result = JSON.parse(inspected.stdout) as {
+    stable: { mouthSkinPairCoverage: number; mouthSkinWarpResidualP95: number; mouthSkinFlowDeformationP95: number };
+    wobbly: { mouthSkinWarpResidualP95: number };
+    bright: { mouthSkinLuminanceDeltaP95: number };
+    translated: { mouthSkinWarpResidualP95: number; mouthSkinFlowDeformationP95: number };
+    deformed: { mouthSkinFlowDeformationP95: number };
+    rotated: { mouthSkinFlowDeformationP95: number };
+    sparse: { mouthSkinPairCount: number; mouthSkinPairCoverage: number; mouthSkinWarpResidualP95: null };
+    pixelSparse: { mouthSkinPairCoverage: number; mouthSkinValidPixelCoverageP10: number };
+    neighborContaminated: { mouthSkinFlowDeformationP95: number; mouthSkinValidPixelCoverageP10: number };
+    temporal: { mouthSkinWarpResidualP95: number };
+  };
+
+  expect(result.stable.mouthSkinPairCoverage).toBe(1);
+  expect(result.stable.mouthSkinWarpResidualP95).toBeLessThan(0.001);
+  expect(result.wobbly.mouthSkinWarpResidualP95).toBeGreaterThan(0.08);
+  expect(result.bright.mouthSkinLuminanceDeltaP95).toBeGreaterThan(0.015);
+  expect(result.translated.mouthSkinWarpResidualP95).toBeLessThan(0.02);
+  expect(result.deformed.mouthSkinFlowDeformationP95).toBeGreaterThan(result.translated.mouthSkinFlowDeformationP95 * 2);
+  expect(result.rotated.mouthSkinFlowDeformationP95).toBeLessThan(result.translated.mouthSkinFlowDeformationP95);
+  expect(result.pixelSparse.mouthSkinPairCoverage).toBe(1);
+  expect(result.pixelSparse.mouthSkinValidPixelCoverageP10).toBeLessThan(0.6);
+  expect(result.neighborContaminated.mouthSkinValidPixelCoverageP10).toBeGreaterThan(0.6);
+  expect(result.neighborContaminated.mouthSkinFlowDeformationP95).toBeLessThan(0.001);
+  expect(result.temporal.mouthSkinWarpResidualP95).toBeLessThan(0.001);
+  expect(result.sparse).toMatchObject({
+    mouthSkinPairCount: 0,
+    mouthSkinPairCoverage: 0,
+    mouthSkinWarpResidualP95: null,
+  });
+});
 
 integrationIt("preserves the signed audio stream PTS offset in the AV lag timebase", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-pts-offset-"));
@@ -561,7 +670,7 @@ integrationIt("replaces a completed pre-track v2 cache with a fresh analysis att
       createdAt: timestamp,
       status: "measured",
       technical: staleWorker.technical,
-      face: staleWorker.face,
+      face: legacyFace(staleWorker.face),
       identity: staleWorker.identity,
       capabilities: {
         avSync: "syncnet-required",
@@ -672,7 +781,7 @@ integrationIt("replaces a completed v3 cache even with current SFace and AV prep
   manager.cancel(outputName, fresh.analysisId);
 }, 20_000);
 
-integrationIt("reuses a completed v6 cache and invalidates it when the bound dialogue changes", async () => {
+integrationIt("invalidates a completed legacy v6 cache after the artifact analyzer upgrade", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-current-cache-"));
   roots.push(root);
   const outputName = "current-v4-cache.mp4";
@@ -711,7 +820,7 @@ integrationIt("reuses a completed v6 cache and invalidates it when the bound dia
     finishedAt: timestamp,
     updatedAt: timestamp,
     error: null,
-    result: buildObjectiveQualityAnalysis(currentWorker, timestamp),
+    result: v6Analysis(currentWorker, timestamp),
   });
   const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
     analysisTempRoot: join(root, "analysis-tmp"),
@@ -719,27 +828,14 @@ integrationIt("reuses a completed v6 cache and invalidates it when the bound dia
     dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
   });
 
-  const reused = manager.start(outputName);
-
-  expect(reused.analysisId).toBe(currentAnalysisId);
-  expect(reused.attempt).toBe(1);
-  expect(reused.status).toBe("completed");
-
-  const settingsPath = join(root, `${outputName}.ltx-settings.json`);
-  const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
-    request: { promptParts: { dialogue: string } };
-  };
-  settings.request.promptParts.dialogue = "Geänderter exakter Dialog.";
-  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
-
-  const invalidated = manager.start(outputName);
-  expect(invalidated.analysisId).not.toBe(currentAnalysisId);
-  expect(invalidated.attempt).toBe(2);
-  expect(invalidated.status).toBe("queued");
-  manager.cancel(outputName, invalidated.analysisId);
+  const fresh = manager.start(outputName);
+  expect(fresh.analysisId).not.toBe(currentAnalysisId);
+  expect(fresh.attempt).toBe(2);
+  expect(fresh.status).toBe("queued");
+  manager.cancel(outputName, fresh.analysisId);
 }, 20_000);
 
-integrationIt("invalidates a v6 cache when only the evaluator fingerprint changes", async () => {
+integrationIt("reuses a current v7 cache and invalidates it when only the evaluator fingerprint changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-pv-cache-"));
   roots.push(root);
   const outputName = "pv-manifest-cache.mp4";
@@ -757,7 +853,7 @@ integrationIt("invalidates a v6 cache when only the evaluator fingerprint change
     result: unavailablePhonemeVisemeResult(),
   };
   writeOutputAnalysis(root, {
-    schemaVersion: "ltx-studio-output-analysis.v6",
+    schemaVersion: "ltx-studio-output-analysis.v7",
     evaluatorFingerprint: combinedEvaluatorFingerprint(evaluatorState, dialogueEvaluatorState),
     conditioningAudioSha256: null,
     expectedDialogueSha256: createHash("sha256")

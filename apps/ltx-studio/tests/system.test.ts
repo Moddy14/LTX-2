@@ -56,9 +56,8 @@ describe("fail-closed start resources", () => {
     )).toContain("Ausgabeplatz ist unbekannt");
   });
 
-  it("checks non-reclaimable swap and disk before queue admission without blocking orchestrator RAM reclaim", () => {
+  it("checks only non-orchestrated disk before queue admission and defers RAM/swap to the start fence", () => {
     const preAdmissionRequirements = {
-      minSwapFreeGiB: 4,
       outputGiB: 0.5,
     };
     expect(validatePreAdmissionResources(
@@ -68,7 +67,11 @@ describe("fail-closed start resources", () => {
     expect(validatePreAdmissionResources(
       { ...healthy, swapFreeGiB: null },
       preAdmissionRequirements,
-    )).toContain("Swap-Status ist unbekannt");
+    )).toBeNull();
+    expect(validatePreAdmissionResources(
+      { ...healthy, swapFreeGiB: 0.25 },
+      preAdmissionRequirements,
+    )).toBeNull();
     expect(validatePreAdmissionResources(
       { ...healthy, outputFreeGiB: null },
       preAdmissionRequirements,

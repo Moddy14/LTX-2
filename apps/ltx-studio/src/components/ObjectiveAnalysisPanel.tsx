@@ -48,25 +48,33 @@ export function ObjectiveAnalysisPanel({
     || result?.schemaVersion === "ltx-studio-objective-quality.v4"
     || result?.schemaVersion === "ltx-studio-objective-quality.v5"
     || result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.identity
     : null;
   const avSync = result?.schemaVersion === "ltx-studio-objective-quality.v3"
     || result?.schemaVersion === "ltx-studio-objective-quality.v4"
     || result?.schemaVersion === "ltx-studio-objective-quality.v5"
     || result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.avSync
     : null;
   const conditioningAvSync = result?.schemaVersion === "ltx-studio-objective-quality.v5"
     || result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.conditioningAvSync
     : null;
   const phonemeViseme = result?.schemaVersion === "ltx-studio-objective-quality.v4"
     || result?.schemaVersion === "ltx-studio-objective-quality.v5"
     || result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.phonemeViseme
     : null;
   const dialogue = result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.dialogue
+    : null;
+  const artifactFace = result?.schemaVersion === "ltx-studio-objective-quality.v7"
+    ? result.face
     : null;
   const provenance = output.provenance;
   const provenanceModelCount = provenance?.files.filter((file) => file.role.startsWith("model:")).length ?? 0;
@@ -133,6 +141,21 @@ export function ObjectiveAnalysisPanel({
             <MetricRow label="Nasenbeschleunigung p95" value={metricWithUnit(result.face?.noseAccelerationP95PerSecond2 ?? null, " EA/s²")} help={fieldHelp.objectiveNoseAcceleration} />
             <MetricRow label="Mundwinkel Median" value={metricWithUnit(result.face?.mouthAngleMedianDegrees ?? null, "°", 1)} help={fieldHelp.objectiveMouthAngle} />
             <MetricRow label="Mundwinkel-Dynamik p95" value={metricWithUnit(result.face?.mouthAngleVelocityP95DegreesPerSecond ?? null, "°/s", 1)} help={fieldHelp.objectiveMouthAngleDynamics} />
+            {artifactFace ? (
+              <>
+                <MetricRow label="Mundhaut-Paarabdeckung" value={percent(artifactFace.mouthSkinPairCoverage)} help={fieldHelp.objectiveMouthSkinCoverage} />
+                <MetricRow label="Mundhaut-Pixelabdeckung p10" value={metricWithUnit(
+                  artifactFace.mouthSkinValidPixelCoverageP10 === null
+                    ? null
+                    : artifactFace.mouthSkinValidPixelCoverageP10 * 100,
+                  " %",
+                  0,
+                )} help={fieldHelp.objectiveMouthSkinPixelCoverage} />
+                <MetricRow label="Mundhaut-Texturrest p95×p95" value={metricWithUnit(artifactFace.mouthSkinWarpResidualP95, "", 3)} help={fieldHelp.objectiveMouthSkinWarpResidual} />
+                <MetricRow label="Mundhaut-Helligkeitsdelta p95" value={metricWithUnit(artifactFace.mouthSkinLuminanceDeltaP95, "", 3)} help={fieldHelp.objectiveMouthSkinLuminance} />
+                <MetricRow label="Mundhaut-Flussdeformation p95×p95" value={metricWithUnit(artifactFace.mouthSkinFlowDeformationP95, "", 3)} help={fieldHelp.objectiveMouthSkinFlowDeformation} />
+              </>
+            ) : null}
             {showIdentityMetrics ? (
               <>
                 <MetricRow label="Identitätsabdeckung" value={percent(identity.outputCoverage)} help={fieldHelp.objectiveIdentityCoverage} />

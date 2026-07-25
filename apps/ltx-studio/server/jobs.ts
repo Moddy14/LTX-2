@@ -146,6 +146,12 @@ type DgxTerminalDelivery = {
   lastError: string | null;
   updatedAt: string;
 };
+type DgxStartOutcome = "started" | "queued" | "resubmit" | "stopped";
+type AcceptedResourceWaitOutcome =
+  | { kind: "ready"; snapshot: ResourceSnapshot }
+  | { kind: "queued" }
+  | { kind: "resubmit" }
+  | { kind: "stopped" };
 type PersistedStudioJob = StudioJob & {
   dgxTerminalDelivery?: DgxTerminalDelivery;
 };
@@ -171,6 +177,8 @@ const MAX_RUNNING_PROCESS_PROGRESS = 95;
 const DEFAULT_DGX_TERMINAL_RETRY_BASE_MS = 5_000;
 const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
 const DGX_START_FENCE_RETRY_MS = 30_000;
+const DGX_ACCEPTED_REMOTE_POLL_MS = 30_000;
+const DGX_ACCEPTED_LOCAL_GATE_MAX_WAIT_MS = 20 * 60_000;
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
 const DGX_TERMINAL_STATES = new Set<DgxTerminalState>(["completed", "failed", "cancelled"]);
 const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
@@ -1253,13 +1261,24 @@ export class JobManager extends EventEmitter {
           + `${admission.reason ? ` - ${admission.reason}` : ""}.`,
       );
       if (queueJob.state === "accepted" && admission.decision === "accepted") {
-        return this.startAcceptedDgxJob(job);
+        const outcome = await this.startAcceptedDgxJob(job);
+        if (outcome === "started") return true;
+        if (outcome === "stopped") return false;
+        if (outcome === "queued") {
+          const queuedOutcome = await this.waitForQueuedDgxJob(job, DGX_START_FENCE_RETRY_MS);
+          if (queuedOutcome === "started") return true;
+          if (queuedOutcome === "stopped") return false;
+        }
+        if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
+        continue;
       }
 
       if (queueJob.state === "queued" || admission.decision === "queued") {
-        const accepted = await this.waitForQueuedDgxJob(job, retryAfterMs(admission));
-        if (!accepted) return false;
-        return isActiveJobStatus(job.status);
+        const outcome = await this.waitForQueuedDgxJob(job, retryAfterMs(admission));
+        if (outcome === "started") return true;
+        if (outcome === "stopped") return false;
+        if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
+        continue;
       }
 
       if (shouldRetryQueueSubmit(admission)) {
@@ -1279,17 +1298,17 @@ export class JobManager extends EventEmitter {
     return false;
   }
 
-  private async waitForQueuedDgxJob(job: RuntimeJob, initialDelayMs: number): Promise<boolean> {
+  private async waitForQueuedDgxJob(job: RuntimeJob, initialDelayMs: number): Promise<DgxStartOutcome> {
     let delayMs = initialDelayMs;
     while (isActiveJobStatus(job.status) && job.dgxJobId) {
       this.appendLog(job, `DGX-Queue-Job wartet beim Orchestrator; nächste Prüfung in ${(delayMs / 1000).toFixed(0)} s.`);
       this.changed();
-      if (!await this.waitForDelay(job, delayMs)) return false;
+      if (!await this.waitForDelay(job, delayMs)) return "stopped";
       let response;
       try {
         response = await this.dgxQueueOperations.read(job.dgxJobId);
       } catch (error) {
-        if (jobWasCancelled(job)) return false;
+        if (jobWasCancelled(job)) return "stopped";
         const message = error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.";
         this.appendLog(job, `DGX-Queue-Status vorübergehend nicht lesbar: ${message}. Prüfung wird wiederholt.`);
         this.changed();
@@ -1299,46 +1318,44 @@ export class JobManager extends EventEmitter {
       const queueJob = response.job;
       this.appendLog(job, `DGX-Queue-Status: ${queueJob.job_id} ${queueJob.state}${queueJob.reason ? ` - ${queueJob.reason}` : ""}.`);
       if (queueJob.state === "accepted") {
-        return this.startAcceptedDgxJob(job);
+        const outcome = await this.startAcceptedDgxJob(job);
+        if (outcome === "queued") {
+          delayMs = DGX_START_FENCE_RETRY_MS;
+          continue;
+        }
+        return outcome;
       }
       if (queueJob.state === "queued") {
         delayMs = 30_000;
         continue;
       }
-      if (["cancelled", "completed", "failed", "rejected"].includes(queueJob.state)) {
+      if (queueJob.state === "cancelled") {
+        job.dgxJobTerminal = true;
+        this.resetDgxLeaseForResubmit(job, `Remote-Job ${queueJob.job_id} wurde vor dem Start abgebrochen.`);
+        return "resubmit";
+      }
+      if (["completed", "failed", "rejected"].includes(queueJob.state)) {
         job.dgxJobTerminal = true;
         this.failJob(job, `DGX-Queue-Job ist terminal: ${queueJob.state}${queueJob.last_error ? ` - ${queueJob.last_error}` : ""}`);
-        return false;
+        return "stopped";
       }
       delayMs = 30_000;
     }
-    return false;
+    return "stopped";
   }
 
-  private async startAcceptedDgxJob(job: RuntimeJob): Promise<boolean> {
+  private async startAcceptedDgxJob(job: RuntimeJob): Promise<DgxStartOutcome> {
     const estimate = estimateRequest(job.request, this.list());
-    const snapshot = this.readStartResourceSnapshot();
-    const issue = validateStartResources(snapshot, {
+    const requirements = {
       estimatedMemoryGiB: estimate.memoryGiB,
       minAvailableGiB,
       minResidualMemoryGiB,
       minSwapFreeGiB,
       outputGiB: estimate.outputGiB,
-    });
-    if (issue !== null) {
-      const message = `DGX hat den Job akzeptiert, aber der unmittelbare lokale Start-Recheck ist fehlgeschlagen: ${issue}`;
-      this.prepareDgxTerminalDelivery(job, "cancelled", {
-        current_step: "local start recheck failed before LTX allocation",
-        last_error: message,
-      });
-      job.status = "failed";
-      job.error = message;
-      job.finishedAt = now();
-      this.appendLog(job, message);
-      this.changed();
-      void this.flushDgxTerminalDelivery(job);
-      return false;
-    }
+    };
+    const gate = await this.waitForAcceptedLocalStartResources(job, requirements);
+    if (gate.kind !== "ready") return gate.kind;
+    const { snapshot } = gate;
     this.appendLog(
       job,
       `Lokales Start-Gate erfüllt: ${snapshot.availableMemoryGiB?.toFixed(2)} GiB RAM, `
@@ -1348,8 +1365,8 @@ export class JobManager extends EventEmitter {
     const started = await this.transitionDgxJob(job, "starting", {
       current_step: "thermal start gate before LTX allocation",
     });
-    if (started) return isActiveJobStatus(job.status);
-    if (jobWasCancelled(job)) return false;
+    if (started) return isActiveJobStatus(job.status) ? "started" : "stopped";
+    if (jobWasCancelled(job)) return "stopped";
     const message = "DGX-Queue-Start-Fence wurde nicht freigegeben.";
     this.prepareDgxTerminalDelivery(job, "cancelled", {
       current_step: "starting transition failed before LTX allocation",
@@ -1357,7 +1374,93 @@ export class JobManager extends EventEmitter {
     });
     this.failJob(job, message);
     await this.flushDgxTerminalDelivery(job);
-    return false;
+    return "stopped";
+  }
+
+  private async waitForAcceptedLocalStartResources(
+    job: RuntimeJob,
+    requirements: Parameters<typeof validateStartResources>[1],
+  ): Promise<AcceptedResourceWaitOutcome> {
+    let lastIssue: string | null = null;
+    let lastLogAt = 0;
+    const acceptedAt = Date.now();
+    let nextRemotePollAt = acceptedAt + DGX_ACCEPTED_REMOTE_POLL_MS;
+    while (isActiveJobStatus(job.status)) {
+      const snapshot = this.readStartResourceSnapshot();
+      const issue = validateStartResources(snapshot, requirements);
+      const currentTime = Date.now();
+      if (issue === null) return { kind: "ready", snapshot };
+      if (currentTime >= nextRemotePollAt && job.dgxJobId) {
+        nextRemotePollAt = currentTime + DGX_ACCEPTED_REMOTE_POLL_MS;
+        try {
+          const remote = (await this.dgxQueueOperations.read(job.dgxJobId)).job;
+          if (remote.state === "queued") {
+            this.appendLog(job, `DGX-Queue-Job ${remote.job_id} wurde wieder eingereiht; lokales accepted-Gate wird beendet.`);
+            this.changed();
+            return { kind: "queued" };
+          }
+          if (remote.state === "cancelled") {
+            job.dgxJobTerminal = true;
+            this.resetDgxLeaseForResubmit(job, `Remote-Job ${remote.job_id} wurde während des lokalen Start-Gates abgebrochen.`);
+            return { kind: "resubmit" };
+          }
+          if (["completed", "failed", "rejected"].includes(remote.state)) {
+            job.dgxJobTerminal = true;
+            this.failJob(job, `DGX-Queue-Job ist während des lokalen Start-Gates terminal: ${remote.state}.`);
+            return { kind: "stopped" };
+          }
+          if (!["accepted", "starting", "running"].includes(remote.state)) {
+            this.appendLog(job, `DGX-Queue-Status ${remote.state} wird vor dem lokalen Start erneut geprüft.`);
+            this.changed();
+          }
+        } catch (error) {
+          this.appendLog(
+            job,
+            `DGX-Queue-Status im lokalen Start-Gate vorübergehend nicht lesbar: ${
+              error instanceof Error ? error.message : String(error)
+            }.`,
+          );
+          this.changed();
+        }
+      }
+      if (currentTime - acceptedAt >= DGX_ACCEPTED_LOCAL_GATE_MAX_WAIT_MS) {
+        const message = "Lokales Start-Gate blieb 20 Minuten blockiert; accepted-Lease wird freigegeben und neu eingereiht.";
+        this.appendLog(job, message);
+        this.prepareDgxTerminalDelivery(job, "cancelled", {
+          current_step: "accepted local start gate timed out before compute allocation",
+          last_error: message,
+        });
+        this.changed();
+        const delivered = await this.flushDgxTerminalDelivery(job);
+        if (delivered && job.dgxJobTerminal) {
+          this.resetDgxLeaseForResubmit(job, message);
+          return { kind: "resubmit" };
+        }
+        this.failJob(job, `${message} Die Freigabe konnte nicht bestätigt werden.`);
+        return { kind: "stopped" };
+      }
+      if (issue !== lastIssue || currentTime - lastLogAt >= RESOURCE_WAIT_LOG_INTERVAL_MS) {
+        this.appendLog(
+          job,
+          `DGX-Queue-Job ist akzeptiert; lokales Start-Gate wartet vor starting/Prozessstart: ${issue}`,
+        );
+        this.changed();
+        lastIssue = issue;
+        lastLogAt = currentTime;
+      }
+      if (!await this.waitForDelay(job, RESOURCE_RETRY_INTERVAL_MS)) return { kind: "stopped" };
+    }
+    return { kind: "stopped" };
+  }
+
+  private resetDgxLeaseForResubmit(job: RuntimeJob, detail: string): void {
+    if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
+    delete job.dgxTerminalRetry;
+    delete job.dgxTerminalDelivery;
+    job.dgxJobId = null;
+    job.dgxJobTerminal = false;
+    this.appendLog(job, `${detail} Der Renderbedarf wird erneut beim Orchestrator eingereicht.`);
+    this.changed();
   }
 
   private readStartResourceSnapshot(): ResourceSnapshot {
@@ -1367,7 +1470,6 @@ export class JobManager extends EventEmitter {
   private async waitForLocalPreAdmissionResources(job: RuntimeJob): Promise<boolean> {
     const estimate = estimateRequest(job.request, this.list());
     const requirements = {
-      minSwapFreeGiB,
       outputGiB: estimate.outputGiB,
     };
     let lastIssue: string | null = null;
@@ -1379,8 +1481,8 @@ export class JobManager extends EventEmitter {
       if (issue === null) {
         this.appendLog(
           job,
-          `Lokales Vorab-Gate erfüllt: ${snapshot.swapFreeGiB?.toFixed(2)} GiB Swap und `
-            + `${snapshot.outputFreeGiB?.toFixed(2)} GiB Ausgabeplatz frei.`,
+          `Lokales Queue-Vorab-Gate erfüllt: ${snapshot.outputFreeGiB?.toFixed(2)} GiB Ausgabeplatz frei; `
+            + "RAM und Swap werden nach Orchestrator-Acceptance erneut geprüft.",
         );
         this.changed();
         return true;
@@ -1944,8 +2046,13 @@ export class JobManager extends EventEmitter {
       const stored = JSON.parse(readFileSync(this.storagePath, "utf8")) as PersistedStudioJob[];
       const retained = [
         ...stored.slice(0, MAX_JOBS),
-        ...stored.slice(MAX_JOBS).filter((entry) =>
-          normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery) !== undefined),
+        ...stored.slice(MAX_JOBS).filter((entry) => {
+          const hasPendingTerminal = normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery) !== undefined;
+          const hasActiveRemoteLease = isActiveJobStatus(entry.status)
+            && typeof entry.dgxJobId === "string"
+            && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId);
+          return hasPendingTerminal || hasActiveRemoteLease;
+        }),
       ];
       for (const entry of retained) {
         const migratedRequest = migrateGenerationRequest(entry.request);
@@ -1972,6 +2079,30 @@ export class JobManager extends EventEmitter {
         const dgxJobId = typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
           ? entry.dgxJobId
           : null;
+        const restoredTerminalDelivery = dgxJobId
+          ? normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery)
+          : undefined;
+        const interruptedRemoteDelivery = interrupted
+          && isActiveJobStatus(storedStatus)
+          && dgxJobId
+          && !restoredTerminalDelivery
+          ? {
+              state: "cancelled" as const,
+              metadata: {
+                current_step: "studio restarted while owning active queue job",
+                last_error: "LTX Studio restarted before the active queue lease reached a terminal state",
+              },
+              attempts: 0,
+              lastError: null,
+              updatedAt: now(),
+            }
+          : undefined;
+        const restoredLogs = Array.isArray(entry.logs)
+          ? entry.logs.filter((line): line is string => typeof line === "string").slice(-MAX_LOG_LINES).map(cleanLogLine)
+          : [];
+        if (interruptedRemoteDelivery) {
+          restoredLogs.push("Studio-Neustart: Remote-Queue-Lease wird als cancelled abgemeldet.");
+        }
         this.jobs.set(entry.id, {
           ...entry,
           id: entry.id,
@@ -1992,9 +2123,7 @@ export class JobManager extends EventEmitter {
             : missingOutput
               ? "Die gespeicherte Ausgabedatei ist nicht mehr vorhanden."
               : typeof entry.error === "string" ? entry.error : null,
-          logs: Array.isArray(entry.logs)
-            ? entry.logs.filter((line): line is string => typeof line === "string").slice(-MAX_LOG_LINES).map(cleanLogLine)
-            : [],
+          logs: restoredLogs.slice(-MAX_LOG_LINES),
           command: plan.displayCommand,
           favorite: entry.favorite === true,
           variantOf: typeof entry.variantOf === "string" && /^[0-9a-f-]{36}$/i.test(entry.variantOf)
@@ -2036,7 +2165,7 @@ export class JobManager extends EventEmitter {
             : thermalProfileFromLogs(entry.logs),
           dgxJobId,
           dgxTerminalDelivery: dgxJobId
-            ? normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery)
+            ? restoredTerminalDelivery ?? interruptedRemoteDelivery
             : undefined,
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
           runProvenance: normalizeRunProvenance(entry.runProvenance),

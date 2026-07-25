@@ -33,6 +33,13 @@ function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorker
       mouthAngleMedianDegrees: 1.2,
       mouthAngleVelocityP95DegreesPerSecond: 33,
       mouthSpanCoefficientOfVariation: 0.024,
+      mouthSkinPairCount: 95,
+      mouthSkinPairCoverage: 1,
+      mouthSkinWarpResidualMedian: 0.018,
+      mouthSkinWarpResidualP95: 0.041,
+      mouthSkinLuminanceDeltaP95: 0.012,
+      mouthSkinFlowDeformationP95: 0.067,
+      mouthSkinValidPixelCoverageP10: 0.91,
     },
     identity: {
       status: "measured",
@@ -100,11 +107,16 @@ describe("objective output quality", () => {
       dialogue: "not-applicable",
     });
     expect(result.face?.noseVelocityP95PerSecond).toBe(2.3);
+    expect(result.face?.mouthSkinWarpResidualP95).toBe(0.041);
     expect(result.findings).toContainEqual(expect.objectContaining({ code: "calibration-required" }));
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "mouth-skin-stability-raw-measured",
+      level: "info",
+    }));
     expect(result).not.toHaveProperty("score");
     expect(result).not.toHaveProperty("rating");
     expect(result.capabilities.avSync).not.toBe("measured");
-    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v6");
+    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v7");
     expect(result.identity.cosineP10).toBe(0.84);
     expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
     expect(result.phonemeViseme.status).toBe("not-available");
@@ -112,6 +124,49 @@ describe("objective output quality", () => {
       code: "phoneme-viseme-manifest-missing",
       level: "warning",
     }));
+  });
+
+  it("does not report mouth-skin artifacts as measured below the pair evidence floor", () => {
+    const input = worker();
+    input.face.mouthSkinPairCount = 7;
+    input.face.mouthSkinPairCoverage = 7 / 95;
+    const result = buildObjectiveQualityAnalysis(input);
+
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "mouth-skin-stability-insufficient",
+      level: "warning",
+    }));
+    expect(result.findings).not.toContainEqual(expect.objectContaining({
+      code: "mouth-skin-stability-raw-measured",
+    }));
+  });
+
+  it("requires enough valid mouth-ring pixels before reporting artifact measurements", () => {
+    const input = worker();
+    input.face.mouthSkinValidPixelCoverageP10 = 0.59;
+    const result = buildObjectiveQualityAnalysis(input);
+
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "mouth-skin-stability-insufficient",
+    }));
+  });
+
+  it("rejects impossible mouth-skin pair relations and partial measurement tuples", () => {
+    const impossible = worker();
+    impossible.face.sampledFrames = 8;
+    expect(objectiveWorkerResultSchema.safeParse(impossible).success).toBe(false);
+
+    const partial = worker();
+    partial.face.mouthSkinPairCount = 0;
+    partial.face.mouthSkinPairCoverage = 0;
+    expect(objectiveWorkerResultSchema.safeParse(partial).success).toBe(false);
+
+    partial.face.mouthSkinWarpResidualMedian = null;
+    partial.face.mouthSkinWarpResidualP95 = null;
+    partial.face.mouthSkinLuminanceDeltaP95 = null;
+    partial.face.mouthSkinFlowDeformationP95 = null;
+    partial.face.mouthSkinValidPixelCoverageP10 = null;
+    expect(objectiveWorkerResultSchema.safeParse(partial).success).toBe(true);
   });
 
   it("distinguishes a missing CPU runner from a legal or manifest hold", () => {
@@ -160,6 +215,13 @@ describe("objective output quality", () => {
         validGeometryFrames: 2,
         detectionCoverage: 0.25,
         geometryCoverage: 1 / 6,
+        mouthSkinPairCount: 0,
+        mouthSkinPairCoverage: 0,
+        mouthSkinWarpResidualMedian: null,
+        mouthSkinWarpResidualP95: null,
+        mouthSkinLuminanceDeltaP95: null,
+        mouthSkinFlowDeformationP95: null,
+        mouthSkinValidPixelCoverageP10: null,
       },
     }));
 

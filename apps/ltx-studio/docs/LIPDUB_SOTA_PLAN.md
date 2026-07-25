@@ -320,6 +320,13 @@ umgesetzt:
 - Gesichtserkennungs- und Geometrieabdeckung;
 - normalisierte Rohwerte für Nasenbewegung, Nasenbeschleunigung,
   Mundwinkel und Mundwinkeldynamik;
+- vorwärts/rückwärts-konsistente, bewegungskompensierte Rohwerte für
+  photometrische Texturinkonsistenz, Helligkeitsflimmern und lokale
+  Flussdeformation nach Schätzung der globalen affinen Kopfbewegung aus einer
+  breiteren stabilen Gesichtsregion und Ableitung nur auf vollständig gültigen
+  3x3-Flow-Nachbarschaften in der Hautzone um Mund und Nase, inklusive echter
+  Paarabdeckung über alle Video-Stichproben und p10-Abdeckung der tatsächlich
+  konsistent verwertbaren Hautring-Pixel;
 - revisionsgebundene SFace-Ähnlichkeiten zwischen der tatsächlich verwendeten
   visuellen Referenz und allen eindeutig verfolgbaren Ausgabeframes;
 - checkpointfreie Rohmessung der zeitlichen Audio-Onset-/Mundbewegungskorrelation.
@@ -334,7 +341,8 @@ Evaluatoren:
   CPU-Inferenzrunner für den bereits implementierten
   Phonem-/Visem-AV-Sync-Vertrag;
 - lokale SFace-Positiv-/Impostor-Kalibrierung für belastbare Grenzbereiche;
-- bewegungskompensierte Artefakt- und Flimmererkennung.
+- Kalibration der bewegungskompensierten Artefakt- und Flimmerrohwerte gegen
+  blind markierte Fremdmund-, Hautwobble-, Nasensprung- und Flimmerereignisse.
 
 Der Whisper-Zwischenschritt ist umgesetzt. Der reale lokale Kontrolllauf vom
 25.07.2026 erkannte acht von acht Wörtern, ersetzte aber `Ton` durch `Turm`

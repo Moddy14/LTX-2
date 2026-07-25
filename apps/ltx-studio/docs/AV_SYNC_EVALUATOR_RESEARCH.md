@@ -1,6 +1,6 @@
 # AV-Sync-Evaluator: Lizenz- und Produktionsentscheidung
 
-Stand: 2026-07-24
+Stand: 2026-07-25
 
 ## Ziel
 
@@ -35,6 +35,8 @@ Checkpoints oder Trainingsdaten.
 
 | Kandidat | Code | Gewichte/Daten | Funktion | Entscheidung |
 | --- | --- | --- | --- | --- |
+| Montreal Forced Aligner 3.3.9 + German MFA acoustic model v3 | MIT; deutsches Akustikmodell CC BY 4.0 | Explizit deutsches Forced Alignment, u. a. Common Voice DE v16.1 und GlobalPhone; Attribution und exakte Modellrevision müssen archiviert werden | Telefonzeitachse aus dem bereits gebundenen Zieldialog | Bevorzugter CPU-Produktbaustein nach Attribution-/Rechtefreigabe |
+| MediaPipe Face Landmarker | Apache-2.0 Code | Offizieller `.task`-Bundle benötigt noch einen separat archivierten Modell-/Lizenznachweis | 478 3D-Landmarks und 52 Blendshapes für sichtbare Artikulation | Bevorzugter CPU-Produktbaustein; Modellbundle bis Lizenznachweis Legal Hold |
 | Oxford SyncNet, Revision `907c0b579c2e2d83f0eae1b2ac9e720cde4e5623` | MIT | Offizielle Modellseite nennt Forschungsnutzung unter nicht näher spezifizierter CC-Attribution-Lizenz; kommerzieller Umfang und separater Weight Grant bleiben unklar | Passender Offset-/Konfidenzevaluator | Fremdgewichte Legal Hold; Architekturidee mit eigenen Gewichten möglich |
 | Wav2Lip LSE-C/LSE-D, Revision `bac9a81e63ecc153202353372e5724b83d9e6322` | Kein permissiver Produktvertrag | README und LRS2 beschränken auf nichtkommerziellen Forschungsgebrauch | Passender LipSync-Evaluator | NO-GO |
 | VocaLiST, Revision `c265b59bcf7cd8559a265aaf454a9333ec24cb0f` | Mixed; eigener Code CC-BY-NC 4.0, übernommene Teile unter Drittlizenzen | Wav2Lip-/LRS2-Abhängigkeiten | Passender Evaluator | NO-GO |
@@ -42,7 +44,7 @@ Checkpoints oder Trainingsdaten.
 | AV-HuBERT, Revision `258fb50e155134eec2c4b49c2ae8de267075fd18` | Eigene Non-Commercial-Research-Lizenz | LRS3/VoxCeleb2 | AV-Repräsentation/ASR, kein fertiger Offset-Head | NO-GO |
 | Synchformer, Revision `b66668a1521d7567cc760e5544b2b5b53179b687` | Top-Level MIT | Externe Checkpoints ohne separaten Weight Grant; MotionFormer-Bestandteile überwiegend CC-NC 4.0 | Allgemeiner AV-Offset | NO-GO für Auslieferung |
 | SparseSync, Revision `a5bee8a047c0ebeec66b18d4ddf4c5f0ef098a4f` | Top-Level MIT | Externe Gewichte ohne getrennte Weight-Lizenz; YouTube-abgeleitete Daten | Allgemeiner AV-Offset | Legal Hold |
-| LatentSync, Code `a229c3948406bc2cf6eaf4873e662e70c6a04746`, HF `c42c7e6c8e9c213626389fa7d9a3c444b8536353` | Apache-2.0 Code | HF nur mit `openrail++`-Tag, ohne eindeutige Lizenzdatei je Auxiliary-Weight; VoxCeleb2/HDTF | Passender Sync-Head vorhanden | Legal Hold |
+| StableSyncNet aus LatentSync, Code `a229c3948406bc2cf6eaf4873e662e70c6a04746`, HF `c42c7e6c8e9c213626389fa7d9a3c444b8536353` | Apache-2.0 Code | 1,61-GB-Pickle mit OpenRAIL++-Tag; VoxCeleb2/HDTF-Provenienz und keine deutsche Validierung | Passender 16-Frame-Sync-Head vorhanden | Optionaler Research-Crosscheck nach Legal/FTO; nie alleiniger Produkt-Gate |
 | WAVE-7B, Code `9c87b5cbb4bf2ad8e21c8c9ca4a2f1f7af8e338b`, HF `7d51cdaecfaabb9c529a447249cd4c2a6df8ce5b` | Code und Weight-Tag Apache-2.0 | Trainingsdaten-/Basiskomponenten-Provenienz noch nicht vollständig auditiert | AV-Retrieval/QA, kein zeitlicher Lippenoffset | Code-/Weight-License-GO, Provenienz offen, funktionales NO-GO |
 
 ## Interne Spitzenkomparatoren
@@ -91,6 +93,12 @@ lokale Nachprüfung noch das Nutzungsrecht.
 - LatentSync: <https://github.com/bytedance/LatentSync/tree/a229c3948406bc2cf6eaf4873e662e70c6a04746> und
   <https://huggingface.co/ByteDance/LatentSync-1.6/tree/c42c7e6c8e9c213626389fa7d9a3c444b8536353>
 - WAVE-7B: <https://huggingface.co/tsinghua-ee/WAVE-7B/tree/7d51cdaecfaabb9c529a447249cd4c2a6df8ce5b>
+- Montreal Forced Aligner:
+  <https://github.com/MontrealCorpusTools/Montreal-Forced-Aligner> und
+  <https://mfa-models.readthedocs.io/en/latest/acoustic/German/German%20MFA%20acoustic%20model%20v3_0_0.html>
+- MediaPipe Face Landmarker:
+  <https://developers.google.com/mediapipe/solutions/vision/face_landmarker> und
+  <https://github.com/google-ai-edge/mediapipe>
 - LongCat-Video-Avatar 1.5 Code:
   <https://github.com/meituan-longcat/LongCat-Video/tree/6b3f4b8582a8bc3f20f795735f5383716c4ba794>
 - LongCat-Video-Avatar 1.5 Gewichte:
@@ -102,8 +110,30 @@ lokale Nachprüfung noch das Nutzungsrecht.
 
 ## Produktionsweg
 
-Der einzige derzeit belastbar prüfbare Zielpfad ist ein Eigenmodell. Er ist
-erst nach Abschluss aller folgenden Nachweise ein Produkt-GO:
+Der bevorzugte deutschsprachige Produktpfad ist ein deterministischer,
+CPU-begrenzter Zweistufen-Evaluator:
+
+1. Der exakt im Studio gebundene Zieldialog wird mit MFA German v3 gegen die
+   gerenderte 16-kHz-Spur ausgerichtet. ASR ersetzt den Zieltext dabei nicht.
+2. MediaPipe verfolgt Gesicht, Kopfpose, Mundlandmarks und Blendshapes pro
+   echtem Video-PTS. Telefonzeiten werden deterministisch auf sichtbare
+   Artikulationsklassen abgebildet.
+3. Persistiert werden mindestens `global_av_lag_ms`,
+   `bilabial_closure_f1` für `/p,b,m/`, Öffnungs-/Rundungs-Korrespondenz,
+   `speech_motion_recall`, `pause_leak_ratio`, Trackabdeckung, Kopfpose,
+   Unschärfe, Komponentenrevisionen und SHA-256.
+4. Zu wenig verwertbare Telefone, verlorener Gesichtstrack, Verdeckung,
+   Mehrsprecher oder außerhalb der Claim-Domain liegende Pose ergeben
+   `insufficient_evidence`, niemals einen scheinbar guten Wert.
+
+MFA-Attribution und die konkreten Rechte des MediaPipe-`.task`-Bundles müssen
+vor Installation und Product-GO archiviert werden. StableSyncNet darf nach
+separater OpenRAIL++-/Trainingsprovenienzfreigabe als isolierter,
+orchestrierter Research-Crosscheck hinzukommen; sein Pickle wird nur mit
+`weights_only=True` geladen und nie dauerhaft resident gehalten.
+
+Ein eigener gelernter Offset-/Inhaltsevaluator bleibt eine spätere Option. Er
+ist erst nach Abschluss aller folgenden Nachweise ein Produkt-GO:
 
 1. SyncNet-artige Architektur permissiv neu implementieren oder erlaubten
    MIT-Code ohne fremde Gewichte übernehmen.

@@ -573,7 +573,7 @@ test("objective speech analysis exposes raw measurements and honest capability g
     const body = route.request().postDataJSON();
     expect(body).toEqual({ force: false });
     output.analysis = {
-      schemaVersion: "ltx-studio-output-analysis.v6",
+      schemaVersion: "ltx-studio-output-analysis.v7",
       evaluatorFingerprint: "test-evaluator.v1",
       conditioningAudioSha256: null,
       expectedDialogueSha256: "2c8e99ff8edb6deec76583cf59599a09c471a38681ecec354522c045593d2852",
@@ -593,8 +593,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
       updatedAt: "2026-07-24T18:05:02.000Z",
       error: null,
       result: {
-        schemaVersion: "ltx-studio-objective-quality.v6",
-        analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6",
+        schemaVersion: "ltx-studio-objective-quality.v7",
+        analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv-artifact.v7",
         createdAt: "2026-07-24T18:05:02.000Z",
         status: "insufficient",
         technical: {
@@ -620,6 +620,13 @@ test("objective speech analysis exposes raw measurements and honest capability g
           mouthAngleMedianDegrees: 1.243,
           mouthAngleVelocityP95DegreesPerSecond: 33.019,
           mouthSpanCoefficientOfVariation: 0.024,
+          mouthSkinPairCount: 96,
+          mouthSkinPairCoverage: 1,
+          mouthSkinWarpResidualMedian: 0.018,
+          mouthSkinWarpResidualP95: 0.041,
+          mouthSkinLuminanceDeltaP95: 0.012,
+          mouthSkinFlowDeformationP95: 0.067,
+          mouthSkinValidPixelCoverageP10: 0.91,
         },
         identity: {
           status: "measured",
@@ -773,9 +780,12 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Rohversatz" }).locator("strong")).toHaveText("20 ms");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Korrelation" }).locator("strong")).toHaveText("0.351");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Identität p10" }).locator("strong")).toHaveText("0.849");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Mundhaut-Texturrest" }).locator("strong")).toHaveText("0.041");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Mundhaut-Flussdeformation" }).locator("strong")).toHaveText("0.067");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Mundhaut-Pixelabdeckung" }).locator("strong")).toHaveText("91 %");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Dialog-Wortfehlerrate" }).locator("strong")).toHaveText("13 %");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Wörter mit Mundbewegung" }).locator("strong")).toHaveText("100 %");
-  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(32);
+  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(37);
   const analysisPanelBox = await page.locator(".objective-analysis").boundingBox();
   expect(analysisPanelBox).not.toBeNull();
   for (const index of [0, 1]) {

@@ -35,6 +35,55 @@ export const faceTrackingMetricsSchema = z.object({
 
 export type FaceTrackingMetrics = z.infer<typeof faceTrackingMetricsSchema>;
 
+const faceTrackingMetricsV7BaseSchema = faceTrackingMetricsSchema.extend({
+  mouthSkinPairCount: z.number().int().min(0),
+  mouthSkinPairCoverage: z.number().finite().min(0).max(1),
+  mouthSkinWarpResidualMedian: z.number().finite().min(0).max(1).nullable(),
+  mouthSkinWarpResidualP95: z.number().finite().min(0).max(1).nullable(),
+  mouthSkinLuminanceDeltaP95: z.number().finite().min(0).max(1).nullable(),
+  mouthSkinFlowDeformationP95: nonNegativeNumber.nullable(),
+  mouthSkinValidPixelCoverageP10: z.number().finite().min(0).max(1).nullable(),
+}).strict();
+
+export const faceTrackingMetricsV7Schema = faceTrackingMetricsV7BaseSchema.superRefine((value, context) => {
+  const possiblePairs = Math.max(0, value.sampledFrames - 1);
+  if (value.mouthSkinPairCount > possiblePairs) {
+    context.addIssue({
+      code: "custom",
+      path: ["mouthSkinPairCount"],
+      message: "Mundhaut-Paarzahl darf sampledFrames - 1 nicht überschreiten.",
+    });
+  }
+  const expectedCoverage = possiblePairs === 0 ? 0 : value.mouthSkinPairCount / possiblePairs;
+  if (Math.abs(value.mouthSkinPairCoverage - expectedCoverage) > 1e-6) {
+    context.addIssue({
+      code: "custom",
+      path: ["mouthSkinPairCoverage"],
+      message: "Mundhaut-Paarabdeckung muss Paarzahl / (sampledFrames - 1) entsprechen.",
+    });
+  }
+  const measurements = [
+    ["mouthSkinWarpResidualMedian", value.mouthSkinWarpResidualMedian],
+    ["mouthSkinWarpResidualP95", value.mouthSkinWarpResidualP95],
+    ["mouthSkinLuminanceDeltaP95", value.mouthSkinLuminanceDeltaP95],
+    ["mouthSkinFlowDeformationP95", value.mouthSkinFlowDeformationP95],
+    ["mouthSkinValidPixelCoverageP10", value.mouthSkinValidPixelCoverageP10],
+  ] as const;
+  for (const [path, measurement] of measurements) {
+    if ((value.mouthSkinPairCount === 0) !== (measurement === null)) {
+      context.addIssue({
+        code: "custom",
+        path: [path],
+        message: value.mouthSkinPairCount === 0
+          ? "Ohne verwertbare Mundhaut-Paare muss der Messwert null sein."
+          : "Mit verwertbaren Mundhaut-Paaren muss der Messwert gesetzt sein.",
+      });
+    }
+  }
+});
+
+export type FaceTrackingMetricsV7 = z.infer<typeof faceTrackingMetricsV7Schema>;
+
 export const identityMetricsSchema = z.object({
   status: z.enum(["measured", "insufficient", "failed", "not-applicable", "reference-provenance-missing"]),
   error: z.string().min(1).max(500).nullable(),
@@ -157,7 +206,11 @@ export const objectiveBaseWorkerResultSchema = z.object({
   dialogue: dialogueEvaluationSchema,
 }).strict();
 
-export const objectiveWorkerResultSchema = objectiveBaseWorkerResultSchema.extend({
+export const objectiveBaseWorkerResultV7Schema = objectiveBaseWorkerResultSchema.extend({
+  face: faceTrackingMetricsV7Schema,
+}).strict();
+
+export const objectiveWorkerResultSchema = objectiveBaseWorkerResultV7Schema.extend({
   phonemeViseme: phonemeVisemeResultSchema,
 }).strict();
 
@@ -315,6 +368,12 @@ const objectiveQualityAnalysisV6Schema = objectiveQualityAnalysisV5Schema.extend
   }).strict(),
 }).strict();
 
+const objectiveQualityAnalysisV7Schema = objectiveQualityAnalysisV6Schema.extend({
+  schemaVersion: z.literal("ltx-studio-objective-quality.v7"),
+  analyzerVersion: z.literal("ffprobe-yunet5-sface-dual-avmotion-whisper-pv-artifact.v7"),
+  face: faceTrackingMetricsV7Schema,
+}).strict();
+
 export const objectiveQualityAnalysisSchema = z.union([
   objectiveQualityAnalysisV1Schema,
   objectiveQualityAnalysisV2Schema,
@@ -322,6 +381,7 @@ export const objectiveQualityAnalysisSchema = z.union([
   objectiveQualityAnalysisV4Schema,
   objectiveQualityAnalysisV5Schema,
   objectiveQualityAnalysisV6Schema,
+  objectiveQualityAnalysisV7Schema,
 ]);
 
 export type ObjectiveQualityAnalysis = z.infer<typeof objectiveQualityAnalysisSchema>;
@@ -389,6 +449,15 @@ const outputAnalysisRecordV6Schema = z.object({
   result: objectiveQualityAnalysisV6Schema.nullable(),
 }).strict();
 
+const outputAnalysisRecordV7Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v7"),
+  ...outputAnalysisRecordFields,
+  evaluatorFingerprint: z.string().min(1).max(512),
+  conditioningAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  expectedDialogueSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  result: objectiveQualityAnalysisV7Schema.nullable(),
+}).strict();
+
 export const outputAnalysisRecordSchema = z.union([
   outputAnalysisRecordV1Schema,
   outputAnalysisRecordV2Schema,
@@ -396,6 +465,7 @@ export const outputAnalysisRecordSchema = z.union([
   outputAnalysisRecordV4Schema,
   outputAnalysisRecordV5Schema,
   outputAnalysisRecordV6Schema,
+  outputAnalysisRecordV7Schema,
 ]);
 
 export type OutputAnalysisRecord = z.infer<typeof outputAnalysisRecordSchema>;

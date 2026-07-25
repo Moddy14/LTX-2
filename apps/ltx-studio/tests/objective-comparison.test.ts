@@ -191,6 +191,56 @@ describe("objective A/B comparison", () => {
     expect(metricTrend(lag)).toBe("neutral");
   });
 
+  it("compares uncalibrated mouth-skin stability only as neutral raw values", () => {
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    for (const candidate of [left, right]) {
+      const analysis = candidate.analysis as NonNullable<StudioOutput["analysis"]> & {
+        result: Record<string, unknown> & { face: Record<string, unknown> };
+      };
+      analysis.schemaVersion = "ltx-studio-output-analysis.v7";
+      analysis.result = {
+        ...analysis.result,
+        schemaVersion: "ltx-studio-objective-quality.v7",
+        analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv-artifact.v7",
+        face: {
+          ...analysis.result.face,
+          mouthSkinPairCount: 23,
+          mouthSkinPairCoverage: 1,
+          mouthSkinWarpResidualMedian: 0.02,
+          mouthSkinWarpResidualP95: candidate.name.startsWith("a") ? 0.08 : 0.03,
+          mouthSkinLuminanceDeltaP95: candidate.name.startsWith("a") ? 0.04 : 0.02,
+          mouthSkinFlowDeformationP95: candidate.name.startsWith("a") ? 0.09 : 0.04,
+          mouthSkinValidPixelCoverageP10: 0.9,
+        },
+      } as unknown as typeof analysis.result;
+    }
+    const warp = objectiveComparisonMetrics(left, right)
+      .find((metric) => metric.id === "mouth-skin-warp-residual")!;
+    const luminance = objectiveComparisonMetrics(left, right)
+      .find((metric) => metric.id === "mouth-skin-luminance-delta")!;
+    const deformation = objectiveComparisonMetrics(left, right)
+      .find((metric) => metric.id === "mouth-skin-flow-deformation")!;
+
+    expect(metricDelta(warp)).toBeCloseTo(-0.05);
+    expect(metricTrend(warp)).toBe("neutral");
+    expect(metricDelta(luminance)).toBeCloseTo(-0.02);
+    expect(metricTrend(luminance)).toBe("neutral");
+    expect(metricDelta(deformation)).toBeCloseTo(-0.05);
+    expect(metricTrend(deformation)).toBe("neutral");
+
+    const leftFace = (left.analysis!.result! as {
+      face: { mouthSkinPairCount: number; mouthSkinPairCoverage: number };
+    }).face;
+    leftFace.mouthSkinPairCount = 7;
+    leftFace.mouthSkinPairCoverage = 7 / 23;
+    const insufficientMetrics = objectiveComparisonMetrics(left, right);
+    expect(insufficientMetrics.find((metric) => metric.id === "mouth-skin-warp-residual")?.left).toBeNull();
+    expect(insufficientMetrics.find((metric) => metric.id === "mouth-skin-pair-coverage")?.left)
+      .toBeCloseTo((7 / 23) * 100);
+    expect(insufficientMetrics.find((metric) => metric.id === "mouth-skin-valid-pixels")?.left).toBe(90);
+  });
+
   it("does not color uncalibrated dialogue-motion proxies as improvements", () => {
     const left = output("a.mp4");
     const right = output("b.mp4");

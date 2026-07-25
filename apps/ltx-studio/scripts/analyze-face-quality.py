@@ -65,6 +65,216 @@ def coefficient_of_variation(values: list[float]) -> float | None:
     return float(math.sqrt(variance) / abs(center))
 
 
+def mouth_skin_stability(
+    tracked_candidates: list[dict[str, object]],
+    sampled_frames: int | None = None,
+) -> dict[str, object]:
+    """Measure raw lower-face texture consistency and local flow deformation."""
+    import cv2
+    import numpy as np
+
+    empty = {
+        "mouthSkinPairCount": 0,
+        "mouthSkinPairCoverage": 0.0,
+        "mouthSkinWarpResidualMedian": None,
+        "mouthSkinWarpResidualP95": None,
+        "mouthSkinLuminanceDeltaP95": None,
+        "mouthSkinFlowDeformationP95": None,
+        "mouthSkinValidPixelCoverageP10": None,
+    }
+    samples: list[tuple[int, float, object]] = []
+    for candidate in tracked_candidates:
+        patch = candidate.get("stabilized_patch")
+        sample_index = finite_number(candidate.get("sampleIndex"))
+        timestamp = finite_number(candidate.get("timestamp"))
+        if sample_index is None or timestamp is None or patch is None:
+            continue
+        array = np.asarray(patch)
+        if array.shape != (96, 96) or not bool(np.isfinite(array).all()):
+            continue
+        samples.append((int(sample_index), timestamp, array.astype(np.uint8, copy=False)))
+    inferred_frames = max((sample[0] for sample in samples), default=-1) + 1
+    possible_pairs = max(0, (sampled_frames if sampled_frames is not None else inferred_frames) - 1)
+    if possible_pairs == 0:
+        return empty
+
+    intervals = [
+        right[1] - left[1]
+        for left, right in zip(samples, samples[1:])
+        if right[0] == left[0] + 1 and right[1] > left[1]
+    ]
+    typical_interval = median(intervals)
+    if typical_interval is None:
+        return empty
+    max_interval = max(0.1, typical_interval * 2.5)
+
+    y_grid, x_grid = np.mgrid[0:96, 0:96].astype(np.float32)
+    outer = ((x_grid - 48.0) / 35.0) ** 2 + ((y_grid - 66.0) / 27.0) ** 2 <= 1.0
+    mouth_core = ((x_grid - 48.0) / 23.0) ** 2 + ((y_grid - 70.0) / 11.0) ** 2 <= 1.0
+    skin_ring = outer & ~mouth_core & (y_grid >= 39.0)
+    stable_face_support = (
+        (((x_grid - 48.0) / 39.0) ** 2 + ((y_grid - 49.0) / 44.0) ** 2 <= 1.0)
+        & ~mouth_core
+    )
+
+    warp_residuals: list[float] = []
+    luminance_deltas: list[float] = []
+    flow_deformations: list[float] = []
+    valid_pixel_coverages: list[float] = []
+    for (index_a, time_a, previous), (index_b, time_b, current) in zip(samples, samples[1:]):
+        if index_b != index_a + 1:
+            continue
+        elapsed = time_b - time_a
+        if elapsed <= 0 or elapsed > max_interval:
+            continue
+        previous_float = previous.astype(np.float32)
+        current_float = current.astype(np.float32)
+        backward_flow = cv2.calcOpticalFlowFarneback(
+            current,
+            previous,
+            None,
+            0.5,
+            3,
+            15,
+            3,
+            5,
+            1.2,
+            0,
+        )
+        forward_flow = cv2.calcOpticalFlowFarneback(
+            previous,
+            current,
+            None,
+            0.5,
+            3,
+            15,
+            3,
+            5,
+            1.2,
+            0,
+        )
+        if (
+            backward_flow.shape != (96, 96, 2)
+            or forward_flow.shape != (96, 96, 2)
+            or not bool(np.isfinite(backward_flow).all())
+            or not bool(np.isfinite(forward_flow).all())
+        ):
+            continue
+        map_x = x_grid + backward_flow[..., 0]
+        map_y = y_grid + backward_flow[..., 1]
+        source_skin = cv2.remap(
+            skin_ring.astype(np.uint8),
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        ) > 0
+        source_face_support = cv2.remap(
+            stable_face_support.astype(np.uint8),
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        ) > 0
+        sampled_forward_x = cv2.remap(
+            forward_flow[..., 0],
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        sampled_forward_y = cv2.remap(
+            forward_flow[..., 1],
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        roundtrip_error = np.sqrt(
+            (backward_flow[..., 0] + sampled_forward_x) ** 2
+            + (backward_flow[..., 1] + sampled_forward_y) ** 2
+        )
+        bounds_valid = (
+            (map_x >= 1.0)
+            & (map_x <= 94.0)
+            & (map_y >= 1.0)
+            & (map_y <= 94.0)
+            & (roundtrip_error <= 1.5)
+        )
+        raw_valid = skin_ring & source_skin & bounds_valid
+        valid = cv2.erode(
+            raw_valid.astype(np.uint8),
+            np.ones((3, 3), dtype=np.uint8),
+            iterations=1,
+        ) > 0
+        affine_valid = stable_face_support & source_face_support & bounds_valid
+        valid_pixels = int(np.count_nonzero(valid))
+        affine_pixels = int(np.count_nonzero(affine_valid))
+        if valid_pixels < 200 or affine_pixels < 500:
+            continue
+        warped_previous = cv2.remap(
+            previous_float,
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT_101,
+        )
+        luminance_delta = float(
+            abs(np.median(current_float[valid]) - np.median(warped_previous[valid]))
+            / 255.0
+        )
+        photometric_offset = float(np.median(current_float[valid] - warped_previous[valid]))
+        residual = np.abs(
+            current_float[valid] - np.clip(warped_previous[valid] + photometric_offset, 0, 255)
+        ) / 255.0
+        warp_residuals.append(float(np.percentile(residual, 95)))
+        luminance_deltas.append(luminance_delta)
+        affine_basis = np.column_stack((
+            np.ones(affine_pixels, dtype=np.float32),
+            x_grid[affine_valid],
+            y_grid[affine_valid],
+        ))
+        affine_x, *_ = np.linalg.lstsq(
+            affine_basis,
+            backward_flow[..., 0][affine_valid],
+            rcond=None,
+        )
+        affine_y, *_ = np.linalg.lstsq(
+            affine_basis,
+            backward_flow[..., 1][affine_valid],
+            rcond=None,
+        )
+        residual_flow_x = backward_flow[..., 0] - (
+            affine_x[0] + affine_x[1] * x_grid + affine_x[2] * y_grid
+        )
+        residual_flow_y = backward_flow[..., 1] - (
+            affine_y[0] + affine_y[1] * x_grid + affine_y[2] * y_grid
+        )
+        flow_x_dy, flow_x_dx = np.gradient(residual_flow_x)
+        flow_y_dy, flow_y_dx = np.gradient(residual_flow_y)
+        symmetric_xy = 0.5 * (flow_x_dy + flow_y_dx)
+        flow_deformation = np.sqrt(
+            flow_x_dx ** 2 + flow_y_dy ** 2 + 2.0 * symmetric_xy ** 2
+        )
+        flow_deformations.append(float(np.percentile(flow_deformation[valid], 95)))
+        valid_pixel_coverages.append(valid_pixels / int(np.count_nonzero(skin_ring)))
+
+    measured_pairs = len(warp_residuals)
+    return {
+        "mouthSkinPairCount": measured_pairs,
+        "mouthSkinPairCoverage": measured_pairs / possible_pairs,
+        "mouthSkinWarpResidualMedian": median(warp_residuals),
+        "mouthSkinWarpResidualP95": percentile(warp_residuals, 0.95),
+        "mouthSkinLuminanceDeltaP95": percentile(luminance_deltas, 0.95),
+        "mouthSkinFlowDeformationP95": percentile(flow_deformations, 0.95),
+        "mouthSkinValidPixelCoverageP10": percentile(valid_pixel_coverages, 0.10),
+    }
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -425,6 +635,7 @@ def analyze(
                     area_ratio = float(selected[2] * selected[3]) / max(float(width * height), 1.0)
                     face_areas.append(area_ratio)
                     tracked_candidates.append({
+                        "sampleIndex": sampled - 1,
                         "timestamp": timestamp,
                         "landmarks": points,
                         "confidence": float(selected[14]),
@@ -481,6 +692,7 @@ def analyze(
         "mouthAngleMedianDegrees": median([angle for _time, angle in mouth_angles]),
         "mouthAngleVelocityP95DegreesPerSecond": percentile(mouth_angle_velocities, 0.95),
         "mouthSpanCoefficientOfVariation": coefficient_of_variation(mouth_spans),
+        **mouth_skin_stability(tracked_candidates, sampled),
     }, tracked_candidates
 
 
@@ -795,6 +1007,7 @@ def face_metrics_from_tracked_candidates(
         "mouthAngleMedianDegrees": median([angle for _time, angle in mouth_angles]),
         "mouthAngleVelocityP95DegreesPerSecond": percentile(mouth_angle_velocities, 0.95),
         "mouthSpanCoefficientOfVariation": coefficient_of_variation(mouth_spans),
+        **mouth_skin_stability(tracked_candidates, sampled_frames),
     }
 
 
@@ -968,9 +1181,12 @@ def analyze_identity(
     output_similarities: list[float] = []
     output_embeddings: list[object] = []
     sampled_output_candidates = []
-    for frame, timestamp in iter_sampled_video_frames_with_time(video_path, max_frames):
+    for sample_index, (frame, timestamp) in enumerate(
+        iter_sampled_video_frames_with_time(video_path, max_frames)
+    ):
         candidates = detect_face_embeddings(detector, recognizer, frame)
         for candidate in candidates:
+            candidate["sampleIndex"] = sample_index
             candidate["timestamp"] = timestamp
         sampled_output_candidates.append(candidates)
     tracked_candidates, ambiguous_output_frames = track_output_identity(

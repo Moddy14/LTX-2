@@ -1,5 +1,6 @@
 import type { GenerationRequest } from "../shared/pipelines.js";
 import type { ObjectiveQualityAnalysis } from "../shared/objectiveQuality.js";
+import { mouthSkinMeasurementIsSufficient } from "../shared/mouthSkinSufficiency.js";
 import type { StudioOutput } from "../shared/outputs.js";
 import { generationRequestDiffPaths } from "../shared/experiments.js";
 
@@ -47,6 +48,11 @@ export function protocolOrderedComparisonOutputs(
 
 function completedResult(output: StudioOutput): ObjectiveQualityAnalysis | null {
   return output.analysis?.status === "completed" ? output.analysis.result : null;
+}
+
+function sufficientArtifactFace(result: ObjectiveQualityAnalysis) {
+  if (result.schemaVersion !== "ltx-studio-objective-quality.v7") return null;
+  return mouthSkinMeasurementIsSufficient(result.face) ? result.face : null;
 }
 
 const settingLabels: Record<string, string> = {
@@ -185,9 +191,11 @@ export function comparisonCompatibility(
     reasons.push("Evaluator-Fingerprints sind nicht identisch belegt.");
   }
   const leftDialogueSha = leftOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
+    || leftOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v7"
     ? leftOutput.analysis.expectedDialogueSha256
     : null;
   const rightDialogueSha = rightOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
+    || rightOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v7"
     ? rightOutput.analysis.expectedDialogueSha256
     : null;
   if ((leftDialogueSha || rightDialogueSha)
@@ -328,6 +336,14 @@ export function objectiveComparisonMetrics(
   const rightDialogue = "dialogue" in right && typeof right.dialogue === "object"
     ? right.dialogue
     : null;
+  const leftArtifactDiagnostics = left.schemaVersion === "ltx-studio-objective-quality.v7"
+    ? left.face
+    : null;
+  const rightArtifactDiagnostics = right.schemaVersion === "ltx-studio-objective-quality.v7"
+    ? right.face
+    : null;
+  const leftArtifactFace = sufficientArtifactFace(left);
+  const rightArtifactFace = sufficientArtifactFace(right);
 
   const metrics: ObjectiveComparisonMetric[] = [
     {
@@ -375,7 +391,7 @@ export function objectiveComparisonMetrics(
       right: right.face?.medianFaceAreaRatio === null || right.face?.medianFaceAreaRatio === undefined
         ? null
         : right.face.medianFaceAreaRatio * 100,
-      digits: 1,
+      digits: 3,
       unit: " %",
       direction: "neutral",
     },
@@ -384,7 +400,7 @@ export function objectiveComparisonMetrics(
       label: "Nasenbewegung p95",
       left: left.face?.noseVelocityP95PerSecond ?? null,
       right: right.face?.noseVelocityP95PerSecond ?? null,
-      digits: 3,
+      digits: 1,
       unit: " EA/s",
       direction: "lower",
     },
@@ -393,6 +409,57 @@ export function objectiveComparisonMetrics(
       label: "Mundbewegungsvariation",
       left: left.face?.mouthSpanCoefficientOfVariation ?? null,
       right: right.face?.mouthSpanCoefficientOfVariation ?? null,
+      digits: 3,
+      unit: "",
+      direction: "neutral",
+    },
+    {
+      id: "mouth-skin-pair-coverage",
+      label: "Mundhaut-Paarabdeckung",
+      left: leftArtifactDiagnostics ? leftArtifactDiagnostics.mouthSkinPairCoverage * 100 : null,
+      right: rightArtifactDiagnostics ? rightArtifactDiagnostics.mouthSkinPairCoverage * 100 : null,
+      digits: 1,
+      unit: " %",
+      direction: "neutral",
+    },
+    {
+      id: "mouth-skin-valid-pixels",
+      label: "Mundhaut-Pixelabdeckung p10",
+      left: leftArtifactDiagnostics?.mouthSkinValidPixelCoverageP10 === null
+        || leftArtifactDiagnostics?.mouthSkinValidPixelCoverageP10 === undefined
+        ? null
+        : leftArtifactDiagnostics.mouthSkinValidPixelCoverageP10 * 100,
+      right: rightArtifactDiagnostics?.mouthSkinValidPixelCoverageP10 === null
+        || rightArtifactDiagnostics?.mouthSkinValidPixelCoverageP10 === undefined
+        ? null
+        : rightArtifactDiagnostics.mouthSkinValidPixelCoverageP10 * 100,
+      digits: 1,
+      unit: " %",
+      direction: "neutral",
+    },
+    {
+      id: "mouth-skin-warp-residual",
+      label: "Mundhaut-Texturrest p95×p95",
+      left: leftArtifactFace?.mouthSkinWarpResidualP95 ?? null,
+      right: rightArtifactFace?.mouthSkinWarpResidualP95 ?? null,
+      digits: 3,
+      unit: "",
+      direction: "neutral",
+    },
+    {
+      id: "mouth-skin-luminance-delta",
+      label: "Mundhaut-Helligkeitsdelta p95",
+      left: leftArtifactFace?.mouthSkinLuminanceDeltaP95 ?? null,
+      right: rightArtifactFace?.mouthSkinLuminanceDeltaP95 ?? null,
+      digits: 3,
+      unit: "",
+      direction: "neutral",
+    },
+    {
+      id: "mouth-skin-flow-deformation",
+      label: "Mundhaut-Flussdeformation p95×p95",
+      left: leftArtifactFace?.mouthSkinFlowDeformationP95 ?? null,
+      right: rightArtifactFace?.mouthSkinFlowDeformationP95 ?? null,
       digits: 3,
       unit: "",
       direction: "neutral",
