@@ -69,6 +69,12 @@ import {
 } from "./inputEvidence.js";
 import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } from "./thermal.js";
 import { buildFinalAudioRemuxArgs } from "./audioRemux.js";
+import type { RunProvenance } from "../shared/provenance.js";
+import {
+  captureRunProvenance,
+  normalizeRunProvenance,
+  verifyRunProvenance,
+} from "./runProvenance.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -104,6 +110,7 @@ export type StudioJob = {
   thermalProfile: ThermalProfile | null;
   dgxJobId: string | null;
   identityEvidence: IdentityInputEvidence | null;
+  runProvenance: RunProvenance | null;
 };
 
 type RuntimeJob = StudioJob & {
@@ -142,6 +149,10 @@ type DgxQueueOperations = {
 };
 type DgxAdmissionOperations = {
   submit: typeof submitQueueAdmission;
+};
+type RunProvenanceOperations = {
+  capture: typeof captureRunProvenance;
+  verify: typeof verifyRunProvenance;
 };
 
 const MAX_JOBS = 100;
@@ -204,6 +215,27 @@ export function publishedOutputIsReusableLtxBase(
   target: GenerationRequest,
 ): boolean {
   return !source.audio.finalMix.path && requestsShareLtxBase(source, target);
+}
+
+export function runProvenanceSharesLtxBase(
+  source: RunProvenance | null,
+  target: RunProvenance | null,
+): boolean {
+  if (!source?.verifiedAt || !target?.verifiedAt) return false;
+  const ltxFiles = (evidence: RunProvenance) => evidence.files
+    .filter((file) =>
+      file.role !== "code:longcat-adapter"
+      && file.role !== "model:longcat-face-detector"
+      && file.role !== "input:final-audio-mix")
+    .map((file) => ({ role: file.role, sha256: file.sha256 }))
+    .sort((left, right) => left.role.localeCompare(right.role));
+  const ltxCode = (evidence: RunProvenance) => evidence.code
+    .filter((repository) => repository.repositoryRoot === repoRoot)
+    .map((repository) => repository.fingerprint);
+  return isDeepStrictEqual(ltxFiles(source), ltxFiles(target))
+    && isDeepStrictEqual(ltxCode(source), ltxCode(target))
+    && ltxCode(source).length === 1
+    && source.runtime.fingerprint === target.runtime.fingerprint;
 }
 
 export function resolveRenderOutputPaths(
@@ -449,6 +481,10 @@ export class JobManager extends EventEmitter {
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
       submit: submitQueueAdmission,
     },
+    private readonly runProvenanceOperations: RunProvenanceOperations = {
+      capture: captureRunProvenance,
+      verify: verifyRunProvenance,
+    },
   ) {
     super();
     this.restore();
@@ -500,6 +536,7 @@ export class JobManager extends EventEmitter {
       thermalProfile: null,
       dgxJobId: null,
       identityEvidence: null,
+      runProvenance: null,
       plan,
     };
     this.jobs.set(id, job);
@@ -670,6 +707,28 @@ export class JobManager extends EventEmitter {
     }
     this.changed();
 
+    try {
+      job.runProvenance = await this.runProvenanceOperations.capture(job.request, job.plan);
+    } catch (error) {
+      this.failJob(
+        job,
+        `Laufprovenienz konnte nicht vollständig gebunden werden: ${
+          error instanceof Error ? error.message : "unbekannter Fehler"
+        }`,
+      );
+      return;
+    }
+    if (jobWasCancelled(job)) {
+      this.changed();
+      return;
+    }
+    this.appendLog(
+      job,
+      `${job.runProvenance.files.length} verwendete Datei-/Modellartefakte sowie Code und Runtime kryptografisch gebunden `
+        + `(Manifest ${job.runProvenance.fingerprint.slice(0, 12)}).`,
+    );
+    this.changed();
+
     const stageRoot = join(hybridRoot, job.id);
     const longcatOutput = join(stageRoot, "longcat.mp4");
     const { ltxOutput, compositeOutput, remuxInput } = resolveRenderOutputPaths(
@@ -682,6 +741,7 @@ export class JobManager extends EventEmitter {
       mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
     }
     if (hybridEnabled) {
+      if (!await this.verifyJobRunProvenance(job, "vor der LongCat-Stufe")) return;
       if (!await this.verifyJobIdentityEvidence(job, "vor der LongCat-Stufe")) return;
       this.appendLog(
         job,
@@ -774,6 +834,14 @@ export class JobManager extends EventEmitter {
         await this.transitionDgxJob(job, "failed", {
           current_step: "identity reference changed before LTX allocation",
           last_error: job.error ?? "identity reference verification failed",
+        });
+        return;
+      }
+      if (!await this.verifyJobRunProvenance(job, "unmittelbar vor dem LTX-Start")) {
+        if (jobWasCancelled(job)) return;
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "run provenance changed before LTX allocation",
+          last_error: job.error ?? "run provenance verification failed",
         });
         return;
       }
@@ -968,8 +1036,17 @@ export class JobManager extends EventEmitter {
       }
       return;
     }
+    if (!await this.verifyJobRunProvenance(job, "nach der vollständigen Ausgabe")) {
+      if (!jobWasCancelled(job)) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "final run provenance verification failed",
+          last_error: job.error ?? "run provenance verification failed",
+        });
+      }
+      return;
+    }
     const completionMetadata: DgxTransitionMetadata = {
-      current_step: "all LTX Studio processing and identity verification completed",
+      current_step: "all LTX Studio processing, identity and run provenance verification completed",
       artifact: {
         type: "video",
         path: job.plan.outputPath,
@@ -1019,6 +1096,23 @@ export class JobManager extends EventEmitter {
     return true;
   }
 
+  private async verifyJobRunProvenance(job: RuntimeJob, context: string): Promise<boolean> {
+    if (!job.runProvenance) {
+      this.failJob(job, `Laufprovenienz ${context} fehlt.`);
+      return false;
+    }
+    const result = await this.runProvenanceOperations.verify(job.runProvenance, job.request);
+    if (jobWasCancelled(job)) return false;
+    job.runProvenance = result.evidence;
+    if (result.error) {
+      this.failJob(job, `Laufprovenienzprüfung ${context} fehlgeschlagen: ${result.error}`);
+      return false;
+    }
+    this.appendLog(job, `Gebundene Laufprovenienz ${context} unverändert verifiziert.`);
+    this.changed();
+    return true;
+  }
+
   private findReusableLtxBase(job: RuntimeJob): RuntimeJob | undefined {
     return [...this.jobs.values()].find((candidate) =>
       candidate.id !== job.id
@@ -1026,6 +1120,7 @@ export class JobManager extends EventEmitter {
       && !candidate.request.postprocess.longcatLipsync.enabled
       && publishedOutputIsReusableLtxBase(candidate.request, job.request)
       && this.identityEvidenceMatches(candidate.identityEvidence, job.identityEvidence)
+      && runProvenanceSharesLtxBase(candidate.runProvenance, job.runProvenance)
       && this.fileReady(candidate.plan.outputPath));
   }
 
@@ -1820,6 +1915,7 @@ export class JobManager extends EventEmitter {
             ? normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery)
             : undefined,
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
+          runProvenance: normalizeRunProvenance(entry.runProvenance),
           plan,
         });
       }

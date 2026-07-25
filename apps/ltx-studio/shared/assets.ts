@@ -1,5 +1,16 @@
+import type { ProvenanceFileEvidence } from "./provenance.js";
+
 export const assetKinds = ["image", "video", "audio", "mask"] as const;
 export type AssetKind = (typeof assetKinds)[number];
+
+export type AssetDerivation = {
+  schemaVersion: "ltx-studio-asset-derivation.v1";
+  operation: "lipdub-reference-prepare" | "image-face-crop";
+  source: ProvenanceFileEvidence;
+  parameters: Record<string, string | number | boolean | null>;
+  command: string | null;
+  createdAt: string;
+};
 
 export type StudioAsset = {
   id: string;
@@ -9,4 +20,5 @@ export type StudioAsset = {
   kind: AssetKind;
   url: string;
   createdAt: string;
+  derivation?: AssetDerivation | null;
 };

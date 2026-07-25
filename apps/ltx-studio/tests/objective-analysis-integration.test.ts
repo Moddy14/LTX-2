@@ -99,6 +99,7 @@ const syntheticWorkerResult: ObjectiveWorkerResult = {
     windowLagIqrMilliseconds: null,
     nullP95Correlation: null,
   },
+  conditioningAvSync: null,
   phonemeViseme: unavailablePhonemeVisemeResult(),
 };
 const syntheticBaseWorkerResult = {
@@ -106,6 +107,7 @@ const syntheticBaseWorkerResult = {
   face: syntheticWorkerResult.face,
   identity: syntheticWorkerResult.identity,
   avSync: syntheticWorkerResult.avSync,
+  conditioningAvSync: syntheticWorkerResult.conditioningAvSync,
 };
 
 afterEach(async () => {
@@ -140,6 +142,7 @@ function job(
     dgxJobId: null,
     thermalProfile: null,
     identityEvidence: null,
+    runProvenance: null,
   };
 }
 
@@ -641,7 +644,7 @@ integrationIt("replaces a completed v3 cache even with current SFace and AV prep
   manager.cancel(outputName, fresh.analysisId);
 }, 20_000);
 
-integrationIt("reuses a completed v4 cache when SFace and evaluator configuration are current", async () => {
+integrationIt("reuses a completed v5 cache when SFace and evaluator configuration are current", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-current-cache-"));
   roots.push(root);
   const outputName = "current-v4-cache.mp4";
@@ -655,8 +658,9 @@ integrationIt("reuses a completed v4 cache when SFace and evaluator configuratio
   const timestamp = "2026-07-24T18:33:00.000Z";
   const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918883";
   writeOutputAnalysis(root, {
-    schemaVersion: "ltx-studio-output-analysis.v4",
+    schemaVersion: "ltx-studio-output-analysis.v5",
     evaluatorFingerprint: "manifest-missing.v1",
+    conditioningAudioSha256: null,
     outputName,
     sizeBytes: target.sizeBytes,
     modifiedAtMs: target.modifiedAtMs,
@@ -685,7 +689,7 @@ integrationIt("reuses a completed v4 cache when SFace and evaluator configuratio
   expect(reused.status).toBe("completed");
 }, 20_000);
 
-integrationIt("invalidates a v4 cache when only the evaluator fingerprint changes", async () => {
+integrationIt("invalidates a v5 cache when only the evaluator fingerprint changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-pv-cache-"));
   roots.push(root);
   const outputName = "pv-manifest-cache.mp4";
@@ -699,8 +703,9 @@ integrationIt("invalidates a v4 cache when only the evaluator fingerprint change
   const timestamp = "2026-07-24T18:34:00.000Z";
   const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918884";
   writeOutputAnalysis(root, {
-    schemaVersion: "ltx-studio-output-analysis.v4",
+    schemaVersion: "ltx-studio-output-analysis.v5",
     evaluatorFingerprint: "manifest-missing.v1",
+    conditioningAudioSha256: null,
     outputName,
     sizeBytes: target.sizeBytes,
     modifiedAtMs: target.modifiedAtMs,

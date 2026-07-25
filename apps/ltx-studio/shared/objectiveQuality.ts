@@ -152,6 +152,7 @@ export const objectiveBaseWorkerResultSchema = z.object({
   face: faceTrackingMetricsSchema,
   identity: identityMetricsSchema,
   avSync: avSyncRawMetricsSchema,
+  conditioningAvSync: avSyncRawMetricsSchema.nullable(),
 }).strict();
 
 export const objectiveWorkerResultSchema = objectiveBaseWorkerResultSchema.extend({
@@ -283,11 +284,26 @@ const objectiveQualityAnalysisV4Schema = z.object({
   limitations: z.array(z.string().min(1).max(500)).min(1).max(20),
 }).strict();
 
+const objectiveQualityAnalysisV5Schema = objectiveQualityAnalysisV4Schema.extend({
+  schemaVersion: z.literal("ltx-studio-objective-quality.v5"),
+  analyzerVersion: z.literal("ffprobe-yunet5-sface-dual-avmotion-pv.v5"),
+  conditioningAvSync: avSyncRawMetricsSchema.nullable(),
+  capabilities: objectiveQualityAnalysisV4Schema.shape.capabilities.extend({
+    conditioningAvSync: z.enum([
+      "classical-av-raw-measured",
+      "classical-av-insufficient",
+      "classical-av-failed",
+      "provenance-unavailable",
+    ]),
+  }).strict(),
+}).strict();
+
 export const objectiveQualityAnalysisSchema = z.union([
   objectiveQualityAnalysisV1Schema,
   objectiveQualityAnalysisV2Schema,
   objectiveQualityAnalysisV3Schema,
   objectiveQualityAnalysisV4Schema,
+  objectiveQualityAnalysisV5Schema,
 ]);
 
 export type ObjectiveQualityAnalysis = z.infer<typeof objectiveQualityAnalysisSchema>;
@@ -338,11 +354,20 @@ const outputAnalysisRecordV4Schema = z.object({
   result: objectiveQualityAnalysisV4Schema.nullable(),
 }).strict();
 
+const outputAnalysisRecordV5Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v5"),
+  ...outputAnalysisRecordFields,
+  evaluatorFingerprint: z.string().min(1).max(512),
+  conditioningAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  result: objectiveQualityAnalysisV5Schema.nullable(),
+}).strict();
+
 export const outputAnalysisRecordSchema = z.union([
   outputAnalysisRecordV1Schema,
   outputAnalysisRecordV2Schema,
   outputAnalysisRecordV3Schema,
   outputAnalysisRecordV4Schema,
+  outputAnalysisRecordV5Schema,
 ]);
 
 export type OutputAnalysisRecord = z.infer<typeof outputAnalysisRecordSchema>;

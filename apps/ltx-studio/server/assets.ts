@@ -1,8 +1,14 @@
 import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, resolve, sep } from "node:path";
 
-import { assetKinds, type AssetKind, type StudioAsset } from "../shared/assets.js";
+import {
+  assetKinds,
+  type AssetDerivation,
+  type AssetKind,
+  type StudioAsset,
+} from "../shared/assets.js";
 import { assetsStatePath, uploadRoot } from "./config.js";
+import { normalizeProvenanceFileEvidence } from "./runProvenance.js";
 
 export type AssetFile = Pick<Express.Multer.File, "filename" | "path" | "originalname" | "size">;
 
@@ -32,7 +38,7 @@ export class AssetStore {
     return asset?.kind === kind ? asset : null;
   }
 
-  add(file: AssetFile, kind: AssetKind): StudioAsset {
+  add(file: AssetFile, kind: AssetKind, derivation: AssetDerivation | null = null): StudioAsset {
     const id = file.filename.replace(/\.[^.]+$/, "");
     const asset: StudioAsset = {
       id,
@@ -42,6 +48,7 @@ export class AssetStore {
       kind,
       url: `/api/uploads/${kind}/${file.filename}`,
       createdAt: new Date().toISOString(),
+      derivation,
     };
     this.assets.set(id, asset);
     this.persist();
@@ -77,10 +84,42 @@ export class AssetStore {
           || asset.url !== `/api/uploads/${asset.kind}/${filename}`
           || !existsSync(resolvedPath)
           || !statSync(resolvedPath).isFile()) continue;
-        this.assets.set(asset.id, asset);
+        const derivation = normalizeAssetDerivation(asset.derivation);
+        if (asset.derivation !== undefined && asset.derivation !== null && !derivation) continue;
+        this.assets.set(asset.id, {
+          ...asset,
+          derivation,
+        });
       }
     } catch {
       // Invalid metadata never blocks uploads or the studio itself.
     }
   }
+}
+
+function normalizeAssetDerivation(value: unknown): AssetDerivation | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object") return null;
+  const item = value as Partial<AssetDerivation>;
+  const source = normalizeProvenanceFileEvidence(item.source);
+  const operation = item.operation;
+  if (item.schemaVersion !== "ltx-studio-asset-derivation.v1"
+    || (operation !== "lipdub-reference-prepare" && operation !== "image-face-crop")
+    || !source
+    || item.parameters === null
+    || typeof item.parameters !== "object"
+    || Array.isArray(item.parameters)
+    || !Object.values(item.parameters).every((entry) =>
+      entry === null || ["string", "number", "boolean"].includes(typeof entry))
+    || (item.command !== null && typeof item.command !== "string")
+    || typeof item.createdAt !== "string"
+    || !Number.isFinite(Date.parse(item.createdAt))) return null;
+  return {
+    schemaVersion: item.schemaVersion,
+    operation,
+    source,
+    parameters: structuredClone(item.parameters),
+    command: item.command,
+    createdAt: item.createdAt,
+  };
 }

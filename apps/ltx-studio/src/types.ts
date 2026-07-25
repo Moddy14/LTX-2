@@ -1,5 +1,6 @@
 import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines";
 import type { StudioAsset } from "../shared/assets";
+import type { RunProvenance } from "../shared/provenance";
 export type { StudioOutput } from "../shared/outputs";
 export type { ResourceEstimate } from "../shared/estimates";
 export type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models";
@@ -58,6 +59,7 @@ export type StudioJob = {
     resumeBelowC: number;
     updatedAt: string;
   } | null;
+  runProvenance?: RunProvenance | null;
 };
 
 export type StudioConfig = {

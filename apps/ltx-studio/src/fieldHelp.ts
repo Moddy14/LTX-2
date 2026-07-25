@@ -32,7 +32,7 @@ export const fieldHelp = {
   audioDuration:
     "Wofür: Begrenzt den verwendeten Audioausschnitt. Empfehlung: leer für automatische Dauer oder eine positive Sekundenangabe passend zur gewünschten Szene.",
   lipDubReferenceStrength:
-    "Wofür: Gewichtet, wie stark das Referenzvideo Bewegung, Timing und Mundführung vorgibt. Empfehlung: mit 1,0 starten; bei zu starrer Kopplung auf 0,7 bis 0,9 senken.",
+    "Wofür: Gewichtet die eingefrorenen Video- und Audio-Referenztokens des offiziellen LipDub-Modells. Das bindet den Referenzclip insgesamt, steuert aber weder Mundform noch Zeitversatz unabhängig oder garantiert deren Übernahme. Empfehlung: mit 1,0 starten und Änderungen nur mit demselben Kalibrierclip objektiv vergleichen.",
   lipDubCalibrationClip:
     "Wofür: Schneidet zuerst einen kurzen, reproduzierbaren Testausschnitt und normalisiert Video und Audio gemeinsam. Empfehlung: eingeschaltet lassen, bis LipSync, Identität und Referenzstärke mit einem 2- bis 5-Sekunden-Clip stimmen.",
   lipDubCalibrationStart:
@@ -193,6 +193,8 @@ export const fieldHelp = {
     "Wofür: Differenz zwischen messbarer Audio- und Videospurdauer. Gut für den technischen Vertrag: höchstens 40 ms. Fehlt eine echte Audiodauer, bleibt der Wert ausdrücklich nicht messbar.",
   objectiveAvMotionLag:
     "Wofür: Grobe Verzögerung am stärksten gemeinsamen Audio-Onset-/Mundbewegungssignal. Positiv bedeutet, dass die sichtbare Mundbewegung dem Audio folgt; negativ bedeutet, dass sie vorausläuft. Nur bei demselben Testclip vergleichen. Das ist keine Phonem- oder Visemprüfung.",
+  objectiveConditioningAvMotionLag:
+    "Wofür: Grobe Verzögerung zwischen der während der Generierung verwendeten, kryptografisch gebundenen Konditionierungs-Sprachspur und der Mundbewegung. Die eingestellte Quellstartzeit und Maximaldauer werden identisch ausgeschnitten. Positiv bedeutet Mund folgt Audio; negativ bedeutet Mund läuft voraus. Keine Phonem-/Visemprüfung.",
   objectiveAvMotionCorrelation:
     "Wofür: Pearson-Korrelation am besten gefundenen Versatz zwischen Audio-Onsets und stabilisierter Mundbewegung. Höher bedeutet ein klareres gemeinsames Bewegungssignal, nicht automatisch bessere LipSync-Qualität. Musik und Lichtwechsel können den Wert verfälschen.",
   objectiveAvMotionProminence:
@@ -223,6 +225,18 @@ export const fieldHelp = {
     "Wofür: Kalibrierte Sicherheit der gelernten Offsetentscheidung. Gut ist nicht einfach ein hoher Rohwert, sondern eine auf unabhängigem Holdout bestandene FAR-/FRR-, Brier- und ECE-Kalibration.",
   objectivePvFrameMacroF1:
     "Wofür: Übereinstimmung der 15 sichtbaren Visemklassen zwischen Audioinhalt und Mundframes, gemittelt über Nicht-Stille-Klassen. Product-GO verlangt mindestens 0,85 insgesamt, 0,75 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
+  objectiveProvenanceFingerprint:
+    "Wofür: SHA-256-Fingerabdruck des gesamten Laufmanifests. Er bindet verwendete Modelldateien, Eingaben, Code-Repositories und Runtime-Versionen. Nur identische Fingerprints beschreiben exakt denselben technischen Ausgangszustand.",
+  objectiveProvenanceVerified:
+    "Wofür: Zeitpunkt der letzten Prüfung nach dem vollständigen Render und allen Nachbearbeitungen. Nein bedeutet, dass die Ausgabe keine abgeschlossene Ende-zu-Ende-Verifikation besitzt und nicht als reproduzierbarer Vergleichslauf gelten darf.",
+  objectiveProvenanceModels:
+    "Wofür: Anzahl der tatsächlich vom Command-Plan referenzierten, inhaltsgehashten Modellartefakte oder Modellmanifeste. Ein Gemma-Verzeichnis zählt als ein Manifest mit allen referenzierten Shards.",
+  objectiveProvenanceInputs:
+    "Wofür: Anzahl der kryptografisch gebundenen Eingabedateien, etwa Konditionierungs-Audio, Endmix, Referenzbild oder Referenzvideo. Abgeleitete Studio-Assets besitzen zusätzlich ihre eigene Quell- und Transformationskette.",
+  objectiveProvenanceCode:
+    "Wofür: Bindet Commit, getrackten Diff und ungetrackte Dateien jedes verwendeten Code-Repositories. Ein gebundener Diff ist reproduzierbar dokumentiert, aber kein sauberer Release-Commit.",
+  objectiveProvenanceRuntime:
+    "Wofür: SHA-256-Fingerabdruck aus Betriebssystem, Kernel, Node, Python, FFmpeg und den relevanten Python-Paketversionen. A/B-Vergleiche werden bei unterschiedlichen Runtime-Fingerprints absichtlich nicht als direkt vergleichbar bewertet.",
   objectivePvTransitionF1:
     "Wofür: Übereinstimmung sichtbarer Visemwechsel mit einer Toleranz von einem Videoframe. Product-GO verlangt mindestens 0,90 insgesamt, 0,80 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
 } as const;

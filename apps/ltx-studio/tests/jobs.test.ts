@@ -13,12 +13,14 @@ import {
   PipelineProgressTracker,
   progressFromPipelineLog,
   publishedOutputIsReusableLtxBase,
+  runProvenanceSharesLtxBase,
   requestsShareLtxBase,
   resolveRenderOutputPaths,
 } from "../server/jobs.js";
-import { hybridRoot } from "../server/config.js";
+import { hybridRoot, repoRoot } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
 import type { ResourceSnapshot } from "../server/system.js";
+import type { RunProvenance } from "../shared/provenance.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -31,6 +33,59 @@ async function statePath(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "ltx-jobs-"));
   roots.push(root);
   return join(root, "jobs.json");
+}
+
+function runProvenance(
+  overrides: {
+    modelSha?: string;
+    runtimeSha?: string;
+    codeSha?: string;
+    verified?: boolean;
+    includeLongCat?: boolean;
+    includeFinalMix?: boolean;
+  } = {},
+): RunProvenance {
+  const file = (role: string, sha256: string) => ({
+    role,
+    path: `/evidence/${role.replaceAll(":", "-")}`,
+    kind: "file" as const,
+    sizeBytes: 1,
+    modifiedAtMs: 1,
+    changedAtMs: 1,
+    fileId: "1",
+    sha256,
+    entries: [],
+  });
+  return {
+    schemaVersion: "ltx-studio-run-provenance.v1",
+    capturedAt: "2026-07-25T00:00:00.000Z",
+    verifiedAt: overrides.verified === false ? null : "2026-07-25T00:01:00.000Z",
+    files: [
+      file("model:checkpoint:1", overrides.modelSha ?? "a".repeat(64)),
+      ...(overrides.includeLongCat ? [file("code:longcat-adapter", "d".repeat(64))] : []),
+      ...(overrides.includeFinalMix ? [file("input:final-audio-mix", "e".repeat(64))] : []),
+    ],
+    code: [{
+      repositoryRoot: repoRoot,
+      commit: "a".repeat(40),
+      dirty: false,
+      trackedDiffSha256: "b".repeat(64),
+      untracked: [],
+      fingerprint: overrides.codeSha ?? "c".repeat(64),
+    }],
+    runtime: {
+      platform: "linux",
+      architecture: "arm64",
+      kernelRelease: "test",
+      nodeVersion: "test",
+      pythonExecutable: "/python",
+      pythonVersion: "test",
+      packages: {},
+      ffmpegVersion: "test",
+      fingerprint: overrides.runtimeSha ?? "f".repeat(64),
+    },
+    fingerprint: "0".repeat(64),
+  };
 }
 
 describe("job persistence and reservations", () => {
@@ -48,6 +103,19 @@ describe("job persistence and reservations", () => {
     expect(publishedOutputIsReusableLtxBase(original, hybrid)).toBe(true);
     hybrid.seed += 1;
     expect(requestsShareLtxBase(original, hybrid)).toBe(false);
+  });
+
+  it("reuses a rendered LTX base only with matching verified model, code, and runtime provenance", () => {
+    const baseline = runProvenance();
+    expect(runProvenanceSharesLtxBase(
+      runProvenance({ includeFinalMix: true }),
+      runProvenance({ includeLongCat: true }),
+    )).toBe(true);
+    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ modelSha: "1".repeat(64) }))).toBe(false);
+    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ codeSha: "2".repeat(64) }))).toBe(false);
+    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ runtimeSha: "3".repeat(64) }))).toBe(false);
+    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ verified: false }))).toBe(false);
+    expect(runProvenanceSharesLtxBase(null, baseline)).toBe(false);
   });
 
   it("keeps every pre-remux video outside the public output path", () => {

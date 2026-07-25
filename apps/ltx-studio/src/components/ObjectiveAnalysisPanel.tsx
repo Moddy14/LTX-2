@@ -46,15 +46,25 @@ export function ObjectiveAnalysisPanel({
   const identity = result?.schemaVersion === "ltx-studio-objective-quality.v2"
     || result?.schemaVersion === "ltx-studio-objective-quality.v3"
     || result?.schemaVersion === "ltx-studio-objective-quality.v4"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v5"
     ? result.identity
     : null;
   const avSync = result?.schemaVersion === "ltx-studio-objective-quality.v3"
     || result?.schemaVersion === "ltx-studio-objective-quality.v4"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v5"
     ? result.avSync
     : null;
+  const conditioningAvSync = result?.schemaVersion === "ltx-studio-objective-quality.v5"
+    ? result.conditioningAvSync
+    : null;
   const phonemeViseme = result?.schemaVersion === "ltx-studio-objective-quality.v4"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v5"
     ? result.phonemeViseme
     : null;
+  const provenance = output.provenance;
+  const provenanceModelCount = provenance?.files.filter((file) => file.role.startsWith("model:")).length ?? 0;
+  const provenanceInputCount = provenance?.files.filter((file) => file.role.startsWith("input:")).length ?? 0;
+  const dirtyCodeCount = provenance?.code.filter((repository) => repository.dirty).length ?? 0;
   const showIdentityMetrics = identity && ["measured", "insufficient"].includes(identity.status);
   const statusLabel = analysis?.status === "completed"
     ? result?.status === "measured" ? "Rohwerte erfasst" : "Messung unzureichend"
@@ -138,34 +148,58 @@ export function ObjectiveAnalysisPanel({
               " ms",
               0,
             )} help={fieldHelp.objectiveAvDurationDelta} />
+            {conditioningAvSync ? (
+              <>
+                <MetricRow label="Kond.-AV-Rohversatz" value={metricWithUnit(
+                  conditioningAvSync.estimatedAudioLeadMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveConditioningAvMotionLag} />
+                <MetricRow label="Kond.-AV-Korrelation" value={metricWithUnit(
+                  conditioningAvSync.correlationPeak,
+                  "",
+                  3,
+                )} help={fieldHelp.objectiveAvMotionCorrelation} />
+                <MetricRow label="Kond.-Nullmodell p95" value={metricWithUnit(
+                  conditioningAvSync.nullP95Correlation,
+                  "",
+                  3,
+                )} help={fieldHelp.objectiveAvNullP95} />
+                <MetricRow label="Kond.-Fenster-Lag-IQR" value={metricWithUnit(
+                  conditioningAvSync.windowLagIqrMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveAvWindowIqr} />
+              </>
+            ) : null}
             {avSync ? (
               <>
-                <MetricRow label="AV-Rohversatz" value={metricWithUnit(
+                <MetricRow label="Endmix-AV-Rohversatz" value={metricWithUnit(
                   avSync.estimatedAudioLeadMilliseconds,
                   " ms",
                   0,
                 )} help={fieldHelp.objectiveAvMotionLag} />
-                <MetricRow label="AV-Zeitauflösung" value={metricWithUnit(
+                <MetricRow label="Endmix-AV-Zeitauflösung" value={metricWithUnit(
                   avSync.lagResolutionMilliseconds,
                   " ms",
                   0,
                 )} help={fieldHelp.objectiveAvResolution} />
-                <MetricRow label="AV-Korrelation" value={metricWithUnit(
+                <MetricRow label="Endmix-AV-Korrelation" value={metricWithUnit(
                   avSync.correlationPeak,
                   "",
                   3,
                 )} help={fieldHelp.objectiveAvMotionCorrelation} />
-                <MetricRow label="Nullmodell p95" value={metricWithUnit(
+                <MetricRow label="Endmix-Nullmodell p95" value={metricWithUnit(
                   avSync.nullP95Correlation,
                   "",
                   3,
                 )} help={fieldHelp.objectiveAvNullP95} />
-                <MetricRow label="AV-Prominenz" value={metricWithUnit(
+                <MetricRow label="Endmix-AV-Prominenz" value={metricWithUnit(
                   avSync.peakProminence,
                   "",
                   3,
                 )} help={fieldHelp.objectiveAvMotionProminence} />
-                <MetricRow label="AV-Peakbreite" value={metricWithUnit(
+                <MetricRow label="Endmix-AV-Peakbreite" value={metricWithUnit(
                   avSync.peakWidthMilliseconds,
                   " ms",
                   0,
@@ -220,7 +254,14 @@ export function ObjectiveAnalysisPanel({
             ) : null}
           </div>
           <div className="objective-analysis__capabilities">
-            <span>AV-Sync <strong>{avSync?.status === "measured"
+            <span>Konditionierungs-AV <strong>{conditioningAvSync?.status === "measured"
+              ? "Rohproxy, Phonem offen"
+              : conditioningAvSync?.status === "failed"
+                ? "Proxy-Fehler"
+                : conditioningAvSync?.status === "insufficient"
+                  ? "Proxy unzureichend"
+                  : "Provenienz fehlt"}</strong></span>
+            <span>Endmix-AV <strong>{avSync?.status === "measured"
               ? "Rohproxy, Phonem offen"
               : avSync?.status === "failed"
                 ? "Proxy-Fehler"
@@ -271,6 +312,46 @@ export function ObjectiveAnalysisPanel({
             {result.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
           </details>
         </>
+      ) : null}
+
+      {provenance ? (
+        <details className="objective-analysis__limitations">
+          <summary>Laufprovenienz</summary>
+          <div className="objective-analysis__metrics" aria-label="Laufprovenienz">
+            <MetricRow
+              label="Manifest"
+              value={provenance.fingerprint}
+              help={fieldHelp.objectiveProvenanceFingerprint}
+            />
+            <MetricRow
+              label="Nach Render verifiziert"
+              value={provenance.verifiedAt ? new Date(provenance.verifiedAt).toLocaleString("de-AT") : "Nein"}
+              help={fieldHelp.objectiveProvenanceVerified}
+            />
+            <MetricRow
+              label="Gebundene Modelle"
+              value={String(provenanceModelCount)}
+              help={fieldHelp.objectiveProvenanceModels}
+            />
+            <MetricRow
+              label="Gebundene Eingaben"
+              value={String(provenanceInputCount)}
+              help={fieldHelp.objectiveProvenanceInputs}
+            />
+            <MetricRow
+              label="Codezustand"
+              value={dirtyCodeCount === 0
+                ? `${provenance.code.length} Repository(s), sauber`
+                : `${dirtyCodeCount} von ${provenance.code.length} Repository(s) mit gebundenem Diff`}
+              help={fieldHelp.objectiveProvenanceCode}
+            />
+            <MetricRow
+              label="Runtime"
+              value={provenance.runtime.fingerprint}
+              help={fieldHelp.objectiveProvenanceRuntime}
+            />
+          </div>
+        </details>
       ) : null}
 
       {analysis?.error ? (

@@ -816,6 +816,66 @@ test("two completed jobs provide a gated objective comparison with synchronized 
     job("11111111-1111-4111-8111-111111111111", leftRequest),
     job("22222222-2222-4222-8222-222222222222", rightRequest),
   ];
+  const provenance = {
+    schemaVersion: "ltx-studio-run-provenance.v1",
+    capturedAt: "2026-07-25T00:00:00.000Z",
+    verifiedAt: "2026-07-25T00:10:00.000Z",
+    files: [
+      {
+        role: "input:conditioning-audio",
+        path: "/inputs/clean-vocals.wav",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "1",
+        sha256: "a".repeat(64),
+        entries: [],
+      },
+      {
+        role: "input:final-audio-mix",
+        path: "/inputs/final-mix.wav",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "2",
+        sha256: "b".repeat(64),
+        entries: [],
+      },
+      {
+        role: "input:reference-image:3",
+        path: "/inputs/reference.png",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "3",
+        sha256: "c".repeat(64),
+        entries: [],
+      },
+    ],
+    code: [{
+      repositoryRoot: "/repo",
+      commit: "d".repeat(40),
+      dirty: false,
+      trackedDiffSha256: "e".repeat(64),
+      untracked: [],
+      fingerprint: "f".repeat(64),
+    }],
+    runtime: {
+      platform: "linux",
+      architecture: "arm64",
+      kernelRelease: "test",
+      nodeVersion: "test",
+      pythonExecutable: "/python",
+      pythonVersion: "3.12",
+      packages: {},
+      ffmpegVersion: "test",
+      fingerprint: "1".repeat(64),
+    },
+    fingerprint: "2".repeat(64),
+  };
   const outputs = jobs.map((currentJob, index) => ({
     name: currentJob.outputName,
     url: currentJob.outputUrl,
@@ -829,6 +889,7 @@ test("two completed jobs provide a gated objective comparison with synchronized 
     settingsAvailable: true,
     qualityReview: null,
     analysis: analysis(index === 0 ? 0.842 : 0.855, index === 0 ? -333 : -42),
+    provenance,
   }));
 
   await page.route(/\/api\/jobs(?:\?.*)?$/, (route) => route.fulfill({

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   objectiveBaseWorkerResultSchema,
@@ -32,6 +32,7 @@ import {
   type PhonemeVisemeEvaluatorState,
 } from "./evaluatorManifest.js";
 import { OutputLibrary, OutputQualityError, type OutputAnalysisTarget } from "./outputs.js";
+import { verifyProvenanceFileEvidence } from "./runProvenance.js";
 
 const MAX_STDOUT_BYTES = 256 * 1024;
 const MAX_STDERR_BYTES = 32 * 1024;
@@ -56,7 +57,7 @@ type OutputAnalysisManagerOptions = {
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
-  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v4" }>;
+  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v5" }>;
   evaluatorState: PhonemeVisemeEvaluatorState;
 };
 
@@ -67,11 +68,13 @@ function analysisWasCancelled(task: AnalysisTask): boolean {
 function completedAnalysisIsCurrent(
   record: OutputAnalysisRecord,
   evaluatorState: PhonemeVisemeEvaluatorState,
+  target: OutputAnalysisTarget,
 ): boolean {
   if (record.status !== "completed"
-    || record.schemaVersion !== "ltx-studio-output-analysis.v4"
-    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v4"
+    || record.schemaVersion !== "ltx-studio-output-analysis.v5"
+    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v5"
     || record.evaluatorFingerprint !== evaluatorState.fingerprint
+    || record.conditioningAudioSha256 !== (conditioningAudioEvidence(target)?.sha256 ?? null)
     || record.result.phonemeViseme.manifestSha256 !== evaluatorState.result.manifestSha256
     || record.result.phonemeViseme.manifestReleaseId !== evaluatorState.result.manifestReleaseId
     || record.result.phonemeViseme.productGo.status !== evaluatorState.result.productGo.status) return false;
@@ -80,6 +83,15 @@ function completedAnalysisIsCurrent(
   return identity.modelSha256 === CURRENT_IDENTITY_MODEL_SHA256
     && identity.modelRevision === CURRENT_IDENTITY_MODEL_REVISION
     && identity.preprocessingVersion === CURRENT_IDENTITY_PREPROCESSING;
+}
+
+function conditioningAudioEvidence(target: OutputAnalysisTarget) {
+  const requestedPath = target.request.audio.path;
+  if (!requestedPath || !target.runProvenance) return null;
+  return target.runProvenance.files.find((file) =>
+    file.role === "input:conditioning-audio"
+    && file.kind === "file"
+    && resolve(file.path) === resolve(requestedPath)) ?? null;
 }
 
 export function cleanupAnalysisTempRoot(root: string): void {
@@ -116,7 +128,7 @@ function revisionOf(target: OutputAnalysisTarget): OutputRevision {
 export function buildObjectiveQualityAnalysis(
   input: ObjectiveWorkerResult,
   createdAt = now(),
-): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v4" }> {
+): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v5" }> {
   const worker = objectiveWorkerResultSchema.parse(input);
   const findings: ObjectiveQualityAnalysis["findings"] = [];
   if (worker.technical.hasAudio !== true) {
@@ -212,21 +224,49 @@ export function buildObjectiveQualityAnalysis(
     findings.push({
       code: "classical-av-sync-raw-measured",
       level: "info",
-      message: `Der klassische AV-Rohproxy fand sein stärkstes gemeinsames Bewegungssignal bei ${timing}.`,
+      message: `Der klassische AV-Rohproxy des eingebetteten Endmixes fand sein stärkstes gemeinsames Bewegungssignal bei ${timing}.`,
     });
   } else if (worker.avSync.status === "insufficient") {
     findings.push({
       code: "classical-av-sync-insufficient",
       level: "warning",
       message: worker.avSync.error
-        ? `AV-Rohproxy unzureichend: ${worker.avSync.error}`
-        : "Der klassische AV-Rohproxy erhielt kein belastbares Bewegungssignal.",
+        ? `Endmix-AV-Rohproxy unzureichend: ${worker.avSync.error}`
+        : "Der klassische Endmix-AV-Rohproxy erhielt kein belastbares Bewegungssignal.",
     });
   } else if (worker.avSync.status === "failed") {
     findings.push({
       code: "classical-av-sync-failed",
       level: "warning",
-      message: `AV-Rohproxy fehlgeschlagen: ${worker.avSync.error ?? "unbekannter Fehler"}`,
+      message: `Endmix-AV-Rohproxy fehlgeschlagen: ${worker.avSync.error ?? "unbekannter Fehler"}`,
+    });
+  }
+  if (worker.conditioningAvSync?.status === "measured") {
+    const lag = worker.conditioningAvSync.estimatedAudioLeadMilliseconds;
+    if (lag === null) throw new Error("Gemessener Konditionierungs-AV-Rohproxy enthält keinen Rohversatz.");
+    const timing = lag > 0
+      ? `${lag} ms Audio-Vorlauf`
+      : lag < 0
+        ? `${Math.abs(lag)} ms Mund-/Video-Vorlauf`
+        : "0 ms Rohversatz";
+    findings.push({
+      code: "classical-conditioning-av-sync-raw-measured",
+      level: "info",
+      message: `Der hashgebundene Konditionierungs-Audio-Proxy fand sein stärkstes gemeinsames Bewegungssignal bei ${timing}.`,
+    });
+  } else if (worker.conditioningAvSync?.status === "insufficient") {
+    findings.push({
+      code: "classical-conditioning-av-sync-insufficient",
+      level: "warning",
+      message: worker.conditioningAvSync.error
+        ? `Konditionierungs-Audio-Proxy unzureichend: ${worker.conditioningAvSync.error}`
+        : "Der Konditionierungs-Audio-Proxy erhielt kein belastbares Bewegungssignal.",
+    });
+  } else if (worker.conditioningAvSync?.status === "failed") {
+    findings.push({
+      code: "classical-conditioning-av-sync-failed",
+      level: "warning",
+      message: `Konditionierungs-Audio-Proxy fehlgeschlagen: ${worker.conditioningAvSync.error ?? "unbekannter Fehler"}`,
     });
   }
   if (worker.phonemeViseme.status === "measured") {
@@ -259,6 +299,7 @@ export function buildObjectiveQualityAnalysis(
     level: "info",
     message: "Dynamikwerte sind Rohmessungen und erhalten erst nach lokalen Positiv-/Negativkontrollen ein Qualitätsurteil.",
   });
+  const primaryAvSync = worker.conditioningAvSync ?? worker.avSync;
   const sufficient = worker.technical.hasAudio === true
     && worker.technical.constantFrameRate === true
     && worker.technical.audioVideoStartDeltaSeconds !== null
@@ -268,17 +309,18 @@ export function buildObjectiveQualityAnalysis(
     && worker.face.sampledFrames >= 8
     && worker.face.geometryCoverage >= 0.5
     && ["measured", "not-applicable"].includes(worker.identity.status)
-    && worker.avSync.status === "measured"
+    && primaryAvSync.status === "measured"
     && worker.phonemeViseme.status === "measured";
   return {
-    schemaVersion: "ltx-studio-objective-quality.v4",
-    analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
+    schemaVersion: "ltx-studio-objective-quality.v5",
+    analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-pv.v5",
     createdAt,
     status: sufficient ? "measured" : "insufficient",
     technical: worker.technical,
     face: worker.face,
     identity: worker.identity,
     avSync: worker.avSync,
+    conditioningAvSync: worker.conditioningAvSync,
     phonemeViseme: worker.phonemeViseme,
     capabilities: {
       avSync: worker.avSync.status === "measured"
@@ -288,6 +330,13 @@ export function buildObjectiveQualityAnalysis(
           : worker.avSync.status === "failed"
             ? "classical-av-failed"
             : "not-applicable",
+      conditioningAvSync: worker.conditioningAvSync?.status === "measured"
+        ? "classical-av-raw-measured"
+        : worker.conditioningAvSync?.status === "insufficient"
+          ? "classical-av-insufficient"
+          : worker.conditioningAvSync?.status === "failed"
+            ? "classical-av-failed"
+            : "provenance-unavailable",
       phonemeViseme: worker.phonemeViseme.status === "measured"
         ? "product-go-measured"
         : worker.phonemeViseme.status === "insufficient"
@@ -318,7 +367,7 @@ export function buildObjectiveQualityAnalysis(
     limitations: [
       "YuNet liefert fünf Landmarken; die Werte messen Stabilität, aber keine Phonem-Mund-Synchronität.",
       "SFace misst Identitätsähnlichkeit nur gegen während der Generierung kryptografisch gebundene Studio-Referenzen.",
-      "Der klassische AV-Rohproxy korreliert Audio-Onsets mit stabilisierter Mundbewegung; er beweist keine Phonem- oder Visemtreue.",
+      "Die getrennten Rohproxys korrelieren Audio-Onsets des Endmixes beziehungsweise der hashgebundenen Konditionierungs-Spur mit stabilisierter Mundbewegung; sie beweisen keine Phonem- oder Visemtreue.",
       "Nur ein manifestgebundener Evaluator mit Product-GO sowie bestandener Offset- und Inhaltsstufe darf Phonem-/Visemtreue als gemessen markieren.",
       "Musik, Fremdsprache, Verdeckungen und starke Beleuchtungswechsel können den AV-Rohproxy verfälschen.",
       "Eine SOTA-Aussage benötigt weiterhin einen lizenzierten und lokal kalibrierten Phonem-AV-Evaluator.",
@@ -354,11 +403,12 @@ export class OutputAnalysisManager {
     const current = readOutputAnalysis(this.root, outputName, revision);
     const evaluatorState = this.resolveEvaluatorState();
     if (current && ["queued", "running"].includes(current.status)) return current;
-    if (current && completedAnalysisIsCurrent(current, evaluatorState) && !force) return current;
+    if (current && completedAnalysisIsCurrent(current, evaluatorState, target) && !force) return current;
     const createdAt = now();
-    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v4" }> = {
-      schemaVersion: "ltx-studio-output-analysis.v4",
+    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v5" }> = {
+      schemaVersion: "ltx-studio-output-analysis.v5",
       evaluatorFingerprint: evaluatorState.fingerprint,
+      conditioningAudioSha256: conditioningAudioEvidence(target)?.sha256 ?? null,
       outputName,
       sizeBytes: target.sizeBytes,
       modifiedAtMs: target.modifiedAtMs,
@@ -452,10 +502,12 @@ export class OutputAnalysisManager {
     writeOutputAnalysis(this.root, task.record);
     try {
       await this.verifyTaskIdentityEvidence(task, "vor der Analyse");
+      this.verifyTaskConditioningAudio(task, "vor der Analyse");
       if (analysisWasCancelled(task)) return;
       const worker = await this.runWorker(task);
       if (analysisWasCancelled(task)) return;
       await this.verifyTaskIdentityEvidence(task, "nach der Analyse");
+      this.verifyTaskConditioningAudio(task, "nach der Analyse");
       if (analysisWasCancelled(task)) return;
       if (this.resolveEvaluatorState().fingerprint !== task.evaluatorState.fingerprint) {
         throw new Error("Phonem-/Visem-Evaluator-Manifest wurde während der Analyse verändert.");
@@ -506,6 +558,15 @@ export class OutputAnalysisManager {
     }
   }
 
+  private verifyTaskConditioningAudio(task: AnalysisTask, context: string): void {
+    const evidence = conditioningAudioEvidence(task.target);
+    if (!evidence) return;
+    const error = verifyProvenanceFileEvidence(evidence);
+    if (error) {
+      throw new Error(`Gebundenes Konditionierungs-Audio ${context} verändert: ${error}`);
+    }
+  }
+
   private resolveEvaluatorState(): PhonemeVisemeEvaluatorState {
     return (this.options.phonemeVisemeEvaluatorStateResolver ?? resolvePhonemeVisemeEvaluatorState)();
   }
@@ -515,6 +576,7 @@ export class OutputAnalysisManager {
     const faceModel = this.options.faceModel ?? join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
     const identityModel = this.options.identityModel ?? join(appRoot, "models", "face_recognition_sface_2021dec.onnx");
     const references = this.options.identityReferenceResolver?.(task.target.identityEvidence) ?? [];
+    const conditioningAudio = conditioningAudioEvidence(task.target);
     const identityStatus = task.target.identityEvidence?.status === "not-applicable"
       ? "not-applicable"
       : task.target.identityEvidence?.status === "verified" && references.length > 0
@@ -537,6 +599,15 @@ export class OutputAnalysisManager {
     ];
     for (const reference of references) {
       workerArgs.push("--identity-reference", reference.path, reference.sha256);
+    }
+    if (conditioningAudio) {
+      workerArgs.push(
+        "--conditioning-audio",
+        conditioningAudio.path,
+        conditioningAudio.sha256,
+        String(task.target.request.audio.startTime),
+        String(task.target.request.audio.maxDuration ?? -1),
+      );
     }
     const analysisTempRoot = this.options.analysisTempRoot ?? defaultAnalysisTempRoot;
     const analysisTempDir = join(analysisTempRoot, `analysis-${task.record.analysisId}`);

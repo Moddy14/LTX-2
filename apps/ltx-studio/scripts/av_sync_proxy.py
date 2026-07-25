@@ -161,15 +161,21 @@ def motion_series(
 
 
 def decode_audio_features(
-    video_path: Path,
+    audio_path: Path,
     audio_start_relative_video_seconds: float,
+    source_seek_seconds: float = 0.0,
+    source_duration_seconds: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     command = [
         "ffmpeg",
         "-v",
         "error",
+    ]
+    if source_seek_seconds > 0:
+        command.extend(["-ss", str(source_seek_seconds)])
+    command.extend([
         "-i",
-        str(video_path),
+        str(audio_path),
         "-map",
         "0:a:0",
         "-ac",
@@ -177,11 +183,13 @@ def decode_audio_features(
         "-ar",
         str(SAMPLE_RATE),
         "-t",
-        str(MAX_DURATION_SECONDS),
+        str(min(MAX_DURATION_SECONDS, source_duration_seconds)
+            if source_duration_seconds is not None and source_duration_seconds > 0
+            else MAX_DURATION_SECONDS),
         "-f",
         "s16le",
         "pipe:1",
-    ]
+    ])
     result = subprocess.run(
         command,
         check=False,
@@ -404,12 +412,14 @@ def estimate_lag(
 
 
 def analyze_audio_motion_sync(
-    video_path: Path,
+    audio_path: Path,
     tracked_candidates: list[dict[str, object]],
     sampled_video_frames: int,
     duration_seconds: float | None,
     has_audio: bool | None,
     audio_start_relative_video_seconds: float | None,
+    source_seek_seconds: float = 0.0,
+    source_duration_seconds: float | None = None,
 ) -> dict[str, object]:
     if has_audio is not True:
         return blank_result(
@@ -443,8 +453,10 @@ def analyze_audio_motion_sync(
         base["error"] = "Zu wenige kontinuierlich verfolgte Mundbewegungspaare."
         return base
     audio_times, audio_onset, audio_activity = decode_audio_features(
-        video_path,
+        audio_path,
         audio_start_relative_video_seconds,
+        source_seek_seconds,
+        source_duration_seconds,
     )
     base["audioWindowCount"] = int(audio_times.size)
     audio_activity_ratio = float(np.mean(audio_activity)) if audio_activity.size else None

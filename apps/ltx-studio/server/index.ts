@@ -36,6 +36,7 @@ import { readOrchestratorStatus } from "./orchestrator.js";
 import { OutputLibrary, OutputQualityError } from "./outputs.js";
 import { cleanupAnalysisTempRoot, OutputAnalysisManager } from "./outputAnalysis.js";
 import { resolveIdentityEvidenceReferences, verifyIdentityEvidence } from "./inputEvidence.js";
+import { captureProvenanceFile, verifyProvenanceFileEvidence } from "./runProvenance.js";
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
 
@@ -243,15 +244,41 @@ app.post("/api/lipdub/reference/inspect", (request, response) => {
 
 app.post("/api/lipdub/reference/prepare", async (request, response) => {
   const payload = lipDubReferencePreparationRequestSchema.parse(request.body);
-  if (!assets.findByPath("video", payload.lipDub.referenceVideo.path)) {
+  const sourceAsset = assets.findByPath("video", payload.lipDub.referenceVideo.path);
+  if (!sourceAsset) {
     return response.status(400).json({
       error: "LipDub-Referenzvorbereitung ist nur für Videos aus der Studio-Mediathek verfügbar.",
     });
   }
+  const source = await captureProvenanceFile(sourceAsset.path, "derived-source:lipdub-reference-video");
   const prepared = await prepareLipDubReference(payload);
+  const sourceError = verifyProvenanceFileEvidence(source);
+  if (sourceError) {
+    unlinkSync(prepared.file.path);
+    throw new LipDubReferencePreparationError(
+      "Das LipDub-Quellvideo wurde während der Vorbereitung verändert. Das Ergebnis wurde verworfen.",
+      409,
+    );
+  }
   let asset;
   try {
-    asset = assets.add(prepared.file, "video");
+    asset = assets.add(prepared.file, "video", {
+      schemaVersion: "ltx-studio-asset-derivation.v1",
+      operation: "lipdub-reference-prepare",
+      source,
+      parameters: {
+        sourceAssetId: sourceAsset.id,
+        width: prepared.target.width,
+        height: prepared.target.height,
+        fps: prepared.target.fps,
+        frames: prepared.target.frames,
+        durationSeconds: prepared.target.durationSeconds,
+        trimStartSeconds: prepared.trim?.startSeconds ?? null,
+        trimRequestedDurationSeconds: prepared.trim?.requestedDurationSeconds ?? null,
+      },
+      command: prepared.command,
+      createdAt: new Date().toISOString(),
+    });
   } catch (error) {
     unlinkSync(prepared.file.path);
     throw error;

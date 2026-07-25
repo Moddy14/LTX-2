@@ -56,6 +56,42 @@ function output(
         avSync,
       },
     },
+    provenance: {
+      schemaVersion: "ltx-studio-run-provenance.v1",
+      capturedAt: "2026-07-25T00:00:00.000Z",
+      verifiedAt: "2026-07-25T00:00:01.000Z",
+      files: [{
+        role: "input:conditioning-audio",
+        path: "/inputs/audio.wav",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "1",
+        sha256: "a".repeat(64),
+        entries: [],
+      }],
+      code: [{
+        repositoryRoot: "/repo",
+        commit: "b".repeat(40),
+        dirty: false,
+        trackedDiffSha256: "c".repeat(64),
+        untracked: [],
+        fingerprint: "d".repeat(64),
+      }],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "test",
+        nodeVersion: "test",
+        pythonExecutable: "/python",
+        pythonVersion: "3.12",
+        packages: {},
+        ffmpegVersion: "test",
+        fingerprint: "e".repeat(64),
+      },
+      fingerprint: "f".repeat(64),
+    },
   } as unknown as StudioOutput;
 }
 

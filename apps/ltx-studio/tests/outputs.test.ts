@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { StudioJob } from "../server/jobs.js";
+import type { RunProvenance } from "../shared/provenance.js";
 import { writeOutputAnalysis } from "../server/analysisStore.js";
 import { OutputLibrary } from "../server/outputs.js";
 import { validRequest } from "./fixtures.js";
@@ -50,6 +51,46 @@ function completedJob(
     dgxJobId: null,
     thermalProfile: null,
     identityEvidence: null,
+    runProvenance: null,
+  };
+}
+
+function runProvenance(): RunProvenance {
+  return {
+    schemaVersion: "ltx-studio-run-provenance.v1",
+    capturedAt: "2026-07-24T09:30:00.000Z",
+    verifiedAt: "2026-07-24T09:35:00.000Z",
+    files: [{
+      role: "input:conditioning-audio",
+      path: "/inputs/speech.wav",
+      kind: "file",
+      sizeBytes: 1024,
+      modifiedAtMs: 1_721_813_400_000,
+      changedAtMs: 1_721_813_400_001,
+      fileId: "123",
+      sha256: "a".repeat(64),
+      entries: [],
+    }],
+    code: [{
+      repositoryRoot: "/repo",
+      commit: "b".repeat(40),
+      dirty: false,
+      trackedDiffSha256: "c".repeat(64),
+      untracked: [],
+      fingerprint: "d".repeat(64),
+    }],
+    runtime: {
+      platform: "linux",
+      architecture: "arm64",
+      kernelRelease: "test",
+      nodeVersion: "test",
+      pythonExecutable: "/python",
+      pythonVersion: "3.12",
+      packages: { torch: "test" },
+      ffmpegVersion: "test",
+      fingerprint: "e".repeat(64),
+    },
+    fingerprint: "f".repeat(64),
   };
 }
 
@@ -130,10 +171,11 @@ describe("generated output library", () => {
     expect(output.qualityReview).toBeNull();
     const migrated = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(migrated).toMatchObject({
-      schemaVersion: "ltx-studio-output.v4",
+      schemaVersion: "ltx-studio-output.v5",
       changedAtMs: expect.any(Number),
       fileId: expect.stringMatching(/^\d+$/),
       identityEvidence: null,
+      runProvenance: null,
     });
   });
 
@@ -175,7 +217,7 @@ describe("generated output library", () => {
     expect(() => library.resolveAnalysisTarget(outputName)).toThrow("inhaltsgebundene Studio-Provenienz");
   });
 
-  it("upgrades a strong v3 speech sidecar to v4 without inventing identity evidence", async () => {
+  it("upgrades a strong v3 speech sidecar to v5 without inventing evidence", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T07:45:00.000Z");
     const outputName = "v3-speech.mp4";
@@ -211,8 +253,9 @@ describe("generated output library", () => {
 
     const upgraded = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(upgraded).toMatchObject({
-      schemaVersion: "ltx-studio-output.v4",
+      schemaVersion: "ltx-studio-output.v5",
       identityEvidence: null,
+      runProvenance: null,
     });
   });
 
@@ -232,7 +275,7 @@ describe("generated output library", () => {
     expect(historic.settingsAvailable).toBe(true);
   });
 
-  it("persists a validated speech quality scorecard in a revision-bound v4 sidecar", async () => {
+  it("persists a validated speech quality scorecard in a revision-bound v5 sidecar", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T09:00:00.000Z");
     const outputName = "speech-scorecard.mp4";
@@ -266,7 +309,7 @@ describe("generated output library", () => {
     });
     expect(Number.isFinite(Date.parse(updated.qualityReview!.updatedAt))).toBe(true);
     const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
-    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v4");
+    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v5");
     expect(sidecar.changedAtMs).toEqual(expect.any(Number));
     expect(sidecar.fileId).toMatch(/^\d+$/);
     expect(sidecar.request).toEqual(job.request);
@@ -367,6 +410,23 @@ describe("generated output library", () => {
     const sidecar = await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8");
     expect(sidecar).not.toContain("/uploads/");
     expect(sidecar).toContain(job.identityEvidence.references[0].sha256);
+  });
+
+  it("persists full run provenance in the output sidecar and analysis target", async () => {
+    const root = await outputRoot();
+    const outputName = "speech-run-provenance.mp4";
+    await writeFile(join(root, outputName), "video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, "2026-07-24T09:35:00.000Z", "audio-to-video");
+    job.runProvenance = runProvenance();
+
+    library.recordCompleted([job]);
+
+    expect(library.list([job]).find((output) => output.name === outputName)?.provenance).toEqual(job.runProvenance);
+    expect(library.resolveAnalysisTarget(outputName).runProvenance).toEqual(job.runProvenance);
+    const sidecar = await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8");
+    expect(sidecar).toContain(job.runProvenance.fingerprint);
+    expect(sidecar).toContain("input:conditioning-audio");
   });
 
   it("drops an analysis when same-sized output bytes replace the original with restored mtime", async () => {

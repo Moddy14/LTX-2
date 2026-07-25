@@ -79,6 +79,7 @@ function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorker
       windowLagIqrMilliseconds: 42,
       nullP95Correlation: 0.25,
     },
+    conditioningAvSync: null,
     phonemeViseme: unavailablePhonemeVisemeResult(),
     ...overrides,
   };
@@ -91,6 +92,7 @@ describe("objective output quality", () => {
     expect(result.status).toBe("insufficient");
     expect(result.capabilities).toEqual({
       avSync: "classical-av-raw-measured",
+      conditioningAvSync: "provenance-unavailable",
       phonemeViseme: "manifest-missing",
       identity: "sface-raw-measured",
       dialogue: "whisper-not-run",
@@ -100,7 +102,7 @@ describe("objective output quality", () => {
     expect(result).not.toHaveProperty("score");
     expect(result).not.toHaveProperty("rating");
     expect(result.capabilities.avSync).not.toBe("measured");
-    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v4");
+    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v5");
     expect(result.identity.cosineP10).toBe(0.84);
     expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
     expect(result.phonemeViseme.status).toBe("not-available");
@@ -120,6 +122,24 @@ describe("objective output quality", () => {
     expect(result.findings).toContainEqual(expect.objectContaining({
       code: "phoneme-viseme-runner-unavailable",
       level: "warning",
+    }));
+  });
+
+  it("keeps the hash-bound conditioning proxy separate from the embedded final mix", () => {
+    const baseline = worker();
+    const conditioningAvSync = {
+      ...baseline.avSync,
+      estimatedAudioLeadMilliseconds: -42,
+      correlationPeak: 0.74,
+      nullP95Correlation: 0.28,
+    };
+    const result = buildObjectiveQualityAnalysis(worker({ conditioningAvSync }));
+
+    expect(result.conditioningAvSync).toEqual(conditioningAvSync);
+    expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
+    expect(result.capabilities.conditioningAvSync).toBe("classical-av-raw-measured");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "classical-conditioning-av-sync-raw-measured",
     }));
   });
 

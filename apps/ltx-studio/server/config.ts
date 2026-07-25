@@ -32,6 +32,7 @@ export const longcatProjectRoot = resolve(
 );
 export const statePath = join(dataRoot, "jobs.json");
 export const assetsStatePath = join(dataRoot, "assets.json");
+export const provenanceCachePath = join(dataRoot, "provenance-cache.json");
 export const serverHost = "127.0.0.1";
 export const serverPort = Number.parseInt(process.env.LTX_STUDIO_PORT ?? "4318", 10);
 export const admissionPythonExecutable = process.env.LTX_STUDIO_ADMISSION_PYTHON ?? "python3";

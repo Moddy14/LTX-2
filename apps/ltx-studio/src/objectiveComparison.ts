@@ -129,6 +129,16 @@ function identityReferencePaths(request: GenerationRequest | null): string[] {
   return request.images.map((image) => image.path).filter(Boolean);
 }
 
+function evidenceFingerprint(output: StudioOutput, rolePrefixes: readonly string[]): string | null {
+  const provenance = output.provenance;
+  if (!provenance) return null;
+  const evidence = provenance.files
+    .filter((file) => rolePrefixes.some((prefix) => file.role.startsWith(prefix)))
+    .map((file) => ({ role: file.role, sha256: file.sha256 }))
+    .sort((left, right) => left.role.localeCompare(right.role));
+  return evidence.length > 0 ? JSON.stringify(evidence) : null;
+}
+
 export function comparisonCompatibility(
   leftOutput: StudioOutput,
   rightOutput: StudioOutput,
@@ -168,6 +178,36 @@ export function comparisonCompatibility(
   if (effectiveOutputAudio(leftOutput.request) !== effectiveOutputAudio(rightOutput.request)) {
     reasons.push("Ausgewertete Tonspuren unterscheiden sich.");
   }
+  const leftInputEvidence = evidenceFingerprint(leftOutput, [
+    "input:conditioning-audio",
+    "input:final-audio-mix",
+    "input:reference-image",
+    "input:reference-video",
+  ]);
+  const rightInputEvidence = evidenceFingerprint(rightOutput, [
+    "input:conditioning-audio",
+    "input:final-audio-mix",
+    "input:reference-image",
+    "input:reference-video",
+  ]);
+  if (!leftInputEvidence || !rightInputEvidence || leftInputEvidence !== rightInputEvidence) {
+    reasons.push("Inhalts-Hashes der ausgewerteten Eingaben sind nicht identisch belegt.");
+  }
+  if (
+    !leftOutput.provenance
+    || !rightOutput.provenance
+    || JSON.stringify(leftOutput.provenance.code.map((item) => item.fingerprint))
+      !== JSON.stringify(rightOutput.provenance.code.map((item) => item.fingerprint))
+  ) {
+    reasons.push("Codezustände sind nicht identisch belegt.");
+  }
+  if (
+    !leftOutput.provenance
+    || !rightOutput.provenance
+    || leftOutput.provenance.runtime.fingerprint !== rightOutput.provenance.runtime.fingerprint
+  ) {
+    reasons.push("Runtime-Versionen sind nicht identisch belegt.");
+  }
   if (
     leftOutput.request?.numFrames !== rightOutput.request?.numFrames
     || leftOutput.request?.frameRate !== rightOutput.request?.frameRate
@@ -189,6 +229,8 @@ export function objectiveComparisonMetrics(
   const rightIdentity = "identity" in right ? right.identity : null;
   const leftAv = "avSync" in left ? left.avSync : null;
   const rightAv = "avSync" in right ? right.avSync : null;
+  const leftConditioningAv = "conditioningAvSync" in left ? left.conditioningAvSync : null;
+  const rightConditioningAv = "conditioningAvSync" in right ? right.conditioningAvSync : null;
 
   const metrics: ObjectiveComparisonMetric[] = [
     {
@@ -259,8 +301,42 @@ export function objectiveComparisonMetrics(
       direction: "neutral",
     },
     {
+      id: "conditioning-av-absolute-lag",
+      label: "Absoluter Kond.-AV-Rohversatz",
+      left: leftConditioningAv?.estimatedAudioLeadMilliseconds === null
+        || leftConditioningAv?.estimatedAudioLeadMilliseconds === undefined
+        ? null
+        : Math.abs(leftConditioningAv.estimatedAudioLeadMilliseconds),
+      right: rightConditioningAv?.estimatedAudioLeadMilliseconds === null
+        || rightConditioningAv?.estimatedAudioLeadMilliseconds === undefined
+        ? null
+        : Math.abs(rightConditioningAv.estimatedAudioLeadMilliseconds),
+      digits: 0,
+      unit: " ms",
+      direction: leftConditioningAv?.status === "measured" && rightConditioningAv?.status === "measured"
+        ? "lower"
+        : "neutral",
+    },
+    {
+      id: "conditioning-av-correlation-margin",
+      label: "Kond.-AV-Peak über Nullmodell",
+      left: leftConditioningAv?.correlationPeak === null || leftConditioningAv?.nullP95Correlation === null
+        || leftConditioningAv?.correlationPeak === undefined
+        || leftConditioningAv?.nullP95Correlation === undefined
+        ? null
+        : leftConditioningAv.correlationPeak - leftConditioningAv.nullP95Correlation,
+      right: rightConditioningAv?.correlationPeak === null || rightConditioningAv?.nullP95Correlation === null
+        || rightConditioningAv?.correlationPeak === undefined
+        || rightConditioningAv?.nullP95Correlation === undefined
+        ? null
+        : rightConditioningAv.correlationPeak - rightConditioningAv.nullP95Correlation,
+      digits: 3,
+      unit: "",
+      direction: "higher",
+    },
+    {
       id: "av-absolute-lag",
-      label: "Absoluter AV-Rohversatz",
+      label: "Absoluter Endmix-AV-Rohversatz",
       left: leftAv?.estimatedAudioLeadMilliseconds === null || leftAv?.estimatedAudioLeadMilliseconds === undefined
         ? null
         : Math.abs(leftAv.estimatedAudioLeadMilliseconds),
@@ -273,7 +349,7 @@ export function objectiveComparisonMetrics(
     },
     {
       id: "av-correlation-margin",
-      label: "AV-Peak über Nullmodell",
+      label: "Endmix-AV-Peak über Nullmodell",
       left: leftAv?.correlationPeak === null || leftAv?.nullP95Correlation === null
         || leftAv?.correlationPeak === undefined || leftAv?.nullP95Correlation === undefined
         ? null
@@ -288,7 +364,7 @@ export function objectiveComparisonMetrics(
     },
     {
       id: "av-window-iqr",
-      label: "Fenster-Lag-IQR",
+      label: "Endmix-Fenster-Lag-IQR",
       left: leftAv?.windowLagIqrMilliseconds ?? null,
       right: rightAv?.windowLagIqrMilliseconds ?? null,
       digits: 0,

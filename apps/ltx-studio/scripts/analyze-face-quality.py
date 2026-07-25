@@ -21,7 +21,7 @@ SCRIPT_ROOT = Path(__file__).absolute().parent
 if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
-from av_sync_proxy import analyze_audio_motion_sync, stabilized_face_patch
+from av_sync_proxy import analyze_audio_motion_sync, blank_result, stabilized_face_patch
 
 FACE_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 IDENTITY_MODEL_SHA256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
@@ -1013,6 +1013,7 @@ def main() -> int:
         required=True,
     )
     parser.add_argument("--identity-reference", nargs=2, action="append", default=[])
+    parser.add_argument("--conditioning-audio", nargs=4)
     parser.add_argument("--max-frames", type=int, default=240)
     args = parser.parse_args()
     video_path = Path(args.video).expanduser().absolute()
@@ -1028,6 +1029,23 @@ def main() -> int:
         raise ValueError("available identity status requires at least one reference")
     if any(not re.fullmatch(r"[0-9a-f]{64}", expected) for _path, expected in references):
         raise ValueError("identity reference SHA-256 must contain 64 lowercase hexadecimal characters")
+    conditioning_audio = None
+    if args.conditioning_audio:
+        conditioning_path, expected_sha256, seek_value, duration_value = args.conditioning_audio
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ValueError("conditioning audio SHA-256 must contain 64 lowercase hexadecimal characters")
+        seek_seconds = float(seek_value)
+        duration_seconds = float(duration_value)
+        if not math.isfinite(seek_seconds) or seek_seconds < 0:
+            raise ValueError("conditioning audio seek must be a finite non-negative number")
+        if not math.isfinite(duration_seconds) or (duration_seconds <= 0 and duration_seconds != -1):
+            raise ValueError("conditioning audio duration must be positive or -1")
+        conditioning_audio = (
+            Path(conditioning_path).expanduser().absolute(),
+            expected_sha256,
+            seek_seconds,
+            None if duration_seconds == -1 else duration_seconds,
+        )
     with analysis_snapshot_root() as snapshot_root:
         snapshot_sources = [
             (video_path, "Output video"),
@@ -1039,6 +1057,8 @@ def main() -> int:
                 (reference_path, "Identity reference")
                 for reference_path, _expected_sha256 in references
             )
+        if conditioning_audio:
+            snapshot_sources.append((conditioning_audio[0], "Conditioning audio"))
         enforce_snapshot_budget(snapshot_sources, snapshot_root)
         video_snapshot, video_sha256 = snapshot_verified_file(
             video_path,
@@ -1052,6 +1072,7 @@ def main() -> int:
             FACE_MODEL_SHA256,
         )
         identity_model_snapshot = identity_model_path
+        conditioning_audio_snapshot = None
         reference_snapshots: list[tuple[Path, str]] = []
         if args.identity_status == "available":
             identity_model_snapshot, _identity_model_sha256 = snapshot_verified_file(
@@ -1068,6 +1089,13 @@ def main() -> int:
                     expected_sha256,
                 )
                 reference_snapshots.append((snapshot, expected_sha256))
+        if conditioning_audio:
+            conditioning_audio_snapshot, _conditioning_sha256 = snapshot_verified_file(
+                conditioning_audio[0],
+                snapshot_root / f"conditioning-audio{conditioning_audio[0].suffix.lower()}",
+                "Conditioning audio",
+                conditioning_audio[1],
+            )
         identity_track: list[dict[str, object]] = []
         identity_sampled_frames = 0
         try:
@@ -1107,35 +1135,36 @@ def main() -> int:
                 audio_start_offset,
             )
         except Exception as error:  # noqa: BLE001
-            av_sync = {
-                "status": "failed",
-                "error": f"{type(error).__name__}: {error}"[:500],
-                "method": "classical-audio-mouth-motion.v1",
-                "sampledVideoFrames": motion_sampled_frames,
-                "validMotionPairs": 0,
-                "motionCoverage": 0.0,
-                "audioWindowCount": 0,
-                "audioActivityRatio": None,
-                "usableAudioActivitySeconds": 0.0,
-                "mouthCoverageDuringAudioActivity": 0.0,
-                "usableWindowCount": 0,
-                "estimatedAudioLeadMilliseconds": None,
-                "lagSearchLimitMilliseconds": 500,
-                "lagResolutionMilliseconds": None,
-                "effectiveVideoSampleMilliseconds": None,
-                "correlationPeak": None,
-                "zeroLagCorrelation": None,
-                "peakProminence": None,
-                "peakWidthMilliseconds": None,
-                "featureLagAgreementMilliseconds": None,
-                "windowLagIqrMilliseconds": None,
-                "nullP95Correlation": None,
-            }
+            av_sync = blank_result(
+                "failed",
+                f"{type(error).__name__}: {error}"[:500],
+                sampled_video_frames=motion_sampled_frames,
+            )
+        conditioning_av_sync = None
+        if conditioning_audio and conditioning_audio_snapshot:
+            try:
+                conditioning_av_sync = analyze_audio_motion_sync(
+                    conditioning_audio_snapshot,
+                    motion_track,
+                    motion_sampled_frames,
+                    finite_number(technical["durationSeconds"]),
+                    True,
+                    0.0,
+                    conditioning_audio[2],
+                    conditioning_audio[3],
+                )
+            except Exception as error:  # noqa: BLE001
+                conditioning_av_sync = blank_result(
+                    "failed",
+                    f"{type(error).__name__}: {error}"[:500],
+                    sampled_video_frames=motion_sampled_frames,
+                )
         result = {
             "technical": technical,
             "face": face,
             "identity": identity,
             "avSync": av_sync,
+            "conditioningAvSync": conditioning_av_sync,
         }
         verify_snapshot(video_snapshot, video_sha256, "Output video")
         verify_snapshot(face_model_snapshot, FACE_MODEL_SHA256, "YuNet model")
@@ -1143,6 +1172,8 @@ def main() -> int:
             verify_snapshot(identity_model_snapshot, IDENTITY_MODEL_SHA256, "SFace model")
         for reference_snapshot, expected_sha256 in reference_snapshots:
             verify_snapshot(reference_snapshot, expected_sha256, "Identity reference")
+        if conditioning_audio and conditioning_audio_snapshot:
+            verify_snapshot(conditioning_audio_snapshot, conditioning_audio[1], "Conditioning audio")
     json.dump(result, sys.stdout, ensure_ascii=True, separators=(",", ":"))
     sys.stdout.write("\n")
     return 0

@@ -1053,7 +1053,7 @@ export function Editor({
         ) : null}
         {recommendedLipDubMismatch ? (
           <p className="advisory advisory--warning">
-            Ausgewählt ist nicht das empfohlene LipDub-LoRA. Für SOTA-LipSync verwenden: {lipDubRecommendation.label} · {lipDubRecommendation.filename}.
+            Ausgewählt ist nicht das offizielle LipDub-LoRA für diese Pipeline: {lipDubRecommendation.label} · {lipDubRecommendation.filename}.
           </p>
         ) : null}
         {recommendedLipDubDistilledMissing ? (
@@ -1063,7 +1063,7 @@ export function Editor({
         ) : null}
         {recommendedLipDubDistilledMismatch ? (
           <p className="advisory advisory--warning">
-            Ausgewählt ist nicht der empfohlene LipDub-Distilled-Checkpoint. Für SOTA-LipSync verwenden: {lipDubDistilledRecommendation.label} · {lipDubDistilledRecommendation.filename}.
+            Ausgewählt ist nicht der zur offiziellen LipDub-Pipeline passende Distilled-Checkpoint: {lipDubDistilledRecommendation.label} · {lipDubDistilledRecommendation.filename}.
           </p>
         ) : null}
         {recommendedLipDubUpscalerMissing ? (
@@ -1073,7 +1073,7 @@ export function Editor({
         ) : null}
         {recommendedLipDubUpscalerMismatch ? (
           <p className="advisory advisory--warning">
-            Ausgewählt ist nicht der empfohlene LipDub-Spatial-Upscaler. Für SOTA-LipSync verwenden: {lipDubUpscalerRecommendation.label} · {lipDubUpscalerRecommendation.filename}.
+            Ausgewählt ist nicht der zur offiziellen LipDub-Pipeline passende Spatial-Upscaler: {lipDubUpscalerRecommendation.label} · {lipDubUpscalerRecommendation.filename}.
           </p>
         ) : null}
         {modelInventory?.truncated ? (

@@ -2176,8 +2176,10 @@ summary:focus-visible,
 }
 
 .objective-analysis__metric strong {
+  max-width: 58%;
   color: #303831;
   font-size: 9px;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 

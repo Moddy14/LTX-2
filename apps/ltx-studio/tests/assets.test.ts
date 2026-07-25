@@ -30,12 +30,38 @@ describe("asset library", () => {
       path,
       originalname: "reference.png",
       size: 5,
-    } as Express.Multer.File, "image");
+    } as Express.Multer.File, "image", {
+      schemaVersion: "ltx-studio-asset-derivation.v1",
+      operation: "image-face-crop",
+      source: {
+        role: "derived-source:image",
+        path: join(imageDir, "source.png"),
+        kind: "file",
+        sizeBytes: 10,
+        modifiedAtMs: 1_000,
+        changedAtMs: 1_000,
+        fileId: "42",
+        sha256: "a".repeat(64),
+        entries: [],
+      },
+      parameters: { x: 12, y: 24, width: 576, height: 576 },
+      command: "ffmpeg -i source.png -vf crop=576:576:12:24 output.png",
+      createdAt: "2026-07-25T00:00:00.000Z",
+    });
     expect(store.list("image")).toHaveLength(1);
     expect(store.findByPath("image", path)).toMatchObject({ name: "reference.png", kind: "image" });
     expect(store.findByPath("video", path)).toBeNull();
     expect(new AssetStore(stateFile, uploads).list()).toMatchObject([
-      { name: "reference.png", kind: "image", path },
+      {
+        name: "reference.png",
+        kind: "image",
+        path,
+        derivation: {
+          operation: "image-face-crop",
+          source: { sha256: "a".repeat(64) },
+          parameters: { x: 12, y: 24, width: 576, height: 576 },
+        },
+      },
     ]);
 
     await writeFile(stateFile, JSON.stringify([{ ...store.list()[0], id: "outside", path: "/etc/passwd" }]));
