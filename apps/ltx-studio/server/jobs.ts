@@ -140,6 +140,9 @@ type DgxQueueOperations = {
   read: typeof readQueueJob;
   transition: typeof transitionQueueJob;
 };
+type DgxAdmissionOperations = {
+  submit: typeof submitQueueAdmission;
+};
 
 const MAX_JOBS = 100;
 export const MAX_ACTIVE_JOBS = 8;
@@ -443,6 +446,9 @@ export class JobManager extends EventEmitter {
       transition: transitionQueueJob,
     },
     private readonly dgxTerminalRetryBaseMs: number | null = DEFAULT_DGX_TERMINAL_RETRY_BASE_MS,
+    private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
+      submit: submitQueueAdmission,
+    },
   ) {
     super();
     this.restore();
@@ -1077,29 +1083,37 @@ export class JobManager extends EventEmitter {
           `DGX-Queue: Ressourcenprognose ${estimate.memoryGiB} GiB RAM plus ${minResidualMemoryGiB} GiB `
             + `Restpuffer, Startanforderung ${requiredStartMemoryGiB} GiB, ${estimate.outputGiB.toFixed(2)} GiB Ausgabe.`,
         );
-        response = await submitQueueAdmission(job.request, requiredStartMemoryGiB);
+        response = await this.dgxAdmissionOperations.submit(job.request, requiredStartMemoryGiB);
       } catch (error) {
         if (jobWasCancelled(job)) return false;
         this.failJob(job, error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.");
         return false;
       }
-      if (jobWasCancelled(job)) return false;
 
       const { admission, job: queueJob } = response;
+      if (queueJob.state === "accepted" || queueJob.state === "queued") {
+        job.dgxJobId = queueJob.job_id;
+        this.changed();
+      }
+      if (jobWasCancelled(job)) {
+        this.prepareDgxTerminalDelivery(job, "cancelled", {
+          current_step: "cancelled while DGX queue submit was in flight",
+          last_error: "manual Studio cancellation",
+        });
+        this.changed();
+        await this.flushDgxTerminalDelivery(job);
+        return false;
+      }
       this.appendLog(
         job,
         `DGX-Queue: ${queueJob.job_id} ${queueJob.state}; Admission ${admission.decision}`
           + `${admission.reason ? ` - ${admission.reason}` : ""}.`,
       );
       if (queueJob.state === "accepted" && admission.decision === "accepted") {
-        job.dgxJobId = queueJob.job_id;
-        this.changed();
         return this.startAcceptedDgxJob(job);
       }
 
       if (queueJob.state === "queued" || admission.decision === "queued") {
-        job.dgxJobId = queueJob.job_id;
-        this.changed();
         const accepted = await this.waitForQueuedDgxJob(job, retryAfterMs(admission));
         if (!accepted) return false;
         return isActiveJobStatus(job.status);
@@ -1132,8 +1146,12 @@ export class JobManager extends EventEmitter {
       try {
         response = await this.dgxQueueOperations.read(job.dgxJobId);
       } catch (error) {
-        this.failJob(job, error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.");
-        return false;
+        if (jobWasCancelled(job)) return false;
+        const message = error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.";
+        this.appendLog(job, `DGX-Queue-Status vorübergehend nicht lesbar: ${message}. Prüfung wird wiederholt.`);
+        this.changed();
+        delayMs = 30_000;
+        continue;
       }
       const queueJob = response.job;
       this.appendLog(job, `DGX-Queue-Status: ${queueJob.job_id} ${queueJob.state}${queueJob.reason ? ` - ${queueJob.reason}` : ""}.`);
@@ -1189,7 +1207,13 @@ export class JobManager extends EventEmitter {
     });
     if (started) return isActiveJobStatus(job.status);
     if (jobWasCancelled(job)) return false;
-    this.failJob(job, "DGX-Queue-Start-Fence wurde nicht freigegeben.");
+    const message = "DGX-Queue-Start-Fence wurde nicht freigegeben.";
+    this.prepareDgxTerminalDelivery(job, "cancelled", {
+      current_step: "starting transition failed before LTX allocation",
+      last_error: message,
+    });
+    this.failJob(job, message);
+    await this.flushDgxTerminalDelivery(job);
     return false;
   }
 
