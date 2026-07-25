@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { dialogueEvaluationSchema } from "./dialogueEvaluator.js";
 import { phonemeVisemeResultSchema } from "./phonemeVisemeEvaluator.js";
 import { outputNameSchema } from "./pipelines.js";
 
@@ -153,6 +154,7 @@ export const objectiveBaseWorkerResultSchema = z.object({
   identity: identityMetricsSchema,
   avSync: avSyncRawMetricsSchema,
   conditioningAvSync: avSyncRawMetricsSchema.nullable(),
+  dialogue: dialogueEvaluationSchema,
 }).strict();
 
 export const objectiveWorkerResultSchema = objectiveBaseWorkerResultSchema.extend({
@@ -298,12 +300,28 @@ const objectiveQualityAnalysisV5Schema = objectiveQualityAnalysisV4Schema.extend
   }).strict(),
 }).strict();
 
+const objectiveQualityAnalysisV6Schema = objectiveQualityAnalysisV5Schema.extend({
+  schemaVersion: z.literal("ltx-studio-objective-quality.v6"),
+  analyzerVersion: z.literal("ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6"),
+  dialogue: dialogueEvaluationSchema,
+  capabilities: objectiveQualityAnalysisV5Schema.shape.capabilities.extend({
+    dialogue: z.enum([
+      "whisper-word-measured",
+      "whisper-word-insufficient",
+      "whisper-word-failed",
+      "whisper-word-not-available",
+      "not-applicable",
+    ]),
+  }).strict(),
+}).strict();
+
 export const objectiveQualityAnalysisSchema = z.union([
   objectiveQualityAnalysisV1Schema,
   objectiveQualityAnalysisV2Schema,
   objectiveQualityAnalysisV3Schema,
   objectiveQualityAnalysisV4Schema,
   objectiveQualityAnalysisV5Schema,
+  objectiveQualityAnalysisV6Schema,
 ]);
 
 export type ObjectiveQualityAnalysis = z.infer<typeof objectiveQualityAnalysisSchema>;
@@ -362,12 +380,22 @@ const outputAnalysisRecordV5Schema = z.object({
   result: objectiveQualityAnalysisV5Schema.nullable(),
 }).strict();
 
+const outputAnalysisRecordV6Schema = z.object({
+  schemaVersion: z.literal("ltx-studio-output-analysis.v6"),
+  ...outputAnalysisRecordFields,
+  evaluatorFingerprint: z.string().min(1).max(512),
+  conditioningAudioSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  expectedDialogueSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  result: objectiveQualityAnalysisV6Schema.nullable(),
+}).strict();
+
 export const outputAnalysisRecordSchema = z.union([
   outputAnalysisRecordV1Schema,
   outputAnalysisRecordV2Schema,
   outputAnalysisRecordV3Schema,
   outputAnalysisRecordV4Schema,
   outputAnalysisRecordV5Schema,
+  outputAnalysisRecordV6Schema,
 ]);
 
 export type OutputAnalysisRecord = z.infer<typeof outputAnalysisRecordSchema>;

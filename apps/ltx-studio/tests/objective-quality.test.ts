@@ -6,6 +6,7 @@ import {
   type ObjectiveWorkerResult,
 } from "../shared/objectiveQuality.js";
 import { unavailablePhonemeVisemeResult } from "../shared/phonemeVisemeEvaluator.js";
+import { notApplicableDialogueEvaluation } from "../shared/dialogueEvaluator.js";
 
 function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorkerResult {
   return {
@@ -80,6 +81,7 @@ function worker(overrides: Partial<ObjectiveWorkerResult> = {}): ObjectiveWorker
       nullP95Correlation: 0.25,
     },
     conditioningAvSync: null,
+    dialogue: notApplicableDialogueEvaluation(),
     phonemeViseme: unavailablePhonemeVisemeResult(),
     ...overrides,
   };
@@ -95,14 +97,14 @@ describe("objective output quality", () => {
       conditioningAvSync: "provenance-unavailable",
       phonemeViseme: "manifest-missing",
       identity: "sface-raw-measured",
-      dialogue: "whisper-not-run",
+      dialogue: "not-applicable",
     });
     expect(result.face?.noseVelocityP95PerSecond).toBe(2.3);
     expect(result.findings).toContainEqual(expect.objectContaining({ code: "calibration-required" }));
     expect(result).not.toHaveProperty("score");
     expect(result).not.toHaveProperty("rating");
     expect(result.capabilities.avSync).not.toBe("measured");
-    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v5");
+    expect(result.schemaVersion).toBe("ltx-studio-objective-quality.v6");
     expect(result.identity.cosineP10).toBe(0.84);
     expect(result.avSync.estimatedAudioLeadMilliseconds).toBe(30);
     expect(result.phonemeViseme.status).toBe("not-available");

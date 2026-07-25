@@ -255,6 +255,24 @@ export const fieldHelp = {
     "Wofür: SHA-256-Fingerabdruck aus Betriebssystem, Kernel, Node, Python, FFmpeg und den relevanten Python-Paketversionen. A/B-Vergleiche werden bei unterschiedlichen Runtime-Fingerprints absichtlich nicht als direkt vergleichbar bewertet.",
   objectivePvTransitionF1:
     "Wofür: Übereinstimmung sichtbarer Visemwechsel mit einer Toleranz von einem Videoframe. Product-GO verlangt mindestens 0,90 insgesamt, 0,80 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
+  objectiveDialogueCapability:
+    "Wofür: Prüft mit dem lokal installierten Whisper-small-Modell, ob die hörbaren Wörter dem exakten Text aus dem Dialogfeld entsprechen, und richtet diesen Text grob an der Audiospur aus. Das misst echte Worttreue, aber keine sichtbaren Phoneme oder Visemklassen.",
+  objectiveDialogueWer:
+    "Wofür: Wortfehlerrate zwischen dem exakten Dialogfeld und der frei erkannten Ausgabesprache. 0 % bedeutet keine Einfügung, Auslassung oder Ersetzung. Der Rohwert kann bei vielen Einfügungen über 100 % liegen und ist noch keine kalibrierte 0-bis-10-Note.",
+  objectiveDialogueWords:
+    "Wofür: Zeigt frei erkannte Wörter im Verhältnis zur erwarteten Wortzahl. Gleiche Zahlen beweisen allein noch keinen identischen Wortlaut; dafür ist die Wortfehlerrate maßgeblich.",
+  objectiveDialogueAlignmentCoverage:
+    "Wofür: Anteil der erwarteten Wörter, für die Whisper im geführten Abgleich ein Audio-Zeitfenster liefern konnte. Gut ist nahe 100 %. Eine geführte Ausrichtung kann einen falschen oder fehlenden Laut nicht in einen richtigen verwandeln.",
+  objectiveDialogueAlignmentConfidence:
+    "Wofür: Median der Whisper-Tokenwahrscheinlichkeit innerhalb der geführten Wortausrichtung. Höher ist plausibler. Niedrige Werte markieren unsichere Wortfenster; es gibt noch keinen lokal kalibrierten Bestehensgrenzwert.",
+  objectiveDialogueMouthCoverage:
+    "Wofür: Anteil der geführten Wortfenster, in denen YuNet eine kontinuierlich stabilisierte Mundregion verfolgen konnte. Gut ist nahe 100 %. Der Wert misst Beobachtbarkeit, nicht Artikulationsrichtigkeit.",
+  objectiveDialogueWordMotion:
+    "Wofür: Anteil der verfolgten Wortfenster mit mindestens einem klaren Mundbewegungssignal. Sehr niedrige Werte zeigen fehlende sichtbare Artikulation. 100 % beweist noch keine korrekten Mundformen oder Phonemtreue.",
+  objectiveDialoguePauseMotion:
+    "Wofür: Anteil der auswertbaren Pausenstichproben mit deutlicher Mundbewegung. Niedriger ist bei einem ruhigen Einzelsprecher meist besser, kann aber durch Atmen, Mimik, Kopfbewegung oder Trackingfehler beeinflusst werden.",
+  objectiveDialogueActivityLag:
+    "Wofür: Grober Versatz zwischen Whisper-Wortaktivitätsfenstern und stabilisierter Mundbewegung. Positiv bedeutet Audio/Wortaktivität läuft der sichtbaren Bewegung voraus. Der Wert erscheint nur bei bestandener Korrelations- und Nullmodellprüfung und bleibt bis zu kontrollierten Verschiebungstests ein Rohwert.",
   experimentTitle:
     "Wofür: Benennt einen vorab geplanten Vergleich dauerhaft. Gute Eingabe: Pipeline, Ausgangswert und Kandidatenwert nennen, zum Beispiel 'A2V Guidance 5 gegen 3'.",
   experimentVariable:

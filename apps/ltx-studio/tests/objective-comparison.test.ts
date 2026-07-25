@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AvSyncRawMetrics, IdentityMetrics } from "../shared/objectiveQuality.js";
 import type { StudioOutput } from "../shared/outputs.js";
+import { notApplicableDialogueEvaluation } from "../shared/dialogueEvaluator.js";
 import {
   comparisonCompatibility,
   metricDelta,
@@ -186,6 +187,44 @@ describe("objective A/B comparison", () => {
 
     expect(metricDelta(lag)).toBe(-83);
     expect(metricTrend(lag)).toBe("neutral");
+  });
+
+  it("does not color uncalibrated dialogue-motion proxies as improvements", () => {
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    for (const [candidate, motion, pause] of [
+      [left, 0.5, 0.5],
+      [right, 0.9, 0.1],
+    ] as const) {
+      const analysis = candidate.analysis as NonNullable<StudioOutput["analysis"]> & {
+        result: Record<string, unknown>;
+      };
+      analysis.schemaVersion = "ltx-studio-output-analysis.v6";
+      analysis.result = {
+        ...analysis.result,
+        schemaVersion: "ltx-studio-objective-quality.v6",
+        dialogue: {
+          ...notApplicableDialogueEvaluation(),
+          status: "measured",
+          blockerCode: "none",
+          error: null,
+          wordsWithMouthMotionRatio: motion,
+          pauseMotionRatio: pause,
+          estimatedWordActivityLeadMilliseconds: 20,
+          wordMotionProxyStatus: "insufficient",
+        },
+      } as unknown as typeof analysis.result;
+    }
+
+    for (const id of [
+      "dialogue-word-motion",
+      "dialogue-pause-motion",
+      "dialogue-word-activity-lag",
+    ]) {
+      const metric = objectiveComparisonMetrics(left, right)
+        .find((candidate) => candidate.id === id)!;
+      expect(metricTrend(metric)).toBe("neutral");
+    }
   });
 
   it("detects prompt differences beyond the displayed preview and gates incompatible analyses", () => {

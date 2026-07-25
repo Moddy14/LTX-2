@@ -47,19 +47,26 @@ export function ObjectiveAnalysisPanel({
     || result?.schemaVersion === "ltx-studio-objective-quality.v3"
     || result?.schemaVersion === "ltx-studio-objective-quality.v4"
     || result?.schemaVersion === "ltx-studio-objective-quality.v5"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v6"
     ? result.identity
     : null;
   const avSync = result?.schemaVersion === "ltx-studio-objective-quality.v3"
     || result?.schemaVersion === "ltx-studio-objective-quality.v4"
     || result?.schemaVersion === "ltx-studio-objective-quality.v5"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v6"
     ? result.avSync
     : null;
   const conditioningAvSync = result?.schemaVersion === "ltx-studio-objective-quality.v5"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v6"
     ? result.conditioningAvSync
     : null;
   const phonemeViseme = result?.schemaVersion === "ltx-studio-objective-quality.v4"
     || result?.schemaVersion === "ltx-studio-objective-quality.v5"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v6"
     ? result.phonemeViseme
+    : null;
+  const dialogue = result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    ? result.dialogue
     : null;
   const provenance = output.provenance;
   const provenanceModelCount = provenance?.files.filter((file) => file.role.startsWith("model:")).length ?? 0;
@@ -230,6 +237,32 @@ export function ObjectiveAnalysisPanel({
                   : percent(avSync.audioActivityRatio)} help={fieldHelp.objectiveAvAudioActivity} />
               </>
             ) : null}
+            {dialogue && dialogue.wordErrorRate !== null ? (
+              <>
+                <MetricRow label="Dialog-Wortfehlerrate" value={metricWithUnit(
+                  dialogue.wordErrorRate === null ? null : dialogue.wordErrorRate * 100,
+                  " %",
+                  0,
+                )} help={fieldHelp.objectiveDialogueWer} />
+                <MetricRow label="Erkannte Wörter" value={`${dialogue.recognizedWordCount} / ${dialogue.expectedWordCount}`} help={fieldHelp.objectiveDialogueWords} />
+                <MetricRow label="Geführte Wortabdeckung" value={percent(dialogue.guidedWordCoverage)} help={fieldHelp.objectiveDialogueAlignmentCoverage} />
+                <MetricRow label="Wortzeit-Konfidenz Median" value={dialogue.medianGuidedWordProbability === null
+                  ? "Nicht messbar"
+                  : percent(dialogue.medianGuidedWordProbability)} help={fieldHelp.objectiveDialogueAlignmentConfidence} />
+                <MetricRow label="Mundtracking in Wörtern" value={percent(dialogue.mouthTrackedWordCoverage)} help={fieldHelp.objectiveDialogueMouthCoverage} />
+                <MetricRow label="Wörter mit Mundbewegung" value={dialogue.wordsWithMouthMotionRatio === null
+                  ? "Nicht messbar"
+                  : percent(dialogue.wordsWithMouthMotionRatio)} help={fieldHelp.objectiveDialogueWordMotion} />
+                <MetricRow label="Mundbewegung in Pausen" value={dialogue.pauseMotionRatio === null
+                  ? "Nicht messbar"
+                  : percent(dialogue.pauseMotionRatio)} help={fieldHelp.objectiveDialoguePauseMotion} />
+                <MetricRow label="Wortaktivitäts-Rohversatz" value={metricWithUnit(
+                  dialogue.estimatedWordActivityLeadMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectiveDialogueActivityLag} />
+              </>
+            ) : null}
             {phonemeViseme?.status === "measured" ? (
               <>
                 <MetricRow label="PV-Offset" value={metricWithUnit(
@@ -298,7 +331,21 @@ export function ObjectiveAnalysisPanel({
                   : result?.schemaVersion === "ltx-studio-objective-quality.v1"
                     ? "Erkennungsmodell fehlt"
                     : "Provenienz fehlt"}</strong></span>
-            <span>Dialogtreue <strong>Whisper nicht ausgeführt</strong></span>
+            <span>Dialogtreue <InfoTooltip text={fieldHelp.objectiveDialogueCapability} /> <strong>{
+              dialogue?.status === "measured"
+                ? "Whisper-Wortmessung"
+                : dialogue?.status === "insufficient"
+                  ? dialogue.wordErrorRate !== null
+                    ? "Wörter gemessen, Alignment unzureichend"
+                    : "Wortmessung unzureichend"
+                  : dialogue?.status === "failed"
+                    ? "Whisper-Fehler"
+                    : dialogue?.status === "not-available"
+                      ? "Whisper fehlt"
+                      : dialogue?.status === "not-applicable"
+                        ? "Kein exakter Dialog"
+                        : "Whisper nicht ausgeführt"
+            }</strong></span>
           </div>
           {result.findings.length > 0 ? (
             <div className="objective-analysis__findings">

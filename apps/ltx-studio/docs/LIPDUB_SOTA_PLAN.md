@@ -118,6 +118,19 @@ Framezahl Qualitätsvoraussetzungen.
   selbstbehauptete Rechts- oder Product-GO-Freigabe. Erst ein separater,
   begrenzter Runner darf Modell, Mapping, Dataset-Freeze, signierte
   Rechtsfreigabe sowie Tune-/Holdout-Berichte prüfen und messen.
+- Objektive Analyse Version 6 ergänzt einen strikt lokalen, CPU-begrenzten
+  Whisper-small-Pfad. Der offizielle Checkpoint, die Python-/Torch-/NumPy-/
+  Whisper-/FFmpeg-Laufzeit sowie alle beteiligten Runner werden gehasht. Der
+  exakte Dialogtext ist ebenfalls SHA-256-gebunden; Änderungen invalidieren den
+  Cache und Änderungen während eines Laufs lassen die Analyse fehlschlagen.
+  Persistiert werden freie Transkription, WER mit S/D/I, erkannte Sprache,
+  vollständige geführte Wortfenster mit Wahrscheinlichkeiten und Abstention,
+  YuNet-Mundtracking in nutzbaren Wortfenstern, Pausenbewegung sowie ein
+  nullmodellgeprüfter grober Wortaktivitäts-/Mundbewegungsproxy. Der Runner lädt
+  ausschließlich den verifizierten lokalen Pfad und hat keinen Downloadweg.
+  Runner-Code bleibt auch bei fehlendem oder ungültigem Checkpoint Bestandteil
+  des Cache-Fingerprints. Decoder- und Wort-Tokenlimits werden vor der
+  geführten Ausrichtung geprüft und führen kontrolliert zu `insufficient`.
 - Der Trainer enthält einen rechtegebundenen, content-adressierten
   **Entwicklungs**-Dataset-Freeze. Er verbindet Sprecher, Gesichtsidentität, Quellasset,
   Sammlung, Session, Äußerung, Ableitung, Rechtequelle, exakte
@@ -279,6 +292,9 @@ umgesetzt:
 - revisionsgebundene SFace-Ähnlichkeiten zwischen der tatsächlich verwendeten
   visuellen Referenz und allen eindeutig verfolgbaren Ausgabeframes;
 - checkpointfreie Rohmessung der zeitlichen Audio-Onset-/Mundbewegungskorrelation.
+- lokale Whisper-Worttreue mit WER sowie persistierten, wahrscheinlichkeits-
+  und hashgebundenen Wortfenstern;
+- wortfenstergeführte Mundbewegungs- und Pausenrohwerte mit Abstention.
 
 Noch offen sind die für eine belastbare SOTA-Aussage erforderlichen
 Evaluatoren:
@@ -287,18 +303,18 @@ Evaluatoren:
   CPU-Inferenzrunner für den bereits implementierten
   Phonem-/Visem-AV-Sync-Vertrag;
 - lokale SFace-Positiv-/Impostor-Kalibrierung für belastbare Grenzbereiche;
-- ASR-Abgleich des erzeugten Dialogs;
 - bewegungskompensierte Artefakt- und Flimmererkennung.
 
-Als nächster ehrlicher Zwischenschritt wird der lokal installierte
-MIT-lizenzierte Whisper-Pfad transcript-geführt und CPU-begrenzt eingebaut:
-ASR/WER, kritische Wortfehler und echte Wortfenster aus dem Zieltext werden mit
-der bestehenden stabilisierten YuNet-Mundbewegung verglichen. Ausgegeben werden
-Wort-Onset-/Offset-Lag, Mundbewegungsabdeckung während Sprache,
-Pausenfehlbewegung, Fenster-IQR und Nulltests. Erst kalibrierte Verschiebungen
-von `±40`, `±80`, `±120` und `±200 ms` dürfen daraus eine Timing-Aussage
-ableiten. Dieser Pfad ist ausdrücklich kein Phonem-/Visem-Nachweis und erzeugt
-keine `10/10`-Freigabe.
+Der Whisper-Zwischenschritt ist umgesetzt. Der reale lokale Kontrolllauf vom
+25.07.2026 erkannte acht von acht Wörtern, ersetzte aber `Ton` durch `Turm`
+(`12,5 %` WER). Die geführte Ausrichtung isolierte genau `Ton` mit
+Wahrscheinlichkeit `0,026`; sieben von acht Wörtern blieben nutzbar. Der
+Wortaktivitätsproxy bestand sein zyklisches Nullmodell nicht und gab deshalb
+keinen Offset aus. Der Lauf benötigte 12,5 Sekunden, maximal 2,24 GiB RAM,
+keine GPU und keine Netzwerksockets. Erst kalibrierte Verschiebungen von `±40`,
+`±80`, `±120` und `±200 ms` dürfen daraus eine Timing-Aussage ableiten. Dieser
+Pfad ist ausdrücklich kein Phonem-/Visem-Nachweis und erzeugt keine
+`10/10`-Freigabe.
 
 Für diese vier noch offenen Nachweise gelten vor dem Holdout zusätzlich:
 

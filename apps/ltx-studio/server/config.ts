@@ -34,6 +34,9 @@ export const longcatProjectRoot = resolve(
 export const statePath = join(dataRoot, "jobs.json");
 export const assetsStatePath = join(dataRoot, "assets.json");
 export const provenanceCachePath = join(dataRoot, "provenance-cache.json");
+export const whisperModelPath = resolve(
+  process.env.LTX_STUDIO_WHISPER_SMALL_MODEL ?? join(homedir(), ".cache", "whisper", "small.pt"),
+);
 export const serverHost = "127.0.0.1";
 export const serverPort = Number.parseInt(process.env.LTX_STUDIO_PORT ?? "4318", 10);
 export const devUiPort = Number.parseInt(process.env.LTX_STUDIO_UI_PORT ?? "4317", 10);

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,11 +14,14 @@ import type { StudioJob } from "../server/jobs.js";
 import {
   buildObjectiveQualityAnalysis,
   cleanupAnalysisTempRoot,
+  combinedEvaluatorFingerprint,
   OutputAnalysisManager,
 } from "../server/outputAnalysis.js";
+import type { DialogueEvaluatorState } from "../server/dialogueEvaluator.js";
 import { OutputLibrary } from "../server/outputs.js";
 import type { ObjectiveWorkerResult } from "../shared/objectiveQuality.js";
 import { unavailablePhonemeVisemeResult } from "../shared/phonemeVisemeEvaluator.js";
+import { notApplicableDialogueEvaluation } from "../shared/dialogueEvaluator.js";
 import { validRequest } from "./fixtures.js";
 
 const faceModel = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
@@ -28,6 +32,17 @@ const runtimeAvailable = existsSync(faceModel)
   && spawnSync(pythonExecutable, ["-c", "import cv2"], { stdio: "ignore" }).status === 0;
 const integrationIt = runtimeAvailable ? it : it.skip;
 const roots: string[] = [];
+const dialogueEvaluatorState: DialogueEvaluatorState = {
+  status: "ready",
+  blockerCode: "none",
+  fingerprint: "dialogue-evaluator-test.v1",
+  modelPath: "/tmp/whisper-small-test.pt",
+  modelSha256: "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794",
+  packageVersion: "test",
+  runnerSha256: "a".repeat(64),
+  runtimeFingerprint: "b".repeat(64),
+  error: null,
+};
 const syntheticWorkerResult: ObjectiveWorkerResult = {
   technical: {
     durationSeconds: 1,
@@ -100,6 +115,7 @@ const syntheticWorkerResult: ObjectiveWorkerResult = {
     nullP95Correlation: null,
   },
   conditioningAvSync: null,
+  dialogue: notApplicableDialogueEvaluation(),
   phonemeViseme: unavailablePhonemeVisemeResult(),
 };
 const syntheticBaseWorkerResult = {
@@ -108,6 +124,7 @@ const syntheticBaseWorkerResult = {
   identity: syntheticWorkerResult.identity,
   avSync: syntheticWorkerResult.avSync,
   conditioningAvSync: syntheticWorkerResult.conditioningAvSync,
+  dialogue: syntheticWorkerResult.dialogue,
 };
 
 afterEach(async () => {
@@ -270,6 +287,11 @@ integrationIt("waits for a timed-out worker to close before starting the next qu
     "parser.add_argument('--identity-model', required=True)",
     "parser.add_argument('--identity-status', required=True)",
     "parser.add_argument('--identity-reference', nargs=2, action='append', default=[])",
+    "parser.add_argument('--expected-dialogue', required=True)",
+    "parser.add_argument('--whisper-model', nargs=2, required=True)",
+    "parser.add_argument('--dialogue-evaluator-state', required=True)",
+    "parser.add_argument('--dialogue-evaluator-blocker', required=True)",
+    "parser.add_argument('--dialogue-evaluator-error')",
     "parser.add_argument('--max-frames')",
     "args = parser.parse_args()",
     "with open(args.face_model, 'a', encoding='utf-8') as handle:",
@@ -339,6 +361,11 @@ integrationIt("detects variable frame timing from actual frame timestamps", asyn
     "--face-model", faceModel,
     "--identity-model", identityModel,
     "--identity-status", "not-applicable",
+    "--expected-dialogue", "",
+    "--whisper-model", join(root, "missing-small.pt"), "0".repeat(64),
+    "--dialogue-evaluator-state", "not-available",
+    "--dialogue-evaluator-blocker", "runtime-unavailable",
+    "--dialogue-evaluator-error", "test",
     "--max-frames", "240",
   ], { encoding: "utf8", timeout: 15_000 });
   expect(analyzed.status, analyzed.stderr).toBe(0);
@@ -645,7 +672,7 @@ integrationIt("replaces a completed v3 cache even with current SFace and AV prep
   manager.cancel(outputName, fresh.analysisId);
 }, 20_000);
 
-integrationIt("reuses a completed v5 cache when SFace and evaluator configuration are current", async () => {
+integrationIt("reuses a completed v6 cache and invalidates it when the bound dialogue changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-current-cache-"));
   roots.push(root);
   const outputName = "current-v4-cache.mp4";
@@ -658,10 +685,17 @@ integrationIt("reuses a completed v5 cache when SFace and evaluator configuratio
   currentWorker.identity = measuredIdentity("yunet5-aligncrop-112-track.v2");
   const timestamp = "2026-07-24T18:33:00.000Z";
   const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918883";
+  const evaluatorState: PhonemeVisemeEvaluatorState = {
+    fingerprint: "manifest-missing.v1",
+    result: unavailablePhonemeVisemeResult(),
+  };
   writeOutputAnalysis(root, {
-    schemaVersion: "ltx-studio-output-analysis.v5",
-    evaluatorFingerprint: "manifest-missing.v1",
+    schemaVersion: "ltx-studio-output-analysis.v6",
+    evaluatorFingerprint: combinedEvaluatorFingerprint(evaluatorState, dialogueEvaluatorState),
     conditioningAudioSha256: null,
+    expectedDialogueSha256: createHash("sha256")
+      .update(target.request.promptParts.dialogue)
+      .digest("hex"),
     outputName,
     sizeBytes: target.sizeBytes,
     modifiedAtMs: target.modifiedAtMs,
@@ -681,6 +715,8 @@ integrationIt("reuses a completed v5 cache when SFace and evaluator configuratio
   });
   const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
     analysisTempRoot: join(root, "analysis-tmp"),
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
   });
 
   const reused = manager.start(outputName);
@@ -688,9 +724,22 @@ integrationIt("reuses a completed v5 cache when SFace and evaluator configuratio
   expect(reused.analysisId).toBe(currentAnalysisId);
   expect(reused.attempt).toBe(1);
   expect(reused.status).toBe("completed");
+
+  const settingsPath = join(root, `${outputName}.ltx-settings.json`);
+  const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
+    request: { promptParts: { dialogue: string } };
+  };
+  settings.request.promptParts.dialogue = "Geänderter exakter Dialog.";
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+
+  const invalidated = manager.start(outputName);
+  expect(invalidated.analysisId).not.toBe(currentAnalysisId);
+  expect(invalidated.attempt).toBe(2);
+  expect(invalidated.status).toBe("queued");
+  manager.cancel(outputName, invalidated.analysisId);
 }, 20_000);
 
-integrationIt("invalidates a v5 cache when only the evaluator fingerprint changes", async () => {
+integrationIt("invalidates a v6 cache when only the evaluator fingerprint changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-v4-pv-cache-"));
   roots.push(root);
   const outputName = "pv-manifest-cache.mp4";
@@ -703,10 +752,17 @@ integrationIt("invalidates a v5 cache when only the evaluator fingerprint change
   currentWorker.identity = measuredIdentity("yunet5-aligncrop-112-track.v2");
   const timestamp = "2026-07-24T18:34:00.000Z";
   const currentAnalysisId = "3c8a5dc6-8864-49f7-a639-85caef918884";
+  let evaluatorState: PhonemeVisemeEvaluatorState = {
+    fingerprint: "manifest-missing.v1",
+    result: unavailablePhonemeVisemeResult(),
+  };
   writeOutputAnalysis(root, {
-    schemaVersion: "ltx-studio-output-analysis.v5",
-    evaluatorFingerprint: "manifest-missing.v1",
+    schemaVersion: "ltx-studio-output-analysis.v6",
+    evaluatorFingerprint: combinedEvaluatorFingerprint(evaluatorState, dialogueEvaluatorState),
     conditioningAudioSha256: null,
+    expectedDialogueSha256: createHash("sha256")
+      .update(target.request.promptParts.dialogue)
+      .digest("hex"),
     outputName,
     sizeBytes: target.sizeBytes,
     modifiedAtMs: target.modifiedAtMs,
@@ -724,13 +780,10 @@ integrationIt("invalidates a v5 cache when only the evaluator fingerprint change
     error: null,
     result: buildObjectiveQualityAnalysis(currentWorker, timestamp),
   });
-  let evaluatorState: PhonemeVisemeEvaluatorState = {
-    fingerprint: "manifest-missing.v1",
-    result: unavailablePhonemeVisemeResult(),
-  };
   const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
     analysisTempRoot: join(root, "analysis-tmp"),
     phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
   });
 
   expect(manager.start(outputName).analysisId).toBe(currentAnalysisId);

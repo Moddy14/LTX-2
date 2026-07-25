@@ -509,6 +509,7 @@ test("speech quality scorecard persists six ratings and remains usable on narrow
 test("objective speech analysis exposes raw measurements and honest capability gaps", async ({ page }, testInfo) => {
   const request = createDefaultRequest("audio-to-video");
   request.outputName = "speech-objective-analysis.mp4";
+  request.promptParts.dialogue = "Bitte prüfe meine Lippen. Der Ton passt jetzt.";
   const modifiedAt = "2026-07-24T18:00:00.000Z";
   const output = {
     name: request.outputName,
@@ -532,8 +533,10 @@ test("objective speech analysis exposes raw measurements and honest capability g
     const body = route.request().postDataJSON();
     expect(body).toEqual({ force: false });
     output.analysis = {
-      schemaVersion: "ltx-studio-output-analysis.v4",
+      schemaVersion: "ltx-studio-output-analysis.v6",
       evaluatorFingerprint: "test-evaluator.v1",
+      conditioningAudioSha256: null,
+      expectedDialogueSha256: "2c8e99ff8edb6deec76583cf59599a09c471a38681ecec354522c045593d2852",
       outputName: output.name,
       sizeBytes: output.sizeBytes,
       modifiedAtMs: Date.parse(modifiedAt),
@@ -550,8 +553,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
       updatedAt: "2026-07-24T18:05:02.000Z",
       error: null,
       result: {
-        schemaVersion: "ltx-studio-objective-quality.v4",
-        analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
+        schemaVersion: "ltx-studio-objective-quality.v6",
+        analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6",
         createdAt: "2026-07-24T18:05:02.000Z",
         status: "insufficient",
         technical: {
@@ -624,6 +627,56 @@ test("objective speech analysis exposes raw measurements and honest capability g
           windowLagIqrMilliseconds: 42,
           nullP95Correlation: 0.21,
         },
+        conditioningAvSync: null,
+        dialogue: {
+          status: "measured",
+          blockerCode: "none",
+          error: null,
+          method: "whisper-small-guided-word-motion.v1",
+          modelName: "OpenAI Whisper small",
+          modelSha256: "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794",
+          packageVersion: "20250625",
+          detectedLanguage: "de",
+          expectedTranscriptSha256: "2c8e99ff8edb6deec76583cf59599a09c471a38681ecec354522c045593d2852",
+          expectedWordCount: 8,
+          recognizedWordCount: 8,
+          recognizedTranscript: "Bitte prüfe meine Lippen. Der Turm passt jetzt.",
+          wordErrorRate: 0.125,
+          substitutions: 1,
+          deletions: 0,
+          insertions: 0,
+          guidedAlignedWordCount: 8,
+          guidedWordCoverage: 1,
+          usableAlignedWordCount: 7,
+          usableGuidedWordCoverage: 0.875,
+          medianGuidedWordProbability: 0.941,
+          p10GuidedWordProbability: 0.356,
+          lowConfidenceAlignedWords: 1,
+          alignmentStatus: "measured",
+          alignmentError: null,
+          timePrecisionMilliseconds: 20,
+          audioStartRelativeVideoSeconds: 0,
+          guidedWords: ["bitte", "prüfe", "meine", "lippen", "der", "ton", "passt", "jetzt"]
+            .map((normalizedWord, index) => ({
+              index,
+              word: normalizedWord,
+              normalizedWord,
+              tokenIds: [index + 1],
+              startSeconds: index * 0.3,
+              endSeconds: index * 0.3 + 0.2,
+              probability: normalizedWord === "ton" ? 0.026 : 0.95,
+              usable: normalizedWord !== "ton",
+            })),
+          trackedWordCount: 7,
+          mouthTrackedWordCoverage: 1,
+          wordsWithMouthMotionRatio: 1,
+          pauseMotionRatio: 0.486,
+          estimatedWordActivityLeadMilliseconds: null,
+          lagResolutionMilliseconds: 42,
+          correlationPeak: 0.16,
+          nullP95Correlation: 0.308,
+          wordMotionProxyStatus: "measured",
+        },
         phonemeViseme: {
           status: "not-available",
           blockerCode: "manifest-missing",
@@ -652,9 +705,10 @@ test("objective speech analysis exposes raw measurements and honest capability g
         },
         capabilities: {
           avSync: "classical-av-raw-measured",
+          conditioningAvSync: "provenance-unavailable",
           phonemeViseme: "manifest-missing",
           identity: "sface-raw-measured",
-          dialogue: "whisper-not-run",
+          dialogue: "whisper-word-measured",
         },
         findings: [{
           code: "calibration-required",
@@ -679,7 +733,9 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Rohversatz" }).locator("strong")).toHaveText("20 ms");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Korrelation" }).locator("strong")).toHaveText("0.351");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Identität p10" }).locator("strong")).toHaveText("0.849");
-  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(24);
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Dialog-Wortfehlerrate" }).locator("strong")).toHaveText("13 %");
+  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Wörter mit Mundbewegung" }).locator("strong")).toHaveText("100 %");
+  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(32);
   const analysisPanelBox = await page.locator(".objective-analysis").boundingBox();
   expect(analysisPanelBox).not.toBeNull();
   for (const index of [0, 1]) {
@@ -701,7 +757,7 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Phonem/Visem");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Modell fehlt");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("SFace Rohwerte");
-  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper nicht ausgeführt");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper-Wortmessung");
   await expect(page.locator(".objective-analysis__actions")).toContainText("keine DGX-Modellbelegung");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("speech-objective-analysis.png"), fullPage: true });

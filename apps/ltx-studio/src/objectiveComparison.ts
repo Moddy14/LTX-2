@@ -154,14 +154,24 @@ export function comparisonCompatibility(
   if (left.analyzerVersion !== right.analyzerVersion) {
     reasons.push("Analyzer-Versionen unterscheiden sich.");
   }
-  const leftFingerprint = leftOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v4"
+  const leftFingerprint = leftOutput.analysis && "evaluatorFingerprint" in leftOutput.analysis
     ? leftOutput.analysis.evaluatorFingerprint
     : null;
-  const rightFingerprint = rightOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v4"
+  const rightFingerprint = rightOutput.analysis && "evaluatorFingerprint" in rightOutput.analysis
     ? rightOutput.analysis.evaluatorFingerprint
     : null;
   if (!leftFingerprint || !rightFingerprint || leftFingerprint !== rightFingerprint) {
     reasons.push("Evaluator-Fingerprints sind nicht identisch belegt.");
+  }
+  const leftDialogueSha = leftOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
+    ? leftOutput.analysis.expectedDialogueSha256
+    : null;
+  const rightDialogueSha = rightOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
+    ? rightOutput.analysis.expectedDialogueSha256
+    : null;
+  if ((leftDialogueSha || rightDialogueSha)
+    && (!leftDialogueSha || !rightDialogueSha || leftDialogueSha !== rightDialogueSha)) {
+    reasons.push("Die gebundenen Dialogtexte sind nicht identisch.");
   }
   const leftIdentity = "identity" in left ? left.identity : null;
   const rightIdentity = "identity" in right ? right.identity : null;
@@ -291,6 +301,12 @@ export function objectiveComparisonMetrics(
   const rightAv = "avSync" in right ? right.avSync : null;
   const leftConditioningAv = "conditioningAvSync" in left ? left.conditioningAvSync : null;
   const rightConditioningAv = "conditioningAvSync" in right ? right.conditioningAvSync : null;
+  const leftDialogue = "dialogue" in left && typeof left.dialogue === "object"
+    ? left.dialogue
+    : null;
+  const rightDialogue = "dialogue" in right && typeof right.dialogue === "object"
+    ? right.dialogue
+    : null;
 
   const metrics: ObjectiveComparisonMetric[] = [
     {
@@ -443,6 +459,71 @@ export function objectiveComparisonMetrics(
       digits: 0,
       unit: " ms",
       direction: "lower",
+    },
+    {
+      id: "dialogue-word-error-rate",
+      label: "Dialog-Wortfehlerrate",
+      left: leftDialogue?.wordErrorRate === null || leftDialogue?.wordErrorRate === undefined
+        ? null
+        : leftDialogue.wordErrorRate * 100,
+      right: rightDialogue?.wordErrorRate === null || rightDialogue?.wordErrorRate === undefined
+        ? null
+        : rightDialogue.wordErrorRate * 100,
+      digits: 0,
+      unit: " %",
+      direction: "lower",
+    },
+    {
+      id: "dialogue-word-motion",
+      label: "Wörter mit Mundbewegung",
+      left: leftDialogue?.wordsWithMouthMotionRatio === null
+        || leftDialogue?.wordsWithMouthMotionRatio === undefined
+        ? null
+        : leftDialogue.wordsWithMouthMotionRatio * 100,
+      right: rightDialogue?.wordsWithMouthMotionRatio === null
+        || rightDialogue?.wordsWithMouthMotionRatio === undefined
+        ? null
+        : rightDialogue.wordsWithMouthMotionRatio * 100,
+      digits: 0,
+      unit: " %",
+      direction: leftDialogue?.wordMotionProxyStatus === "measured"
+        && rightDialogue?.wordMotionProxyStatus === "measured"
+        ? "higher"
+        : "neutral",
+    },
+    {
+      id: "dialogue-pause-motion",
+      label: "Mundbewegung in Pausen",
+      left: leftDialogue?.pauseMotionRatio === null || leftDialogue?.pauseMotionRatio === undefined
+        ? null
+        : leftDialogue.pauseMotionRatio * 100,
+      right: rightDialogue?.pauseMotionRatio === null || rightDialogue?.pauseMotionRatio === undefined
+        ? null
+        : rightDialogue.pauseMotionRatio * 100,
+      digits: 0,
+      unit: " %",
+      direction: leftDialogue?.wordMotionProxyStatus === "measured"
+        && rightDialogue?.wordMotionProxyStatus === "measured"
+        ? "lower"
+        : "neutral",
+    },
+    {
+      id: "dialogue-word-activity-lag",
+      label: "Absoluter Wortaktivitäts-Rohversatz",
+      left: leftDialogue?.estimatedWordActivityLeadMilliseconds === null
+        || leftDialogue?.estimatedWordActivityLeadMilliseconds === undefined
+        ? null
+        : Math.abs(leftDialogue.estimatedWordActivityLeadMilliseconds),
+      right: rightDialogue?.estimatedWordActivityLeadMilliseconds === null
+        || rightDialogue?.estimatedWordActivityLeadMilliseconds === undefined
+        ? null
+        : Math.abs(rightDialogue.estimatedWordActivityLeadMilliseconds),
+      digits: 0,
+      unit: " ms",
+      direction: leftDialogue?.wordMotionProxyStatus === "measured"
+        && rightDialogue?.wordMotionProxyStatus === "measured"
+        ? "lower"
+        : "neutral",
     },
   ];
 

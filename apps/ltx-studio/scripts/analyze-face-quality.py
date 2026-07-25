@@ -22,6 +22,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from av_sync_proxy import analyze_audio_motion_sync, blank_result, stabilized_face_patch
+from dialogue_word_evaluator import evaluate_dialogue
 
 FACE_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 IDENTITY_MODEL_SHA256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
@@ -1014,6 +1015,19 @@ def main() -> int:
     )
     parser.add_argument("--identity-reference", nargs=2, action="append", default=[])
     parser.add_argument("--conditioning-audio", nargs=4)
+    parser.add_argument("--expected-dialogue", required=True)
+    parser.add_argument("--whisper-model", nargs=2, required=True)
+    parser.add_argument(
+        "--dialogue-evaluator-state",
+        choices=["ready", "not-available"],
+        required=True,
+    )
+    parser.add_argument(
+        "--dialogue-evaluator-blocker",
+        choices=["none", "model-missing", "model-invalid", "runtime-unavailable"],
+        required=True,
+    )
+    parser.add_argument("--dialogue-evaluator-error", default="")
     parser.add_argument("--max-frames", type=int, default=240)
     args = parser.parse_args()
     video_path = Path(args.video).expanduser().absolute()
@@ -1046,6 +1060,10 @@ def main() -> int:
             seek_seconds,
             None if duration_seconds == -1 else duration_seconds,
         )
+    whisper_model_path = Path(args.whisper_model[0]).expanduser().absolute()
+    whisper_model_sha256 = args.whisper_model[1]
+    if not re.fullmatch(r"[0-9a-f]{64}", whisper_model_sha256):
+        raise ValueError("Whisper model SHA-256 must contain 64 lowercase hexadecimal characters")
     with analysis_snapshot_root() as snapshot_root:
         snapshot_sources = [
             (video_path, "Output video"),
@@ -1159,12 +1177,26 @@ def main() -> int:
                     f"{type(error).__name__}: {error}"[:500],
                     sampled_video_frames=motion_sampled_frames,
                 )
+        dialogue = evaluate_dialogue(
+            video_snapshot,
+            args.expected_dialogue,
+            motion_track,
+            finite_number(technical["durationSeconds"]),
+            technical["hasAudio"] if isinstance(technical["hasAudio"], bool) else None,
+            whisper_model_path,
+            whisper_model_sha256,
+            audio_start_offset,
+            args.dialogue_evaluator_state == "ready",
+            args.dialogue_evaluator_error or None,
+            args.dialogue_evaluator_blocker,
+        )
         result = {
             "technical": technical,
             "face": face,
             "identity": identity,
             "avSync": av_sync,
             "conditioningAvSync": conditioning_av_sync,
+            "dialogue": dialogue,
         }
         verify_snapshot(video_snapshot, video_sha256, "Output video")
         verify_snapshot(face_model_snapshot, FACE_MODEL_SHA256, "YuNet model")

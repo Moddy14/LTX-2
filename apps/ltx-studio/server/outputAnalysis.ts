@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -28,6 +28,11 @@ import {
   type ResolvedIdentityReference,
 } from "./inputEvidence.js";
 import {
+  resolveDialogueEvaluatorState,
+  WHISPER_SMALL_SHA256,
+  type DialogueEvaluatorState,
+} from "./dialogueEvaluator.js";
+import {
   resolvePhonemeVisemeEvaluatorState,
   type PhonemeVisemeEvaluatorState,
 } from "./evaluatorManifest.js";
@@ -53,12 +58,15 @@ type OutputAnalysisManagerOptions = {
   timeoutMs?: number;
   terminationGraceMs?: number;
   phonemeVisemeEvaluatorStateResolver?: () => PhonemeVisemeEvaluatorState;
+  dialogueEvaluatorStateResolver?: () => DialogueEvaluatorState;
 };
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
-  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v5" }>;
+  record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v6" }>;
   evaluatorState: PhonemeVisemeEvaluatorState;
+  dialogueEvaluatorState: DialogueEvaluatorState;
+  evaluatorFingerprint: string;
 };
 
 function analysisWasCancelled(task: AnalysisTask): boolean {
@@ -68,21 +76,54 @@ function analysisWasCancelled(task: AnalysisTask): boolean {
 function completedAnalysisIsCurrent(
   record: OutputAnalysisRecord,
   evaluatorState: PhonemeVisemeEvaluatorState,
+  dialogueEvaluatorState: DialogueEvaluatorState,
   target: OutputAnalysisTarget,
 ): boolean {
+  const evaluatorFingerprint = combinedEvaluatorFingerprint(
+    evaluatorState,
+    dialogueEvaluatorState,
+  );
   if (record.status !== "completed"
-    || record.schemaVersion !== "ltx-studio-output-analysis.v5"
-    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v5"
-    || record.evaluatorFingerprint !== evaluatorState.fingerprint
+    || record.schemaVersion !== "ltx-studio-output-analysis.v6"
+    || record.result?.schemaVersion !== "ltx-studio-objective-quality.v6"
+    || record.evaluatorFingerprint !== evaluatorFingerprint
     || record.conditioningAudioSha256 !== (conditioningAudioEvidence(target)?.sha256 ?? null)
+    || record.expectedDialogueSha256 !== expectedDialogueSha256(target)
     || record.result.phonemeViseme.manifestSha256 !== evaluatorState.result.manifestSha256
     || record.result.phonemeViseme.manifestReleaseId !== evaluatorState.result.manifestReleaseId
     || record.result.phonemeViseme.productGo.status !== evaluatorState.result.productGo.status) return false;
+  if (dialogueEvaluatorState.status === "ready"
+    && (record.result.dialogue.status === "measured"
+      || record.result.dialogue.status === "failed"
+      || record.result.dialogue.blockerCode === "alignment-insufficient")) {
+    if (record.result.dialogue.modelSha256 !== dialogueEvaluatorState.modelSha256
+      || record.result.dialogue.packageVersion !== dialogueEvaluatorState.packageVersion) return false;
+  } else if (dialogueEvaluatorState.status !== "ready"
+    && !["not-available", "not-applicable"].includes(record.result.dialogue.status)) {
+    return false;
+  }
   const identity = record.result.identity;
   if (["not-applicable", "reference-provenance-missing"].includes(identity.status)) return true;
   return identity.modelSha256 === CURRENT_IDENTITY_MODEL_SHA256
     && identity.modelRevision === CURRENT_IDENTITY_MODEL_REVISION
     && identity.preprocessingVersion === CURRENT_IDENTITY_PREPROCESSING;
+}
+
+function expectedDialogueSha256(target: OutputAnalysisTarget): string {
+  return createHash("sha256")
+    .update(target.request.promptParts.dialogue, "utf8")
+    .digest("hex");
+}
+
+export function combinedEvaluatorFingerprint(
+  evaluatorState: PhonemeVisemeEvaluatorState,
+  dialogueEvaluatorState: DialogueEvaluatorState,
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    analyzer: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6",
+    phonemeViseme: evaluatorState.fingerprint,
+    dialogue: dialogueEvaluatorState.fingerprint,
+  })).digest("hex");
 }
 
 function conditioningAudioEvidence(target: OutputAnalysisTarget) {
@@ -128,7 +169,7 @@ function revisionOf(target: OutputAnalysisTarget): OutputRevision {
 export function buildObjectiveQualityAnalysis(
   input: ObjectiveWorkerResult,
   createdAt = now(),
-): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v5" }> {
+): Extract<ObjectiveQualityAnalysis, { schemaVersion: "ltx-studio-objective-quality.v6" }> {
   const worker = objectiveWorkerResultSchema.parse(input);
   const findings: ObjectiveQualityAnalysis["findings"] = [];
   if (worker.technical.hasAudio !== true) {
@@ -294,6 +335,40 @@ export function buildObjectiveQualityAnalysis(
       message: worker.phonemeViseme.error ?? "Phonem-/Visem-Inhaltsprüfung fehlgeschlagen.",
     });
   }
+  if (worker.dialogue.wordErrorRate !== null) {
+    const errorPercent = Math.min(999, (worker.dialogue.wordErrorRate ?? 0) * 100);
+    findings.push({
+      code: "dialogue-whisper-word-measured",
+      level: errorPercent > 20 ? "warning" : "info",
+      message: `Whisper erkannte den gespeicherten Dialog mit ${errorPercent.toFixed(0)} % Wortfehlerrate.`,
+    });
+    if (worker.dialogue.lowConfidenceAlignedWords > 0) {
+      findings.push({
+        code: "dialogue-guided-low-confidence",
+        level: "warning",
+        message: `${worker.dialogue.lowConfidenceAlignedWords} geführte Wortausrichtung(en) haben niedrige Modellkonfidenz.`,
+      });
+    }
+  }
+  if (worker.dialogue.status === "insufficient") {
+    findings.push({
+      code: "dialogue-whisper-insufficient",
+      level: "warning",
+      message: worker.dialogue.error ?? "Whisper-Wortauswertung unzureichend.",
+    });
+  } else if (worker.dialogue.status === "failed") {
+    findings.push({
+      code: "dialogue-whisper-failed",
+      level: "warning",
+      message: worker.dialogue.error ?? "Whisper-Wortauswertung fehlgeschlagen.",
+    });
+  } else if (worker.dialogue.status === "not-available") {
+    findings.push({
+      code: "dialogue-whisper-not-available",
+      level: "warning",
+      message: worker.dialogue.error ?? "Lokaler Whisper-Wortauswerter nicht verfügbar.",
+    });
+  }
   findings.push({
     code: "calibration-required",
     level: "info",
@@ -310,10 +385,11 @@ export function buildObjectiveQualityAnalysis(
     && worker.face.geometryCoverage >= 0.5
     && ["measured", "not-applicable"].includes(worker.identity.status)
     && primaryAvSync.status === "measured"
-    && worker.phonemeViseme.status === "measured";
+    && worker.phonemeViseme.status === "measured"
+    && ["measured", "not-applicable"].includes(worker.dialogue.status);
   return {
-    schemaVersion: "ltx-studio-objective-quality.v5",
-    analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-pv.v5",
+    schemaVersion: "ltx-studio-objective-quality.v6",
+    analyzerVersion: "ffprobe-yunet5-sface-dual-avmotion-whisper-pv.v6",
     createdAt,
     status: sufficient ? "measured" : "insufficient",
     technical: worker.technical,
@@ -322,6 +398,7 @@ export function buildObjectiveQualityAnalysis(
     avSync: worker.avSync,
     conditioningAvSync: worker.conditioningAvSync,
     phonemeViseme: worker.phonemeViseme,
+    dialogue: worker.dialogue,
     capabilities: {
       avSync: worker.avSync.status === "measured"
         ? "classical-av-raw-measured"
@@ -361,13 +438,23 @@ export function buildObjectiveQualityAnalysis(
             : worker.identity.status === "failed"
               ? "sface-failed"
               : "reference-provenance-required",
-      dialogue: "whisper-not-run",
+      dialogue: worker.dialogue.status === "measured"
+        ? "whisper-word-measured"
+        : worker.dialogue.status === "insufficient"
+          ? "whisper-word-insufficient"
+          : worker.dialogue.status === "failed"
+            ? "whisper-word-failed"
+            : worker.dialogue.status === "not-available"
+              ? "whisper-word-not-available"
+              : "not-applicable",
     },
     findings,
     limitations: [
       "YuNet liefert fünf Landmarken; die Werte messen Stabilität, aber keine Phonem-Mund-Synchronität.",
       "SFace misst Identitätsähnlichkeit nur gegen während der Generierung kryptografisch gebundene Studio-Referenzen.",
       "Die getrennten Rohproxys korrelieren Audio-Onsets des Endmixes beziehungsweise der hashgebundenen Konditionierungs-Spur mit stabilisierter Mundbewegung; sie beweisen keine Phonem- oder Visemtreue.",
+      "Whisper misst Worttreue und richtet den gespeicherten Wortlaut grob an der Audiospur aus; Wortfenster und YuNet-Mundbewegung sind keine Phonem-/Visemklassifikation.",
+      "Wortaktivitäts-Lags und Mundbewegungsanteile bleiben Rohwerte, bis kontrollierte Zeitverschiebungen und lokale Positiv-/Negativbeispiele kalibriert sind.",
       "Nur ein manifestgebundener Evaluator mit Product-GO sowie bestandener Offset- und Inhaltsstufe darf Phonem-/Visemtreue als gemessen markieren.",
       "Musik, Fremdsprache, Verdeckungen und starke Beleuchtungswechsel können den AV-Rohproxy verfälschen.",
       "Eine SOTA-Aussage benötigt weiterhin einen lizenzierten und lokal kalibrierten Phonem-AV-Evaluator.",
@@ -402,13 +489,24 @@ export class OutputAnalysisManager {
     const revision = revisionOf(target);
     const current = readOutputAnalysis(this.root, outputName, revision);
     const evaluatorState = this.resolveEvaluatorState();
+    const dialogueEvaluatorState = this.resolveDialogueEvaluatorState();
+    const evaluatorFingerprint = combinedEvaluatorFingerprint(
+      evaluatorState,
+      dialogueEvaluatorState,
+    );
     if (current && ["queued", "running"].includes(current.status)) return current;
-    if (current && completedAnalysisIsCurrent(current, evaluatorState, target) && !force) return current;
+    if (current && completedAnalysisIsCurrent(
+      current,
+      evaluatorState,
+      dialogueEvaluatorState,
+      target,
+    ) && !force) return current;
     const createdAt = now();
-    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v5" }> = {
-      schemaVersion: "ltx-studio-output-analysis.v5",
-      evaluatorFingerprint: evaluatorState.fingerprint,
+    const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v6" }> = {
+      schemaVersion: "ltx-studio-output-analysis.v6",
+      evaluatorFingerprint,
       conditioningAudioSha256: conditioningAudioEvidence(target)?.sha256 ?? null,
+      expectedDialogueSha256: expectedDialogueSha256(target),
       outputName,
       sizeBytes: target.sizeBytes,
       modifiedAtMs: target.modifiedAtMs,
@@ -427,7 +525,13 @@ export class OutputAnalysisManager {
       result: null,
     };
     writeOutputAnalysis(this.root, record);
-    this.tasks.set(record.analysisId, { target, record, evaluatorState });
+    this.tasks.set(record.analysisId, {
+      target,
+      record,
+      evaluatorState,
+      dialogueEvaluatorState,
+      evaluatorFingerprint,
+    });
     this.activeByOutput.set(outputName, record.analysisId);
     this.queue.push(record.analysisId);
     setImmediate(() => void this.pump());
@@ -509,8 +613,11 @@ export class OutputAnalysisManager {
       await this.verifyTaskIdentityEvidence(task, "nach der Analyse");
       this.verifyTaskConditioningAudio(task, "nach der Analyse");
       if (analysisWasCancelled(task)) return;
-      if (this.resolveEvaluatorState().fingerprint !== task.evaluatorState.fingerprint) {
-        throw new Error("Phonem-/Visem-Evaluator-Manifest wurde während der Analyse verändert.");
+      if (combinedEvaluatorFingerprint(
+        this.resolveEvaluatorState(),
+        this.resolveDialogueEvaluatorState(),
+      ) !== task.evaluatorFingerprint) {
+        throw new Error("Evaluator-Manifest oder Whisper-Laufzeit wurde während der Analyse verändert.");
       }
       const currentTarget = this.library.resolveAnalysisTarget(task.target.outputName);
       if (currentTarget.sizeBytes !== task.target.sizeBytes
@@ -519,6 +626,9 @@ export class OutputAnalysisManager {
         || currentTarget.fileId !== task.target.fileId
         || currentTarget.jobId !== task.target.jobId) {
         throw new Error("Ausgabe wurde während der Analyse ersetzt oder verändert.");
+      }
+      if (expectedDialogueSha256(currentTarget) !== expectedDialogueSha256(task.target)) {
+        throw new Error("Gespeicherter Dialog wurde während der Analyse verändert.");
       }
       const finishedAt = now();
       task.record = {
@@ -571,6 +681,13 @@ export class OutputAnalysisManager {
     return (this.options.phonemeVisemeEvaluatorStateResolver ?? resolvePhonemeVisemeEvaluatorState)();
   }
 
+  private resolveDialogueEvaluatorState(): DialogueEvaluatorState {
+    return (this.options.dialogueEvaluatorStateResolver ?? (() => resolveDialogueEvaluatorState(
+      undefined,
+      this.options.pythonExecutable ?? defaultPythonExecutable,
+    )))();
+  }
+
   private runWorker(task: AnalysisTask): Promise<ObjectiveWorkerResult> {
     const script = this.options.workerScript ?? join(appRoot, "scripts", "analyze-face-quality.py");
     const faceModel = this.options.faceModel ?? join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
@@ -594,6 +711,17 @@ export class OutputAnalysisManager {
       identityModel,
       "--identity-status",
       identityStatus,
+      "--expected-dialogue",
+      task.target.request.promptParts.dialogue,
+      "--whisper-model",
+      task.dialogueEvaluatorState.modelPath,
+      task.dialogueEvaluatorState.modelSha256 ?? WHISPER_SMALL_SHA256,
+      "--dialogue-evaluator-state",
+      task.dialogueEvaluatorState.status,
+      "--dialogue-evaluator-blocker",
+      task.dialogueEvaluatorState.blockerCode,
+      "--dialogue-evaluator-error",
+      task.dialogueEvaluatorState.error ?? "",
       "--max-frames",
       "240",
     ];
@@ -622,6 +750,8 @@ export class OutputAnalysisManager {
         env: {
           ...process.env,
           CUDA_VISIBLE_DEVICES: "",
+          HF_HUB_OFFLINE: "1",
+          TRANSFORMERS_OFFLINE: "1",
           OMP_NUM_THREADS: "2",
           OPENBLAS_NUM_THREADS: "2",
           LTX_STUDIO_ANALYSIS_TEMP_DIR: analysisTempDir,
