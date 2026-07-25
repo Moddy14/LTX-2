@@ -115,6 +115,7 @@ export function Editor({
   const [lipDubTrimDuration, setLipDubTrimDuration] = useState(4.2);
   const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
   const isLipDub = request.mode === "lipdub";
+  const isAudioToVideo = request.mode === "audio-to-video";
   const guided = ["two-stage", "two-stage-hq", "one-stage", "keyframes", "audio-to-video", "retake"].includes(
     request.mode,
   ) && !(request.mode === "retake" && request.retake.distilled);
@@ -137,6 +138,39 @@ export function Editor({
   const lipDubRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-lora");
   const lipDubDistilledRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint");
   const lipDubUpscalerRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-spatial-upscaler");
+  const ltx23DevRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-dev-checkpoint");
+  const ltx23GemmaRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-gemma");
+  const ltx23DistilledLoraRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-distilled-lora");
+  const ltx23UpscalerRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-spatial-upscaler");
+  const a2vRecommendations = [
+    ltx23DevRecommendation,
+    ltx23GemmaRecommendation,
+    ltx23DistilledLoraRecommendation,
+    ltx23UpscalerRecommendation,
+  ];
+  const a2vMissingAssets = isAudioToVideo && modelInventory
+    ? a2vRecommendations
+        .flatMap((item) => item && !item.present ? [item.label] : [])
+    : [];
+  const a2vStackMismatches = isAudioToVideo
+    ? [
+        ltx23DevRecommendation?.present
+          && request.models.checkpointPath !== ltx23DevRecommendation.localPath
+          ? ltx23DevRecommendation.label
+          : null,
+        ltx23GemmaRecommendation?.present && request.models.gemmaRoot !== ltx23GemmaRecommendation.localPath
+          ? ltx23GemmaRecommendation.label
+          : null,
+        ltx23DistilledLoraRecommendation?.present
+          && request.models.distilledLora.path !== ltx23DistilledLoraRecommendation.localPath
+          ? ltx23DistilledLoraRecommendation.label
+          : null,
+        ltx23UpscalerRecommendation?.present
+          && request.models.spatialUpscalerPath !== ltx23UpscalerRecommendation.localPath
+          ? ltx23UpscalerRecommendation.label
+          : null,
+      ].filter((value): value is string => value !== null)
+    : [];
   const recommendedLipDubMissing = isLipDub
     && lipDubRecommendation
     && !lipDubRecommendation.present
@@ -1098,6 +1132,17 @@ export function Editor({
         {recommendedLipDubUpscalerMismatch ? (
           <p className="advisory advisory--warning">
             Ausgewählt ist nicht der zur offiziellen LipDub-Pipeline passende Spatial-Upscaler: {lipDubUpscalerRecommendation.label} · {lipDubUpscalerRecommendation.filename}.
+          </p>
+        ) : null}
+        {a2vStackMismatches.length > 0 ? (
+          <p className="advisory advisory--warning">
+            Der A2V-Entwurf weicht vom lokalen offiziellen LTX-2.3-Referenzstack ab: {a2vStackMismatches.join(", ")}.
+          </p>
+        ) : null}
+        {a2vMissingAssets.length > 0 ? (
+          <p className="advisory advisory--warning">
+            Der offizielle LTX-2.3-A2V-Referenzstack ist lokal unvollständig: {a2vMissingAssets.join(", ")}.
+            Ein automatisch gewähltes Ersatzmodell ist kein offizieller Referenzlauf.
           </p>
         ) : null}
         {modelInventory?.truncated ? (

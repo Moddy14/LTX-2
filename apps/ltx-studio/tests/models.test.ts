@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { withDiscoveredModelDefaults } from "../shared/models.js";
+import { createDefaultRequest } from "../shared/pipelines.js";
 import { classifyModelFile, discoverModels } from "../server/models.js";
 
 const temporaryRoots: string[] = [];
@@ -103,6 +105,84 @@ describe("model discovery", () => {
       present: true,
       localPath,
     });
+  });
+
+  it("prefers the official LTX-2.3 A2V stack over alphabetically earlier legacy assets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
+    temporaryRoots.push(root);
+    const ltx = join(root, "Lightricks__LTX-2.3");
+    const legacyGemma = join(root, "DreamFast__gemma-3-12b-it-heretic");
+    const officialGemma = join(root, "google__gemma-3-12b-it-qat-q4_0-unquantized");
+    await Promise.all([mkdir(ltx), mkdir(legacyGemma), mkdir(officialGemma)]);
+    await Promise.all([
+      writeFile(join(ltx, "000-ltx-legacy-dev-checkpoint.safetensors"), "legacy checkpoint"),
+      writeFile(join(ltx, "ltx-2.3-22b-dev.safetensors"), "official checkpoint"),
+      writeFile(join(ltx, "ltx-2.3-22b-distilled-lora-384.safetensors"), "legacy lora"),
+      writeFile(join(ltx, "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"), "official lora"),
+      writeFile(join(ltx, "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"), "legacy upscaler"),
+      writeFile(join(ltx, "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"), "official upscaler"),
+      ...[legacyGemma, officialGemma].flatMap((path) => [
+        writeFile(join(path, "tokenizer.model"), "tokenizer"),
+        writeFile(join(path, "config.json"), "{}"),
+        writeFile(join(path, "model.safetensors.index.json"), "{}"),
+      ]),
+    ]);
+
+    const inventory = await discoverModels([root]);
+    const request = withDiscoveredModelDefaults(createDefaultRequest("audio-to-video"), inventory);
+
+    expect(request.models.checkpointPath).toBe(
+      join(ltx, "ltx-2.3-22b-dev.safetensors"),
+    );
+    expect(request.models.gemmaRoot).toBe(officialGemma);
+    expect(request.models.distilledLora.path).toBe(
+      join(ltx, "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"),
+    );
+    expect(request.models.spatialUpscalerPath).toBe(
+      join(ltx, "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"),
+    );
+  });
+
+  it("reports an incomplete official Gemma directory instead of treating a fallback as official", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
+    temporaryRoots.push(root);
+    const incompleteOfficialGemma = join(root, "google__gemma-3-12b-it-qat-q4_0-unquantized");
+    const fallbackGemma = join(root, "DreamFast__gemma-3-12b-it-heretic");
+    await Promise.all([mkdir(incompleteOfficialGemma), mkdir(fallbackGemma)]);
+    await Promise.all([
+      writeFile(join(incompleteOfficialGemma, "README.md"), "incomplete"),
+      writeFile(join(fallbackGemma, "tokenizer.model"), "tokenizer"),
+      writeFile(join(fallbackGemma, "config.json"), "{}"),
+      writeFile(join(fallbackGemma, "model.safetensors.index.json"), "{}"),
+    ]);
+
+    const inventory = await discoverModels([root]);
+    const request = withDiscoveredModelDefaults(createDefaultRequest("audio-to-video"), inventory);
+
+    expect(inventory.recommendations.find((item) => item.id === "ltx23-gemma")).toMatchObject({
+      present: false,
+    });
+    expect(request.models.gemmaRoot).toBe(fallbackGemma);
+  });
+
+  it("never overwrites explicit model selections with recommendations", () => {
+    const request = createDefaultRequest("audio-to-video");
+    request.models.gemmaRoot = "/models/custom-gemma";
+    request.models.distilledLora.path = "/models/custom-lora.safetensors";
+    request.models.spatialUpscalerPath = "/models/custom-upscaler.safetensors";
+
+    const resolved = withDiscoveredModelDefaults(request, {
+      roots: [],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: [],
+    });
+
+    expect(resolved.models.gemmaRoot).toBe("/models/custom-gemma");
+    expect(resolved.models.distilledLora.path).toBe("/models/custom-lora.safetensors");
+    expect(resolved.models.spatialUpscalerPath).toBe("/models/custom-upscaler.safetensors");
   });
 
   it("reports unreadable roots without failing the whole inventory", async () => {

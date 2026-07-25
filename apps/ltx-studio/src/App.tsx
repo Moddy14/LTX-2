@@ -9,6 +9,7 @@ import {
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines";
+import { withDiscoveredModelDefaults } from "../shared/models";
 import type { PlanSuggestion, PreparedLipDubReference } from "../shared/plan";
 import { estimateResources } from "../shared/estimates";
 import { decodeDraftParameter } from "../shared/drafts";
@@ -71,48 +72,6 @@ function restoreRequest(): GenerationRequest {
   } catch {
     return createDefaultRequest();
   }
-}
-
-function withDiscoveredModelDefaults(request: GenerationRequest, inventory: ModelInventory): GenerationRequest {
-  const find = (kind: ModelInventory["items"][number]["kind"], predicate: (name: string) => boolean = () => true) =>
-    inventory.items.find((item) => item.kind === kind && predicate(item.name.toLowerCase()))?.path ?? "";
-  const recommendedLipDub = inventory.recommendations.find((item) => item.id === "lipdub-lora" && item.present);
-  const recommendedLipDubDistilled = inventory.recommendations.find((item) =>
-    item.id === "lipdub-distilled-checkpoint" && item.present,
-  );
-  const recommendedLipDubUpscaler = inventory.recommendations.find((item) =>
-    item.id === "lipdub-spatial-upscaler" && item.present,
-  );
-  return {
-    ...request,
-    models: {
-      ...request.models,
-      checkpointPath: request.models.checkpointPath
-        || find("checkpoint", (name) => !name.includes("fp8"))
-        || find("checkpoint"),
-      distilledCheckpointPath: request.models.distilledCheckpointPath
-        || recommendedLipDubDistilled?.localPath
-        || find("distilled-checkpoint"),
-      gemmaRoot: request.models.gemmaRoot || find("gemma"),
-      spatialUpscalerPath: request.models.spatialUpscalerPath
-        || recommendedLipDubUpscaler?.localPath
-        || find("spatial-upscaler", (name) => name.includes("x2"))
-        || find("spatial-upscaler"),
-      distilledLora: {
-        ...request.models.distilledLora,
-        path: request.models.distilledLora.path || find("lora", (name) => name.includes("distilled")),
-      },
-    },
-    lipDub: {
-      ...request.lipDub,
-      lora: {
-        ...request.lipDub.lora,
-        path: request.lipDub.lora.path
-          || recommendedLipDub?.localPath
-          || find("lora", (name) => name.includes("lipdub") || name.includes("lip-dub")),
-      },
-    },
-  };
 }
 
 function nextEditableOutputName(
