@@ -4,6 +4,7 @@ import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
 import type {
   LipDubReferenceDiagnostics,
   PlanSuggestion,
+  PreparedImageCrop,
   PreparedLipDubReference,
 } from "../shared/plan";
 import {
@@ -157,6 +158,24 @@ export async function getAssets(kind?: AssetKind): Promise<StudioAsset[]> {
     await fetch(`/api/assets${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`),
   );
   return body.assets;
+}
+
+export async function prepareImageCrop(input: {
+  path: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  outputWidth: number;
+  outputHeight: number;
+}): Promise<PreparedImageCrop> {
+  return decode<PreparedImageCrop>(
+    await fetch("/api/images/crop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 export async function inspectLipDubReference(input: {

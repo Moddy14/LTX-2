@@ -15,6 +15,18 @@ export const fieldHelp = {
     "Wofür: Bestimmt, wie strikt das Ergebnis dem Referenzbild folgt. Empfehlung: 1,0 für starke Bindung; 0,7 bis 0,9 für mehr gestalterische Freiheit.",
   imageCrf:
     "Wofür: Steuert die H.264-Vorverarbeitung des Referenzbildes; kleinere Werte erhalten mehr Details. Empfehlung: 33 als Standard, 18 bis 28 für detailkritische Vorlagen, 0 ohne Kompression.",
+  imageCropX:
+    "Wofür: Linke Kante des neuen Ausschnitts in Pixeln ab dem linken Rand des Quellbildes. Gute Eingabe: 0 beginnt ganz links; der Ausschnitt muss vollständig innerhalb des Quellbildes bleiben.",
+  imageCropY:
+    "Wofür: Obere Kante des neuen Ausschnitts in Pixeln ab dem oberen Rand des Quellbildes. Gute Eingabe: 0 beginnt ganz oben; bei Porträts so wählen, dass Kinn und Stirn nicht versehentlich abgeschnitten werden.",
+  imageCropWidth:
+    "Wofür: Breite des entnommenen Quellbereichs vor der Skalierung. Gute Eingabe: mindestens 64 Pixel; für Lipsync Mund, Kinn, Nase und etwas Wangenkontext einschließen.",
+  imageCropHeight:
+    "Wofür: Höhe des entnommenen Quellbereichs vor der Skalierung. Gute Eingabe: mindestens 64 Pixel und für unverzerrte Gesichter passend zur Ausschnittbreite wählen.",
+  imageCropOutputWidth:
+    "Wofür: Breite des neuen reproduzierbaren Referenzassets. Gute Eingabe: 576 für die aktuellen quadratischen Lipsync-Tests; der Wert muss durch 64 teilbar sein.",
+  imageCropOutputHeight:
+    "Wofür: Höhe des neuen reproduzierbaren Referenzassets. Gute Eingabe: 576 für die aktuellen quadratischen Lipsync-Tests; der Wert muss durch 64 teilbar sein.",
   mediaPath:
     "Wofür: Verwendet eine bereits auf dem DGX vorhandene Datei ohne Upload. Gute Eingabe: ein absoluter, lesbarer Pfad zur passenden Audio-, Video- oder Maskendatei.",
   audioUpload:

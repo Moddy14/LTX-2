@@ -63,7 +63,7 @@ describe("LipDub reference preparation", () => {
     const metadata = probeVideoMetadata(prepared.file.path);
 
     expect(prepared.file.filename).toMatch(/^[0-9a-f-]{36}\.mp4$/);
-    expect(prepared.file.originalname).toBe("source-lipdub-prep.mp4");
+    expect(prepared.file.originalname).toBe("speaker-reference-lipdub-prep.mp4");
     expect(prepared.target.fps).toBe(24);
     expect(prepared.target.width % 64).toBe(0);
     expect(prepared.target.height % 64).toBe(0);
@@ -106,7 +106,7 @@ describe("LipDub reference preparation", () => {
     }, join(root, "uploads"));
     const metadata = probeVideoMetadata(prepared.file.path);
 
-    expect(prepared.file.originalname).toBe("long-source-lipdub-calibration.mp4");
+    expect(prepared.file.originalname).toBe("speaker-reference-lipdub-calibration.mp4");
     expect(prepared.trim).toEqual({ startSeconds: 1, requestedDurationSeconds: 4.2 });
     expect(prepared.target).toMatchObject({ fps: 30, frames: 121 });
     expect(prepared.target.frames % 8).toBe(1);

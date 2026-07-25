@@ -40,8 +40,8 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function preparedReferenceName(sourcePath: string, trimmed: boolean): string {
-  const sourceName = basename(sourcePath).replace(/\.[^.]+$/, "") || "reference";
+function preparedReferenceName(sourcePathOrName: string, trimmed: boolean): string {
+  const sourceName = basename(sourcePathOrName).replace(/\.[^.]+$/, "") || "reference";
   return `${sourceName}-lipdub-${trimmed ? "calibration" : "prep"}.mp4`;
 }
 
@@ -209,7 +209,10 @@ export async function prepareLipDubReference(
       file: {
         filename,
         path: outputPath,
-        originalname: preparedReferenceName(sourcePath, Boolean(request.trim)),
+        originalname: preparedReferenceName(
+          request.lipDub.referenceVideo.name || sourcePath,
+          Boolean(request.trim),
+        ),
         size: stats.size,
       },
       target: { width, height, fps, frames, durationSeconds },

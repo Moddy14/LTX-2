@@ -1,8 +1,8 @@
-import { Check, FileAudio, FileVideo, ImagePlus, LoaderCircle, Plus, Trash2, Upload } from "lucide-react";
-import { type ChangeEvent, type ReactNode, useId, useRef, useState } from "react";
+import { Check, Crop, FileAudio, FileVideo, ImagePlus, LoaderCircle, Plus, Trash2, Upload, X } from "lucide-react";
+import { type ChangeEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import type { GenerationRequest } from "../../shared/pipelines";
-import { uploadFile } from "../api";
+import { prepareImageCrop, uploadFile } from "../api";
 import { fieldHelp } from "../fieldHelp";
 import type { UploadedFile } from "../types";
 import { AssetLibrary } from "./AssetLibrary";
@@ -59,12 +59,78 @@ type ImageRowsProps = {
 };
 
 export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsProps) {
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
+  const [cropIndex, setCropIndex] = useState<number | null>(null);
+  const [cropValues, setCropValues] = useState({
+    x: 0,
+    y: 0,
+    width: 576,
+    height: 576,
+    outputWidth: 576,
+    outputHeight: 576,
+  });
+  const [cropBusy, setCropBusy] = useState(false);
+  const [cropError, setCropError] = useState<string | null>(null);
+  const [cropResult, setCropResult] = useState<string | null>(null);
   const add = (file: UploadedFile) => {
     onPreview(file.path, file.url);
     onChange([
       ...images,
       { path: file.path, name: file.name, frameIndex: images.length === 0 ? 0 : images.length * 40, strength: 1, crf: 33 },
     ]);
+  };
+  const openCrop = (index: number) => {
+    setCropIndex(index);
+    setCropValues({
+      x: 0,
+      y: 0,
+      width: 576,
+      height: 576,
+      outputWidth: 576,
+      outputHeight: 576,
+    });
+    setCropError(null);
+    setCropResult(null);
+  };
+  const createCrop = async (index: number) => {
+    const sourceImage = imagesRef.current[index];
+    const sourcePath = sourceImage?.path;
+    if (!sourcePath) {
+      setCropError("Für den Zuschnitt fehlt ein Bildpfad.");
+      return;
+    }
+    setCropBusy(true);
+    setCropError(null);
+    setCropResult(null);
+    try {
+      const prepared = await prepareImageCrop({ path: sourcePath, ...cropValues });
+      if (!mountedRef.current) return;
+      const current = imagesRef.current;
+      if (cropIndex !== index || current[index] !== sourceImage) {
+        setCropError("Ausschnitt erstellt, aber nicht übernommen: Die Quellreferenz wurde inzwischen geändert.");
+        return;
+      }
+      onPreview(prepared.asset.path, prepared.asset.url);
+      onChange(current.map((item, itemIndex) => itemIndex === index
+        ? { ...item, path: prepared.asset.path, name: prepared.asset.name }
+        : item));
+      setCropResult(
+        `Neues ${prepared.target.width} x ${prepared.target.height}-Asset aus `
+        + `${prepared.crop.width} x ${prepared.crop.height} Pixeln erstellt.`,
+      );
+      setCropIndex(null);
+    } catch (error) {
+      if (mountedRef.current) {
+        setCropError(error instanceof Error ? error.message : "Bildzuschnitt fehlgeschlagen.");
+      }
+    } finally {
+      if (mountedRef.current) setCropBusy(false);
+    }
   };
 
   return (
@@ -93,6 +159,7 @@ export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsPr
             label={image.name || `Bild ${index + 1}`}
             hint={fieldHelp.imagePath}
             value={image.path}
+            disabled={cropBusy}
             placeholder="/absoluter/pfad/bild.png"
             onChange={(path) => onChange(images.map((item, itemIndex) =>
               itemIndex === index ? { ...item, path } : item,
@@ -104,6 +171,7 @@ export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsPr
             min={0}
             step={1}
             value={image.frameIndex}
+            disabled={cropBusy}
             onChange={(value) => onChange(images.map((item, itemIndex) => (itemIndex === index ? { ...item, frameIndex: value ?? 0 } : item)))}
           />
           <NumberField
@@ -113,6 +181,7 @@ export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsPr
             max={1}
             step={0.05}
             value={image.strength}
+            disabled={cropBusy}
             onChange={(value) => onChange(images.map((item, itemIndex) => (itemIndex === index ? { ...item, strength: value ?? 1 } : item)))}
           />
           <NumberField
@@ -122,18 +191,107 @@ export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsPr
             max={51}
             step={1}
             value={image.crf}
+            disabled={cropBusy}
             onChange={(value) => onChange(images.map((item, itemIndex) => (itemIndex === index ? { ...item, crf: value ?? 33 } : item)))}
           />
           <button
             type="button"
-            className="icon-button icon-button--danger"
+            className="icon-button asset-row__crop"
+            title="Reproduzierbaren Bildausschnitt erstellen"
+            disabled={!image.path || cropBusy}
+            onClick={() => cropIndex === index ? setCropIndex(null) : openCrop(index)}
+          >
+            <Crop size={17} />
+          </button>
+          <button
+            type="button"
+            className="icon-button icon-button--danger asset-row__delete"
             title="Bild entfernen"
+            disabled={cropBusy}
             onClick={() => onChange(images.filter((_, itemIndex) => itemIndex !== index))}
           >
             <Trash2 size={17} />
           </button>
+          {cropIndex === index ? (
+            <div className="image-crop-tool">
+              <div className="field-grid field-grid--3">
+                <NumberField
+                  label="Ausschnitt X"
+                  hint={fieldHelp.imageCropX}
+                  min={0}
+                  step={1}
+                  value={cropValues.x}
+                  onChange={(x) => setCropValues((value) => ({ ...value, x: x ?? 0 }))}
+                />
+                <NumberField
+                  label="Ausschnitt Y"
+                  hint={fieldHelp.imageCropY}
+                  min={0}
+                  step={1}
+                  value={cropValues.y}
+                  onChange={(y) => setCropValues((value) => ({ ...value, y: y ?? 0 }))}
+                />
+                <NumberField
+                  label="Ausschnitt Breite"
+                  hint={fieldHelp.imageCropWidth}
+                  min={64}
+                  step={1}
+                  value={cropValues.width}
+                  onChange={(width) => setCropValues((value) => ({ ...value, width: width ?? 64 }))}
+                />
+                <NumberField
+                  label="Ausschnitt Höhe"
+                  hint={fieldHelp.imageCropHeight}
+                  min={64}
+                  step={1}
+                  value={cropValues.height}
+                  onChange={(height) => setCropValues((value) => ({ ...value, height: height ?? 64 }))}
+                />
+                <NumberField
+                  label="Zielbreite"
+                  hint={fieldHelp.imageCropOutputWidth}
+                  min={64}
+                  max={4096}
+                  step={64}
+                  value={cropValues.outputWidth}
+                  onChange={(outputWidth) => setCropValues((value) => ({ ...value, outputWidth: outputWidth ?? 576 }))}
+                />
+                <NumberField
+                  label="Zielhöhe"
+                  hint={fieldHelp.imageCropOutputHeight}
+                  min={64}
+                  max={4096}
+                  step={64}
+                  value={cropValues.outputHeight}
+                  onChange={(outputHeight) => setCropValues((value) => ({ ...value, outputHeight: outputHeight ?? 576 }))}
+                />
+              </div>
+              <div className="image-crop-tool__actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  disabled={cropBusy}
+                  onClick={() => void createCrop(index)}
+                >
+                  {cropBusy ? <LoaderCircle className="spin" size={16} /> : <Crop size={16} />}
+                  Ausschnitt erstellen
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="Ausschnittwerkzeug schließen"
+                  disabled={cropBusy}
+                  onClick={() => setCropIndex(null)}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+              {cropError ? <p className="section-error" role="alert">{cropError}</p> : null}
+            </div>
+          ) : null}
         </div>
       ))}
+      {cropResult ? <p className="advisory advisory--success">{cropResult}</p> : null}
     </div>
   );
 }

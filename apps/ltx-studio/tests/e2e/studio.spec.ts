@@ -932,6 +932,90 @@ test("explicit image-to-video mode requires and exposes a reference image", asyn
   await expect(page.getByRole("alert")).toContainText("Für Bild-zu-Video ist ein Referenzbild erforderlich.");
 });
 
+test("image references expose a responsive provenance-bound crop tool", async ({ page }) => {
+  const request = createDefaultRequest("two-stage");
+  request.sourceMode = "image";
+  request.images = [{
+    path: "/inputs/portrait.png",
+    name: "portrait.png",
+    frameIndex: 0,
+    strength: 1,
+    crf: 33,
+  }];
+  const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+  await page.goto(`/?draft=${draft}`);
+
+  await page.getByTitle("Reproduzierbaren Bildausschnitt erstellen").click();
+  for (const label of [
+    "Ausschnitt X",
+    "Ausschnitt Y",
+    "Ausschnitt Breite",
+    "Ausschnitt Höhe",
+    "Zielbreite",
+    "Zielhöhe",
+  ]) {
+    await expect(page.getByRole("spinbutton", { name: label, exact: true })).toBeVisible();
+    await expect(page.locator(".field").filter({ has: page.getByRole("spinbutton", { name: label, exact: true }) })
+      .locator(".tooltip")).toBeVisible();
+  }
+  await expect(page.getByRole("button", { name: "Ausschnitt erstellen", exact: true })).toBeVisible();
+  await expect(page.getByTitle("Ausschnittwerkzeug schließen")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("an in-flight image crop cannot overwrite an editor that has moved on", async ({ page }) => {
+  let releaseCrop!: () => void;
+  const cropPending = new Promise<void>((resolve) => {
+    releaseCrop = resolve;
+  });
+  await page.route("**/api/images/crop", async (route) => {
+    await cropPending;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset: {
+          id: "a1b2c3d4-1111-4222-8333-123456789012",
+          path: "/uploads/derived.png",
+          name: "portrait-crop.png",
+          size: 1024,
+          kind: "image",
+          url: "/api/uploads/image/a1b2c3d4-1111-4222-8333-123456789012.png",
+          createdAt: "2026-07-25T00:00:00.000Z",
+          derivation: null,
+        },
+        source: { width: 704, height: 1248 },
+        crop: { x: 0, y: 0, width: 576, height: 576 },
+        target: { width: 576, height: 576 },
+        scaleFilter: "lanczos",
+        command: "ffmpeg fixture",
+      }),
+    });
+  });
+  const request = createDefaultRequest("two-stage");
+  request.sourceMode = "image";
+  request.images = [{
+    path: "/inputs/portrait.png",
+    name: "portrait.png",
+    frameIndex: 0,
+    strength: 1,
+    crf: 33,
+  }];
+  const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+  await page.goto(`/?draft=${draft}`);
+  await page.getByTitle("Reproduzierbaren Bildausschnitt erstellen").click();
+  await page.getByRole("button", { name: "Ausschnitt erstellen", exact: true }).click();
+
+  await expect(page.getByLabel("portrait.png")).toBeDisabled();
+  await expect(page.getByTitle("Bild entfernen")).toBeDisabled();
+  const audioMode = page.locator(".mode-button").filter({ hasText: "Audio" });
+  await audioMode.scrollIntoViewIfNeeded();
+  await audioMode.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
+  releaseCrop();
+  await page.waitForTimeout(100);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
+});
+
 test("field help explains purpose and recommended input", async ({ page }) => {
   const promptField = page.locator(".field").filter({ has: page.getByLabel("Positive Beschreibung") });
   const help = promptField.locator(".tooltip");

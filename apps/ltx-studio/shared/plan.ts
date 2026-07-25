@@ -25,6 +25,26 @@ export type PreparedLipDubReference = {
   command: string;
 };
 
+export type PreparedImageCrop = {
+  asset: StudioAsset;
+  source: {
+    width: number;
+    height: number;
+  };
+  crop: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  target: {
+    width: number;
+    height: number;
+  };
+  scaleFilter: "lanczos";
+  command: string;
+};
+
 export type LipDubReferenceFinding = {
   code: string;
   level: "error" | "warning";

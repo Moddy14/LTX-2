@@ -29,6 +29,7 @@ import {
 } from "./config.js";
 import { isActiveJobStatus, JobConflictError, JobManager, type StudioJob } from "./jobs.js";
 import { inspectLipDubReference } from "./lipdubDiagnostics.js";
+import { ImageCropPreparationError, prepareImageCrop } from "./imageCrop.js";
 import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
 import { estimateRequest } from "./estimates.js";
 import { getModelInventory } from "./models.js";
@@ -121,6 +122,15 @@ const lipDubReferencePreparationRequestSchema = z.object({
     durationSeconds: z.number().finite().min(2).max(5),
   }).optional(),
 });
+const imageCropPreparationRequestSchema = z.object({
+  path: lipDubReferencePathSchema,
+  x: z.number().int().min(0).max(16_384),
+  y: z.number().int().min(0).max(16_384),
+  width: z.number().int().min(64).max(16_384),
+  height: z.number().int().min(64).max(16_384),
+  outputWidth: lipDubReferenceDimensionSchema,
+  outputHeight: lipDubReferenceDimensionSchema,
+}).strict();
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -218,6 +228,59 @@ app.get("/api/uploads/:kind/:filename", (request, response) => {
     return response.status(400).json({ error: "Ungültiger Upload-Pfad." });
   }
   response.sendFile(uploadPath, { dotfiles: "allow" });
+});
+
+app.post("/api/images/crop", async (request, response) => {
+  const payload = imageCropPreparationRequestSchema.parse(request.body);
+  const sourceAsset = assets.findByPath("image", payload.path);
+  if (!sourceAsset) {
+    return response.status(400).json({
+      error: "Bildzuschnitt ist nur für Bilder aus der Studio-Mediathek verfügbar.",
+    });
+  }
+  const source = await captureProvenanceFile(sourceAsset.path, "derived-source:image-face-crop");
+  const prepared = await prepareImageCrop({ ...payload, sourceName: sourceAsset.name });
+  const sourceError = verifyProvenanceFileEvidence(source);
+  if (sourceError) {
+    unlinkSync(prepared.file.path);
+    throw new ImageCropPreparationError(
+      "Das Quellbild wurde während des Zuschnitts verändert. Das Ergebnis wurde verworfen.",
+      409,
+    );
+  }
+  let asset;
+  try {
+    asset = assets.add(prepared.file, "image", {
+      schemaVersion: "ltx-studio-asset-derivation.v1",
+      operation: "image-face-crop",
+      source,
+      parameters: {
+        sourceAssetId: sourceAsset.id,
+        sourceWidth: prepared.source.width,
+        sourceHeight: prepared.source.height,
+        x: prepared.crop.x,
+        y: prepared.crop.y,
+        width: prepared.crop.width,
+        height: prepared.crop.height,
+        outputWidth: prepared.target.width,
+        outputHeight: prepared.target.height,
+        scaleFilter: prepared.scaleFilter,
+      },
+      command: prepared.command,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    unlinkSync(prepared.file.path);
+    throw error;
+  }
+  response.status(201).json({
+    asset,
+    source: prepared.source,
+    crop: prepared.crop,
+    target: prepared.target,
+    scaleFilter: prepared.scaleFilter,
+    command: prepared.command,
+  });
 });
 
 app.post("/api/jobs/plan", (request, response) => {
@@ -419,6 +482,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
   }
   if (error instanceof JobConflictError) {
     return response.status(409).json({ error: error.message });
+  }
+  if (error instanceof ImageCropPreparationError) {
+    return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof LipDubReferencePreparationError) {
     return response.status(error.statusCode).json({ error: error.message });
