@@ -30,6 +30,8 @@ import { qualityReviewAverage, type QualityReviewInput } from "../../shared/qual
 import { isSpeechQualityCandidate } from "../qualityCandidates";
 import { QualityScorecard } from "./QualityScorecard";
 import { ObjectiveAnalysisPanel } from "./ObjectiveAnalysisPanel";
+import { ObjectiveComparisonPanel } from "./ObjectiveComparisonPanel";
+import { SynchronizedComparePreview } from "./SynchronizedComparePreview";
 
 const statusLabels: Record<StudioJob["status"], string> = {
   queued: "Wartet",
@@ -161,6 +163,9 @@ export function RunPanel({
   const outputRequest = selectedOutput?.request ?? null;
   const outputForJob = (job: StudioJob) =>
     outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
+  const comparisonOutputs = comparisonJobs
+    .map(outputForJob)
+    .filter((output): output is StudioOutput => Boolean(output));
   const qualityAverageForJob = (job: StudioJob): number | null => {
     const review = outputForJob(job)?.qualityReview;
     return review ? qualityReviewAverage(review) : null;
@@ -171,19 +176,10 @@ export function RunPanel({
       <section className="preview-stage">
         <div className="preview-stage__media">
           {comparisonJobs.length === 2 ? (
-            <div className="compare-preview">
-              {comparisonJobs.map((job) => (
-                <div className="compare-preview__item" key={job.id}>
-                  <video src={job.outputUrl ?? undefined} controls muted playsInline />
-                  <span>
-                    {job.outputName}
-                    {outputForJob(job)?.qualityReview
-                      ? ` · ${qualityReviewAverage(outputForJob(job)!.qualityReview!).toFixed(1)}/10`
-                      : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <SynchronizedComparePreview
+              jobs={[comparisonJobs[0], comparisonJobs[1]]}
+              scores={[qualityAverageForJob(comparisonJobs[0]), qualityAverageForJob(comparisonJobs[1])]}
+            />
           ) : selectedOutput ? (
             <video key={selectedOutput.url} src={selectedOutput.url} controls muted playsInline />
           ) : selectedJob?.outputUrl ? (
@@ -206,6 +202,10 @@ export function RunPanel({
           </div>
         </div>
       </section>
+
+      {comparisonOutputs.length === 2 ? (
+        <ObjectiveComparisonPanel outputs={[comparisonOutputs[0], comparisonOutputs[1]]} />
+      ) : null}
 
       <section className="output-library" aria-label="Erzeugte Videos und Einstellungen">
         <div className="run-panel__heading">

@@ -677,6 +677,163 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("Nicht messbar");
 });
 
+test("two completed jobs provide a gated objective comparison with synchronized playback", async ({ page }, testInfo) => {
+  const leftRequest = createDefaultRequest("audio-to-video");
+  leftRequest.outputName = "comparison-a.mp4";
+  leftRequest.images = [{
+    path: "/inputs/reference.png",
+    name: "reference.png",
+    frameIndex: 0,
+    strength: 1,
+    crf: 33,
+  }];
+  leftRequest.audio.path = "/inputs/clean-vocals.wav";
+  leftRequest.audio.name = "clean-vocals.wav";
+  leftRequest.audio.finalMix.path = "/inputs/final-mix.wav";
+  leftRequest.audio.finalMix.name = "final-mix.wav";
+  leftRequest.videoGuidance.modalityScale = 5;
+  const rightRequest = structuredClone(leftRequest);
+  rightRequest.outputName = "comparison-b.mp4";
+  rightRequest.videoGuidance.modalityScale = 3;
+
+  const job = (id: string, request: typeof leftRequest) => ({
+    id,
+    status: "completed",
+    mode: request.mode,
+    prompt: request.prompt,
+    outputName: request.outputName,
+    outputUrl: `/api/jobs/${id}/output`,
+    createdAt: "2026-07-25T00:00:00.000Z",
+    startedAt: "2026-07-25T00:00:01.000Z",
+    finishedAt: "2026-07-25T00:10:00.000Z",
+    progress: 100,
+    error: null,
+    logs: ["Pipeline beendet mit Code 0."],
+    command: "python -m ltx_pipelines.a2vid",
+    request,
+    favorite: false,
+    variantOf: null,
+    runtimeMs: 599_000,
+    cancelledBy: null,
+    dgxJobId: `dgx-${id}`,
+    thermalProfile: null,
+  });
+  const analysis = (identityMedian: number, lagMs: number) => ({
+    schemaVersion: "ltx-studio-output-analysis.v4",
+    evaluatorFingerprint: "comparison-evaluator.v1",
+    outputName: "",
+    sizeBytes: 1_048_576,
+    modifiedAtMs: Date.parse("2026-07-25T00:10:00.000Z"),
+    changedAtMs: Date.parse("2026-07-25T00:10:01.000Z"),
+    fileId: "fixture",
+    jobId: null,
+    analysisId: crypto.randomUUID(),
+    attempt: 1,
+    status: "completed",
+    progress: 100,
+    createdAt: "2026-07-25T00:11:00.000Z",
+    startedAt: "2026-07-25T00:11:01.000Z",
+    finishedAt: "2026-07-25T00:11:02.000Z",
+    updatedAt: "2026-07-25T00:11:02.000Z",
+    error: null,
+    result: {
+      schemaVersion: "ltx-studio-objective-quality.v4",
+      analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
+      status: "measured",
+      technical: {
+        audioVideoStartDeltaSeconds: 0,
+        audioVideoDurationDeltaSeconds: 0,
+      },
+      face: {
+        detectionCoverage: 1,
+        geometryCoverage: 1,
+        medianFaceAreaRatio: 0.14,
+        noseVelocityP95PerSecond: 1.5,
+        noseAccelerationP95PerSecond2: 42,
+        mouthAngleMedianDegrees: 1.2,
+        mouthAngleVelocityP95DegreesPerSecond: 18,
+        mouthSpanCoefficientOfVariation: 0.04,
+      },
+      identity: {
+        status: "measured",
+        modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+        preprocessingVersion: "yunet5-aligncrop-112-track.v2",
+        outputCoverage: 1,
+        cosineMedian: identityMedian,
+        cosineP10: identityMedian - 0.03,
+        cosineMinimum: identityMedian - 0.08,
+        outputTemporalConsistencyMedian: 0.989,
+      },
+      avSync: {
+        status: "measured",
+        estimatedAudioLeadMilliseconds: lagMs,
+        lagResolutionMilliseconds: 42,
+        correlationPeak: 0.38,
+        nullP95Correlation: 0.25,
+        peakProminence: 0.13,
+        peakWidthMilliseconds: 42,
+        featureLagAgreementMilliseconds: 42,
+        windowLagIqrMilliseconds: 83,
+        motionCoverage: 1,
+        mouthCoverageDuringAudioActivity: 1,
+        usableAudioActivitySeconds: 3.2,
+        audioActivityRatio: 0.7,
+      },
+      findings: [],
+      limitations: ["Rohproxy ohne Phonem-/Visem-Garantie."],
+    },
+  });
+  const jobs = [
+    job("11111111-1111-4111-8111-111111111111", leftRequest),
+    job("22222222-2222-4222-8222-222222222222", rightRequest),
+  ];
+  const outputs = jobs.map((currentJob, index) => ({
+    name: currentJob.outputName,
+    url: currentJob.outputUrl,
+    sizeBytes: 1_048_576,
+    modifiedAt: "2026-07-25T00:10:00.000Z",
+    changedAt: "2026-07-25T00:10:01.000Z",
+    fileId: `fixture-${index}`,
+    jobId: currentJob.id,
+    jobStatus: "completed",
+    request: currentJob.request,
+    settingsAvailable: true,
+    qualityReview: null,
+    analysis: analysis(index === 0 ? 0.842 : 0.855, index === 0 ? -333 : -42),
+  }));
+
+  await page.route(/\/api\/jobs(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ jobs }),
+  }));
+  await page.route(/\/api\/outputs(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ outputs }),
+  }));
+  await page.route("**/api/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: ":\n\n",
+  }));
+  await page.reload();
+
+  await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
+  await page.getByRole("button", { name: /comparison-b\.mp4/ }).click();
+  await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
+
+  await expect(page.getByRole("heading", { name: "Objektiver A/B-Vergleich" })).toBeVisible();
+  await expect(page.locator(".objective-comparison__heading")).toContainText("Vergleichbar");
+  await expect(page.getByRole("table", { name: "Abweichende Einstellungen" })).toContainText("A2V Guidance");
+  await expect(page.getByRole("table", { name: "Abweichende Einstellungen" })).toContainText("5");
+  await expect(page.getByRole("table", { name: "Abweichende Einstellungen" })).toContainText("3");
+  await expect(page.getByRole("table", { name: "Objektive Messwertdifferenzen" })).toContainText("Identität Median");
+  await expect(page.getByLabel("Synchroner Videovergleich")).toBeVisible();
+  await expect(page.getByTitle("Beide Videos synchron starten")).toBeVisible();
+  await expect(page.getByLabel("Gemeinsame Wiedergabeposition")).toBeVisible();
+  await expect(page.getByLabel("Vergleichston")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("objective-ab-comparison.png"), fullPage: true });
+});
+
 test("explicit image-to-video mode requires and exposes a reference image", async ({ page }) => {
   await page.getByRole("button", { name: "Bild zu Video · empfohlen" }).click();
   await expect(page.getByRole("heading", { name: "Referenzbild" })).toBeVisible();

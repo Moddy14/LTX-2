@@ -1,0 +1,134 @@
+import { describe, expect, it } from "vitest";
+
+import type { AvSyncRawMetrics, IdentityMetrics } from "../shared/objectiveQuality.js";
+import type { StudioOutput } from "../shared/outputs.js";
+import {
+  comparisonCompatibility,
+  metricDelta,
+  metricTrend,
+  objectiveComparisonMetrics,
+  settingsDifferences,
+} from "../src/objectiveComparison.js";
+import { validRequest } from "./fixtures.js";
+
+function output(
+  name: string,
+  identityOverrides: Partial<IdentityMetrics> = {},
+  avOverrides: Partial<AvSyncRawMetrics> = {},
+): StudioOutput {
+  const identity = {
+    status: "measured",
+    modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    preprocessingVersion: "yunet5-aligncrop-112-track.v2",
+    cosineMedian: 0.82,
+    cosineP10: 0.79,
+    cosineMinimum: 0.72,
+    outputTemporalConsistencyMedian: 0.98,
+    ...identityOverrides,
+  };
+  const avSync = {
+    status: "measured",
+    estimatedAudioLeadMilliseconds: 125,
+    correlationPeak: 0.5,
+    nullP95Correlation: 0.3,
+    windowLagIqrMilliseconds: 83,
+    ...avOverrides,
+  };
+  return {
+    name,
+    request: validRequest("audio-to-video"),
+    analysis: {
+      schemaVersion: "ltx-studio-output-analysis.v4",
+      evaluatorFingerprint: "test-evaluator.v1",
+      status: "completed",
+      result: {
+        schemaVersion: "ltx-studio-objective-quality.v4",
+        analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
+        technical: {
+          audioVideoDurationDeltaSeconds: 0.01,
+        },
+        face: {
+          medianFaceAreaRatio: 0.14,
+          noseVelocityP95PerSecond: 1.5,
+          mouthSpanCoefficientOfVariation: 0.04,
+        },
+        identity,
+        avSync,
+      },
+    },
+  } as unknown as StudioOutput;
+}
+
+describe("objective A/B comparison", () => {
+  it("lists only settings that changed between the two stored requests", () => {
+    const left = validRequest("audio-to-video");
+    left.images = [{ path: "/inputs/wide.png", name: "wide.png", frameIndex: 0, strength: 1, crf: 33 }];
+    const right = structuredClone(left);
+    right.images = [{ path: "/inputs/tight.png", name: "tight.png", frameIndex: 0, strength: 1, crf: 0 }];
+    right.videoGuidance.modalityScale = 5;
+
+    expect(settingsDifferences(left, right)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "images[0].path", left: "/inputs/wide.png", right: "/inputs/tight.png" }),
+      expect.objectContaining({ id: "images[0].crf", left: "33", right: "0" }),
+      expect.objectContaining({ id: "videoGuidance.modalityScale", left: "3", right: "5" }),
+    ]));
+    expect(settingsDifferences(left, right).map((difference) => difference.id)).not.toContain("seed");
+  });
+
+  it("computes B-minus-A metrics and direction only for calibrated metric intent", () => {
+    const left = output("a.mp4");
+    const right = output(
+      "b.mp4",
+      { cosineMedian: 0.86, cosineP10: 0.81 },
+      { estimatedAudioLeadMilliseconds: 42, correlationPeak: 0.6 },
+    );
+    const metrics = objectiveComparisonMetrics(left, right);
+    const identity = metrics.find((metric) => metric.id === "identity-median")!;
+    const lag = metrics.find((metric) => metric.id === "av-absolute-lag")!;
+    const margin = metrics.find((metric) => metric.id === "av-correlation-margin")!;
+
+    expect(metricDelta(identity)).toBeCloseTo(0.04);
+    expect(metricTrend(identity)).toBe("improved");
+    expect(metricDelta(lag)).toBe(-83);
+    expect(metricTrend(lag)).toBe("improved");
+    expect(metricDelta(margin)).toBeCloseTo(0.1);
+    expect(metricTrend(margin)).toBe("improved");
+  });
+
+  it("does not label raw lag changes as improvements when either AV result is insufficient", () => {
+    const left = output("a.mp4", {}, { status: "insufficient" });
+    const right = output("b.mp4", {}, {
+      status: "insufficient",
+      estimatedAudioLeadMilliseconds: 42,
+    });
+    const lag = objectiveComparisonMetrics(left, right)
+      .find((metric) => metric.id === "av-absolute-lag")!;
+
+    expect(metricDelta(lag)).toBe(-83);
+    expect(metricTrend(lag)).toBe("neutral");
+  });
+
+  it("detects prompt differences beyond the displayed preview and gates incompatible analyses", () => {
+    const leftRequest = validRequest("audio-to-video");
+    leftRequest.prompt = `${"same ".repeat(30)}left`;
+    const rightRequest = structuredClone(leftRequest);
+    rightRequest.prompt = `${"same ".repeat(30)}right`;
+    expect(settingsDifferences(leftRequest, rightRequest)).toContainEqual(expect.objectContaining({ id: "prompt" }));
+
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    expect(comparisonCompatibility(left, right)).toEqual({ comparable: true, reasons: [] });
+
+    right.request!.images = [{ path: "/inputs/other.png", name: "other.png", frameIndex: 0, strength: 1, crf: 33 }];
+    const compatibility = comparisonCompatibility(left, right);
+    expect(compatibility.comparable).toBe(false);
+    expect(compatibility.reasons).toContain("Identitätsreferenzen unterscheiden sich.");
+  });
+
+  it("requires completed analysis records on both outputs", () => {
+    const left = output("a.mp4");
+    const right = { ...output("b.mp4"), analysis: null };
+
+    expect(objectiveComparisonMetrics(left, right)).toEqual([]);
+  });
+});
