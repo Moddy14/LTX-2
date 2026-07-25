@@ -1,6 +1,7 @@
 import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines";
 import type { StudioAsset } from "../shared/assets";
 import type { RunProvenance } from "../shared/provenance";
+import type { ExperimentRunBinding } from "../shared/experiments";
 export type { StudioOutput } from "../shared/outputs";
 export type { ResourceEstimate } from "../shared/estimates";
 export type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models";
@@ -47,6 +48,7 @@ export type StudioJob = {
   request: GenerationRequest;
   favorite: boolean;
   variantOf: string | null;
+  experiment: ExperimentRunBinding | null;
   runtimeMs: number | null;
   cancelledBy: "studio" | null;
   dgxJobId: string | null;

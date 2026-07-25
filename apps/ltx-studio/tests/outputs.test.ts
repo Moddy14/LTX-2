@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { StudioJob } from "../server/jobs.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import { writeOutputAnalysis } from "../server/analysisStore.js";
+import { sha256Json } from "../server/experimentStore.js";
 import { OutputLibrary } from "../server/outputs.js";
 import { validRequest } from "./fixtures.js";
 
@@ -46,6 +47,7 @@ function completedJob(
     request,
     favorite: false,
     variantOf: null,
+    experiment: null,
     runtimeMs: 1000,
     cancelledBy: null,
     dgxJobId: null,
@@ -171,7 +173,7 @@ describe("generated output library", () => {
     expect(output.qualityReview).toBeNull();
     const migrated = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(migrated).toMatchObject({
-      schemaVersion: "ltx-studio-output.v5",
+      schemaVersion: "ltx-studio-output.v6",
       changedAtMs: expect.any(Number),
       fileId: expect.stringMatching(/^\d+$/),
       identityEvidence: null,
@@ -217,7 +219,7 @@ describe("generated output library", () => {
     expect(() => library.resolveAnalysisTarget(outputName)).toThrow("inhaltsgebundene Studio-Provenienz");
   });
 
-  it("upgrades a strong v3 speech sidecar to v5 without inventing evidence", async () => {
+  it("upgrades a strong v3 speech sidecar to v6 without inventing evidence", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T07:45:00.000Z");
     const outputName = "v3-speech.mp4";
@@ -253,7 +255,7 @@ describe("generated output library", () => {
 
     const upgraded = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(upgraded).toMatchObject({
-      schemaVersion: "ltx-studio-output.v5",
+      schemaVersion: "ltx-studio-output.v6",
       identityEvidence: null,
       runProvenance: null,
     });
@@ -275,7 +277,7 @@ describe("generated output library", () => {
     expect(historic.settingsAvailable).toBe(true);
   });
 
-  it("persists a validated speech quality scorecard in a revision-bound v5 sidecar", async () => {
+  it("persists a validated speech quality scorecard in a revision-bound v6 sidecar", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T09:00:00.000Z");
     const outputName = "speech-scorecard.mp4";
@@ -309,7 +311,7 @@ describe("generated output library", () => {
     });
     expect(Number.isFinite(Date.parse(updated.qualityReview!.updatedAt))).toBe(true);
     const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
-    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v5");
+    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v6");
     expect(sidecar.changedAtMs).toEqual(expect.any(Number));
     expect(sidecar.fileId).toMatch(/^\d+$/);
     expect(sidecar.request).toEqual(job.request);
@@ -427,6 +429,41 @@ describe("generated output library", () => {
     const sidecar = await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8");
     expect(sidecar).toContain(job.runProvenance.fingerprint);
     expect(sidecar).toContain("input:conditioning-audio");
+  });
+
+  it("keeps a frozen experiment binding after the source job leaves bounded history", async () => {
+    const root = await outputRoot();
+    const completedAt = new Date("2026-07-24T09:40:00.000Z");
+    const outputName = "experiment-bound.mp4";
+    await writeFile(join(root, outputName), "video");
+    await utimes(join(root, outputName), completedAt, completedAt);
+    const job = completedJob(outputName, completedAt.toISOString(), "audio-to-video");
+    const requestSha256 = sha256Json(job.request);
+    job.experiment = {
+      schemaVersion: "ltx-studio-experiment-run.v1",
+      experimentId: "33333333-3333-4333-8333-333333333333",
+      protocolSha256: "a".repeat(64),
+      arm: "baseline",
+      kind: "ablation",
+      variableId: "a2v-guidance",
+      changedRequestPaths: ["videoGuidance.modalityScale"],
+      baselineRequestSha256: requestSha256,
+      requestSha256,
+      baselineJobId: null,
+      baselineOutputName: outputName,
+    };
+    const library = new OutputLibrary(root);
+
+    library.recordCompleted([job]);
+    const output = library.list([]).find((item) => item.name === outputName);
+    const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
+
+    expect(output?.experiment).toEqual(job.experiment);
+    expect(output?.experimentRequestVerified).toBe(true);
+    expect(sidecar).toMatchObject({
+      schemaVersion: "ltx-studio-output.v6",
+      experiment: job.experiment,
+    });
   });
 
   it("drops an analysis when same-sized output bytes replace the original with restored mtime", async () => {

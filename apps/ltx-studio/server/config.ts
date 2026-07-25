@@ -27,6 +27,7 @@ export const outputRoot = join(dataRoot, "outputs");
 export const hybridRoot = join(dataRoot, "hybrid");
 export const hybridCacheRoot = join(dataRoot, "hybrid-cache");
 export const analysisTempRoot = join(dataRoot, "analysis-tmp");
+export const experimentRoot = join(dataRoot, "experiments");
 export const longcatProjectRoot = resolve(
   process.env.LTX_STUDIO_LONGCAT_ROOT ?? "/home/moddy/projects/longcat-video-avatar-dgx",
 );
@@ -35,6 +36,7 @@ export const assetsStatePath = join(dataRoot, "assets.json");
 export const provenanceCachePath = join(dataRoot, "provenance-cache.json");
 export const serverHost = "127.0.0.1";
 export const serverPort = Number.parseInt(process.env.LTX_STUDIO_PORT ?? "4318", 10);
+export const devUiPort = Number.parseInt(process.env.LTX_STUDIO_UI_PORT ?? "4317", 10);
 export const admissionPythonExecutable = process.env.LTX_STUDIO_ADMISSION_PYTHON ?? "python3";
 export const admissionRequired = process.env.LTX_STUDIO_REQUIRE_ADMISSION !== "0";
 export const minAvailableGiB = Number.parseFloat(process.env.LTX_STUDIO_MIN_AVAILABLE_GIB ?? "48");
@@ -93,7 +95,15 @@ export const modelRoots = (process.env.LTX_STUDIO_MODEL_ROOTS ?? "/home/moddy/LT
   .map((root) => resolve(root));
 
 export function ensureRuntimeDirectories(): void {
-  for (const directory of [dataRoot, uploadRoot, outputRoot, hybridRoot, hybridCacheRoot, analysisTempRoot]) {
+  for (const directory of [
+    dataRoot,
+    uploadRoot,
+    outputRoot,
+    hybridRoot,
+    hybridCacheRoot,
+    analysisTempRoot,
+    experimentRoot,
+  ]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
 }

@@ -16,6 +16,11 @@ function output(
   identityOverrides: Partial<IdentityMetrics> = {},
   avOverrides: Partial<AvSyncRawMetrics> = {},
 ): StudioOutput {
+  const jobId = name.startsWith("a")
+    ? "11111111-1111-4111-8111-111111111111"
+    : "22222222-2222-4222-8222-222222222222";
+  const request = validRequest("audio-to-video");
+  request.outputName = name;
   const identity = {
     status: "measured",
     modelSha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
@@ -36,7 +41,8 @@ function output(
   };
   return {
     name,
-    request: validRequest("audio-to-video"),
+    jobId,
+    request,
     analysis: {
       schemaVersion: "ltx-studio-output-analysis.v4",
       evaluatorFingerprint: "test-evaluator.v1",
@@ -70,6 +76,16 @@ function output(
         fileId: "1",
         sha256: "a".repeat(64),
         entries: [],
+      }, {
+        role: "model:checkpoint",
+        path: "/models/ltx.safetensors",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "2",
+        sha256: "9".repeat(64),
+        entries: [],
       }],
       code: [{
         repositoryRoot: "/repo",
@@ -93,6 +109,34 @@ function output(
       fingerprint: "f".repeat(64),
     },
   } as unknown as StudioOutput;
+}
+
+function bindGuidanceExperiment(left: StudioOutput, right: StudioOutput): void {
+  right.request!.videoGuidance.modalityScale = 5;
+  const common = {
+    schemaVersion: "ltx-studio-experiment-run.v1" as const,
+    experimentId: "33333333-3333-4333-8333-333333333333",
+    protocolSha256: "3".repeat(64),
+    kind: "ablation" as const,
+    variableId: "a2v-guidance",
+    changedRequestPaths: ["videoGuidance.modalityScale"],
+    baselineRequestSha256: "4".repeat(64),
+    baselineOutputName: left.name,
+  };
+  left.experiment = {
+    ...common,
+    arm: "baseline",
+    requestSha256: "4".repeat(64),
+    baselineJobId: null,
+  };
+  right.experiment = {
+    ...common,
+    arm: "candidate",
+    requestSha256: "5".repeat(64),
+    baselineJobId: left.jobId,
+  };
+  left.experimentRequestVerified = true;
+  right.experimentRequestVerified = true;
 }
 
 describe("objective A/B comparison", () => {
@@ -153,12 +197,38 @@ describe("objective A/B comparison", () => {
 
     const left = output("a.mp4");
     const right = output("b.mp4");
+    bindGuidanceExperiment(left, right);
     expect(comparisonCompatibility(left, right)).toEqual({ comparable: true, reasons: [] });
 
     right.request!.images = [{ path: "/inputs/other.png", name: "other.png", frameIndex: 0, strength: 1, crf: 33 }];
     const compatibility = comparisonCompatibility(left, right);
     expect(compatibility.comparable).toBe(false);
     expect(compatibility.reasons).toContain("Identitätsreferenzen unterscheiden sich.");
+    expect(compatibility.reasons).toContain(
+      "Der tatsächliche Request-Diff entspricht nicht der eingefrorenen Einzelfaktoränderung.",
+    );
+  });
+
+  it("keeps technically similar but unregistered outputs in raw-value mode", () => {
+    const compatibility = comparisonCompatibility(output("a.mp4"), output("b.mp4"));
+
+    expect(compatibility.comparable).toBe(false);
+    expect(compatibility.reasons).toContain(
+      "Beide Ausgaben müssen an denselben eingefrorenen Experimentplan gebunden sein.",
+    );
+  });
+
+  it("rejects an output whose stored request no longer matches its frozen hash", () => {
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    bindGuidanceExperiment(left, right);
+    right.experimentRequestVerified = false;
+
+    const compatibility = comparisonCompatibility(left, right);
+    expect(compatibility.comparable).toBe(false);
+    expect(compatibility.reasons).toContain(
+      "Die gespeicherten Requests stimmen nicht mit ihren eingefrorenen Request-Hashes überein.",
+    );
   });
 
   it("requires completed analysis records on both outputs", () => {

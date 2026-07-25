@@ -1,6 +1,7 @@
 import type { GenerationRequest } from "../shared/pipelines.js";
 import type { ObjectiveQualityAnalysis } from "../shared/objectiveQuality.js";
 import type { StudioOutput } from "../shared/outputs.js";
+import { generationRequestDiffPaths } from "../shared/experiments.js";
 
 export type ComparisonDirection = "higher" | "lower" | "neutral";
 
@@ -172,6 +173,60 @@ export function comparisonCompatibility(
   ) {
     reasons.push("Identitätsmodell oder Vorverarbeitung unterscheiden sich.");
   }
+  const leftExperiment = leftOutput.experiment;
+  const rightExperiment = rightOutput.experiment;
+  if (!leftExperiment || !rightExperiment) {
+    reasons.push("Beide Ausgaben müssen an denselben eingefrorenen Experimentplan gebunden sein.");
+  } else if (
+    leftOutput.experimentRequestVerified !== true
+    || rightOutput.experimentRequestVerified !== true
+  ) {
+    reasons.push("Die gespeicherten Requests stimmen nicht mit ihren eingefrorenen Request-Hashes überein.");
+  } else if (
+    leftExperiment.experimentId !== rightExperiment.experimentId
+    || leftExperiment.protocolSha256 !== rightExperiment.protocolSha256
+  ) {
+    reasons.push("Experiment-ID oder eingefrorener Protokoll-Hash unterscheiden sich.");
+  } else {
+    const baseline = leftExperiment.arm === "baseline"
+      ? { output: leftOutput, binding: leftExperiment }
+      : rightExperiment.arm === "baseline"
+        ? { output: rightOutput, binding: rightExperiment }
+        : null;
+    const candidate = leftExperiment.arm === "candidate"
+      ? { output: leftOutput, binding: leftExperiment }
+      : rightExperiment.arm === "candidate"
+        ? { output: rightOutput, binding: rightExperiment }
+        : null;
+    if (!baseline || !candidate) {
+      reasons.push("Der Vergleich benötigt genau einen Baseline- und einen Kandidatenarm.");
+    } else {
+      if (candidate.binding.baselineJobId !== baseline.output.jobId) {
+        reasons.push("Der Kandidatenarm verweist nicht auf diesen Baseline-Job.");
+      }
+      if (
+        baseline.binding.variableId !== candidate.binding.variableId
+        || baseline.binding.kind !== candidate.binding.kind
+        || baseline.binding.baselineRequestSha256 !== candidate.binding.baselineRequestSha256
+      ) {
+        reasons.push("Die Experimentbindungen beschreiben nicht dieselbe kontrollierte Variable.");
+      }
+      const actualPaths = baseline.output.request && candidate.output.request
+        ? generationRequestDiffPaths(baseline.output.request, candidate.output.request)
+          .filter((path) => path !== "outputName")
+        : [];
+      const expectedPaths = [...candidate.binding.changedRequestPaths].sort();
+      if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+        reasons.push("Der tatsächliche Request-Diff entspricht nicht der eingefrorenen Einzelfaktoränderung.");
+      }
+      if (
+        candidate.binding.kind === "ablation"
+        && baseline.output.request?.seed !== candidate.output.request?.seed
+      ) {
+        reasons.push("Der Seed wurde innerhalb einer Einzelfaktor-Ablation verändert.");
+      }
+    }
+  }
   if (JSON.stringify(identityReferencePaths(leftOutput.request)) !== JSON.stringify(identityReferencePaths(rightOutput.request))) {
     reasons.push("Identitätsreferenzen unterscheiden sich.");
   }
@@ -192,6 +247,11 @@ export function comparisonCompatibility(
   ]);
   if (!leftInputEvidence || !rightInputEvidence || leftInputEvidence !== rightInputEvidence) {
     reasons.push("Inhalts-Hashes der ausgewerteten Eingaben sind nicht identisch belegt.");
+  }
+  const leftModels = evidenceFingerprint(leftOutput, ["model:"]);
+  const rightModels = evidenceFingerprint(rightOutput, ["model:"]);
+  if (!leftModels || !rightModels || leftModels !== rightModels) {
+    reasons.push("Generationsmodelle oder deren Inhalts-Hashes sind nicht identisch belegt.");
   }
   if (
     !leftOutput.provenance

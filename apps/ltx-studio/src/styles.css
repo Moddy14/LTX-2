@@ -1659,9 +1659,132 @@ summary:focus-visible,
 }
 
 .output-library,
+.experiment-panel,
 .run-monitor {
   padding: 10px 0 12px;
   border-bottom: 1px solid #c7ccc6;
+}
+
+.experiment-create {
+  margin-top: 7px;
+  border-top: 1px solid #d5d9d4;
+}
+
+.experiment-create summary {
+  padding: 8px 0;
+  color: #3d4940;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.experiment-create[open] {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.experiment-create .button {
+  width: 100%;
+  justify-content: center;
+}
+
+.experiment-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.experiment-item {
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid #d5d9d4;
+}
+
+.experiment-item__heading,
+.experiment-item__facts,
+.experiment-arms,
+.experiment-actions,
+.experiment-hash,
+.experiment-evidence,
+.experiment-bound,
+.experiment-status {
+  display: flex;
+  align-items: center;
+}
+
+.experiment-item__heading {
+  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.experiment-item__heading > strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experiment-status {
+  flex: 0 0 auto;
+  gap: 4px;
+  color: #6d5522;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.experiment-status.is-frozen {
+  color: var(--teal-dark);
+}
+
+.experiment-item__facts,
+.experiment-arms {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-top: 6px;
+  color: #606961;
+  font-size: 8px;
+}
+
+.experiment-item__facts span:last-child {
+  overflow: hidden;
+  max-width: 100%;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experiment-hash,
+.experiment-evidence {
+  gap: 5px;
+  margin: 6px 0 0;
+  color: #536157;
+  font-size: 8px;
+}
+
+.experiment-hash {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.experiment-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.experiment-actions .button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.experiment-bound {
+  gap: 5px;
+  color: var(--teal-dark);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .run-panel__heading h2 {
@@ -2816,6 +2939,7 @@ summary:focus-visible,
   .quality-scorecard,
   .objective-analysis,
   .objective-comparison,
+  .experiment-panel,
   .run-errors,
   .run-warnings,
   .run-suggestions,

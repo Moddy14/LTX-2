@@ -2,6 +2,10 @@ import type { GenerationRequest } from "../shared/pipelines";
 import type { QualityReviewInput } from "../shared/quality";
 import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
 import type {
+  ControlledExperiment,
+  ExperimentCreateInput,
+} from "../shared/experiments";
+import type {
   LipDubReferenceDiagnostics,
   PlanSuggestion,
   PreparedImageCrop,
@@ -42,6 +46,38 @@ export async function getJobs(): Promise<StudioJob[]> {
 export async function getOutputs(): Promise<StudioOutput[]> {
   const body = await decode<{ outputs: StudioOutput[] }>(await fetch("/api/outputs"));
   return body.outputs;
+}
+
+export async function getExperiments(): Promise<ControlledExperiment[]> {
+  const body = await decode<{ experiments: ControlledExperiment[] }>(await fetch("/api/experiments"));
+  return body.experiments;
+}
+
+export async function createExperiment(input: ExperimentCreateInput): Promise<ControlledExperiment> {
+  const body = await decode<{ experiment: ControlledExperiment }>(
+    await fetch("/api/experiments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.experiment;
+}
+
+export async function freezeExperiment(id: string): Promise<ControlledExperiment> {
+  const body = await decode<{ experiment: ControlledExperiment }>(
+    await fetch(`/api/experiments/${id}/freeze`, { method: "POST" }),
+  );
+  return body.experiment;
+}
+
+export async function launchExperimentArm(
+  id: string,
+  arm: "baseline" | "candidate",
+): Promise<{ experiment: ControlledExperiment; job: StudioJob }> {
+  return decode<{ experiment: ControlledExperiment; job: StudioJob }>(
+    await fetch(`/api/experiments/${id}/runs/${arm}`, { method: "POST" }),
+  );
 }
 
 export async function getModels(refresh = false): Promise<ModelInventory> {

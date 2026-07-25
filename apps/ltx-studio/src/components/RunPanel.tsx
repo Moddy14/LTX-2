@@ -27,11 +27,16 @@ import { videoDurationSeconds } from "../../shared/presets";
 import { isVideoPreviewUrl } from "../../shared/media";
 import type { Health, ResourceEstimate, StudioJob, StudioOutput } from "../types";
 import { qualityReviewAverage, type QualityReviewInput } from "../../shared/quality";
+import type {
+  ControlledExperiment,
+  ExperimentCreateInput,
+} from "../../shared/experiments";
 import { isSpeechQualityCandidate } from "../qualityCandidates";
 import { QualityScorecard } from "./QualityScorecard";
 import { ObjectiveAnalysisPanel } from "./ObjectiveAnalysisPanel";
 import { ObjectiveComparisonPanel } from "./ObjectiveComparisonPanel";
 import { SynchronizedComparePreview } from "./SynchronizedComparePreview";
+import { ExperimentPanel } from "./ExperimentPanel";
 
 const statusLabels: Record<StudioJob["status"], string> = {
   queued: "Wartet",
@@ -71,6 +76,7 @@ function formatFileSize(bytes: number): string {
 
 type RunPanelProps = {
   request: GenerationRequest;
+  requestValid: boolean;
   health: Health | null;
   jobs: StudioJob[];
   outputs: StudioOutput[];
@@ -87,9 +93,9 @@ type RunPanelProps = {
   onApplySuggestion: (suggestion: PlanSuggestion) => void;
   command: string | null;
   previews: Record<string, string>;
-  comparisonJobs: StudioJob[];
-  comparisonIds: string[];
-  onToggleCompare: (job: StudioJob) => void;
+  comparisonOutputs: StudioOutput[];
+  comparisonNames: string[];
+  onToggleCompare: (output: StudioOutput) => void;
   onRerun: (job: StudioJob, mode: "exact" | "random-seed") => void;
   onFavorite: (job: StudioJob) => void;
   onSaveQualityReview: (output: StudioOutput, input: QualityReviewInput) => Promise<void>;
@@ -97,12 +103,17 @@ type RunPanelProps = {
   onCancelAnalysis: (output: StudioOutput) => Promise<void>;
   onLoadSettings: (job: StudioJob) => void;
   onLoadOutputSettings: (output: StudioOutput) => void;
+  experiments: ControlledExperiment[];
+  onCreateExperiment: (input: ExperimentCreateInput) => Promise<void>;
+  onFreezeExperiment: (id: string) => Promise<void>;
+  onLaunchExperiment: (id: string, arm: "baseline" | "candidate") => Promise<void>;
   estimate: ResourceEstimate;
   requiredStartMemoryGiB: number;
 };
 
 export function RunPanel({
   request,
+  requestValid,
   health,
   jobs,
   outputs,
@@ -119,8 +130,8 @@ export function RunPanel({
   onApplySuggestion,
   command,
   previews,
-  comparisonJobs,
-  comparisonIds,
+  comparisonOutputs,
+  comparisonNames,
   onToggleCompare,
   onRerun,
   onFavorite,
@@ -129,6 +140,10 @@ export function RunPanel({
   onCancelAnalysis,
   onLoadSettings,
   onLoadOutputSettings,
+  experiments,
+  onCreateExperiment,
+  onFreezeExperiment,
+  onLaunchExperiment,
   estimate,
   requiredStartMemoryGiB,
 }: RunPanelProps) {
@@ -163,11 +178,12 @@ export function RunPanel({
   const outputRequest = selectedOutput?.request ?? null;
   const outputForJob = (job: StudioJob) =>
     outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
-  const comparisonOutputs = comparisonJobs
-    .map(outputForJob)
-    .filter((output): output is StudioOutput => Boolean(output));
   const qualityAverageForJob = (job: StudioJob): number | null => {
     const review = outputForJob(job)?.qualityReview;
+    return review ? qualityReviewAverage(review) : null;
+  };
+  const qualityAverageForOutput = (output: StudioOutput): number | null => {
+    const review = output.qualityReview;
     return review ? qualityReviewAverage(review) : null;
   };
 
@@ -175,10 +191,13 @@ export function RunPanel({
     <aside className="run-panel">
       <section className="preview-stage">
         <div className="preview-stage__media">
-          {comparisonJobs.length === 2 ? (
+          {comparisonOutputs.length === 2 ? (
             <SynchronizedComparePreview
-              jobs={[comparisonJobs[0], comparisonJobs[1]]}
-              scores={[qualityAverageForJob(comparisonJobs[0]), qualityAverageForJob(comparisonJobs[1])]}
+              outputs={[comparisonOutputs[0], comparisonOutputs[1]]}
+              scores={[
+                qualityAverageForOutput(comparisonOutputs[0]),
+                qualityAverageForOutput(comparisonOutputs[1]),
+              ]}
             />
           ) : selectedOutput ? (
             <video key={selectedOutput.url} src={selectedOutput.url} controls muted playsInline />
@@ -266,11 +285,34 @@ export function RunPanel({
             >
               <SlidersHorizontal size={16} /> Alle Einstellungen übernehmen
             </button>
+            <button
+              type="button"
+              className={`icon-button ${selectedOutput && comparisonNames.includes(selectedOutput.name) ? "is-active" : ""}`}
+              title="Ausgabe zum Vergleich hinzufügen"
+              aria-pressed={Boolean(selectedOutput && comparisonNames.includes(selectedOutput.name))}
+              disabled={!selectedOutput}
+              onClick={() => {
+                if (selectedOutput) onToggleCompare(selectedOutput);
+              }}
+            >
+              <Columns2 size={17} />
+            </button>
           </>
         ) : (
           <div className="compact-empty">Noch keine MP4-Ausgabe im Studio-Ordner</div>
         )}
       </section>
+
+      <ExperimentPanel
+        request={request}
+        requestValid={requestValid}
+        experiments={experiments}
+        jobs={jobs}
+        outputs={outputs}
+        onCreate={onCreateExperiment}
+        onFreeze={onFreezeExperiment}
+        onLaunch={onLaunchExperiment}
+      />
 
       <section className={`run-monitor ${activeJob ? "is-live" : ""}`} aria-label="Laufmonitor">
         <div className="run-panel__heading">
@@ -397,21 +439,11 @@ export function RunPanel({
           >
             <Dices size={17} />
           </button>
-          <button
-            type="button"
-            className={`icon-button ${comparisonIds.includes(selectedJob.id) ? "is-active" : ""}`}
-            title="Ausgabe zum Vergleich hinzufügen"
-            aria-pressed={comparisonIds.includes(selectedJob.id)}
-            disabled={!selectedJob.outputUrl}
-            onClick={() => onToggleCompare(selectedJob)}
-          >
-            <Columns2 size={17} />
-          </button>
           <span>Seed {selectedJob.request.seed}</span>
         </div>
       ) : null}
 
-      {comparisonJobs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
+      {comparisonOutputs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
         <>
           <QualityScorecard
             key={`manual-${selectedOutput.name}`}

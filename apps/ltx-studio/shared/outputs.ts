@@ -2,6 +2,7 @@ import type { GenerationRequest } from "./pipelines.js";
 import type { JobQualityReview } from "./quality.js";
 import type { OutputAnalysisRecord } from "./objectiveQuality.js";
 import type { RunProvenance } from "./provenance.js";
+import type { ExperimentRunBinding } from "./experiments.js";
 
 export type StudioOutput = {
   name: string;
@@ -17,4 +18,6 @@ export type StudioOutput = {
   qualityReview: JobQualityReview | null;
   analysis: OutputAnalysisRecord | null;
   provenance?: RunProvenance | null;
+  experiment?: ExperimentRunBinding | null;
+  experimentRequestVerified?: boolean;
 };

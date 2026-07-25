@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createDefaultRequest } from "../../shared/pipelines.js";
+import { applyExperimentCandidate } from "../../shared/experiments.js";
 
 test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -145,6 +146,97 @@ test("explicit LongCat settings survive draft and local editor restoration", asy
   await page.reload();
   await expect(page.getByLabel("LongCat-Lippenpass")).toBeChecked();
   await expect(page.getByLabel("LongCat-Auflösung")).toHaveValue("720p");
+});
+
+test("controlled experiments freeze one variable before either arm can run", async ({ page }, testInfo) => {
+  const request = createDefaultRequest("audio-to-video");
+  request.prompt = "A controlled native A2V experiment.";
+  request.outputName = "controlled-guidance.mp4";
+  request.models.checkpointPath = "/models/checkpoint.safetensors";
+  request.models.gemmaRoot = "/models/gemma";
+  request.models.spatialUpscalerPath = "/models/upscaler.safetensors";
+  request.models.distilledLora = { path: "/models/distilled-lora.safetensors", strength: 1 };
+  request.audio.path = "/inputs/speech.wav";
+  request.audio.name = "speech.wav";
+  request.videoGuidance.modalityScale = 5;
+
+  const experimentId = "33333333-3333-4333-8333-333333333333";
+  let experiment: ReturnType<typeof buildExperiment> | null = null;
+  function buildExperiment(status: "draft" | "frozen") {
+    const baseline = structuredClone(request);
+    baseline.outputName = "controlled-guidance-exp-33333333-a.mp4";
+    const candidate = applyExperimentCandidate(request, { variable: "a2v-guidance", value: 3 });
+    candidate.outputName = "controlled-guidance-exp-33333333-b.mp4";
+    return {
+      schemaVersion: "ltx-studio-experiment.v1" as const,
+      id: experimentId,
+      title: "A2V Guidance 5 gegen 3",
+      claimScope: "development" as const,
+      status,
+      kind: "ablation" as const,
+      candidate: { variable: "a2v-guidance" as const, value: 3 },
+      changedRequestPaths: ["videoGuidance.modalityScale"],
+      createdAt: "2026-07-25T04:00:00.000Z",
+      frozenAt: status === "frozen" ? "2026-07-25T04:01:00.000Z" : null,
+      protocolSha256: status === "frozen" ? "a".repeat(64) : null,
+      arms: [
+        {
+          arm: "baseline" as const,
+          request: baseline,
+          requestSha256: "b".repeat(64),
+          settingsSha256: "c".repeat(64),
+          jobId: null,
+        },
+        {
+          arm: "candidate" as const,
+          request: candidate,
+          requestSha256: "d".repeat(64),
+          settingsSha256: "e".repeat(64),
+          jobId: null,
+        },
+      ] as const,
+    };
+  }
+
+  await page.route(/\/api\/experiments$/, async (route) => {
+    if (route.request().method() === "POST") {
+      const payload = route.request().postDataJSON() as {
+        title: string;
+        candidate: { variable: string; value: number };
+      };
+      expect(payload.title).toBe("A2V Guidance 5 gegen 3");
+      expect(payload.candidate).toEqual({ variable: "a2v-guidance", value: 3 });
+      experiment = buildExperiment("draft");
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ experiment }) });
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ experiments: experiment ? [experiment] : [] }),
+    });
+  });
+  await page.route(`**/api/experiments/${experimentId}/freeze`, async (route) => {
+    experiment = buildExperiment("frozen");
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ experiment }) });
+  });
+
+  const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+  await page.goto(`/?draft=${draft}`);
+  await page.getByText("Experiment vorregistrieren", { exact: true }).click();
+  await page.getByLabel("Experimentname").fill("A2V Guidance 5 gegen 3");
+  await expect(page.getByLabel("Kontrollierte Variable")).toHaveValue("a2v-guidance");
+  await expect(page.getByRole("spinbutton", { name: "Kandidatenwert", exact: true })).toHaveValue("3");
+  await page.getByRole("button", { name: "Draft anlegen" }).click();
+  await expect(page.getByText("A2V Guidance 5 gegen 3", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Einfrieren" }).click();
+  await expect(page.getByText("Eingefroren", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Baseline starten" })).toBeVisible();
+  await expect(page.getByText(/SOTA-Evidence bleibt bis zu allen Product-Gates blockiert/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator(".experiment-panel").screenshot({
+    path: testInfo.outputPath("controlled-experiment-panel.png"),
+  });
 });
 
 test("LipDub live preflight surfaces plan findings before starting a job", async ({ page }, testInfo) => {
@@ -715,7 +807,7 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("Nicht messbar");
 });
 
-test("two completed jobs provide a gated objective comparison with synchronized playback", async ({ page }, testInfo) => {
+test("durable outputs provide a gated objective comparison after job history is pruned", async ({ page }, testInfo) => {
   const leftRequest = createDefaultRequest("audio-to-video");
   leftRequest.outputName = "comparison-a.mp4";
   leftRequest.images = [{
@@ -735,6 +827,21 @@ test("two completed jobs provide a gated objective comparison with synchronized 
   rightRequest.videoGuidance.modalityScale = 3;
 
   const job = (id: string, request: typeof leftRequest) => ({
+    experiment: {
+      schemaVersion: "ltx-studio-experiment-run.v1",
+      experimentId: "33333333-3333-4333-8333-333333333333",
+      protocolSha256: "3".repeat(64),
+      arm: request.outputName === leftRequest.outputName ? "baseline" : "candidate",
+      kind: "ablation",
+      variableId: "a2v-guidance",
+      changedRequestPaths: ["videoGuidance.modalityScale"],
+      baselineRequestSha256: "4".repeat(64),
+      requestSha256: request.outputName === leftRequest.outputName ? "4".repeat(64) : "5".repeat(64),
+      baselineJobId: request.outputName === leftRequest.outputName
+        ? null
+        : "11111111-1111-4111-8111-111111111111",
+      baselineOutputName: leftRequest.outputName,
+    },
     id,
     status: "completed",
     mode: request.mode,
@@ -863,6 +970,17 @@ test("two completed jobs provide a gated objective comparison with synchronized 
         sha256: "c".repeat(64),
         entries: [],
       },
+      {
+        role: "model:checkpoint",
+        path: "/models/ltx.safetensors",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "4",
+        sha256: "9".repeat(64),
+        entries: [],
+      },
     ],
     code: [{
       repositoryRoot: "/repo",
@@ -899,15 +1017,21 @@ test("two completed jobs provide a gated objective comparison with synchronized 
     qualityReview: null,
     analysis: analysis(index === 0 ? 0.842 : 0.855, index === 0 ? -333 : -42),
     provenance,
+    experiment: currentJob.experiment,
+    experimentRequestVerified: true,
   }));
 
   await page.route(/\/api\/jobs(?:\?.*)?$/, (route) => route.fulfill({
     contentType: "application/json",
-    body: JSON.stringify({ jobs }),
+    body: JSON.stringify({ jobs: [] }),
   }));
   await page.route(/\/api\/outputs(?:\?.*)?$/, (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({ outputs }),
+  }));
+  await page.route(/\/api\/experiments(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ experiments: [] }),
   }));
   await page.route("**/api/events", (route) => route.fulfill({
     contentType: "text/event-stream",
@@ -916,7 +1040,7 @@ test("two completed jobs provide a gated objective comparison with synchronized 
   await page.reload();
 
   await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
-  await page.getByRole("button", { name: /comparison-b\.mp4/ }).click();
+  await page.getByLabel("Erzeugtes Video").selectOption("comparison-b.mp4");
   await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
 
   await expect(page.getByRole("heading", { name: "Objektiver A/B-Vergleich" })).toBeVisible();
@@ -1131,6 +1255,55 @@ test("API rejects foreign browser origins and unknown routes", async ({ request 
   expect(await foreignInspection.json()).toMatchObject({
     error: "LipDub-Referenzdiagnose ist nur für Videos aus der Studio-Mediathek verfügbar.",
   });
+});
+
+test("API persists and freezes a controlled experiment before any render can start", async ({ request }) => {
+  const baselineRequest = createDefaultRequest("audio-to-video");
+  baselineRequest.prompt = "A single-speaker native A2V experiment.";
+  baselineRequest.outputName = "api-controlled-guidance.mp4";
+  baselineRequest.models.checkpointPath = "/models/checkpoint.safetensors";
+  baselineRequest.models.gemmaRoot = "/models/gemma";
+  baselineRequest.models.spatialUpscalerPath = "/models/upscaler.safetensors";
+  baselineRequest.models.distilledLora = { path: "/models/distilled-lora.safetensors", strength: 1 };
+  baselineRequest.audio.path = "/inputs/speech.wav";
+  baselineRequest.audio.name = "speech.wav";
+  baselineRequest.videoGuidance.modalityScale = 5;
+
+  const createdResponse = await request.post("/api/experiments", {
+    data: {
+      title: "API A2V Guidance 5 gegen 3",
+      baselineRequest,
+      candidate: { variable: "a2v-guidance", value: 3 },
+    },
+  });
+  expect(createdResponse.status()).toBe(201);
+  const created = (await createdResponse.json()).experiment;
+  expect(created).toMatchObject({
+    status: "draft",
+    kind: "ablation",
+    changedRequestPaths: ["videoGuidance.modalityScale"],
+  });
+
+  const frozenResponse = await request.post(`/api/experiments/${created.id}/freeze`);
+  expect(frozenResponse.ok()).toBe(true);
+  const frozen = (await frozenResponse.json()).experiment;
+  expect(frozen.status).toBe("frozen");
+  expect(frozen.protocolSha256).toMatch(/^[0-9a-f]{64}$/);
+
+  const duplicateFreeze = await request.post(`/api/experiments/${created.id}/freeze`);
+  expect(duplicateFreeze.status()).toBe(409);
+
+  const prematureCandidate = await request.post(`/api/experiments/${created.id}/runs/candidate`);
+  expect(prematureCandidate.status()).toBe(409);
+  expect(await prematureCandidate.json()).toMatchObject({
+    error: "Der gebundene Baseline-Lauf muss vollständig abgeschlossen und mit verifizierter Laufprovenienz belegt sein.",
+  });
+
+  const listResponse = await request.get("/api/experiments");
+  expect(listResponse.ok()).toBe(true);
+  expect((await listResponse.json()).experiments).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: created.id, protocolSha256: frozen.protocolSha256 })]),
+  );
 });
 
 test("API exposes bounded model inventory and request estimates", async ({ request }) => {

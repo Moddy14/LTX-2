@@ -15,6 +15,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+import {
+  experimentRunBindingSchema,
+  type ExperimentRunBinding,
+} from "../shared/experiments.js";
 import { migrateGenerationRequest, type GenerationRequest } from "../shared/pipelines.js";
 import {
   decisionMessage,
@@ -105,6 +109,7 @@ export type StudioJob = {
   request: GenerationRequest;
   favorite: boolean;
   variantOf: string | null;
+  experiment: ExperimentRunBinding | null;
   runtimeMs: number | null;
   cancelledBy: "studio" | null;
   thermalProfile: ThermalProfile | null;
@@ -502,7 +507,14 @@ export class JobManager extends EventEmitter {
     return job ? publicJob(job) : undefined;
   }
 
-  create(request: GenerationRequest, metadata: { variantOf?: string | null } = {}): StudioJob {
+  create(
+    request: GenerationRequest,
+    metadata: {
+      variantOf?: string | null;
+      experiment?: ExperimentRunBinding | null;
+      deferStart?: boolean;
+    } = {},
+  ): StudioJob {
     const activeJobs = [...this.jobs.values()].filter((job) => isActiveJobStatus(job.status));
     if (activeJobs.length >= MAX_ACTIVE_JOBS) {
       throw new JobConflictError(
@@ -531,6 +543,7 @@ export class JobManager extends EventEmitter {
       request,
       favorite: false,
       variantOf: metadata.variantOf ?? null,
+      experiment: metadata.experiment ? experimentRunBindingSchema.parse(metadata.experiment) : null,
       runtimeMs: null,
       cancelledBy: null,
       thermalProfile: null,
@@ -550,6 +563,13 @@ export class JobManager extends EventEmitter {
       if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
       throw error;
     }
+    if (this.autoStart && !metadata.deferStart) void this.pump();
+    return publicJob(job);
+  }
+
+  startQueued(id: string): StudioJob | undefined {
+    const job = this.jobs.get(id);
+    if (!job || job.status !== "queued" || !this.queue.includes(id)) return undefined;
     if (this.autoStart) void this.pump();
     return publicJob(job);
   }
@@ -1178,7 +1198,7 @@ export class JobManager extends EventEmitter {
           `DGX-Queue: Ressourcenprognose ${estimate.memoryGiB} GiB RAM plus ${minResidualMemoryGiB} GiB `
             + `Restpuffer, Startanforderung ${requiredStartMemoryGiB} GiB, ${estimate.outputGiB.toFixed(2)} GiB Ausgabe.`,
         );
-        response = await this.dgxAdmissionOperations.submit(job.request, requiredStartMemoryGiB);
+        response = await this.dgxAdmissionOperations.submit(job.request, requiredStartMemoryGiB, job.id);
       } catch (error) {
         if (jobWasCancelled(job)) return false;
         this.failJob(job, error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.");
@@ -1878,6 +1898,9 @@ export class JobManager extends EventEmitter {
           favorite: entry.favorite === true,
           variantOf: typeof entry.variantOf === "string" && /^[0-9a-f-]{36}$/i.test(entry.variantOf)
             ? entry.variantOf
+            : null,
+          experiment: experimentRunBindingSchema.safeParse(entry.experiment).success
+            ? experimentRunBindingSchema.parse(entry.experiment)
             : null,
           runtimeMs: typeof entry.runtimeMs === "number" && Number.isFinite(entry.runtimeMs) && entry.runtimeMs >= 0
             ? entry.runtimeMs

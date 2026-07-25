@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 
-import type { StudioJob } from "../types";
+import type { StudioOutput } from "../types";
 
 type AudioSource = "left" | "right" | "muted";
 
@@ -19,10 +19,10 @@ function clock(seconds: number): string {
 }
 
 export function SynchronizedComparePreview({
-  jobs,
+  outputs,
   scores,
 }: {
-  jobs: [StudioJob, StudioJob];
+  outputs: [StudioOutput, StudioOutput];
   scores: [number | null, number | null];
 }) {
   const leftRef = useRef<HTMLVideoElement>(null);
@@ -60,7 +60,7 @@ export function SynchronizedComparePreview({
   const step = (direction: -1 | 1) => {
     videos().forEach((video) => video.pause());
     setPlaying(false);
-    const fps = Math.max(1, jobs[0].request.frameRate);
+    const fps = Math.max(1, outputs[0].request?.frameRate ?? 24);
     syncTo((leftRef.current?.currentTime ?? currentTime) + direction / fps);
   };
 
@@ -91,11 +91,11 @@ export function SynchronizedComparePreview({
   return (
     <div className="synchronized-compare">
       <div className="compare-preview">
-        {jobs.map((job, index) => (
-          <div className="compare-preview__item" key={job.id}>
+        {outputs.map((output, index) => (
+          <div className="compare-preview__item" key={output.name}>
             <video
               ref={index === 0 ? leftRef : rightRef}
-              src={job.outputUrl ?? undefined}
+              src={output.url}
               muted={audioSource !== (index === 0 ? "left" : "right")}
               playsInline
               preload="metadata"
@@ -104,7 +104,7 @@ export function SynchronizedComparePreview({
               onEnded={() => setPlaying(false)}
             />
             <span>
-              {index === 0 ? "A" : "B"} · {job.outputName}
+              {index === 0 ? "A" : "B"} · {output.name}
               {scores[index] !== null ? ` · ${scores[index]!.toFixed(1)}/10` : ""}
             </span>
           </div>
@@ -129,7 +129,7 @@ export function SynchronizedComparePreview({
           type="range"
           min={0}
           max={duration || 0}
-          step={1 / Math.max(1, jobs[0].request.frameRate)}
+          step={1 / Math.max(1, outputs[0].request?.frameRate ?? 24)}
           value={Math.min(currentTime, duration || 0)}
           aria-label="Gemeinsame Wiedergabeposition"
           onChange={(event) => syncTo(Number(event.target.value))}

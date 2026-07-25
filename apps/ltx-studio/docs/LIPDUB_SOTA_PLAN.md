@@ -1,6 +1,6 @@
 # LipDub SOTA-Plan
 
-Stand: 2026-07-24
+Stand: 2026-07-25
 
 ## Ziel
 
@@ -135,6 +135,29 @@ Framezahl Qualitätsvoraussetzungen.
   implementiert und unabhängig geprüft sind.
 - LongCat bleibt vorhanden, ist aber standardmäßig aus und kein SOTA-Hauptpfad.
 - DGX-Queue, Thermalwächter und Wiederanlauf bleiben Teil jedes GPU-Laufs.
+- Vollständige Laufprovenienz bindet Eingaben, Generationsmodelle, Codezustand,
+  Runtime und verifizierten Zeitpunkt mit SHA-256 an Job und Output-Sidecar.
+- Kontrollierte Entwicklungsversuche werden vor dem ersten Lauf als Baseline
+  plus genau eine serverseitig angewendete Kandidatenvariable angelegt und
+  eingefroren. Der Protokoll-Hash, beide vollständigen Requests, Request- und
+  Settings-Hashes, der tatsächliche rekursive Diff und beide Arme werden
+  dauerhaft gespeichert.
+- Seed-Änderungen sind ausdrücklich Replikate und keine Ablationen. Ablationen
+  halten den Seed fest; unbekannte oder zusätzliche Request-Änderungen werden
+  serverseitig abgelehnt.
+- Das eingefrorene Protokoll wird unmittelbar vor jedem Armstart erneut
+  vollständig gehasht. Jeder Queue-Submit trägt eine stabile lokale Job-ID im
+  `requested_by`-Wert. Eindeutig nie gestartete Crash-Orphans bleiben
+  ungebunden; ein terminal unterbrochener Arm darf erst erneut gestartet
+  werden, nachdem die Runtime-Queue unter dieser ID keinen aktiven Job mehr
+  meldet. Alle Versuchs-IDs bleiben als Attempt-Historie erhalten.
+- Experimentbindung und Request-Hash-Integrität liegen im revisionsgebundenen
+  Output-Sidecar Version 6. Baselinefreigabe und A/B-Vergleich funktionieren
+  deshalb auch nach Bereinigung der auf 100 Einträge begrenzten Jobhistorie.
+- Ein objektiver Vergleich gilt nur für Baseline plus Kandidat desselben
+  eingefrorenen Protokolls, exakt den registrierten Request-Diff, identische
+  nicht ablatierte Eingaben, Generationsmodelle, Code- und Runtimezustände sowie
+  denselben Evaluator-Fingerprint.
 
 ## Aktueller Blocker
 
@@ -245,7 +268,7 @@ Jedes Ergebnis erhält getrennte Bewertungen:
 - Audio: verständlich, sauber und ohne Versatz oder Aussetzer.
 
 Die persistente Scorecard liegt im revisionsgebundenen
-MP4-Einstellungs-Sidecar Version 4; ältere Versionen werden bei belegbarer
+MP4-Einstellungs-Sidecar Version 6; ältere Versionen werden bei belegbarer
 Job-Provenienz kompatibel gelesen. Der objektive CPU-Evaluatorblock ist
 umgesetzt:
 
@@ -267,7 +290,17 @@ Evaluatoren:
 - ASR-Abgleich des erzeugten Dialogs;
 - bewegungskompensierte Artefakt- und Flimmererkennung.
 
-Für diese drei noch offenen Nachweise gelten vor dem Holdout zusätzlich:
+Als nächster ehrlicher Zwischenschritt wird der lokal installierte
+MIT-lizenzierte Whisper-Pfad transcript-geführt und CPU-begrenzt eingebaut:
+ASR/WER, kritische Wortfehler und echte Wortfenster aus dem Zieltext werden mit
+der bestehenden stabilisierten YuNet-Mundbewegung verglichen. Ausgegeben werden
+Wort-Onset-/Offset-Lag, Mundbewegungsabdeckung während Sprache,
+Pausenfehlbewegung, Fenster-IQR und Nulltests. Erst kalibrierte Verschiebungen
+von `±40`, `±80`, `±120` und `±200 ms` dürfen daraus eine Timing-Aussage
+ableiten. Dieser Pfad ist ausdrücklich kein Phonem-/Visem-Nachweis und erzeugt
+keine `10/10`-Freigabe.
+
+Für diese vier noch offenen Nachweise gelten vor dem Holdout zusätzlich:
 
 - **SFace:** Der lokal eingefrorene Same-/Impostor-Schwellwert muss auf
   identitätsdisjunkter Kalibration und Holdout eine False-Accept-Rate von

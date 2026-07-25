@@ -1,10 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const uiPort = 14_317;
+const apiPort = 14_318;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   outputDir: "./test-results",
   use: {
-    baseURL: "http://127.0.0.1:4317",
+    baseURL: `http://127.0.0.1:${uiPort}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -13,9 +16,9 @@ export default defineConfig({
     { name: "mobile", use: { ...devices["Pixel 7"] } },
   ],
   webServer: {
-    command: "npm run dev",
-    url: "http://127.0.0.1:4317",
-    reuseExistingServer: true,
+    command: `LTX_STUDIO_DATA_DIR=/tmp/ltx-studio-playwright LTX_STUDIO_PORT=${apiPort} LTX_STUDIO_UI_PORT=${uiPort} npm run dev`,
+    url: `http://127.0.0.1:${uiPort}`,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

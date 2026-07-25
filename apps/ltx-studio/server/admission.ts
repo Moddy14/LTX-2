@@ -62,6 +62,10 @@ export type QueueJobSummary = {
   last_error?: string;
 };
 
+export type QueueListResponse = {
+  jobs: QueueJobSummary[];
+};
+
 export type QueueSubmitResponse = {
   schema_version: "dgx-queue-submit.v0";
   job: QueueJobSummary;
@@ -100,10 +104,14 @@ const TRANSIENT_REASONS = new Set([
   "qwen_pressure_evicted_for_blocked_job",
 ]);
 
-export function buildAdmissionRequests(request: GenerationRequest, estimatedMemoryGiB?: number): AdmissionRequest[] {
+export function buildAdmissionRequests(
+  request: GenerationRequest,
+  estimatedMemoryGiB?: number,
+  callerJobId?: string,
+): AdmissionRequest[] {
   const requestMemoryGiB = estimatedMemoryGiB ?? estimateResources(request).memoryGiB;
   return [{
-    requested_by: "ltx-studio",
+    requested_by: callerJobId ? `ltx-studio:${callerJobId}` : "ltx-studio",
     source_app: "LTX Studio",
     job_type: `ltx2_native_${request.mode.replaceAll("-", "_")}`,
     runtime: "ltx2_native",
@@ -149,9 +157,23 @@ export function shouldRetryQueueSubmit(decision: AdmissionDecision): boolean {
 export async function submitQueueAdmission(
   request: GenerationRequest,
   estimatedMemoryGiB?: number,
+  callerJobId?: string,
 ): Promise<QueueSubmitResponse> {
-  const [admissionRequest] = buildAdmissionRequests(request, estimatedMemoryGiB);
+  const [admissionRequest] = buildAdmissionRequests(request, estimatedMemoryGiB, callerJobId);
   return runtimeApiJson("POST", "/dgx/queue/submit", admissionRequest, { timeoutMs: 120_000 });
+}
+
+export async function listQueueJobs(): Promise<QueueListResponse> {
+  const response = await runtimeApiJson<{ jobs?: QueueJobSummary[]; queue?: { jobs?: QueueJobSummary[] } }>(
+    "GET",
+    "/dgx/queue",
+    undefined,
+    { timeoutMs: 30_000 },
+  );
+  const jobs = Array.isArray(response.jobs)
+    ? response.jobs
+    : Array.isArray(response.queue?.jobs) ? response.queue.jobs : [];
+  return { jobs };
 }
 
 export async function readQueueJob(jobId: string): Promise<QueueJobReadResponse> {

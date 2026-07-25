@@ -255,4 +255,14 @@ export const fieldHelp = {
     "Wofür: SHA-256-Fingerabdruck aus Betriebssystem, Kernel, Node, Python, FFmpeg und den relevanten Python-Paketversionen. A/B-Vergleiche werden bei unterschiedlichen Runtime-Fingerprints absichtlich nicht als direkt vergleichbar bewertet.",
   objectivePvTransitionF1:
     "Wofür: Übereinstimmung sichtbarer Visemwechsel mit einer Toleranz von einem Videoframe. Product-GO verlangt mindestens 0,90 insgesamt, 0,80 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
+  experimentTitle:
+    "Wofür: Benennt einen vorab geplanten Vergleich dauerhaft. Gute Eingabe: Pipeline, Ausgangswert und Kandidatenwert nennen, zum Beispiel 'A2V Guidance 5 gegen 3'.",
+  experimentVariable:
+    "Wofür: Wählt genau eine serverseitig zugelassene Änderung. Alle übrigen Request-Felder einschließlich Seed bleiben bei einer Ablation unverändert; ein Seedwechsel wird ausdrücklich als Replikat geführt.",
+  experimentCandidate:
+    "Wofür: Legt den Kandidatenwert vor dem ersten Lauf fest. Gute Eingabe: nur einen fachlich begründeten Wert wählen; nach dem Einfrieren kann er nicht mehr geändert werden.",
+  experimentProtocolHash:
+    "Wofür: Bindet Titel, beide vollständigen Requests, kontrollierte Variable und erlaubte Diff-Pfade kryptografisch. Derselbe Hash muss auf Baseline, Kandidat und späterem Vergleich liegen.",
+  experimentEvidenceStatus:
+    "Wofür: Trennt reproduzierbare Entwicklungsvergleiche von einem SOTA-Nachweis. Solange Phonem/Visem, ASR, Artefaktkalibration, Holdout und externer Vergleich fehlen, darf das Experiment keine 10/10-Freigabe erzeugen.",
 } as const;

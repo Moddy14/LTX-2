@@ -1006,6 +1006,31 @@ describe("job persistence and reservations", () => {
     });
   });
 
+  it("persists a frozen experiment binding across a Studio restart", async () => {
+    const path = await statePath();
+    const request = validRequest("audio-to-video");
+    const binding = {
+      schemaVersion: "ltx-studio-experiment-run.v1" as const,
+      experimentId: "33333333-3333-4333-8333-333333333333",
+      protocolSha256: "a".repeat(64),
+      arm: "baseline" as const,
+      kind: "ablation" as const,
+      variableId: "a2v-guidance",
+      changedRequestPaths: ["videoGuidance.modalityScale"],
+      baselineRequestSha256: "b".repeat(64),
+      requestSha256: "b".repeat(64),
+      baselineJobId: null,
+      baselineOutputName: request.outputName,
+    };
+    const manager = new JobManager(path, false);
+
+    const created = manager.create(request, { experiment: binding });
+    const restored = new JobManager(path, false);
+
+    expect(created.experiment).toEqual(binding);
+    expect(restored.get(created.id)?.experiment).toEqual(binding);
+  });
+
   it("bounds the persisted active queue", async () => {
     const manager = new JobManager(await statePath(), false);
     for (let index = 0; index < MAX_ACTIVE_JOBS; index += 1) {

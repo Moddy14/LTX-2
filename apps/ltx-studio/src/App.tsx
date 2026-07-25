@@ -29,9 +29,17 @@ import {
   setOutputQualityReview,
   startOutputAnalysis,
   cancelOutputAnalysis,
+  createExperiment as createExperimentApi,
+  freezeExperiment as freezeExperimentApi,
+  getExperiments,
+  launchExperimentArm,
 } from "./api";
 import type { QualityReviewInput } from "../shared/quality";
 import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
+import type {
+  ControlledExperiment,
+  ExperimentCreateInput,
+} from "../shared/experiments";
 import { Editor } from "./components/Editor";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
@@ -132,9 +140,10 @@ export function App() {
   const [historyEstimate, setHistoryEstimate] = useState<ResourceEstimate | null>(null);
   const [jobs, setJobs] = useState<StudioJob[]>([]);
   const [outputs, setOutputs] = useState<StudioOutput[]>([]);
+  const [experiments, setExperiments] = useState<ControlledExperiment[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedOutputName, setSelectedOutputName] = useState<string | null>(null);
-  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
+  const [comparisonNames, setComparisonNames] = useState<string[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -161,9 +170,9 @@ export function App() {
   );
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
   const selectedOutput = outputs.find((output) => output.name === selectedOutputName) ?? outputs[0] ?? null;
-  const comparisonJobs = comparisonIds
-    .map((id) => jobs.find((job) => job.id === id))
-    .filter((job): job is StudioJob => Boolean(job?.outputUrl));
+  const comparisonOutputs = comparisonNames
+    .map((name) => outputs.find((output) => output.name === name))
+    .filter((output): output is StudioOutput => Boolean(output));
 
   useLayoutEffect(() => {
     requestRef.current = request;
@@ -177,19 +186,29 @@ export function App() {
     let mounted = true;
     const refresh = async () => {
       try {
-        const [nextConfig, nextHealth, nextJobs, nextModels, nextAssets, nextOutputs] = await Promise.all([
+        const [
+          nextConfig,
+          nextHealth,
+          nextJobs,
+          nextModels,
+          nextAssets,
+          nextOutputs,
+          nextExperiments,
+        ] = await Promise.all([
           getConfig(),
           getHealth(),
           getJobs(),
           getModels(),
           getAssets(),
           getOutputs(),
+          getExperiments(),
         ]);
         if (!mounted) return;
         setConfig(nextConfig);
         setHealth(nextHealth);
         setJobs(nextJobs);
         setOutputs((current) => mergeOutputRefresh(current, nextOutputs));
+        setExperiments(nextExperiments);
         setModelInventory(nextModels);
         setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
         setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
@@ -206,6 +225,10 @@ export function App() {
         .catch(() => undefined),
       10_000,
     );
+    const experimentsTimer = window.setInterval(
+      () => void getExperiments().then(setExperiments).catch(() => undefined),
+      10_000,
+    );
     const events = new EventSource("/api/events");
     events.addEventListener("jobs", (event) => {
       setJobs(JSON.parse((event as MessageEvent).data) as StudioJob[]);
@@ -217,6 +240,7 @@ export function App() {
       mounted = false;
       window.clearInterval(healthTimer);
       window.clearInterval(outputsTimer);
+      window.clearInterval(experimentsTimer);
       events.close();
     };
   }, []);
@@ -389,6 +413,23 @@ export function App() {
     }
   };
 
+  const handleCreateExperiment = async (input: ExperimentCreateInput) => {
+    const experiment = await createExperimentApi(input);
+    setExperiments((current) => [experiment, ...current.filter((item) => item.id !== experiment.id)]);
+  };
+
+  const handleFreezeExperiment = async (id: string) => {
+    const experiment = await freezeExperimentApi(id);
+    setExperiments((current) => current.map((item) => item.id === id ? experiment : item));
+  };
+
+  const handleLaunchExperiment = async (id: string, arm: "baseline" | "candidate") => {
+    const launched = await launchExperimentArm(id, arm);
+    setExperiments((current) => current.map((item) => item.id === id ? launched.experiment : item));
+    setJobs((current) => [launched.job, ...current.filter((item) => item.id !== launched.job.id)]);
+    setSelectedJobId(launched.job.id);
+  };
+
   const handleQualityReview = async (output: StudioOutput, input: QualityReviewInput) => {
     setServerErrors([]);
     try {
@@ -430,11 +471,10 @@ export function App() {
     }
   };
 
-  const toggleComparison = (job: StudioJob) => {
-    if (!job.outputUrl) return;
-    setComparisonIds((current) => {
-      if (current.includes(job.id)) return current.filter((id) => id !== job.id);
-      return current.length < 2 ? [...current, job.id] : [current[1], job.id];
+  const toggleComparison = (output: StudioOutput) => {
+    setComparisonNames((current) => {
+      if (current.includes(output.name)) return current.filter((name) => name !== output.name);
+      return current.length < 2 ? [...current, output.name] : [current[1], output.name];
     });
   };
 
@@ -600,6 +640,7 @@ export function App() {
         />
         <RunPanel
           request={request}
+          requestValid={validation.success}
           health={health}
           jobs={jobs}
           outputs={outputs}
@@ -625,8 +666,8 @@ export function App() {
           onApplySuggestion={applyPlanSuggestion}
           command={command}
           previews={previews}
-          comparisonJobs={comparisonJobs}
-          comparisonIds={comparisonIds}
+          comparisonOutputs={comparisonOutputs}
+          comparisonNames={comparisonNames}
           estimate={resourceEstimate}
           requiredStartMemoryGiB={requiredStartMemoryGiB}
           onToggleCompare={toggleComparison}
@@ -637,6 +678,10 @@ export function App() {
           onCancelAnalysis={handleCancelAnalysis}
           onLoadSettings={loadJobSettings}
           onLoadOutputSettings={loadOutputSettings}
+          experiments={experiments}
+          onCreateExperiment={handleCreateExperiment}
+          onFreezeExperiment={handleFreezeExperiment}
+          onLaunchExperiment={handleLaunchExperiment}
         />
       </div>
 

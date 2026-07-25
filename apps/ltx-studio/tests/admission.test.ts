@@ -28,6 +28,13 @@ describe("DGX admission contract", () => {
     expect(requests[0].job_type).toBe("ltx2_native_distilled");
   });
 
+  it("uses a stable per-job requester key for crash reconciliation", () => {
+    const jobId = "11111111-1111-4111-8111-111111111111";
+    const [admission] = buildAdmissionRequests(validRequest(), undefined, jobId);
+
+    expect(admission.requested_by).toBe(`ltx-studio:${jobId}`);
+  });
+
   it("does not understate runtime FP8 casting of a BF16 checkpoint", () => {
     const request = validRequest();
     request.enhancePrompt = false;

@@ -8,15 +8,25 @@ import { z, ZodError } from "zod";
 
 import { assetKinds, type AssetKind } from "../shared/assets.js";
 import { generationRequestSchema, outputNameSchema, PIPELINES } from "../shared/pipelines.js";
+import {
+  experimentCreateInputSchema,
+  type ControlledExperiment,
+} from "../shared/experiments.js";
 import { qualityReviewInputSchema } from "../shared/quality.js";
-import { admissionClientAvailable } from "./admission.js";
+import {
+  admissionClientAvailable,
+  listQueueJobs,
+  type QueueJobState,
+} from "./admission.js";
 import { AssetStore } from "./assets.js";
 import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan } from "./command.js";
 import {
   appRoot,
   admissionRequired,
   analysisTempRoot,
+  devUiPort,
   ensureRuntimeDirectories,
+  experimentRoot,
   minAvailableGiB,
   minResidualMemoryGiB,
   minSwapFreeGiB,
@@ -32,6 +42,11 @@ import { inspectLipDubReference } from "./lipdubDiagnostics.js";
 import { ImageCropPreparationError, prepareImageCrop } from "./imageCrop.js";
 import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
 import { estimateRequest } from "./estimates.js";
+import {
+  ExperimentConflictError,
+  ExperimentStore,
+  outputVerifiesExperimentBaseline,
+} from "./experimentStore.js";
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
 import { OutputLibrary, OutputQualityError } from "./outputs.js";
@@ -47,6 +62,8 @@ const app = express();
 const assets = new AssetStore();
 const jobs = new JobManager(undefined, true, assets);
 const outputs = new OutputLibrary(outputRoot);
+const experiments = new ExperimentStore(experimentRoot);
+experiments.reconcileJobs(jobs.list());
 const analyses = new OutputAnalysisManager(outputs, () => jobs.list(), outputRoot, {
   identityReferenceResolver: (evidence) => resolveIdentityEvidenceReferences(evidence, assets),
   identityEvidenceVerifier: async (evidence) => (await verifyIdentityEvidence(evidence, assets)).error,
@@ -56,12 +73,51 @@ jobs.on("changed", (value: StudioJob[]) => outputs.recordCompleted(value));
 const allowedBrowserOrigins = new Set([
   `http://127.0.0.1:${serverPort}`,
   `http://localhost:${serverPort}`,
-  "http://127.0.0.1:4317",
-  "http://localhost:4317",
+  `http://127.0.0.1:${devUiPort}`,
+  `http://localhost:${devUiPort}`,
 ]);
 
 function routeParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
+}
+
+const activeRemoteQueueStates = new Set<QueueJobState>([
+  "submitted",
+  "accepted",
+  "queued",
+  "starting",
+  "running",
+  "pausing",
+  "paused",
+  "resuming",
+]);
+
+async function releaseRetryableExperimentArm(
+  experiment: ControlledExperiment,
+  arm: "baseline" | "candidate",
+): Promise<ControlledExperiment> {
+  const selected = experiment.arms[arm === "baseline" ? 0 : 1];
+  if (!selected.jobId) return experiment;
+  const previous = jobs.get(selected.jobId);
+  if (!previous || !["failed", "cancelled", "interrupted"].includes(previous.status)) return experiment;
+
+  let remoteJobs;
+  try {
+    remoteJobs = (await listQueueJobs()).jobs;
+  } catch {
+    throw new ExperimentConflictError(
+      "Der frühere Experimentlauf ist terminal, aber sein DGX-Queue-Zustand kann nicht sicher geprüft werden.",
+    );
+  }
+  const remote = previous.dgxJobId
+    ? remoteJobs.find((job) => job.job_id === previous.dgxJobId)
+    : remoteJobs.find((job) => job.requested_by === `ltx-studio:${previous.id}`);
+  if (remote && activeRemoteQueueStates.has(remote.state)) {
+    throw new ExperimentConflictError(
+      `Der frühere Experimentlauf besitzt noch den aktiven DGX-Queue-Job ${remote.job_id} (${remote.state}).`,
+    );
+  }
+  return experiments.releaseArmForRetry(experiment.id, arm, previous.id);
 }
 
 app.disable("x-powered-by");
@@ -356,6 +412,58 @@ app.post("/api/lipdub/reference/prepare", async (request, response) => {
 
 app.get("/api/jobs", (_request, response) => response.json({ jobs: jobs.list() }));
 app.get("/api/outputs", (_request, response) => response.json({ outputs: outputs.list(jobs.list()) }));
+app.get("/api/experiments", (_request, response) => response.json({ experiments: experiments.list() }));
+
+app.post("/api/experiments", (request, response) => {
+  const payload = experimentCreateInputSchema.parse(request.body);
+  response.status(201).json({ experiment: experiments.create(payload) });
+});
+
+app.post("/api/experiments/:id/freeze", (request, response) => {
+  response.json({ experiment: experiments.freeze(request.params.id) });
+});
+
+app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
+  const arm = z.enum(["baseline", "candidate"]).parse(request.params.arm);
+  let experiment = experiments.get(request.params.id);
+  if (!experiment) throw new ExperimentConflictError("Experiment nicht gefunden.");
+  experiment = await releaseRetryableExperimentArm(experiment, arm);
+  const selected = experiment.arms[arm === "baseline" ? 0 : 1];
+  if (arm === "candidate") {
+    const baselineJobId = experiment.arms[0].jobId;
+    const baseline = baselineJobId ? jobs.get(baselineJobId) : null;
+    const baselineOutput = baselineJobId
+      ? outputs.list(jobs.list()).find((output) => outputVerifiesExperimentBaseline(output, experiment))
+      : null;
+    const verifiedBaselineJob = baseline?.status === "completed"
+      && Boolean(baseline.runProvenance?.verifiedAt)
+      && baseline.runProvenance?.fingerprint.length === 64;
+    if (!verifiedBaselineJob && !baselineOutput) {
+      throw new ExperimentConflictError(
+        "Der gebundene Baseline-Lauf muss vollständig abgeschlossen und mit verifizierter Laufprovenienz belegt sein.",
+      );
+    }
+  }
+  const plan = buildCommand(selected.request);
+  const planErrors = validateRequestPlan(selected.request, plan);
+  if (planErrors.length > 0) {
+    throw new ExperimentConflictError(`Experimentarm kann nicht gestartet werden: ${planErrors.join(" ")}`);
+  }
+  const binding = experiments.bindingFor(experiment.id, arm);
+  const job = jobs.create(selected.request, {
+    variantOf: arm === "candidate" ? experiment.arms[0].jobId : null,
+    experiment: binding,
+    deferStart: true,
+  });
+  try {
+    const updated = experiments.attachJob(experiment.id, arm, job.id);
+    jobs.startQueued(job.id);
+    response.status(202).json({ experiment: updated, job });
+  } catch (error) {
+    jobs.cancel(job.id);
+    throw error;
+  }
+});
 
 app.post("/api/estimates", (request, response) => {
   const payload = generationRequestSchema.parse(request.body);
@@ -481,6 +589,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(400).json({ error: `Upload fehlgeschlagen: ${error.message}` });
   }
   if (error instanceof JobConflictError) {
+    return response.status(409).json({ error: error.message });
+  }
+  if (error instanceof ExperimentConflictError) {
     return response.status(409).json({ error: error.message });
   }
   if (error instanceof ImageCropPreparationError) {

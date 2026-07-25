@@ -137,6 +137,7 @@ function job(
     request,
     favorite: false,
     variantOf: null,
+    experiment: null,
     runtimeMs: 1_000,
     cancelledBy: null,
     dgxJobId: null,
