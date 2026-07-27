@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildAdmissionRequests,
+  decisionMessage,
+  normalizeQueueJobs,
   retryAfterMs,
   shouldRetryQueueSubmit,
 } from "../server/admission.js";
@@ -15,7 +17,6 @@ describe("DGX admission contract", () => {
       runtime: "ltx2_native",
       job_type: "ltx2_native_two_stage",
       estimated_memory_gib: 64,
-      resumability: "required",
       resource_profile: { gpu: true, exclusive_runtime: "ltx2_native", required_gib: 64 },
     });
   });
@@ -33,6 +34,24 @@ describe("DGX admission contract", () => {
     const [admission] = buildAdmissionRequests(validRequest(), undefined, jobId);
 
     expect(admission.requested_by).toBe(`ltx-studio:${jobId}`);
+    expect(admission).toMatchObject({
+      resumability: "required",
+      scheduling: {
+        mode: "segmented",
+        preemptible: true,
+        yield_after_each_segment: true,
+        expected_segment_seconds: 60,
+        qwen_pressure_reclaim: "required_before_start",
+      },
+    });
+    expect(admission.scheduling?.resume_checkpoint).toContain(`/checkpoints/${jobId}/manifest.json`);
+  });
+
+  it("does not advertise a resumable boundary for the Res2S HQ sampler", () => {
+    const [admission] = buildAdmissionRequests(validRequest("two-stage-hq"), undefined, "hq-job");
+
+    expect(admission.resumability).toBeUndefined();
+    expect(admission.scheduling).toBeUndefined();
   });
 
   it("does not understate runtime FP8 casting of a BF16 checkpoint", () => {
@@ -78,6 +97,14 @@ describe("DGX admission contract", () => {
     })).toBe(30_000);
   });
 
+  it("shows the current busy reason instead of a stale accepted message", () => {
+    expect(decisionMessage({
+      decision: "busy_retry",
+      reason: "qwen_restore_reserved",
+      message_for_humans: "accepted from the first admission pass",
+    })).toBe("qwen_restore_reserved");
+  });
+
   it("uses the documented 15-minute fallback for resource waits without a server delay", () => {
     const decision = {
       decision: "rejected_insufficient_resources",
@@ -100,5 +127,32 @@ describe("DGX admission contract", () => {
       client_action: "free_reclaim_candidates_then_retry",
       reason: "memory_reclaim_required",
     })).toBe(false);
+  });
+
+  it("normalizes the current Runtime API queue groups for crash reconciliation", () => {
+    expect(normalizeQueueJobs({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        accepted_jobs: [{
+          job_id: "dgx-job-accepted",
+          state: "accepted",
+          requested_by: "ltx-studio:one",
+        }],
+        active_jobs: [{
+          job_id: "dgx-job-running",
+          state: "running",
+          requested_by: "ltx-studio:two",
+        }],
+        queued_jobs: [{
+          job_id: "dgx-job-queued",
+          state: "queued",
+          requested_by: "ltx-studio:three",
+        }],
+      },
+    })).toEqual([
+      expect.objectContaining({ job_id: "dgx-job-accepted", state: "accepted" }),
+      expect.objectContaining({ job_id: "dgx-job-running", state: "running" }),
+      expect.objectContaining({ job_id: "dgx-job-queued", state: "queued" }),
+    ]);
   });
 });

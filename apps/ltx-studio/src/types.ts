@@ -28,10 +28,12 @@ export type Health = {
   }>;
   evaluators: {
     phonemeViseme: {
-      status: "measured" | "insufficient" | "not-available" | "failed" | "not-applicable";
+      status: "measured" | "measurement-only" | "insufficient" | "not-available" | "failed" | "not-applicable";
       blockerCode: string;
       message: string | null;
       productGo: "passed" | "blocked";
+      measurementReady: boolean;
+      method: "mfa-mediapipe-de.v1" | null;
     };
   };
   queueDepth: number;

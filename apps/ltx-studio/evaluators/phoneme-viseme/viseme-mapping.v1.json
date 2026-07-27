@@ -7,7 +7,7 @@
     "unicodeForm": "NFC",
     "stripPrimaryAndSecondaryStress": true,
     "stripVowelLength": true,
-    "expandAffricatesBeforeMapping": true,
+    "mapAffricatesAtomically": true,
     "frameAssignment": "phoneme active at video-frame center",
     "transitionDefinition": "class id changes between adjacent non-silence frame centers",
     "unknownPolicy": "quarantine"

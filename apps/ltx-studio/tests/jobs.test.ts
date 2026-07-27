@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -141,6 +142,126 @@ describe("job persistence and reservations", () => {
     expect(isActiveJobStatus("paused")).toBe(true);
   });
 
+  it("restores a purely local queued job without inventing an interruption", async () => {
+    const path = await statePath();
+    const request = validRequest();
+    const id = "00000000-0000-4000-8000-000000000099";
+    await writeFile(path, JSON.stringify([{
+      id,
+      status: "queued",
+      mode: request.mode,
+      prompt: request.prompt,
+      outputName: request.outputName,
+      outputUrl: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      progress: null,
+      error: null,
+      logs: ["waiting locally"],
+      command: "ignored",
+      request,
+      favorite: false,
+      variantOf: null,
+      experiment: null,
+      runtimeMs: null,
+      cancelledBy: null,
+      thermalProfile: null,
+      dgxJobId: null,
+      identityEvidence: null,
+      runProvenance: null,
+    }]));
+
+    const restored = new JobManager(path, false);
+
+    expect(restored.get(id)).toMatchObject({
+      status: "queued",
+      dgxJobId: null,
+      error: null,
+    });
+    expect(restored.get(id)?.logs.at(-1)).toContain("automatisch fortgesetzt");
+    expect(Reflect.get(restored, "queue")).toEqual([id]);
+  });
+
+  it("retires a resource-free paused slice before acquiring a fresh resume slice", async () => {
+    const transitions: Array<{ jobId: string; state: string }> = [];
+    const manager = new JobManager(await statePath(), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "paused" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push({ jobId, state });
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    });
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
+      status: string;
+      dgxJobId: string | null;
+    }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.status = "running";
+    runtimeJob.dgxJobId = "dgx-job-old-slice";
+    Reflect.set(manager, "waitForQwenIdleGrace", async () => true);
+    Reflect.set(manager, "waitForDgxQueueStart", async (job: { dgxJobId: string | null }) => {
+      job.dgxJobId = "dgx-job-new-slice";
+      return true;
+    });
+    const pauseAndReacquire = Reflect.get(manager, "pauseAndReacquireDgxSlice") as (
+      job: unknown,
+      artifact: { type: string; path: string },
+    ) => Promise<boolean>;
+
+    expect(await pauseAndReacquire.call(manager, runtimeJob, {
+      type: "ltx-cooperative-checkpoint",
+      path: "/checkpoints/job/manifest.json",
+    })).toBe(true);
+    expect(transitions).toEqual([
+      { jobId: "dgx-job-old-slice", state: "pausing" },
+      { jobId: "dgx-job-old-slice", state: "paused" },
+      { jobId: "dgx-job-old-slice", state: "cancelled" },
+    ]);
+    expect(runtimeJob.dgxJobId).toBe("dgx-job-new-slice");
+  });
+
+  it("accepts only a complete checkpoint bound to the current run provenance", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-checkpoint-"));
+    roots.push(root);
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
+      runProvenance: RunProvenance | null;
+    }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.runProvenance = runProvenance();
+    await writeFile(join(root, "state.pt"), "state");
+    await writeFile(join(root, "manifest.json"), JSON.stringify({
+      schema_version: "ltx-cooperative-checkpoint.v1",
+      job_fingerprint: runtimeJob.runProvenance.fingerprint,
+      request_id: "yield-1",
+      state_file: "state.pt",
+      loop_index: 0,
+      next_step_index: 4,
+    }));
+    const validate = Reflect.get(manager, "validateCooperativeCheckpoint") as (
+      job: unknown,
+      manifestPath: string,
+      requestId: string,
+    ) => { type: string } | null;
+
+    expect(validate.call(manager, runtimeJob, join(root, "manifest.json"), "yield-1")).toMatchObject({
+      type: "ltx-cooperative-checkpoint",
+    });
+    expect(validate.call(manager, runtimeJob, join(root, "manifest.json"), "different")).toBeNull();
+  });
+
   it("recognizes only complete tqdm records", () => {
     expect(progressFromPipelineLog(" 87%|########7 | 26/30")).toBe(87);
     expect(progressFromPipelineLog("100%|##########| 30/30")).toBe(100);
@@ -202,6 +323,396 @@ describe("job persistence and reservations", () => {
     expect(cancelled.logs.at(-1)).toContain("Studio-Abbruchfunktion");
   });
 
+  it("stops the complete process group before releasing its lease during shutdown", async () => {
+    const path = await statePath();
+    const root = join(path, "..");
+    const readyPath = join(root, "parent.ready");
+    const childReadyPath = join(root, "child.ready");
+    const transitions: string[] = [];
+    let processGroupId = 0;
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (remoteJobId) => {
+        expect(() => process.kill(-processGroupId, 0)).toThrow();
+        transitions.push("read-after-local-exit");
+        return {
+          schema_version: "dgx-job-read.v0",
+          job: { job_id: remoteJobId, state: "running" },
+        };
+      },
+      transition: async (remoteJobId, state) => {
+        transitions.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: remoteJobId, state },
+        };
+      },
+    }, null);
+    const first = manager.create(validRequest());
+    const secondRequest = validRequest();
+    secondRequest.outputName = "shutdown-preserved.mp4";
+    const second = manager.create(secondRequest);
+    const child = spawn("/usr/bin/python3", ["-c", [
+      "import pathlib,signal,subprocess,sys,time",
+      `child_ready=${JSON.stringify(childReadyPath)}`,
+      "code='import pathlib,signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        + `pathlib.Path(${JSON.stringify(childReadyPath)}).write_text("ready"); time.sleep(30)'`,
+      "subprocess.Popen([sys.executable,'-c',code],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,close_fds=True)",
+      "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+      "for _ in range(200):",
+      "    if pathlib.Path(child_ready).exists(): break",
+      "    time.sleep(0.01)",
+      `pathlib.Path(${JSON.stringify(readyPath)}).write_text("ready")`,
+      "time.sleep(30)",
+    ].join("\n")], {
+      detached: true,
+      stdio: "ignore",
+    });
+    if (!child.pid) throw new Error("Test-Prozessgruppe konnte nicht gestartet werden.");
+    processGroupId = child.pid;
+    try {
+      for (let attempt = 0; attempt < 300; attempt += 1) {
+        try {
+          await readFile(readyPath);
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      const internalJobs = Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>;
+      const active = internalJobs.get(first.id)!;
+      active.status = "running";
+      active.startedAt = new Date().toISOString();
+      active.dgxJobId = "dgx-job-shutdown-order";
+      active.process = child;
+      Reflect.set(manager, "runningId", first.id);
+
+      const report = await manager.shutdown(2_000);
+
+      expect(report).toMatchObject({
+        queuedPreserved: 1,
+        localGroupsStopped: 1,
+        remoteConfirmed: 1,
+        remotePending: 0,
+      });
+      expect(transitions).toEqual(["read-after-local-exit", "cancelled"]);
+      expect(manager.get(first.id)).toMatchObject({
+        status: "interrupted",
+        cancelledBy: null,
+      });
+      expect(manager.get(second.id)?.status).toBe("queued");
+      expect(() => manager.create(validRequest())).toThrow("nimmt keine neuen Aufträge");
+
+      const restored = new JobManager(path, false);
+      expect(restored.get(second.id)?.status).toBe("queued");
+    } finally {
+      try {
+        process.kill(-processGroupId, "SIGKILL");
+      } catch {
+        // The shutdown path should already have removed the complete group.
+      }
+    }
+  }, 10_000);
+
+  it("preserves the queue item already pulled by the pump when no remote or local process exists", async () => {
+    const path = await statePath();
+    const manager = new JobManager(path, false);
+    const created = manager.create(validRequest());
+    const queue = Reflect.get(manager, "queue") as string[];
+    queue.splice(queue.indexOf(created.id), 1);
+    Reflect.set(manager, "runningId", created.id);
+    Reflect.set(manager, "activeRunPromise", Promise.resolve());
+
+    const report = await manager.shutdown(250);
+
+    expect(report).toMatchObject({ queuedPreserved: 1, remotePending: 0 });
+    expect(manager.get(created.id)?.status).toBe("queued");
+    const restored = new JobManager(path, false);
+    expect(restored.get(created.id)?.status).toBe("queued");
+    expect(Reflect.get(restored, "queue")).toContain(created.id);
+  });
+
+  it("does not spawn LTX after shutdown wins the thermal-baseline race", async () => {
+    const path = await statePath();
+    const marker = join(path, "..", "spawned-after-shutdown");
+    const executable = join(path, "..", "spawn-marker.sh");
+    await writeFile(executable, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`);
+    await chmod(executable, 0o755);
+    let releaseBaseline!: () => void;
+    let baselineStartedResolve!: () => void;
+    const baselineStarted = new Promise<void>((resolve) => {
+      baselineStartedResolve = resolve;
+    });
+    const baselineGate = new Promise<void>((resolve) => {
+      releaseBaseline = resolve;
+    });
+    const manager = new JobManager(
+      path,
+      false,
+      null,
+      {
+        capture: async () => notApplicableIdentityEvidence(),
+        verify: async (evidence) => ({ evidence, error: null }),
+      },
+      undefined,
+      null,
+      undefined,
+      {
+        capture: async () => runProvenance(),
+        verify: async (evidence) => ({ evidence, error: null }),
+      },
+    );
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
+      plan: { executable: string; outputPath: string; requiredPaths: unknown[] };
+    }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.plan.requiredPaths = [];
+    runtimeJob.plan.outputPath = join(path, "..", "thermal-race-output.mp4");
+    Reflect.set(manager, "waitForDgxQueueStart", async () => true);
+    Reflect.set(manager, "verifyJobIdentityEvidence", async () => true);
+    Reflect.set(manager, "verifyJobRunProvenance", async () => true);
+    Reflect.set(manager, "readThermalBaseline", async () => {
+      runtimeJob.plan.executable = executable;
+      baselineStartedResolve();
+      await baselineGate;
+      return 50;
+    });
+    const queue = Reflect.get(manager, "queue") as string[];
+    queue.splice(queue.indexOf(created.id), 1);
+    Reflect.set(manager, "runningId", created.id);
+    const run = Reflect.get(manager, "run") as (job: unknown) => Promise<void>;
+    const running = run.call(manager, runtimeJob);
+    Reflect.set(manager, "activeRunPromise", running);
+    await baselineStarted;
+
+    const shutdown = manager.shutdown(500);
+    releaseBaseline();
+    const report = await shutdown;
+    await running;
+
+    expect(report.queuedPreserved).toBe(1);
+    expect(manager.get(created.id)?.status).toBe("queued");
+    await expect(access(marker)).rejects.toThrow();
+  });
+
+  it("never releases a remote lease while local process-group exit remains unproven", async () => {
+    const path = await statePath();
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async () => {
+        throw new Error("remote read must remain fenced");
+      },
+      transition: async () => {
+        throw new Error("remote transition must remain fenced");
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>;
+    const active = internalJobs.get(created.id)!;
+    active.status = "running";
+    active.dgxJobId = "dgx-job-unproven-local-group";
+    active.localProcessGroupPending = true;
+    Reflect.set(manager, "runningId", created.id);
+
+    const report = await manager.shutdown(250);
+
+    expect(report).toMatchObject({
+      localGroupsStopped: 0,
+      remoteConfirmed: 0,
+      remotePending: 1,
+    });
+    const restored = new JobManager(path, false, null, undefined, undefined, null);
+    expect(Reflect.get(restored, "jobs").get(created.id)).toMatchObject({
+      localProcessGroupPending: true,
+      dgxTerminalDelivery: { state: "cancelled" },
+    });
+  });
+
+  it("reconciles a persisted process group after restart without risking PID-reuse signalling", async () => {
+    const path = await statePath();
+    const first = new JobManager(path, false);
+    const created = first.create(validRequest());
+    const internalJobs = Reflect.get(first, "jobs") as Map<string, Record<string, unknown>>;
+    const active = internalJobs.get(created.id)!;
+    const child = spawn("/usr/bin/python3", ["-c", "import time; time.sleep(30)"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    if (!child.pid) throw new Error("Recovery-Testprozess besitzt keine PID.");
+    const processGroupId = child.pid;
+    try {
+      active.status = "interrupted";
+      active.dgxJobId = "dgx-job-restart-process-group";
+      const markProcessStarted = Reflect.get(first, "markProcessStarted") as (
+        job: unknown,
+        process: ReturnType<typeof spawn>,
+      ) => Promise<void>;
+      await markProcessStarted.call(first, active, child);
+      const prepareTerminal = Reflect.get(first, "prepareDgxTerminalDelivery") as (
+        job: unknown,
+        state: string,
+        metadata: Record<string, string>,
+      ) => void;
+      prepareTerminal.call(first, active, "cancelled", {
+        current_step: "synthetic restart recovery",
+      });
+      (Reflect.get(first, "changed") as () => void).call(first);
+
+      const transitions: string[] = [];
+      const restored = new JobManager(path, false, null, undefined, {
+        read: async (jobId) => ({
+          schema_version: "dgx-job-read.v0",
+          job: { job_id: jobId, state: "running" },
+        }),
+        transition: async (jobId, state) => {
+          transitions.push(state);
+          return {
+            schema_version: "dgx-job-transition.v0",
+            job: { job_id: jobId, state },
+          };
+        },
+      }, null);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(transitions).toEqual([]);
+
+      process.kill(-processGroupId, "SIGKILL");
+      await new Promise<void>((resolve) => child.once("close", () => resolve()));
+      for (let attempt = 0; attempt < 300 && transitions.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      expect(transitions).toEqual(["cancelled"]);
+      const recovered = Reflect.get(restored, "jobs").get(created.id);
+      expect(recovered.localProcessGroupPending).toBeUndefined();
+      expect(recovered.localProcessGroupIdentity).toBeUndefined();
+      expect(recovered.dgxJobTerminal).toBe(true);
+    } finally {
+      try {
+        process.kill(-processGroupId, "SIGKILL");
+      } catch {
+        // The test intentionally removes the old process group before reconciliation.
+      }
+    }
+  }, 10_000);
+
+  it("treats a same-boot PGID with different leader start ticks as safe reuse", async () => {
+    const path = await statePath();
+    const first = new JobManager(path, false);
+    const created = first.create(validRequest());
+    const active = (Reflect.get(first, "jobs") as Map<string, Record<string, unknown>>).get(created.id)!;
+    active.status = "interrupted";
+    active.dgxJobId = "dgx-job-reused-process-group";
+    active.localProcessGroupPending = true;
+    active.localProcessGroupIdentity = {
+      bootId: (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(),
+      processGroupId: process.pid,
+      leaderStartTicks: "0",
+    };
+    const prepareTerminal = Reflect.get(first, "prepareDgxTerminalDelivery") as (
+      job: unknown,
+      state: string,
+      metadata: Record<string, string>,
+    ) => void;
+    prepareTerminal.call(first, active, "cancelled", {
+      current_step: "synthetic PGID reuse recovery",
+    });
+    (Reflect.get(first, "changed") as () => void).call(first);
+
+    const transitions: string[] = [];
+    const restored = new JobManager(path, false, null, undefined, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "running" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    for (let attempt = 0; attempt < 100 && transitions.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(transitions).toEqual(["cancelled"]);
+    const recovered = Reflect.get(restored, "jobs").get(created.id);
+    expect(recovered.localProcessGroupPending).toBeUndefined();
+    expect(recovered.dgxJobTerminal).toBe(true);
+  });
+
+  it("persists an ambiguous in-flight submit and terminalizes a late acceptance", async () => {
+    const path = await statePath();
+    let submitStartedResolve!: () => void;
+    const submitStarted = new Promise<void>((resolve) => {
+      submitStartedResolve = resolve;
+    });
+    let releaseSubmitResolve!: () => void;
+    const releaseSubmit = new Promise<void>((resolve) => {
+      releaseSubmitResolve = resolve;
+    });
+    const transitions: string[] = [];
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "accepted" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null, {
+      submit: async () => {
+        submitStartedResolve();
+        await releaseSubmit;
+        return {
+          schema_version: "dgx-queue-submit.v0",
+          job: { job_id: "dgx-submit-after-shutdown-deadline", state: "accepted" },
+          admission: { decision: "accepted" },
+        };
+      },
+    });
+    const created = manager.create(validRequest());
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, unknown>).get(created.id)!;
+    Reflect.set(manager, "waitForLocalPreAdmissionResources", async () => true);
+    const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+      job: unknown,
+    ) => Promise<boolean>;
+    const waiting = waitForDgxQueueStart.call(manager, runtimeJob);
+    Reflect.set(manager, "runningId", created.id);
+    Reflect.set(manager, "activeRunPromise", waiting.then(() => undefined));
+    await submitStarted;
+
+    const report = await manager.shutdown(25);
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Array<Record<string, unknown>>;
+    expect(report).toMatchObject({ queuedPreserved: 1, remotePending: 1 });
+    expect(persisted[0]).toMatchObject({
+      id: created.id,
+      status: "queued",
+      dgxSubmitPending: true,
+    });
+
+    releaseSubmitResolve();
+    expect(await waiting).toBe(false);
+    expect(transitions).toEqual(["cancelled"]);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "interrupted",
+      dgxJobId: "dgx-submit-after-shutdown-deadline",
+    });
+  });
+
   it("allows the orchestrator to see a job before the local swap start gate is met", async () => {
     const manager = new JobManager(await statePath(), false);
     const created = manager.create(validRequest());
@@ -228,12 +739,14 @@ describe("job persistence and reservations", () => {
 
   it("submits a low-swap job and defers the complete gate until after acceptance", async () => {
     let submits = 0;
+    let submittedMemoryGiB: number | undefined;
     const manager = new JobManager(await statePath(), false, null, {
       capture: async () => notApplicableIdentityEvidence(),
       verify: async (evidence) => ({ evidence, error: null }),
     }, undefined, null, {
-      submit: async () => {
+      submit: async (_request, estimatedMemoryGiB) => {
         submits += 1;
+        submittedMemoryGiB = estimatedMemoryGiB;
         return {
           schema_version: "dgx-queue-submit.v0",
           job: { job_id: "dgx-low-swap-visible", state: "accepted" },
@@ -259,6 +772,7 @@ describe("job persistence and reservations", () => {
 
     expect(await waitForDgxQueueStart.call(manager, runtimeJob)).toBe(true);
     expect(submits).toBe(1);
+    expect(submittedMemoryGiB).toBe(64);
     expect(manager.get(created.id)).toMatchObject({
       status: "queued",
       dgxJobId: "dgx-low-swap-visible",
@@ -273,13 +787,13 @@ describe("job persistence and reservations", () => {
     runtimeJob.dgxJobId = "dgx-job-local-start-gate";
     const transitions: string[] = [];
     const snapshots: ResourceSnapshot[] = [{
-      availableMemoryGiB: 121,
+      availableMemoryGiB: 88,
       totalMemoryGiB: 121.69,
       swapFreeGiB: 3.25,
       swapTotalGiB: 16,
       outputFreeGiB: 100,
     }, {
-      availableMemoryGiB: 121,
+      availableMemoryGiB: 88,
       totalMemoryGiB: 121.69,
       swapFreeGiB: 4.25,
       swapTotalGiB: 16,
@@ -301,7 +815,7 @@ describe("job persistence and reservations", () => {
     expect(transitions).toEqual(["starting"]);
     expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
       expect.stringContaining("akzeptiert; lokales Start-Gate wartet"),
-      expect.stringContaining("mindestens 4 GiB"),
+      expect.stringContaining("gemeinsame Sicherheitsreserve"),
     ]));
     expect(manager.get(created.id)?.logs.at(-1)).toContain("100.00 GiB Ausgabeplatz");
   });

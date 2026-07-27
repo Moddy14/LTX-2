@@ -73,9 +73,9 @@ test("prompt validation stays in context", async ({ page }) => {
   const prompt = page.getByLabel("Positive Beschreibung");
   const checkpoint = page.getByLabel("Checkpoint Pfad");
   const gemmaRoot = page.getByLabel("Gemma Root Pfad");
-  // Model discovery fills empty defaults asynchronously after the first paint.
-  await expect(checkpoint).not.toHaveValue("");
   await prompt.fill("A deliberate camera move through a detailed workshop.");
+  await expect(checkpoint).toHaveValue(/ltx-e2e-checkpoint\.safetensors$/);
+  await expect(gemmaRoot).toHaveValue(/model-inventory\/gemma$/);
   await checkpoint.fill("");
   await gemmaRoot.fill("");
   await expect(checkpoint).toHaveValue("");
@@ -247,6 +247,8 @@ test("controlled experiments freeze one variable before either arm can run", asy
             blockerCode: "manifest-missing",
             message: "Kein rechtlich freigegebener Phonem-/Visem-Evaluator konfiguriert.",
             productGo: "blocked",
+            measurementReady: false,
+            method: null,
           },
         },
         queueDepth: 0,
@@ -725,35 +727,57 @@ test("objective speech analysis exposes raw measurements and honest capability g
           wordMotionProxyStatus: "measured",
         },
         phonemeViseme: {
-          status: "not-available",
-          blockerCode: "manifest-missing",
-          error: "Kein rechtlich freigegebener Phonem-/Visem-Evaluator konfiguriert.",
-          manifestReleaseId: null,
-          manifestSha256: null,
-          preprocessingVersion: null,
-          visemeMapVersion: null,
+          status: "measurement-only",
+          blockerCode: "product-go-pending",
+          error: "MFA/MediaPipe-Rohmessung erfasst; Product-GO bleibt blockiert.",
+          manifestReleaseId: "pv-measurement-e2e",
+          manifestSha256: "a".repeat(64),
+          preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+          visemeMapVersion: "viseme15-en-de.v1",
           gateVersion: null,
           productGo: {
             status: "blocked",
-            reason: "Kein rechtlich freigegebener Phonem-/Visem-Evaluator konfiguriert.",
+            reason: "Unabhängige Visemklassifikation und Holdout fehlen.",
           },
           offset: {
-            status: "not-run",
+            status: "measured",
             gatePassed: false,
-            estimatedOffsetMilliseconds: null,
-            confidence: null,
+            estimatedOffsetMilliseconds: 42,
+            confidence: 0.8,
           },
           content: {
-            status: "not-run",
+            status: "insufficient",
             gatePassed: false,
             frameMacroF1: null,
             transitionF1: null,
+          },
+          measurement: {
+            method: "mfa-mediapipe-de.v1",
+            runnerFingerprint: "b".repeat(64),
+            expectedDialogueSha256: "c".repeat(64),
+            globalAvLagMilliseconds: 42,
+            lagConfidence: 0.8,
+            bilabialClosureF1: 0.75,
+            openingCorrelation: 0.7,
+            roundingCorrelation: 0.6,
+            speechMotionRecall: 0.9,
+            pauseLeakRatio: 0.1,
+            phoneCoverage: 1,
+            unknownPhones: [],
+            faceTrackCoverage: 1,
+            mouthTrackCoverage: 1,
+            multiFaceFrameRatio: 0,
+            medianBlurVariance: 100,
+            yawP95Degrees: 5,
+            pitchP95Degrees: 4,
+            usableDurationSeconds: 4,
+            sampledFrames: 96,
           },
         },
         capabilities: {
           avSync: "classical-av-raw-measured",
           conditioningAvSync: "provenance-unavailable",
-          phonemeViseme: "manifest-missing",
+          phonemeViseme: "measurement-only",
           identity: "sface-raw-measured",
           dialogue: "whisper-word-measured",
         },
@@ -775,17 +799,23 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await page.getByRole("button", { name: "Objektiv analysieren" }).click();
   await expect(page.getByRole("heading", { name: "Objektive Ausgabeanalyse" })).toBeVisible();
   await expect(page.locator(".objective-analysis__status")).toHaveText("Messung unzureichend");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Gesicht erkannt" }).locator("strong")).toHaveText("100 %");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("1 ms");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Rohversatz" }).locator("strong")).toHaveText("20 ms");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Korrelation" }).locator("strong")).toHaveText("0.351");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Identität p10" }).locator("strong")).toHaveText("0.849");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Mundhaut-Texturrest" }).locator("strong")).toHaveText("0.041");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Mundhaut-Flussdeformation" }).locator("strong")).toHaveText("0.067");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Mundhaut-Pixelabdeckung" }).locator("strong")).toHaveText("91 %");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Dialog-Wortfehlerrate" }).locator("strong")).toHaveText("13 %");
-  await expect(page.locator(".objective-analysis__metric").filter({ hasText: "Wörter mit Mundbewegung" }).locator("strong")).toHaveText("100 %");
-  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(37);
+  const metricValue = (label: string) => page.locator(
+    `.objective-analysis__metric[data-metric-label="${label}"] > strong`,
+  );
+  await expect(metricValue("Gesicht erkannt")).toHaveText("100 %");
+  await expect(metricValue("AV-Dauerdifferenz")).toHaveText("1 ms");
+  await expect(metricValue("Endmix-AV-Rohversatz")).toHaveText("20 ms");
+  await expect(metricValue("Endmix-AV-Korrelation")).toHaveText("0.351");
+  await expect(metricValue("Identität p10")).toHaveText("0.849");
+  await expect(metricValue("Mundhaut-Texturrest p95×p95")).toHaveText("0.041");
+  await expect(metricValue("Mundhaut-Flussdeformation p95×p95")).toHaveText("0.067");
+  await expect(metricValue("Mundhaut-Pixelabdeckung p10")).toHaveText("91 %");
+  await expect(metricValue("Dialog-Wortfehlerrate")).toHaveText("13 %");
+  await expect(metricValue("Wörter mit Mundbewegung")).toHaveText("100 %");
+  await expect(metricValue("MFA/MediaPipe AV-Versatz")).toHaveText("42 ms");
+  await expect(metricValue("Bilabialer Schluss F1")).toHaveText("0.750");
+  await expect(metricValue("Unbekannte Phones")).toHaveText("Keine");
+  await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(54);
   const analysisPanelBox = await page.locator(".objective-analysis").boundingBox();
   expect(analysisPanelBox).not.toBeNull();
   for (const index of [0, 1]) {
@@ -805,7 +835,7 @@ test("objective speech analysis exposes raw measurements and honest capability g
   }
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Rohproxy, Phonem offen");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Phonem/Visem");
-  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Modell fehlt");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Rohmessung, Product-GO blockiert");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("SFace Rohwerte");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper-Wortmessung");
   await expect(page.locator(".objective-analysis__actions")).toContainText("keine DGX-Modellbelegung");
@@ -1422,6 +1452,8 @@ test("API exposes bounded model inventory and request estimates", async ({ reque
     status: "not-available",
     blockerCode: "manifest-missing",
     productGo: "blocked",
+    measurementReady: false,
+    method: null,
   });
 
   const models = await request.get("/api/models");

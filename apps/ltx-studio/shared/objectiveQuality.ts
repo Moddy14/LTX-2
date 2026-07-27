@@ -210,6 +210,8 @@ export const objectiveBaseWorkerResultV7Schema = objectiveBaseWorkerResultSchema
   face: faceTrackingMetricsV7Schema,
 }).strict();
 
+export type ObjectiveBaseWorkerResultV7 = z.infer<typeof objectiveBaseWorkerResultV7Schema>;
+
 export const objectiveWorkerResultSchema = objectiveBaseWorkerResultV7Schema.extend({
   phonemeViseme: phonemeVisemeResultSchema,
 }).strict();
@@ -315,6 +317,7 @@ const objectiveQualityAnalysisV4Schema = z.object({
     ]),
     phonemeViseme: z.enum([
       "product-go-measured",
+      "measurement-only",
       "product-go-insufficient",
       "legal-hold",
       "runner-unavailable",

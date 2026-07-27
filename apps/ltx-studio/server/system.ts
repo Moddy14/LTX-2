@@ -62,8 +62,11 @@ export function validateStartResources(
   if (resource.swapFreeGiB === null) {
     return "Swap-Status ist unbekannt; Start aus Sicherheitsgründen blockiert.";
   }
-  if (resource.swapFreeGiB < requirements.minSwapFreeGiB) {
-    return `Nur ${resource.swapFreeGiB.toFixed(2)} GiB Swap frei; mindestens ${requirements.minSwapFreeGiB} GiB sind als Sicherheitsreserve erforderlich.`;
+  const memoryAboveStartFloorGiB = resource.availableMemoryGiB - requiredMemoryGiB;
+  const combinedReserveGiB = memoryAboveStartFloorGiB + resource.swapFreeGiB;
+  if (combinedReserveGiB < requirements.minSwapFreeGiB) {
+    return `RAM oberhalb des Start-Floors plus freier Swap ergeben nur ${combinedReserveGiB.toFixed(2)} GiB; `
+      + `mindestens ${requirements.minSwapFreeGiB} GiB gemeinsame Sicherheitsreserve sind erforderlich.`;
   }
   return validatePreAdmissionResources(resource, requirements);
 }

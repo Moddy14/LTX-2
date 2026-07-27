@@ -159,6 +159,8 @@ function evaluatorStatusLabel(health: Health | null): string {
   const evaluator = health?.evaluators.phonemeViseme;
   if (!evaluator) return "Status fehlt";
   if (evaluator.status === "measured") return "bereit";
+  if (evaluator.status === "measurement-only") return "Rohmessung";
+  if (evaluator.measurementReady) return "Rohmessung bereit, Product-GO blockiert";
   if (evaluator.status === "insufficient") return "Messung unzureichend";
   if (evaluator.status === "failed") return "Messung fehlgeschlagen";
   if (evaluator.status === "not-applicable") return "nicht anwendbar";

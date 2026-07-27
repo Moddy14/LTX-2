@@ -265,6 +265,40 @@ export const fieldHelp = {
     "Wofür: SHA-256-Fingerabdruck aus Betriebssystem, Kernel, Node, Python, FFmpeg und den relevanten Python-Paketversionen. A/B-Vergleiche werden bei unterschiedlichen Runtime-Fingerprints absichtlich nicht als direkt vergleichbar bewertet.",
   objectivePvTransitionF1:
     "Wofür: Übereinstimmung sichtbarer Visemwechsel mit einer Toleranz von einem Videoframe. Product-GO verlangt mindestens 0,90 insgesamt, 0,80 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
+  objectivePvRawLag:
+    "Wofür: Rohversatz zwischen dem von MFA am exakten Dialog ausgerichteten Phone-Verlauf und der MediaPipe-Mundöffnung. Positiv bedeutet: Der sichtbare Mund folgt dem Audio. Die Auflösung ist durch die Bildrate begrenzt; ohne Holdout-Kalibrierung ist das kein Product-GO.",
+  objectivePvRawLagConfidence:
+    "Wofür: Eindeutigkeit des besten Roh-Lag-Peaks gegenüber dem zweitbesten Peak. Höher bedeutet nur, dass dieser Clip einen klareren Versatz liefert. Der Wert ist keine kalibrierte Wahrscheinlichkeit und keine Qualitätsnote.",
+  objectivePvBilabialF1:
+    "Wofür: Roh-F1 für sichtbaren Lippenschluss bei p, b und m. 1,000 bedeutet perfekte Übereinstimmung der erkannten Schlussframes in diesem Clip. MediaPipe ist dabei kein unabhängiger 15-Klassen-Visemklassifikator; deshalb bleibt Product-GO blockiert.",
+  objectivePvOpeningCorrelation:
+    "Wofür: Pearson-Korrelation zwischen grob erwarteter Phone-Mundöffnung und der normalisierten sichtbaren Öffnung. Höher bedeutet ähnlichere zeitliche Öffnungsdynamik. Anatomie, Betonung und Kopfpose beeinflussen den unkalibrierten Rohwert.",
+  objectivePvRoundingCorrelation:
+    "Wofür: Pearson-Korrelation zwischen erwarteten gerundeten Lauten und MediaPipe mouthPucker/mouthFunnel. Höher bedeutet passendere zeitliche Lippenrundung. Der Rohwert benötigt kontrollierte Positiv-, Negativ- und Zeitverschiebungskalibrierung.",
+  objectivePvSpeechMotion:
+    "Wofür: Anteil auswertbarer Sprechframes mit sichtbarer Mundbewegung. Sehr niedrige Werte zeigen einen zu statischen Mund. 100 % beweist keine korrekten Mundformen und kann bei übertriebener Dauerbewegung ebenfalls auftreten.",
+  objectivePvPauseLeak:
+    "Wofür: Anteil auswertbarer Phone-Pausen mit sichtbarer Mundbewegung. Niedriger ist bei einem ruhigen Einzelsprecher meist plausibler; Atmung, Mimik und Trackingrauschen können den Rohwert erhöhen.",
+  objectivePvPhoneCoverage:
+    "Wofür: Zeitanteil der von MFA gelieferten Nicht-Stille-Phones, die das eingefrorene Deutsch/Englisch-Visem-Mapping kennt. Für einen brauchbaren Rohvergleich sollte der Wert mindestens 90 % betragen und es sollten keine unbekannten Phones bleiben.",
+  objectivePvUnknownPhones:
+    "Wofür: MFA-Phone-Symbole ohne Eintrag im eingefrorenen Visem-Mapping. Sie werden strikt aus den Inhaltsmetriken ausgeschlossen. Gute Eingabe beziehungsweise Evidenz: keine unbekannten Phones; andernfalls Mapping und Aussprachemodell getrennt prüfen.",
+  objectivePvFaceTrackCoverage:
+    "Wofür: Anteil der geprüften Frames mit genau einem von MediaPipe verwertbaren Gesicht. Für belastbare Rohmessungen werden mindestens 80 % erwartet; Verdeckung, Profilansicht, Unschärfe oder mehrere Gesichter senken den Wert.",
+  objectivePvMouthTrackCoverage:
+    "Wofür: Anteil der Frames mit verwertbarer Mundgeometrie und Mundmerkmalen. Gut ist nahe 100 %. Der Wert misst Beobachtbarkeit, nicht LipSync-Qualität.",
+  objectivePvMultiFaceRatio:
+    "Wofür: Anteil der Frames, in denen MediaPipe mehr als ein Gesicht erkannt hat. Für den aktuellen Einzelsprecher-Messpfad sollten höchstens 5 % auftreten, weil sonst die Sprecherzuordnung nicht belastbar ist.",
+  objectivePvBlurVariance:
+    "Wofür: Median der Laplace-Varianz als technischer Bildschärfe-Rohwert. Höher ist meist schärfer, hängt aber stark von Auflösung, Hauttextur und Kompression ab. Nur gleich vorbereitete Clips vergleichen.",
+  objectivePvYaw:
+    "Wofür: 95. Perzentil der absoluten horizontalen Kopfdrehung aus der MediaPipe-Gesichtsmatrix. Große Werte markieren Seitenansichten, bei denen Mundmetriken schwieriger werden. Noch kein kalibrierter Ausschlussgrenzwert.",
+  objectivePvPitch:
+    "Wofür: 95. Perzentil der absoluten vertikalen Kopfneigung aus der MediaPipe-Gesichtsmatrix. Große Werte können Mundöffnung und Tracking verzerren. Noch kein kalibrierter Ausschlussgrenzwert.",
+  objectivePvUsableDuration:
+    "Wofür: Tatsächlich untersuchte Dauer des auf fünf Sekunden begrenzten Messclips. Für Roh-Lag und Bewegung werden mindestens eine Sekunde und 24 verwertbare Frames verlangt; längere kontrollierte Clips liefern mehr Evidenz.",
+  objectivePvSampledFrames:
+    "Wofür: Anzahl der mit echten Video-PTS untersuchten Frames, höchstens 300. Gute Evidenz: mindestens 24 Frames bei konstanter 24-, 25- oder 30-FPS-Zeitbasis und hoher Trackingabdeckung.",
   objectiveDialogueCapability:
     "Wofür: Prüft mit dem lokal installierten Whisper-small-Modell, ob die hörbaren Wörter dem exakten Text aus dem Dialogfeld entsprechen, und richtet diesen Text grob an der Audiospur aus. Das misst echte Worttreue, aber keine sichtbaren Phoneme oder Visemklassen.",
   objectiveDialogueWer:

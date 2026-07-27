@@ -139,6 +139,8 @@ export const pythonExecutable = selectPythonExecutable(process.env.LTX_STUDIO_PY
   join(homedir(), "comfyui-env", "bin", "python"),
   "python3",
 ]);
+export const phonemeVisemePythonExecutable =
+  process.env.LTX_STUDIO_PHONEME_VISEME_PYTHON?.trim() || pythonExecutable;
 
 const pythonRuntimeCache = new Map<string, boolean>();
 

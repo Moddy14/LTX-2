@@ -37,7 +37,7 @@ export const visemeMappingSchema = z.object({
     unicodeForm: z.literal("NFC"),
     stripPrimaryAndSecondaryStress: z.literal(true),
     stripVowelLength: z.literal(true),
-    expandAffricatesBeforeMapping: z.literal(true),
+    mapAffricatesAtomically: z.literal(true),
     frameAssignment: z.literal("phoneme active at video-frame center"),
     transitionDefinition: z.literal("class id changes between adjacent non-silence frame centers"),
     unknownPolicy: z.literal("quarantine"),
@@ -142,9 +142,188 @@ const releaseCandidateManifestSchema = z.object({
   }).strict()).min(1).max(100),
 }).strict();
 
+const measurementArtifactSchema = z.object({
+  path: relativeArtifactPathSchema,
+  sha256: sha256Schema,
+  sizeBytes: z.number().int().positive().max(8 * 1024 ** 3),
+  kind: z.enum([
+    "mfa-executable",
+    "mfa-acoustic-model",
+    "mfa-dictionary",
+    "mfa-g2p-model",
+    "mediapipe-face-landmarker",
+    "viseme-mapping",
+  ]),
+  upstreamUrl: z.string().url().max(1_000),
+  revision: z.string().min(1).max(200),
+  licenseEvidenceIds: z.array(releaseIdSchema).min(1).max(20),
+}).strict();
+
+const legalEvidenceSchema = z.object({
+  evidenceId: releaseIdSchema,
+  subject: z.string().min(1).max(200),
+  path: relativeArtifactPathSchema,
+  sha256: sha256Schema,
+  upstreamUrl: z.string().url().max(1_000),
+  revision: z.string().min(1).max(200),
+  evidenceType: z.enum([
+    "code-license",
+    "model-license",
+    "model-card",
+    "notice",
+    "attribution",
+    "training-data-provenance",
+    "biometric-processing-approval",
+  ]),
+  commercialUseReviewed: z.boolean(),
+  biometricProcessingReviewed: z.boolean(),
+}).strict();
+
+const measurementOnlyManifestSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-phoneme-viseme-manifest.v2"),
+  releaseId: releaseIdSchema,
+  method: z.literal("mfa-mediapipe-de.v1"),
+  productGo: z.object({
+    status: z.literal("blocked"),
+    reason: z.string().min(1).max(500),
+    candidateCreatedAt: z.string().datetime({ offset: true }),
+  }).strict(),
+  preprocessing: z.object({
+    version: z.literal("mfa-mediapipe-de-pts.v1"),
+    maxSeconds: z.literal(5),
+    frameRates: z.tuple([z.literal(24), z.literal(25), z.literal(30)]),
+  }).strict(),
+  evidencePolicy: z.object({
+    minimumSampledFrames: z.number().int().min(24).max(300),
+    minimumUsableDurationSeconds: z.number().finite().min(1).max(5),
+    minimumFaceTrackCoverage: z.number().finite().min(0.5).max(1),
+    minimumMouthTrackCoverage: z.number().finite().min(0.5).max(1),
+    maximumMultiFaceFrameRatio: z.number().finite().min(0).max(0.2),
+    minimumPhoneCoverage: z.number().finite().min(0.5).max(1),
+    requireNoUnknownPhones: z.literal(true),
+    minimumMedianBlurVariance: z.number().finite().min(0).max(10_000),
+    maximumYawP95Degrees: z.number().finite().min(0).max(90),
+    maximumPitchP95Degrees: z.number().finite().min(0).max(90),
+  }).strict(),
+  visemeMap: z.object({
+    version: z.literal("viseme15-en-de.v1"),
+    classCount: z.literal(15),
+    path: relativeArtifactPathSchema,
+    sha256: sha256Schema,
+  }).strict(),
+  runtime: z.object({
+    pythonVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    mfaVersion: z.literal("3.3.9"),
+    mediaPipeVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    openCvVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    numpyVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    ffmpegVersion: z.string().min(1).max(100),
+    ffmpegSha256: sha256Schema,
+    ffprobeSha256: sha256Schema,
+    cpuOnly: z.literal(true),
+  }).strict(),
+  components: z.object({
+    mfaExecutable: measurementArtifactSchema,
+    acousticModel: measurementArtifactSchema,
+    dictionary: measurementArtifactSchema,
+    g2pModel: measurementArtifactSchema.nullable(),
+    faceLandmarker: measurementArtifactSchema,
+    visemeMapping: measurementArtifactSchema,
+  }).strict(),
+  legalApproval: z.object({
+    evidenceId: releaseIdSchema,
+    reviewedBy: z.string().min(3).max(200),
+    reviewedAt: z.string().datetime({ offset: true }),
+    policyVersion: z.literal("ltx-studio-evaluator-legal.v1"),
+    scope: z.literal("commercial-biometric-measurement-only"),
+  }).strict(),
+  legalEvidence: z.array(legalEvidenceSchema).min(1).max(100),
+}).strict().superRefine((value, context) => {
+  const expectedKinds = {
+    mfaExecutable: "mfa-executable",
+    acousticModel: "mfa-acoustic-model",
+    dictionary: "mfa-dictionary",
+    g2pModel: "mfa-g2p-model",
+    faceLandmarker: "mediapipe-face-landmarker",
+    visemeMapping: "viseme-mapping",
+  } as const;
+  for (const [key, expected] of Object.entries(expectedKinds)) {
+    const component = value.components[key as keyof typeof value.components];
+    if (component !== null && component.kind !== expected) {
+      context.addIssue({
+        code: "custom",
+        path: ["components", key, "kind"],
+        message: `${key} muss als ${expected} deklariert sein.`,
+      });
+    }
+  }
+  if (value.components.visemeMapping.path !== value.visemeMap.path
+    || value.components.visemeMapping.sha256 !== value.visemeMap.sha256) {
+    context.addIssue({
+      code: "custom",
+      path: ["components", "visemeMapping"],
+      message: "Visem-Mapping muss mit dem manifestweiten Mapping identisch gebunden sein.",
+    });
+  }
+  const evidenceIds = value.legalEvidence.map((entry) => entry.evidenceId);
+  if (new Set(evidenceIds).size !== evidenceIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["legalEvidence"],
+      message: "Lizenzbeleg-IDs müssen eindeutig sein.",
+    });
+  }
+  const evidenceIdSet = new Set(evidenceIds);
+  const evidenceById = new Map(value.legalEvidence.map((entry) => [entry.evidenceId, entry]));
+  const approval = evidenceById.get(value.legalApproval.evidenceId);
+  if (!approval
+    || approval.evidenceType !== "biometric-processing-approval") {
+    context.addIssue({
+      code: "custom",
+      path: ["legalApproval", "evidenceId"],
+      message: "Legal Approval muss auf einen vollständigen biometrischen Freigabebeleg zeigen.",
+    });
+  }
+  for (const [key, component] of Object.entries(value.components)) {
+    if (component === null) continue;
+    for (const evidenceId of component.licenseEvidenceIds) {
+      if (!evidenceIdSet.has(evidenceId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["components", key, "licenseEvidenceIds"],
+          message: `Unbekannter Lizenzbeleg ${evidenceId}.`,
+        });
+      }
+    }
+    const evidenceTypes = new Set(component.licenseEvidenceIds
+      .map((evidenceId) => evidenceById.get(evidenceId)?.evidenceType)
+      .filter((entry) => entry !== undefined));
+    const requiredTypes = key === "mfaExecutable" || key === "visemeMapping"
+      ? ["code-license"]
+      : ["model-license", "model-card", "training-data-provenance"];
+    for (const requiredType of requiredTypes) {
+      if (!evidenceTypes.has(requiredType as typeof value.legalEvidence[number]["evidenceType"])) {
+        context.addIssue({
+          code: "custom",
+          path: ["components", key, "licenseEvidenceIds"],
+          message: `${key} benötigt einen Beleg vom Typ ${requiredType}.`,
+        });
+      }
+    }
+    if (!component.licenseEvidenceIds.includes(value.legalApproval.evidenceId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["components", key, "licenseEvidenceIds"],
+        message: `${key} muss an das externe Legal Approval gebunden sein.`,
+      });
+    }
+  }
+});
+
 export const phonemeVisemeEvaluatorManifestSchema = z.union([
   blockedManifestSchema,
   releaseCandidateManifestSchema,
+  measurementOnlyManifestSchema,
 ]);
 
 export type PhonemeVisemeEvaluatorManifest = z.infer<typeof phonemeVisemeEvaluatorManifestSchema>;
@@ -161,18 +340,119 @@ export const phonemeVisemeBlockerCodeSchema = z.enum([
   "manifest-invalid",
   "artifact-invalid",
   "runner-unavailable",
+  "product-go-pending",
   "measurement-insufficient",
   "evaluator-failed",
   "not-applicable",
 ]);
 
+export const mfaMediaPipeMeasurementSchema = z.object({
+  method: z.literal("mfa-mediapipe-de.v1"),
+  runnerFingerprint: sha256Schema,
+  expectedDialogueSha256: sha256Schema,
+  globalAvLagMilliseconds: z.number().int().min(-500).max(500).nullable(),
+  lagConfidence: z.number().finite().min(0).max(1).nullable(),
+  bilabialClosureF1: z.number().finite().min(0).max(1).nullable(),
+  openingCorrelation: z.number().finite().min(-1).max(1).nullable(),
+  roundingCorrelation: z.number().finite().min(-1).max(1).nullable(),
+  speechMotionRecall: z.number().finite().min(0).max(1).nullable(),
+  pauseLeakRatio: z.number().finite().min(0).max(1).nullable(),
+  phoneCoverage: z.number().finite().min(0).max(1),
+  unknownPhones: z.array(z.string().min(1).max(32)).max(100),
+  faceTrackCoverage: z.number().finite().min(0).max(1),
+  mouthTrackCoverage: z.number().finite().min(0).max(1),
+  multiFaceFrameRatio: z.number().finite().min(0).max(1),
+  medianBlurVariance: z.number().finite().min(0).nullable(),
+  yawP95Degrees: z.number().finite().min(0).max(180).nullable(),
+  pitchP95Degrees: z.number().finite().min(0).max(180).nullable(),
+  usableDurationSeconds: z.number().finite().min(0).max(5),
+  sampledFrames: z.number().int().min(0).max(300),
+}).strict();
+
+export type MfaMediaPipeMeasurement = z.infer<typeof mfaMediaPipeMeasurementSchema>;
+
+export const mfaMediaPipeRunnerOutputSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-mfa-mediapipe-runner.v1"),
+  status: z.enum(["measurement-only", "insufficient", "failed"]),
+  error: z.string().min(1).max(500),
+  manifestReleaseId: releaseIdSchema,
+  manifestSha256: sha256Schema,
+  preprocessingVersion: z.literal("mfa-mediapipe-de-pts.v1"),
+  visemeMapVersion: z.literal("viseme15-en-de.v1"),
+  offset: z.object({
+    status: z.enum(["measured", "insufficient", "not-run"]),
+    estimatedOffsetMilliseconds: z.number().int().min(-500).max(500).nullable(),
+    confidence: z.number().finite().min(0).max(1).nullable(),
+  }).strict(),
+  measurement: mfaMediaPipeMeasurementSchema.nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.measurement
+    && (value.offset.estimatedOffsetMilliseconds !== value.measurement.globalAvLagMilliseconds
+      || value.offset.confidence !== value.measurement.lagConfidence)) {
+    context.addIssue({
+      code: "custom",
+      path: ["offset"],
+      message: "Offsetstufe und MFA/MediaPipe-Rohmessung müssen dieselbe Lag-Messung ausweisen.",
+    });
+  }
+  if (value.offset.status === "measured"
+    && (value.offset.estimatedOffsetMilliseconds === null || value.offset.confidence === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["offset"],
+      message: "Eine gemessene Offsetstufe benötigt Versatz und Konfidenz.",
+    });
+  }
+  if (value.status === "measurement-only") {
+    if (value.measurement === null
+      || !["measured", "insufficient"].includes(value.offset.status)) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Measurement-only benötigt Rohmetriken und eine ausgeführte Offsetstufe.",
+      });
+    }
+    return;
+  }
+  if (value.status === "insufficient") {
+    if (value.measurement !== null
+      && !["measured", "insufficient"].includes(value.offset.status)) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Unzureichende Rohmessung benötigt eine ausgeführte Offsetstufe.",
+      });
+    }
+    if (value.measurement === null && value.offset.status !== "not-run") {
+      context.addIssue({
+        code: "custom",
+        path: ["offset"],
+        message: "Ohne Rohmetriken darf keine Offsetstufe behauptet werden.",
+      });
+    }
+    return;
+  }
+  if (value.measurement !== null || value.offset.status !== "not-run") {
+    context.addIssue({
+      code: "custom",
+      path: ["status"],
+      message: "Fehlgeschlagene oder unzureichende Runner dürfen keine Messwerte behaupten.",
+    });
+  }
+});
+
+export type MfaMediaPipeRunnerOutput = z.infer<typeof mfaMediaPipeRunnerOutputSchema>;
+
 const phonemeVisemeResultBaseSchema = z.object({
-  status: z.enum(["measured", "insufficient", "failed", "not-available", "not-applicable"]),
+  status: z.enum(["measured", "measurement-only", "insufficient", "failed", "not-available", "not-applicable"]),
   blockerCode: phonemeVisemeBlockerCodeSchema,
   error: z.string().min(1).max(500).nullable(),
   manifestReleaseId: releaseIdSchema.nullable(),
   manifestSha256: sha256Schema.nullable(),
-  preprocessingVersion: z.literal("mouth-npz-rgb96-audio-wav16k-cfr.v2").nullable(),
+  preprocessingVersion: z.enum([
+    "mouth-npz-rgb96-audio-wav16k-cfr.v2",
+    "mfa-mediapipe-de-pts.v1",
+  ]).nullable(),
   visemeMapVersion: z.literal("viseme15-en-de.v1").nullable(),
   gateVersion: z.literal("ltx-pv-release-gates.v1").nullable(),
   productGo: z.object({
@@ -187,6 +467,7 @@ const phonemeVisemeResultBaseSchema = z.object({
     frameMacroF1: z.number().finite().min(0).max(1).nullable(),
     transitionF1: z.number().finite().min(0).max(1).nullable(),
   }).strict(),
+  measurement: mfaMediaPipeMeasurementSchema.nullable().optional(),
 }).strict();
 
 export const phonemeVisemeResultSchema = phonemeVisemeResultBaseSchema.superRefine((value, context) => {
@@ -197,7 +478,7 @@ export const phonemeVisemeResultSchema = phonemeVisemeResultBaseSchema.superRefi
       message: "Ein Manifest-Release benötigt den zugehörigen Manifest-Hash.",
     });
   }
-  if (value.status !== "measured" && value.productGo.status !== "blocked") {
+  if (!["measured", "measurement-only"].includes(value.status) && value.productGo.status !== "blocked") {
     context.addIssue({
       code: "custom",
       path: ["productGo"],
@@ -219,11 +500,60 @@ export const phonemeVisemeResultSchema = phonemeVisemeResultBaseSchema.superRefi
     });
   }
   if (value.productGo.status === "blocked"
+    && value.status !== "measurement-only"
+    && !(value.status === "insufficient" && value.measurement)
     && (value.offset.status === "measured" || value.content.status === "measured")) {
     context.addIssue({
       code: "custom",
       path: ["productGo"],
       message: "Blockierte Gewichte dürfen keine Stufenmessung ausführen.",
+    });
+  }
+  if (value.status === "measurement-only") {
+    if (value.productGo.status !== "blocked"
+      || value.blockerCode !== "product-go-pending"
+      || value.measurement === null
+      || value.measurement === undefined
+      || value.error === null
+      || (value.offset.status !== "measured" && value.offset.status !== "insufficient")
+      || value.offset.gatePassed
+      || value.content.status !== "insufficient"
+      || value.content.gatePassed
+      || value.content.frameMacroF1 !== null
+      || value.content.transitionF1 !== null
+      || value.gateVersion !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Measurement-only benötigt echte MFA/MediaPipe-Rohmessung und einen explizit blockierten Product-GO.",
+      });
+    }
+    return;
+  }
+  if (value.status === "insufficient" && value.measurement) {
+    if (value.productGo.status !== "blocked"
+      || value.blockerCode !== "measurement-insufficient"
+      || value.error === null
+      || value.offset.gatePassed
+      || !["measured", "insufficient"].includes(value.offset.status)
+      || value.content.status !== "insufficient"
+      || value.content.gatePassed
+      || value.content.frameMacroF1 !== null
+      || value.content.transitionF1 !== null
+      || value.gateVersion !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Unzureichende MFA/MediaPipe-Rohmessung muss Product-GO und alle Inhaltsgates blockieren.",
+      });
+    }
+    return;
+  }
+  if (value.measurement !== null && value.measurement !== undefined && value.status !== "measured") {
+    context.addIssue({
+      code: "custom",
+      path: ["measurement"],
+      message: "MFA/MediaPipe-Rohmetriken sind nur bei measurement-only oder gemessen zulässig.",
     });
   }
   if (value.status !== "measured") {

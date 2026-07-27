@@ -65,7 +65,7 @@ export function runtimeApiJson<T>(
   method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown,
-  options: { timeoutMs?: number; maxBytes?: number } = {},
+  options: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal } = {},
 ): Promise<T> {
   const url = runtimeUrl(path);
   const payload = body === undefined ? null : JSON.stringify(body);
@@ -80,7 +80,7 @@ export function runtimeApiJson<T>(
   }
 
   return new Promise((resolvePromise, rejectPromise) => {
-    const requestHandle = request(url, { method, headers }, (response) => {
+    const requestHandle = request(url, { method, headers, signal: options.signal }, (response) => {
       let responseBody = "";
       let byteLength = 0;
       const maxBytes = options.maxBytes ?? MAX_RESPONSE_BYTES;

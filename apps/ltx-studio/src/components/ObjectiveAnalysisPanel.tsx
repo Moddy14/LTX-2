@@ -22,7 +22,7 @@ function metricWithUnit(value: number | null, unit: string, digits = 3): string 
 
 function MetricRow({ label, value, help }: { label: string; value: string; help: string }) {
   return (
-    <div className="objective-analysis__metric">
+    <div className="objective-analysis__metric" data-metric-label={label}>
       <span>{label} <InfoTooltip text={help} /></span>
       <strong>{value}</strong>
     </div>
@@ -69,6 +69,7 @@ export function ObjectiveAnalysisPanel({
     || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.phonemeViseme
     : null;
+  const phonemeVisemeMeasurement = phonemeViseme?.measurement ?? null;
   const dialogue = result?.schemaVersion === "ltx-studio-objective-quality.v6"
     || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.dialogue
@@ -308,6 +309,77 @@ export function ObjectiveAnalysisPanel({
                 )} help={fieldHelp.objectivePvTransitionF1} />
               </>
             ) : null}
+            {phonemeVisemeMeasurement ? (
+              <>
+                <MetricRow label="MFA/MediaPipe AV-Versatz" value={metricWithUnit(
+                  phonemeVisemeMeasurement.globalAvLagMilliseconds,
+                  " ms",
+                  0,
+                )} help={fieldHelp.objectivePvRawLag} />
+                <MetricRow label="Roh-Lag-Eindeutigkeit" value={phonemeVisemeMeasurement.lagConfidence === null
+                  ? "Nicht messbar"
+                  : percent(phonemeVisemeMeasurement.lagConfidence)} help={fieldHelp.objectivePvRawLagConfidence} />
+                <MetricRow label="Bilabialer Schluss F1" value={metricWithUnit(
+                  phonemeVisemeMeasurement.bilabialClosureF1,
+                  "",
+                  3,
+                )} help={fieldHelp.objectivePvBilabialF1} />
+                <MetricRow label="Mundöffnungskorrelation" value={metricWithUnit(
+                  phonemeVisemeMeasurement.openingCorrelation,
+                  "",
+                  3,
+                )} help={fieldHelp.objectivePvOpeningCorrelation} />
+                <MetricRow label="Lippenrundungskorrelation" value={metricWithUnit(
+                  phonemeVisemeMeasurement.roundingCorrelation,
+                  "",
+                  3,
+                )} help={fieldHelp.objectivePvRoundingCorrelation} />
+                <MetricRow label="Sprechbewegungsabdeckung" value={phonemeVisemeMeasurement.speechMotionRecall === null
+                  ? "Nicht messbar"
+                  : percent(phonemeVisemeMeasurement.speechMotionRecall)} help={fieldHelp.objectivePvSpeechMotion} />
+                <MetricRow label="Bewegung in Phonempausen" value={phonemeVisemeMeasurement.pauseLeakRatio === null
+                  ? "Nicht messbar"
+                  : percent(phonemeVisemeMeasurement.pauseLeakRatio)} help={fieldHelp.objectivePvPauseLeak} />
+                <MetricRow label="Phone-Abdeckung" value={percent(
+                  phonemeVisemeMeasurement.phoneCoverage,
+                )} help={fieldHelp.objectivePvPhoneCoverage} />
+                <MetricRow label="Unbekannte Phones" value={phonemeVisemeMeasurement.unknownPhones.length > 0
+                  ? phonemeVisemeMeasurement.unknownPhones.join(", ")
+                  : "Keine"} help={fieldHelp.objectivePvUnknownPhones} />
+                <MetricRow label="Gesichtstrack-Abdeckung" value={percent(
+                  phonemeVisemeMeasurement.faceTrackCoverage,
+                )} help={fieldHelp.objectivePvFaceTrackCoverage} />
+                <MetricRow label="Mundtrack-Abdeckung" value={percent(
+                  phonemeVisemeMeasurement.mouthTrackCoverage,
+                )} help={fieldHelp.objectivePvMouthTrackCoverage} />
+                <MetricRow label="Mehrgesicht-Frames" value={percent(
+                  phonemeVisemeMeasurement.multiFaceFrameRatio,
+                )} help={fieldHelp.objectivePvMultiFaceRatio} />
+                <MetricRow label="Bildschärfe Median" value={metricWithUnit(
+                  phonemeVisemeMeasurement.medianBlurVariance,
+                  "",
+                  1,
+                )} help={fieldHelp.objectivePvBlurVariance} />
+                <MetricRow label="Kopfdrehung p95" value={metricWithUnit(
+                  phonemeVisemeMeasurement.yawP95Degrees,
+                  "°",
+                  1,
+                )} help={fieldHelp.objectivePvYaw} />
+                <MetricRow label="Kopfneigung p95" value={metricWithUnit(
+                  phonemeVisemeMeasurement.pitchP95Degrees,
+                  "°",
+                  1,
+                )} help={fieldHelp.objectivePvPitch} />
+                <MetricRow label="Nutzbare Messdauer" value={metricWithUnit(
+                  phonemeVisemeMeasurement.usableDurationSeconds,
+                  " s",
+                  2,
+                )} help={fieldHelp.objectivePvUsableDuration} />
+                <MetricRow label="MFA/MediaPipe Frames" value={String(
+                  phonemeVisemeMeasurement.sampledFrames,
+                )} help={fieldHelp.objectivePvSampledFrames} />
+              </>
+            ) : null}
           </div>
           <div className="objective-analysis__capabilities">
             <span>Konditionierungs-AV <strong>{conditioningAvSync?.status === "measured"
@@ -329,6 +401,8 @@ export function ObjectiveAnalysisPanel({
             <span>Phonem/Visem <InfoTooltip text={fieldHelp.objectivePvCapability} /> <strong>{
               phonemeViseme?.status === "measured"
                 ? "Product-GO gemessen"
+                : phonemeViseme?.status === "measurement-only"
+                  ? "Rohmessung, Product-GO blockiert"
                 : phonemeViseme?.status === "failed"
                   ? "Manifest-/Evaluatorfehler"
                   : phonemeViseme?.status === "insufficient"

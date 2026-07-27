@@ -50,24 +50,38 @@ import {
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
 import { OutputLibrary, OutputQualityError } from "./outputs.js";
-import { cleanupAnalysisTempRoot, OutputAnalysisManager } from "./outputAnalysis.js";
+import {
+  cleanupAnalysisTempRoot,
+  OutputAnalysisManager,
+  recoverPhonemeVisemeSandboxState,
+} from "./outputAnalysis.js";
 import { resolveIdentityEvidenceReferences, verifyIdentityEvidence } from "./inputEvidence.js";
 import { captureProvenanceFile, verifyProvenanceFileEvidence } from "./runProvenance.js";
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
-import { resolvePhonemeVisemeEvaluatorState } from "./evaluatorManifest.js";
+import { PhonemeVisemeEvaluatorStateProvider } from "./evaluatorStateProvider.js";
 
 ensureRuntimeDirectories();
 cleanupAnalysisTempRoot(analysisTempRoot);
+try {
+  await recoverPhonemeVisemeSandboxState(analysisTempRoot);
+} catch (error) {
+  console.error(
+    "Phonem-/Visem-Sandbox-Recovery blieb fail-closed:",
+    error instanceof Error ? error.message : String(error),
+  );
+}
 const app = express();
 const assets = new AssetStore();
 const jobs = new JobManager(undefined, true, assets);
 const outputs = new OutputLibrary(outputRoot);
 const experiments = new ExperimentStore(experimentRoot);
+const phonemeVisemeEvaluatorStates = new PhonemeVisemeEvaluatorStateProvider();
 experiments.reconcileJobs(jobs.list());
 const analyses = new OutputAnalysisManager(outputs, () => jobs.list(), outputRoot, {
   identityReferenceResolver: (evidence) => resolveIdentityEvidenceReferences(evidence, assets),
   identityEvidenceVerifier: async (evidence) => (await verifyIdentityEvidence(evidence, assets)).error,
+  phonemeVisemeEvaluatorStateResolver: () => phonemeVisemeEvaluatorStates.get(),
 });
 outputs.recordCompleted(jobs.list());
 jobs.on("changed", (value: StudioJob[]) => outputs.recordCompleted(value));
@@ -224,7 +238,8 @@ app.get("/api/config", (_request, response) => {
 
 app.get("/api/health", async (_request, response) => {
   const resources = readResourceSnapshot();
-  const phonemeViseme = resolvePhonemeVisemeEvaluatorState().result;
+  const phonemeVisemeState = phonemeVisemeEvaluatorStates.get();
+  const phonemeViseme = phonemeVisemeState.result;
   let runtimeStatus;
   let orchestratorReachable = false;
   try {
@@ -247,6 +262,8 @@ app.get("/api/health", async (_request, response) => {
         blockerCode: phonemeViseme.blockerCode,
         message: phonemeViseme.error,
         productGo: phonemeViseme.productGo.status,
+        measurementReady: Boolean(phonemeVisemeState.execution),
+        method: phonemeVisemeState.execution?.method ?? null,
       },
     },
     queueDepth: jobs.list().filter((job) => isActiveJobStatus(job.status)).length,
@@ -631,6 +648,46 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
   response.status(500).json({ error: message });
 });
 
-app.listen(serverPort, serverHost, () => {
+const server = app.listen(serverPort, serverHost, () => {
   process.stdout.write(`LTX Studio API: http://${serverHost}:${serverPort}\n`);
 });
+
+let shutdownPromise: Promise<void> | null = null;
+function shutdown(signal: NodeJS.Signals): void {
+  if (shutdownPromise) return;
+  const shutdownTimeoutMs = 20_000;
+  const forcedExit = setTimeout(() => {
+    console.error(`Studio-Shutdown nach ${signal} überschritt ${shutdownTimeoutMs / 1_000} Sekunden; Prozess wird beendet.`);
+    process.exit(1);
+  }, shutdownTimeoutMs);
+  shutdownPromise = (async () => {
+    let cleanupFinished = false;
+    server.close();
+    server.closeAllConnections();
+    try {
+      const [jobShutdown] = await Promise.all([
+        jobs.shutdown(15_000),
+        analyses.shutdown(15_000),
+      ]);
+      if (jobShutdown.remotePending > 0 || jobShutdown.localPending > 0) {
+        process.exitCode = 1;
+        console.error(
+          `Studio-Shutdown: ${jobShutdown.localPending} lokale Prozessgruppe(n) und `
+            + `${jobShutdown.remotePending} DGX-Terminalmeldung(en) bleiben zur Wiederholung vorgemerkt.`,
+        );
+      }
+      cleanupFinished = jobShutdown.remotePending === 0 && jobShutdown.localPending === 0;
+    } catch (error) {
+      process.exitCode = 1;
+      console.error(
+        `Studio-Shutdown nach ${signal} blieb fail-closed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      if (cleanupFinished) clearTimeout(forcedExit);
+    }
+  })();
+}
+
+process.once("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", () => shutdown("SIGTERM"));

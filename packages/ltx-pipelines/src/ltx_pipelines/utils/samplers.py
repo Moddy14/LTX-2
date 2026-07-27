@@ -11,6 +11,11 @@ from ltx_core.components.protocols import DiffusionStepProtocol
 from ltx_core.devices import highest_precision_float
 from ltx_core.model.transformer import X0Model
 from ltx_core.utils import to_denoised, to_velocity
+from ltx_pipelines.utils.cooperative_checkpoint import (
+    checkpoint_and_yield_if_requested,
+    complete_restored_euler_loop,
+    restore_euler_checkpoint,
+)
 from ltx_pipelines.utils.helpers import post_process_latent, timesteps_from_mask
 from ltx_pipelines.utils.res2s import get_res2s_coefficients
 from ltx_pipelines.utils.types import Denoiser, LatentState
@@ -66,7 +71,8 @@ def euler_denoising_loop(
     tuple[LatentState | None, LatentState | None]
         Final ``(video_state, audio_state)`` after the denoising loop.
     """
-    for step_idx, _ in enumerate(tqdm(sigmas[:-1])):
+    loop_index, start_step, video_state, audio_state = restore_euler_checkpoint(sigmas, video_state, audio_state)
+    for step_idx in tqdm(range(start_step, len(sigmas) - 1)):
         video_result, audio_result = denoiser(transformer, video_state, audio_state, sigmas, step_idx)
         denoised_video = video_result.denoised if video_result is not None else None
         denoised_audio = audio_result.denoised if audio_result is not None else None
@@ -74,6 +80,15 @@ def euler_denoising_loop(
         video_state = _step_state(video_state, denoised_video, stepper, sigmas, step_idx)
         audio_state = _step_state(audio_state, denoised_audio, stepper, sigmas, step_idx)
 
+        checkpoint_and_yield_if_requested(
+            loop_index=loop_index,
+            next_step_index=step_idx + 1,
+            sigmas=sigmas,
+            video_state=video_state,
+            audio_state=audio_state,
+        )
+
+    complete_restored_euler_loop(loop_index, start_step)
     return (video_state, audio_state)
 
 

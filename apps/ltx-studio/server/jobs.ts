@@ -1,9 +1,13 @@
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -12,7 +16,7 @@ import {
 } from "node:fs";
 import { randomInt, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -22,12 +26,17 @@ import {
 import { migrateGenerationRequest, type GenerationRequest } from "../shared/pipelines.js";
 import {
   decisionMessage,
+  cooperativeCheckpointPath,
+  listQueueJobs,
+  readQwenDemand,
   readQueueJob,
   retryAfterMs,
   shouldRetryQueueSubmit,
   submitQueueAdmission,
+  supportsCooperativeCheckpoint,
   transitionQueueJob,
   type QueueArtifact,
+  type QueueJobSummary,
   type QueueJobState,
   type QueueTransitionState,
 } from "./admission.js";
@@ -122,6 +131,13 @@ export type StudioJob = {
 type RuntimeJob = StudioJob & {
   plan: CommandPlan;
   process?: ChildProcess;
+  processTermination?: Promise<void>;
+  localProcessGroupPending?: boolean;
+  localProcessGroupIdentity?: LocalProcessGroupIdentity;
+  localProcessGroupRetry?: NodeJS.Timeout;
+  dgxSubmitPending?: boolean;
+  dgxSubmitStartedAt?: string;
+  dgxAdmissionAbortController?: AbortController;
   dgxJobTerminal?: boolean;
   dgxStateTransitionInFlight?: Promise<boolean>;
   dgxTerminalDelivery?: DgxTerminalDelivery;
@@ -147,6 +163,11 @@ type DgxTerminalDelivery = {
   updatedAt: string;
 };
 type DgxStartOutcome = "started" | "queued" | "resubmit" | "stopped";
+type LocalProcessGroupIdentity = {
+  bootId: string;
+  processGroupId: number;
+  leaderStartTicks: string;
+};
 type AcceptedResourceWaitOutcome =
   | { kind: "ready"; snapshot: ResourceSnapshot }
   | { kind: "queued" }
@@ -154,6 +175,10 @@ type AcceptedResourceWaitOutcome =
   | { kind: "stopped" };
 type PersistedStudioJob = StudioJob & {
   dgxTerminalDelivery?: DgxTerminalDelivery;
+  localProcessGroupPending?: boolean;
+  localProcessGroupIdentity?: LocalProcessGroupIdentity;
+  dgxSubmitPending?: boolean;
+  dgxSubmitStartedAt?: string;
 };
 type DgxQueueOperations = {
   read: typeof readQueueJob;
@@ -161,6 +186,10 @@ type DgxQueueOperations = {
 };
 type DgxAdmissionOperations = {
   submit: typeof submitQueueAdmission;
+  list?: typeof listQueueJobs;
+};
+type DgxDemandOperations = {
+  read: typeof readQwenDemand;
 };
 type RunProvenanceOperations = {
   capture: typeof captureRunProvenance;
@@ -179,6 +208,18 @@ const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
 const DGX_START_FENCE_RETRY_MS = 30_000;
 const DGX_ACCEPTED_REMOTE_POLL_MS = 30_000;
 const DGX_ACCEPTED_LOCAL_GATE_MAX_WAIT_MS = 20 * 60_000;
+const DGX_SUBMIT_AMBIGUITY_MAX_MS = 125_000;
+const DGX_SUBMIT_RECONCILE_POLL_MS = 2_000;
+const LOCAL_PROCESS_GROUP_RECONCILE_MS = 2_000;
+const LTX_COOPERATIVE_YIELD_EXIT_CODE = 75;
+const QWEN_DEMAND_POLL_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.LTX_STUDIO_QWEN_DEMAND_POLL_MS ?? "5000", 10) || 5_000,
+);
+const QWEN_IDLE_GRACE_MS = Math.max(
+  0,
+  Number.parseInt(process.env.LTX_STUDIO_QWEN_IDLE_GRACE_MS ?? "30000", 10) || 30_000,
+);
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
 const DGX_TERMINAL_STATES = new Set<DgxTerminalState>(["completed", "failed", "cancelled"]);
 const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
@@ -300,6 +341,37 @@ export function resolveRenderOutputPaths(
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function atomicJsonFile(path: string, value: object): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporaryPath = join(dirname(path), `.${path.split("/").at(-1)}.${randomUUID()}.tmp`);
+  const descriptor = openSync(temporaryPath, "wx", 0o600);
+  try {
+    writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  renameSync(temporaryPath, path);
+  const directoryDescriptor = openSync(dirname(path), "r");
+  try {
+    fsyncSync(directoryDescriptor);
+  } finally {
+    closeSync(directoryDescriptor);
+  }
+}
+
+function readJsonObject(path: string): Record<string, unknown> | null {
+  try {
+    if (statSync(path).size > 64 * 1024) return null;
+    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function validTimestamp(value: unknown, fallback: string | null): string | null {
@@ -434,11 +506,11 @@ function processIsAlive(child: ChildProcess): boolean {
 }
 
 function jobWasCancelled(job: RuntimeJob): boolean {
-  return job.status === "cancelled";
+  return job.status === "cancelled" || job.status === "interrupted";
 }
 
 function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): boolean {
-  if (!child.pid || !processIsAlive(child)) return false;
+  if (!child.pid) return false;
   try {
     process.kill(-child.pid, signal);
     return true;
@@ -447,10 +519,119 @@ function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): boolea
   }
 }
 
+function processGroupExists(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function readBootId(): string {
+  const bootId = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bootId)) {
+    throw new Error("Linux-Boot-ID ist nicht lesbar oder ungültig.");
+  }
+  return bootId;
+}
+
+function readProcessStat(processId: number): { processGroupId: number; startTicks: string } {
+  const raw = readFileSync(`/proc/${processId}/stat`, "utf8");
+  const suffixStart = raw.lastIndexOf(") ");
+  if (suffixStart < 0) throw new Error(`Prozessstatus ${processId} ist ungültig.`);
+  const fields = raw.slice(suffixStart + 2).trim().split(/\s+/u);
+  const processGroupId = Number.parseInt(fields[2] ?? "", 10);
+  const startTicks = fields[19] ?? "";
+  if (!Number.isSafeInteger(processGroupId) || processGroupId < 0 || !/^[0-9]+$/u.test(startTicks)) {
+    throw new Error(`Prozessstatus ${processId} enthält keine sichere Gruppenidentität.`);
+  }
+  return { processGroupId, startTicks };
+}
+
+function captureLocalProcessGroupIdentity(processGroupId: number): LocalProcessGroupIdentity {
+  const details = readProcessStat(processGroupId);
+  if (details.processGroupId !== processGroupId) {
+    throw new Error(`Prozess ${processGroupId} besitzt keine eigene isolierte Prozessgruppe.`);
+  }
+  return {
+    bootId: readBootId(),
+    processGroupId,
+    leaderStartTicks: details.startTicks,
+  };
+}
+
+function isLocalProcessGroupIdentity(value: unknown): value is LocalProcessGroupIdentity {
+  if (!value || typeof value !== "object") return false;
+  const identity = value as Record<string, unknown>;
+  return typeof identity.bootId === "string"
+    && /^[0-9a-f-]{36}$/i.test(identity.bootId)
+    && typeof identity.processGroupId === "number"
+    && Number.isSafeInteger(identity.processGroupId)
+    && identity.processGroupId > 0
+    && typeof identity.leaderStartTicks === "string"
+    && /^[0-9]+$/u.test(identity.leaderStartTicks);
+}
+
+function localProcessGroupIsGone(identity: LocalProcessGroupIdentity): boolean {
+  if (readBootId() !== identity.bootId) return true;
+  try {
+    const currentLeader = readProcessStat(identity.processGroupId);
+    if (currentLeader.startTicks !== identity.leaderStartTicks) return true;
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9]+$/u.test(entry.name)) continue;
+    try {
+      if (readProcessStat(Number.parseInt(entry.name, 10)).processGroupId === identity.processGroupId) {
+        return false;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return true;
+}
+
+async function waitForProcessGroupExit(processGroupId: number, deadlineMs: number): Promise<boolean> {
+  while (Date.now() < deadlineMs) {
+    if (!processGroupExists(processGroupId)) return true;
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  return !processGroupExists(processGroupId);
+}
+
+async function terminateProcessGroup(
+  child: ChildProcess,
+  wasPaused: boolean,
+  graceMs = 10_000,
+  deadlineMs = 15_000,
+): Promise<void> {
+  if (!child.pid) return;
+  const processGroupId = child.pid;
+  if (wasPaused) signalProcessGroup(child, "SIGCONT");
+  signalProcessGroup(child, "SIGTERM");
+  const startedAt = Date.now();
+  if (await waitForProcessGroupExit(processGroupId, startedAt + graceMs)) return;
+  signalProcessGroup(child, "SIGKILL");
+  if (!await waitForProcessGroupExit(processGroupId, startedAt + deadlineMs)) {
+    throw new Error(`Prozessgruppe ${processGroupId} blieb nach SIGKILL aktiv.`);
+  }
+}
+
 function publicJob(job: RuntimeJob): StudioJob {
   const value = { ...job } as Partial<RuntimeJob>;
   delete value.plan;
   delete value.process;
+  delete value.processTermination;
+  delete value.localProcessGroupPending;
+  delete value.localProcessGroupIdentity;
+  delete value.localProcessGroupRetry;
+  delete value.dgxSubmitPending;
+  delete value.dgxSubmitStartedAt;
+  delete value.dgxAdmissionAbortController;
   delete value.dgxJobTerminal;
   delete value.dgxStateTransitionInFlight;
   delete value.dgxTerminalDelivery;
@@ -462,6 +643,12 @@ function publicJob(job: RuntimeJob): StudioJob {
 function persistedJob(job: RuntimeJob): PersistedStudioJob {
   const value: PersistedStudioJob = publicJob(job);
   if (job.dgxTerminalDelivery) value.dgxTerminalDelivery = structuredClone(job.dgxTerminalDelivery);
+  if (job.localProcessGroupPending) value.localProcessGroupPending = true;
+  if (job.localProcessGroupIdentity) {
+    value.localProcessGroupIdentity = structuredClone(job.localProcessGroupIdentity);
+  }
+  if (job.dgxSubmitPending) value.dgxSubmitPending = true;
+  if (job.dgxSubmitStartedAt) value.dgxSubmitStartedAt = job.dgxSubmitStartedAt;
   return value;
 }
 
@@ -505,6 +692,15 @@ export class JobManager extends EventEmitter {
   private readonly jobs = new Map<string, RuntimeJob>();
   private readonly queue: string[] = [];
   private runningId: string | null = null;
+  private activeRunPromise: Promise<void> | null = null;
+  private shuttingDown = false;
+  private shutdownPromise: Promise<{
+    queuedPreserved: number;
+    localGroupsStopped: number;
+    localPending: number;
+    remoteConfirmed: number;
+    remotePending: number;
+  }> | null = null;
 
   constructor(
     private readonly storagePath = statePath,
@@ -521,15 +717,23 @@ export class JobManager extends EventEmitter {
     private readonly dgxTerminalRetryBaseMs: number | null = DEFAULT_DGX_TERMINAL_RETRY_BASE_MS,
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
       submit: submitQueueAdmission,
+      list: listQueueJobs,
     },
     private readonly runProvenanceOperations: RunProvenanceOperations = {
       capture: captureRunProvenance,
       verify: verifyRunProvenance,
     },
+    private readonly dgxDemandOperations: DgxDemandOperations = {
+      read: readQwenDemand,
+    },
   ) {
     super();
     this.restore();
-    for (const job of this.jobs.values()) this.scheduleDgxTerminalRetry(job, 0);
+    for (const job of this.jobs.values()) {
+      this.scheduleLocalProcessGroupReconciliation(job, 0);
+      this.scheduleDgxTerminalRetry(job, 0);
+    }
+    if (this.autoStart && this.queue.length > 0) queueMicrotask(() => void this.pump());
   }
 
   list(): StudioJob[] {
@@ -551,6 +755,9 @@ export class JobManager extends EventEmitter {
       deferStart?: boolean;
     } = {},
   ): StudioJob {
+    if (this.shuttingDown) {
+      throw new JobConflictError("LTX Studio wird beendet und nimmt keine neuen Aufträge mehr an.");
+    }
     const activeJobs = [...this.jobs.values()].filter((job) => isActiveJobStatus(job.status));
     if (activeJobs.length >= MAX_ACTIVE_JOBS) {
       throw new JobConflictError(
@@ -604,6 +811,7 @@ export class JobManager extends EventEmitter {
   }
 
   startQueued(id: string): StudioJob | undefined {
+    if (this.shuttingDown) return undefined;
     const job = this.jobs.get(id);
     if (!job || job.status !== "queued" || !this.queue.includes(id)) return undefined;
     if (this.autoStart) void this.pump();
@@ -646,13 +854,10 @@ export class JobManager extends EventEmitter {
       if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
       this.appendLog(job, "Manueller Abbruch über die Studio-Abbruchfunktion vor dem Start angefordert.");
       if (process?.pid) {
-        signalProcessGroup(process, "SIGTERM");
-        setTimeout(() => {
-          if (processIsAlive(process)) signalProcessGroup(process, "SIGKILL");
-        }, 10_000).unref();
+        void this.stopProcessBeforeTerminalDelivery(job, process, false);
       }
       this.changed();
-      void this.flushDgxTerminalDelivery(job);
+      if (!process?.pid) void this.flushDgxTerminalDelivery(job);
       return publicJob(job);
     }
     if (["running", "paused"].includes(job.status)) {
@@ -668,29 +873,267 @@ export class JobManager extends EventEmitter {
       if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
       this.appendLog(job, "Manueller Abbruch über die Studio-Abbruchfunktion angefordert.");
       if (process?.pid) {
-        if (wasPaused) signalProcessGroup(process, "SIGCONT");
-        signalProcessGroup(process, "SIGTERM");
-        setTimeout(() => {
-          if (processIsAlive(process)) signalProcessGroup(process, "SIGKILL");
-        }, 10_000).unref();
+        void this.stopProcessBeforeTerminalDelivery(job, process, wasPaused);
       }
       this.changed();
-      void this.flushDgxTerminalDelivery(job);
+      if (!process?.pid) void this.flushDgxTerminalDelivery(job);
     }
     return publicJob(job);
   }
 
+  async shutdown(timeoutMs = 15_000): Promise<{
+    queuedPreserved: number;
+    localGroupsStopped: number;
+    localPending: number;
+    remoteConfirmed: number;
+    remotePending: number;
+  }> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shuttingDown = true;
+    for (const job of this.jobs.values()) {
+      job.dgxAdmissionAbortController?.abort();
+      delete job.dgxAdmissionAbortController;
+      if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
+      delete job.dgxTerminalRetry;
+      if (job.localProcessGroupRetry) clearTimeout(job.localProcessGroupRetry);
+      delete job.localProcessGroupRetry;
+    }
+    this.shutdownPromise = (async () => {
+      const deadline = Date.now() + timeoutMs;
+      const activeJob = this.runningId ? this.jobs.get(this.runningId) : undefined;
+      let localGroupsStopped = 0;
+      const preserveLocalQueue = activeJob?.status === "queued"
+        && !activeJob.dgxJobId
+        && !activeJob.process;
+      if (activeJob && preserveLocalQueue) {
+        if (!this.queue.includes(activeJob.id)) this.queue.unshift(activeJob.id);
+        this.appendLog(
+          activeJob,
+          "Studio-Shutdown: rein lokaler Queue-Auftrag bleibt für den nächsten Start erhalten.",
+        );
+        this.changed();
+      } else if (activeJob && isActiveJobStatus(activeJob.status)) {
+        const process = activeJob.process;
+        const wasPaused = activeJob.status === "paused";
+        this.prepareDgxTerminalDelivery(activeJob, "cancelled", {
+          current_step: "LTX Studio signal shutdown after local process stop",
+          last_error: "LTX Studio was stopped before the job completed",
+        });
+        activeJob.status = "interrupted";
+        activeJob.finishedAt = now();
+        if (activeJob.startedAt) activeJob.runtimeMs = Date.now() - Date.parse(activeJob.startedAt);
+        this.appendLog(
+          activeJob,
+          "Studio-Shutdown: aktiver Job wird kontrolliert unterbrochen; dies ist kein manueller Benutzerabbruch.",
+        );
+        this.changed();
+        if (process?.pid) {
+          try {
+            await this.withDeadline(
+              this.stopProcessBeforeTerminalDelivery(
+                activeJob,
+                process,
+                wasPaused,
+                Math.min(10_000, Math.max(100, timeoutMs - 1_000)),
+                timeoutMs,
+              ),
+              deadline,
+            );
+            localGroupsStopped = 1;
+          } catch (error) {
+            this.appendLog(
+              activeJob,
+              `Studio-Shutdown konnte die lokale Prozessgruppe nicht sicher beenden: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            this.changed();
+          }
+        } else {
+          await this.withDeadline(
+            this.flushDgxTerminalDelivery(activeJob).then(() => undefined),
+            deadline,
+          ).catch(() => undefined);
+        }
+      }
+      if (this.activeRunPromise) {
+        await this.withDeadline(this.activeRunPromise, deadline).catch(() => undefined);
+      }
+      const terminalJobs = [...this.jobs.values()].filter((job) => job.dgxTerminalDelivery);
+      for (const job of terminalJobs) {
+        if (Date.now() >= deadline) break;
+        await this.withDeadline(
+          this.flushDgxTerminalDelivery(job).then(() => undefined),
+          deadline,
+        ).catch(() => undefined);
+      }
+      const shutdownRemoteJobs = [...this.jobs.values()].filter(
+        (job) => job.dgxSubmitPending
+          || (job.dgxJobId
+            && (job.status === "interrupted" || job.dgxTerminalDelivery || job.dgxJobTerminal)),
+      );
+      return {
+        queuedPreserved: [...this.jobs.values()].filter(
+          (job) => job.status === "queued",
+        ).length,
+        localGroupsStopped,
+        localPending: [...this.jobs.values()].filter((job) => job.localProcessGroupPending).length,
+        remoteConfirmed: shutdownRemoteJobs.filter((job) => job.dgxJobTerminal).length,
+        remotePending: shutdownRemoteJobs.filter(
+          (job) => Boolean(job.dgxSubmitPending || job.dgxTerminalDelivery),
+        ).length,
+      };
+    })();
+    return this.shutdownPromise;
+  }
+
+  private stopProcessBeforeTerminalDelivery(
+    job: RuntimeJob,
+    process: ChildProcess,
+    wasPaused: boolean,
+    graceMs = 10_000,
+    deadlineMs = 15_000,
+  ): Promise<void> {
+    if (job.processTermination) return job.processTermination;
+    const termination = (async () => {
+      await terminateProcessGroup(process, wasPaused, graceMs, deadlineMs);
+      if (job.process === process) delete job.process;
+      delete job.localProcessGroupPending;
+      delete job.localProcessGroupIdentity;
+      this.changed();
+      await this.flushDgxTerminalDelivery(job);
+    })();
+    job.processTermination = termination;
+    void termination.catch((error) => {
+      this.appendLog(
+        job,
+        `Lokale Prozessgruppe konnte nicht sicher beendet werden; Remote-Lease bleibt vorgemerkt: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.changed();
+    }).finally(() => {
+      if (job.processTermination === termination) delete job.processTermination;
+    });
+    return termination;
+  }
+
+  private withDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
+    const remaining = deadlineMs - Date.now();
+    if (remaining <= 0) return Promise.reject(new Error("Studio-Shutdown-Zeitlimit erreicht."));
+    return Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Studio-Shutdown-Zeitlimit erreicht.")),
+          remaining,
+        );
+        timer.unref();
+      }),
+    ]);
+  }
+
+  private jobShouldStop(job: RuntimeJob): boolean {
+    return this.shuttingDown || jobWasCancelled(job);
+  }
+
+  private async markProcessStarted(job: RuntimeJob, child: ChildProcess): Promise<void> {
+    job.process = child;
+    job.localProcessGroupPending = true;
+    try {
+      if (!child.pid) throw new Error("Gestarteter Prozess besitzt keine PID.");
+      job.localProcessGroupIdentity = captureLocalProcessGroupIdentity(child.pid);
+      this.changed();
+    } catch (error) {
+      this.appendLog(
+        job,
+        `Lokale Prozessgruppenidentität konnte nicht dauerhaft gebunden werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.changed();
+      try {
+        await terminateProcessGroup(child, false, 250, 2_000);
+        if (job.process === child) delete job.process;
+        delete job.localProcessGroupPending;
+        delete job.localProcessGroupIdentity;
+        this.changed();
+      } catch {
+        // The persisted pending marker keeps every remote terminal transition fenced.
+      }
+      throw error;
+    }
+  }
+
+  private async confirmProcessGroupGone(job: RuntimeJob, child: ChildProcess): Promise<void> {
+    if (child.pid && processGroupExists(child.pid)) {
+      await terminateProcessGroup(child, false, 250, 2_000);
+    }
+    if (job.process === child) delete job.process;
+    delete job.localProcessGroupPending;
+    delete job.localProcessGroupIdentity;
+    this.changed();
+  }
+
+  private scheduleLocalProcessGroupReconciliation(job: RuntimeJob, delayMs: number): void {
+    if (
+      this.shuttingDown
+      || !job.localProcessGroupPending
+      || !job.localProcessGroupIdentity
+      || job.localProcessGroupRetry
+    ) {
+      return;
+    }
+    job.localProcessGroupRetry = setTimeout(() => {
+      delete job.localProcessGroupRetry;
+      void this.reconcileLocalProcessGroup(job);
+    }, delayMs);
+    job.localProcessGroupRetry.unref();
+  }
+
+  private async reconcileLocalProcessGroup(job: RuntimeJob): Promise<void> {
+    const identity = job.localProcessGroupIdentity;
+    if (!job.localProcessGroupPending || !identity || this.shuttingDown) return;
+    let gone = false;
+    try {
+      gone = localProcessGroupIsGone(identity);
+    } catch (error) {
+      process.stderr.write(
+        `LTX Studio Prozessgruppen-Recovery bleibt fail-closed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
+      this.scheduleLocalProcessGroupReconciliation(job, LOCAL_PROCESS_GROUP_RECONCILE_MS);
+      return;
+    }
+    if (!gone) {
+      this.scheduleLocalProcessGroupReconciliation(job, LOCAL_PROCESS_GROUP_RECONCILE_MS);
+      return;
+    }
+    delete job.localProcessGroupPending;
+    delete job.localProcessGroupIdentity;
+    this.appendLog(
+      job,
+      "Studio-Recovery: frühere lokale Prozessgruppe ist nachweislich beendet; Remote-Terminalmeldung wird freigegeben.",
+    );
+    this.changed();
+    await this.flushDgxTerminalDelivery(job);
+    this.scheduleDgxTerminalRetry(job, 0);
+  }
+
   private async pump(): Promise<void> {
-    if (this.runningId !== null) return;
+    if (this.shuttingDown || this.runningId !== null) return;
     const id = this.queue.shift();
     if (!id) return;
     const job = this.jobs.get(id);
     if (!job || job.status !== "queued") return void this.pump();
     this.runningId = id;
+    const runPromise = this.run(job);
+    this.activeRunPromise = runPromise;
     try {
-      await this.run(job);
+      await runPromise;
     } catch (error) {
-      if (this.jobs.get(id)?.status !== "cancelled") {
+      if (!["cancelled", "interrupted"].includes(this.jobs.get(id)?.status ?? "")) {
         const message = `Interner Runner-Fehler: ${
           error instanceof Error ? error.message : "Unerwarteter Fehler im Job-Runner."
         }`;
@@ -701,8 +1144,9 @@ export class JobManager extends EventEmitter {
         }
       }
     } finally {
+      if (this.activeRunPromise === runPromise) this.activeRunPromise = null;
       this.runningId = null;
-      void this.pump();
+      if (!this.shuttingDown) void this.pump();
     }
   }
 
@@ -746,7 +1190,7 @@ export class JobManager extends EventEmitter {
     }
 
     job.identityEvidence = await this.identityEvidenceOperations.capture(job.request, this.assets);
-    if (jobWasCancelled(job)) {
+    if (this.jobShouldStop(job)) {
       this.changed();
       return;
     }
@@ -766,6 +1210,7 @@ export class JobManager extends EventEmitter {
     try {
       job.runProvenance = await this.runProvenanceOperations.capture(job.request, job.plan);
     } catch (error) {
+      if (this.jobShouldStop(job)) return;
       this.failJob(
         job,
         `Laufprovenienz konnte nicht vollständig gebunden werden: ${
@@ -774,7 +1219,7 @@ export class JobManager extends EventEmitter {
       );
       return;
     }
-    if (jobWasCancelled(job)) {
+    if (this.jobShouldStop(job)) {
       this.changed();
       return;
     }
@@ -832,7 +1277,7 @@ export class JobManager extends EventEmitter {
         cwd: repoRoot,
         env: { ...process.env, PYTHONUNBUFFERED: "1" },
       });
-      if (jobWasCancelled(job)) return;
+      if (this.jobShouldStop(job)) return;
       const cacheHit = !cacheResult.error && cacheResult.code === 0 && this.fileReady(longcatOutput);
       if (!cacheHit && (cacheResult.error || cacheResult.code !== 3)) {
         this.failJob(
@@ -853,7 +1298,7 @@ export class JobManager extends EventEmitter {
           cwd: repoRoot,
           env: { ...process.env, PYTHONUNBUFFERED: "1" },
         });
-        if (jobWasCancelled(job)) return;
+        if (this.jobShouldStop(job)) return;
         if (longcatResult.error || longcatResult.code !== 0 || !this.fileReady(longcatOutput)) {
           this.failJob(
             job,
@@ -886,7 +1331,7 @@ export class JobManager extends EventEmitter {
     } else {
       if (!await this.waitForDgxQueueStart(job)) return;
       if (!await this.verifyJobIdentityEvidence(job, "unmittelbar vor dem LTX-Start")) {
-        if (jobWasCancelled(job)) return;
+        if (this.jobShouldStop(job)) return;
         await this.transitionDgxJob(job, "failed", {
           current_step: "identity reference changed before LTX allocation",
           last_error: job.error ?? "identity reference verification failed",
@@ -894,24 +1339,13 @@ export class JobManager extends EventEmitter {
         return;
       }
       if (!await this.verifyJobRunProvenance(job, "unmittelbar vor dem LTX-Start")) {
-        if (jobWasCancelled(job)) return;
+        if (this.jobShouldStop(job)) return;
         await this.transitionDgxJob(job, "failed", {
           current_step: "run provenance changed before LTX allocation",
           last_error: job.error ?? "run provenance verification failed",
         });
         return;
       }
-      const thermalBaselineC = await this.readThermalBaseline(job);
-      if (thermalBaselineC === null) {
-        await this.transitionDgxJob(job, "failed", {
-          current_step: "thermal start gate failed before LTX allocation",
-          last_error: job.error ?? "thermal start gate failed",
-        });
-        return;
-      }
-
-      job.status = "running";
-      job.startedAt ??= now();
       this.appendLog(job, `LTX-Start: ${job.command}`);
       const pythonPath = [
         `${repoRoot}/packages/ltx-core/src`,
@@ -927,63 +1361,121 @@ export class JobManager extends EventEmitter {
         return;
       }
       ltxArgs[outputArgumentIndex + 1] = ltxOutput;
-      const child = spawn(job.plan.executable, ltxArgs, {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          DGX_JOB_ID: job.dgxJobId ?? undefined,
-          PYTHONPATH: pythonPath,
-          PYTHONUNBUFFERED: "1",
-        },
-        detached: true,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      job.process = child;
-      if (!await this.transitionDgxJob(job, "running", { current_step: "ltx native pipeline running" })) {
-        if (jobWasCancelled(job)) return;
-        signalProcessGroup(child, "SIGTERM");
-        setTimeout(() => {
-          if (processIsAlive(child)) signalProcessGroup(child, "SIGKILL");
-        }, 10_000).unref();
-        this.failJob(job, "DGX-Queue-Running-State wurde nicht freigegeben; LTX-Prozess wurde beendet.");
-        await this.transitionDgxJob(job, "failed", {
-          current_step: "failed before LTX output because running transition failed",
-          last_error: job.error ?? "running transition failed",
-        });
-        return;
-      }
-      this.changed();
       const ltxProgressEnd = hybridEnabled
         ? finalAudioMixEnabled ? 80 : 85
         : finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
-      this.consumeProcessLogs(
-        job,
-        child,
-        new PipelineProgressTracker(
-          hybridEnabled ? 20 : 0,
-          ltxProgressEnd,
-          expectedDenoisingStages(job.request),
-        ),
+      const progressTracker = new PipelineProgressTracker(
+        hybridEnabled ? 20 : 0,
+        ltxProgressEnd,
+        expectedDenoisingStages(job.request),
       );
-      const stopThermalWatcher = this.watchThermals(job, child, thermalBaselineC);
-      const ltxResult = await this.waitForProcess(child);
-      stopThermalWatcher();
-      delete job.process;
-      if (jobWasCancelled(job)) {
-        this.changed();
-        return;
-      }
-      if (ltxResult.error || ltxResult.code !== 0 || !this.fileReady(ltxOutput)) {
-        this.failJob(
-          job,
-          ltxResult.error?.message
-            ?? `Pipeline beendet mit Code ${String(ltxResult.code)}${ltxResult.signal ? ` (${ltxResult.signal})` : ""}.`,
-        );
-        await this.transitionDgxJob(job, "failed", {
-          current_step: "ltx native pipeline failed",
-          last_error: job.error ?? "ltx native pipeline failed",
+      const cooperativeEnabled = supportsCooperativeCheckpoint(job.request)
+        && job.plan.executable === pythonExecutable
+        && Boolean(job.runProvenance?.fingerprint);
+      const checkpointManifest = cooperativeCheckpointPath(job.id);
+      const checkpointRoot = dirname(checkpointManifest);
+      if (cooperativeEnabled) mkdirSync(checkpointRoot, { recursive: true, mode: 0o700 });
+
+      while (true) {
+        const thermalBaselineC = await this.readThermalBaseline(job);
+        if (this.jobShouldStop(job)) return;
+        if (thermalBaselineC === null) {
+          await this.transitionDgxJob(job, "failed", {
+            current_step: "thermal start gate failed before LTX allocation",
+            last_error: job.error ?? "thermal start gate failed",
+          });
+          return;
+        }
+
+        job.status = "running";
+        job.startedAt ??= now();
+        const child = spawn(job.plan.executable, ltxArgs, {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            DGX_JOB_ID: job.dgxJobId ?? undefined,
+            LTX_COOPERATIVE_CHECKPOINT_DIR: cooperativeEnabled ? checkpointRoot : undefined,
+            LTX_COOPERATIVE_JOB_FINGERPRINT: cooperativeEnabled
+              ? job.runProvenance?.fingerprint
+              : undefined,
+            PYTHONPATH: pythonPath,
+            PYTHONUNBUFFERED: "1",
+          },
+          detached: true,
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
         });
+        await this.markProcessStarted(job, child);
+        if (!await this.transitionDgxJob(job, "running", {
+          current_step: cooperativeEnabled
+            ? "ltx native pipeline running with cooperative Euler checkpoints"
+            : "ltx native pipeline running",
+        })) {
+          if (this.jobShouldStop(job)) return;
+          this.failJob(job, "DGX-Queue-Running-State wurde nicht freigegeben; LTX-Prozess wurde beendet.");
+          await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
+          return;
+        }
+        this.changed();
+        this.consumeProcessLogs(job, child, progressTracker);
+        const qwenWatcher = cooperativeEnabled
+          ? this.watchQwenDemand(job, checkpointRoot, job.runProvenance!.fingerprint)
+          : null;
+        const stopThermalWatcher = this.watchThermals(job, child, thermalBaselineC);
+        const ltxResult = await this.waitForProcess(child);
+        stopThermalWatcher();
+        await qwenWatcher?.stop();
+        await this.confirmProcessGroupGone(job, child);
+        if (this.jobShouldStop(job)) {
+          return;
+        }
+
+        if (!ltxResult.error && ltxResult.code === LTX_COOPERATIVE_YIELD_EXIT_CODE && cooperativeEnabled) {
+          const artifact = this.validateCooperativeCheckpoint(
+            job,
+            checkpointManifest,
+            qwenWatcher?.requestId() ?? null,
+          );
+          rmSync(join(checkpointRoot, "yield-request.json"), { force: true });
+          if (!artifact) {
+            await this.failDgxJob(
+              job,
+              "LTX meldete einen kooperativen Yield, aber der atomare Checkpoint ist unvollständig oder gehört zu einem anderen Lauf.",
+              "invalid cooperative LTX checkpoint",
+            );
+            return;
+          }
+          if (!await this.pauseAndReacquireDgxSlice(job, artifact)) return;
+          if (!await this.verifyJobRunProvenance(job, "vor dem LTX-Resume")) {
+            await this.transitionDgxJob(job, "failed", {
+              current_step: "run provenance changed before LTX resume",
+              last_error: job.error ?? "run provenance verification failed before resume",
+            });
+            return;
+          }
+          this.appendLog(job, "LTX wird aus dem bestätigten Euler-Checkpoint fortgesetzt.");
+          this.changed();
+          continue;
+        }
+
+        if (ltxResult.error || ltxResult.code !== 0 || !this.fileReady(ltxOutput)) {
+          this.failJob(
+            job,
+            ltxResult.error?.message
+              ?? `Pipeline beendet mit Code ${String(ltxResult.code)}${ltxResult.signal ? ` (${ltxResult.signal})` : ""}.`,
+          );
+          await this.transitionDgxJob(job, "failed", {
+            current_step: "ltx native pipeline failed",
+            last_error: job.error ?? "ltx native pipeline failed",
+          });
+          return;
+        }
+        if (cooperativeEnabled) rmSync(checkpointRoot, { recursive: true, force: true });
+        break;
+      }
+
+      if (this.jobShouldStop(job)) {
+        this.changed();
         return;
       }
       job.progress = Math.max(job.progress ?? 0, ltxProgressEnd);
@@ -1018,7 +1510,7 @@ export class JobManager extends EventEmitter {
           env: { ...process.env, PYTHONUNBUFFERED: "1" },
         },
       );
-      if (jobWasCancelled(job)) return;
+      if (this.jobShouldStop(job)) return;
       if (compositeResult.error || compositeResult.code !== 0 || !this.fileReady(compositeOutput)) {
         await this.failDgxJob(
           job,
@@ -1050,7 +1542,7 @@ export class JobManager extends EventEmitter {
           env: { ...process.env },
         },
       );
-      if (jobWasCancelled(job)) {
+      if (this.jobShouldStop(job)) {
         rmSync(remuxPath, { force: true });
         return;
       }
@@ -1084,7 +1576,7 @@ export class JobManager extends EventEmitter {
     }
 
     if (!await this.verifyJobIdentityEvidence(job, "nach der vollständigen Ausgabe")) {
-      if (!jobWasCancelled(job)) {
+      if (!this.jobShouldStop(job)) {
         await this.transitionDgxJob(job, "failed", {
           current_step: "final identity evidence verification failed",
           last_error: job.error ?? "identity evidence verification failed",
@@ -1093,7 +1585,7 @@ export class JobManager extends EventEmitter {
       return;
     }
     if (!await this.verifyJobRunProvenance(job, "nach der vollständigen Ausgabe")) {
-      if (!jobWasCancelled(job)) {
+      if (!this.jobShouldStop(job)) {
         await this.transitionDgxJob(job, "failed", {
           current_step: "final run provenance verification failed",
           last_error: job.error ?? "run provenance verification failed",
@@ -1139,7 +1631,7 @@ export class JobManager extends EventEmitter {
   private async verifyJobIdentityEvidence(job: RuntimeJob, context: string): Promise<boolean> {
     if (!job.identityEvidence) return true;
     const result = await this.identityEvidenceOperations.verify(job.identityEvidence, this.assets);
-    if (jobWasCancelled(job)) return false;
+    if (this.jobShouldStop(job)) return false;
     job.identityEvidence = result.evidence;
     if (result.error) {
       this.failJob(job, `Identitätsreferenzprüfung ${context} fehlgeschlagen: ${result.error}`);
@@ -1158,7 +1650,7 @@ export class JobManager extends EventEmitter {
       return false;
     }
     const result = await this.runProvenanceOperations.verify(job.runProvenance, job.request);
-    if (jobWasCancelled(job)) return false;
+    if (this.jobShouldStop(job)) return false;
     job.runProvenance = result.evidence;
     if (result.error) {
       this.failJob(job, `Laufprovenienzprüfung ${context} fehlgeschlagen: ${result.error}`);
@@ -1210,7 +1702,7 @@ export class JobManager extends EventEmitter {
 
   private async waitForDelay(job: RuntimeJob, delayMs: number): Promise<boolean> {
     const endAt = Date.now() + delayMs;
-    while (isActiveJobStatus(job.status)) {
+    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
       const remaining = endAt - Date.now();
       if (remaining <= 0) return true;
       await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, Math.min(1_000, remaining)));
@@ -1218,10 +1710,99 @@ export class JobManager extends EventEmitter {
     return false;
   }
 
+  private async reconcilePendingDgxSubmit(
+    job: RuntimeJob,
+  ): Promise<QueueJobSummary | null | undefined> {
+    if (!job.dgxSubmitPending) return null;
+    const list = this.dgxAdmissionOperations.list;
+    if (!list) {
+      this.appendLog(
+        job,
+        "DGX-Submit-Ausgang ist unklar und kann ohne Queue-List-Operation nicht sicher abgeglichen werden.",
+      );
+      this.changed();
+      return undefined;
+    }
+    const requestedBy = `ltx-studio:${job.id}`;
+    const parsedStartedAt = Date.parse(job.dgxSubmitStartedAt ?? "");
+    const startedAt = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
+    const ambiguityDeadline = startedAt + DGX_SUBMIT_AMBIGUITY_MAX_MS;
+    let lastError = "";
+    while (!this.jobShouldStop(job) && job.dgxSubmitPending) {
+      try {
+        const queue = await list();
+        if (this.jobShouldStop(job)) return undefined;
+        const matches = queue.jobs.filter((candidate) => candidate.requested_by === requestedBy);
+        const remote = matches.find((candidate) =>
+          ["submitted", "accepted", "queued", "starting", "running", "pausing", "paused", "resuming"]
+            .includes(candidate.state))
+          ?? matches[0];
+        if (remote) {
+          if (!DGX_REMOTE_TERMINAL_STATES.has(remote.state)) job.dgxJobId = remote.job_id;
+          delete job.dgxSubmitPending;
+          delete job.dgxSubmitStartedAt;
+          this.appendLog(
+            job,
+            `DGX-Submit nach unklarer Antwort autoritativ abgeglichen: ${remote.job_id} ist ${remote.state}.`,
+          );
+          this.changed();
+          return remote;
+        }
+        if (Date.now() >= ambiguityDeadline) {
+          delete job.dgxSubmitPending;
+          delete job.dgxSubmitStartedAt;
+          this.appendLog(
+            job,
+            "DGX-Queue bestätigt nach Ablauf des Submit-Zeitfensters, dass kein Auftrag für diesen Studio-Job existiert.",
+          );
+          this.changed();
+          return null;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== lastError) {
+          lastError = message;
+          this.appendLog(job, `DGX-Submit-Abgleich wartet auf eine autoritative Queue-Antwort: ${message}`);
+          this.changed();
+        }
+      }
+      const remaining = Math.max(1, ambiguityDeadline - Date.now());
+      if (!await this.waitForDelay(job, Math.min(DGX_SUBMIT_RECONCILE_POLL_MS, remaining))) {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
   private async waitForDgxQueueStart(job: RuntimeJob): Promise<boolean> {
     if (!await this.waitForLocalPreAdmissionResources(job)) return false;
-    while (isActiveJobStatus(job.status)) {
+    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
+      if (job.dgxSubmitPending) {
+        const recovered = await this.reconcilePendingDgxSubmit(job);
+        if (recovered === undefined) return false;
+        if (recovered) {
+          if (recovered.state === "accepted") {
+            const outcome = await this.startAcceptedDgxJob(job);
+            if (outcome === "started") return true;
+            if (outcome === "stopped") return false;
+          } else if (recovered.state === "queued") {
+            const outcome = await this.waitForQueuedDgxJob(job, DGX_START_FENCE_RETRY_MS);
+            if (outcome === "started") return true;
+            if (outcome === "stopped") return false;
+          } else {
+            this.failJob(
+              job,
+              `Der zuvor unklare DGX-Submit ist bereits terminal: ${recovered.state}`
+                + `${recovered.last_error ? ` - ${recovered.last_error}` : ""}.`,
+            );
+            return false;
+          }
+          if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
+          continue;
+        }
+      }
       let response;
+      const submitAbortController = new AbortController();
       try {
         this.appendLog(job, "DGX-Queue: Renderbedarf wird beim Orchestrator eingereicht; laufende Anwendungen werden nicht direkt beendet.");
         const estimate = estimateRequest(job.request, this.list());
@@ -1231,14 +1812,33 @@ export class JobManager extends EventEmitter {
         );
         this.appendLog(
           job,
-          `DGX-Queue: Ressourcenprognose ${estimate.memoryGiB} GiB RAM plus ${minResidualMemoryGiB} GiB `
-            + `Restpuffer, Startanforderung ${requiredStartMemoryGiB} GiB, ${estimate.outputGiB.toFixed(2)} GiB Ausgabe.`,
+          `DGX-Queue: Modellbedarf ${estimate.memoryGiB} GiB RAM; das separate lokale Start-Gate verlangt `
+            + `${requiredStartMemoryGiB} GiB inklusive ${minResidualMemoryGiB} GiB Restpuffer, `
+            + `${estimate.outputGiB.toFixed(2)} GiB Ausgabe.`,
         );
-        response = await this.dgxAdmissionOperations.submit(job.request, requiredStartMemoryGiB, job.id);
+        job.dgxSubmitPending = true;
+        job.dgxSubmitStartedAt = now();
+        job.dgxAdmissionAbortController = submitAbortController;
+        this.changed();
+        response = await this.dgxAdmissionOperations.submit(
+          job.request,
+          estimate.memoryGiB,
+          job.id,
+          submitAbortController.signal,
+        );
+        delete job.dgxAdmissionAbortController;
+        delete job.dgxSubmitPending;
+        delete job.dgxSubmitStartedAt;
       } catch (error) {
-        if (jobWasCancelled(job)) return false;
-        this.failJob(job, error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.");
-        return false;
+        delete job.dgxAdmissionAbortController;
+        const message = error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.";
+        this.appendLog(
+          job,
+          `DGX-Queue-Submit endete ohne autoritative Antwort; der Auftrag wird vor jedem weiteren Submit abgeglichen: ${message}`,
+        );
+        this.changed();
+        if (this.jobShouldStop(job)) return false;
+        continue;
       }
 
       const { admission, job: queueJob } = response;
@@ -1246,10 +1846,20 @@ export class JobManager extends EventEmitter {
         job.dgxJobId = queueJob.job_id;
         this.changed();
       }
-      if (jobWasCancelled(job)) {
+      if (this.jobShouldStop(job)) {
+        if (this.shuttingDown && job.status === "queued" && job.dgxJobId) {
+          const queueIndex = this.queue.indexOf(job.id);
+          if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
+          job.status = "interrupted";
+          job.finishedAt = now();
+        }
         this.prepareDgxTerminalDelivery(job, "cancelled", {
-          current_step: "cancelled while DGX queue submit was in flight",
-          last_error: "manual Studio cancellation",
+          current_step: this.shuttingDown
+            ? "LTX Studio stopped while DGX queue submit was in flight"
+            : "cancelled while DGX queue submit was in flight",
+          last_error: this.shuttingDown
+            ? "Studio shutdown won the queue submit race"
+            : "manual Studio cancellation",
         });
         this.changed();
         await this.flushDgxTerminalDelivery(job);
@@ -1300,7 +1910,7 @@ export class JobManager extends EventEmitter {
 
   private async waitForQueuedDgxJob(job: RuntimeJob, initialDelayMs: number): Promise<DgxStartOutcome> {
     let delayMs = initialDelayMs;
-    while (isActiveJobStatus(job.status) && job.dgxJobId) {
+    while (!this.shuttingDown && isActiveJobStatus(job.status) && job.dgxJobId) {
       this.appendLog(job, `DGX-Queue-Job wartet beim Orchestrator; nächste Prüfung in ${(delayMs / 1000).toFixed(0)} s.`);
       this.changed();
       if (!await this.waitForDelay(job, delayMs)) return "stopped";
@@ -1308,7 +1918,7 @@ export class JobManager extends EventEmitter {
       try {
         response = await this.dgxQueueOperations.read(job.dgxJobId);
       } catch (error) {
-        if (jobWasCancelled(job)) return "stopped";
+        if (this.jobShouldStop(job)) return "stopped";
         const message = error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.";
         this.appendLog(job, `DGX-Queue-Status vorübergehend nicht lesbar: ${message}. Prüfung wird wiederholt.`);
         this.changed();
@@ -1366,7 +1976,7 @@ export class JobManager extends EventEmitter {
       current_step: "thermal start gate before LTX allocation",
     });
     if (started) return isActiveJobStatus(job.status) ? "started" : "stopped";
-    if (jobWasCancelled(job)) return "stopped";
+    if (this.jobShouldStop(job)) return "stopped";
     const message = "DGX-Queue-Start-Fence wurde nicht freigegeben.";
     this.prepareDgxTerminalDelivery(job, "cancelled", {
       current_step: "starting transition failed before LTX allocation",
@@ -1385,7 +1995,7 @@ export class JobManager extends EventEmitter {
     let lastLogAt = 0;
     const acceptedAt = Date.now();
     let nextRemotePollAt = acceptedAt + DGX_ACCEPTED_REMOTE_POLL_MS;
-    while (isActiveJobStatus(job.status)) {
+    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
       const snapshot = this.readStartResourceSnapshot();
       const issue = validateStartResources(snapshot, requirements);
       const currentTime = Date.now();
@@ -1475,7 +2085,7 @@ export class JobManager extends EventEmitter {
     let lastIssue: string | null = null;
     let lastLogAt = 0;
 
-    while (isActiveJobStatus(job.status)) {
+    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
       const snapshot = this.readStartResourceSnapshot();
       const issue = validatePreAdmissionResources(snapshot, requirements);
       if (issue === null) {
@@ -1513,7 +2123,7 @@ export class JobManager extends EventEmitter {
     }
     if (job.dgxStateTransitionInFlight) return job.dgxStateTransitionInFlight;
     const transitionPromise = (async () => {
-      while (isActiveJobStatus(job.status)) {
+      while (!this.shuttingDown && isActiveJobStatus(job.status)) {
         try {
           const response = await this.dgxQueueOperations.transition(job.dgxJobId!, state, metadata);
           this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
@@ -1558,7 +2168,7 @@ export class JobManager extends EventEmitter {
     const detail = transitionError instanceof Error
       ? transitionError.message
       : String(transitionError);
-    while (isActiveJobStatus(job.status) && job.dgxJobId) {
+    while (!this.shuttingDown && isActiveJobStatus(job.status) && job.dgxJobId) {
       let remote;
       try {
         remote = (await this.dgxQueueOperations.read(job.dgxJobId)).job;
@@ -1637,6 +2247,7 @@ export class JobManager extends EventEmitter {
 
   private async flushDgxTerminalDelivery(job: RuntimeJob): Promise<boolean> {
     if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
+    if (job.localProcessGroupPending) return false;
     if (job.dgxTerminalDeliveryInFlight) return job.dgxTerminalDeliveryInFlight;
     if (job.dgxStateTransitionInFlight) await job.dgxStateTransitionInFlight;
     if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
@@ -1757,10 +2368,12 @@ export class JobManager extends EventEmitter {
 
   private scheduleDgxTerminalRetry(job: RuntimeJob, delayOverrideMs?: number): void {
     if (
-      this.dgxTerminalRetryBaseMs === null
+      this.shuttingDown
+      || this.dgxTerminalRetryBaseMs === null
       || !job.dgxTerminalDelivery
       || job.dgxJobTerminal
       || job.dgxTerminalRetry
+      || job.localProcessGroupPending
     ) {
       return;
     }
@@ -1786,7 +2399,6 @@ export class JobManager extends EventEmitter {
     job.finishedAt = now();
     if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
     this.appendLog(job, message);
-    delete job.process;
     this.changed();
     this.scheduleDgxTerminalRetry(job, 0);
   }
@@ -1847,6 +2459,200 @@ export class JobManager extends EventEmitter {
     });
   }
 
+  private watchQwenDemand(
+    job: RuntimeJob,
+    checkpointRoot: string,
+    fingerprint: string,
+  ): { stop: () => Promise<void>; requestId: () => string | null } {
+    const requestPath = join(checkpointRoot, "yield-request.json");
+    const readyPath = join(checkpointRoot, "yield-ready.json");
+    let currentRequestId: string | null = null;
+    let stopped = false;
+    let pollInFlight: Promise<void> | null = null;
+
+    const poll = async (): Promise<void> => {
+      let visible = true;
+      try {
+        const demand = await this.dgxDemandOperations.read();
+        if (demand.schema_version !== "dgx-qwen-demand.v0" || typeof demand.visible !== "boolean") {
+          throw new Error("Qwen-Demand-Antwort verletzt den API-Vertrag");
+        }
+        visible = demand.visible;
+      } catch (error) {
+        process.stderr.write(`LTX Studio Qwen-Demand-Wächter (fail-closed): ${String(error)}\n`);
+      }
+      const child = job.process;
+      if (stopped || !child || !processIsAlive(child)) return;
+
+      if (visible && currentRequestId === null) {
+        currentRequestId = randomUUID();
+        rmSync(readyPath, { force: true });
+        atomicJsonFile(requestPath, {
+          schema_version: "ltx-cooperative-yield-request.v1",
+          job_fingerprint: fingerprint,
+          request_id: currentRequestId,
+          requested_at: now(),
+          reason: "production Qwen demand visible",
+        });
+        this.appendLog(
+          job,
+          "Produktions-Qwen wird benötigt. LTX schreibt nach dem aktuellen Diffusionsschritt einen Checkpoint.",
+        );
+        this.changed();
+      } else if (!visible && currentRequestId !== null && !existsSync(readyPath)) {
+        rmSync(requestPath, { force: true });
+        currentRequestId = null;
+        this.appendLog(job, "Qwen-Bedarf endete vor der Checkpoint-Grenze; der aktuelle LTX-Slice läuft weiter.");
+        this.changed();
+      }
+    };
+    const startPoll = (): void => {
+      if (pollInFlight || stopped) return;
+      pollInFlight = poll().finally(() => {
+        pollInFlight = null;
+      });
+    };
+    startPoll();
+    const timer = setInterval(startPoll, QWEN_DEMAND_POLL_MS);
+    timer.unref();
+
+    return {
+      stop: async () => {
+        stopped = true;
+        clearInterval(timer);
+        await pollInFlight;
+      },
+      requestId: () => currentRequestId,
+    };
+  }
+
+  private validateCooperativeCheckpoint(
+    job: RuntimeJob,
+    manifestPath: string,
+    expectedRequestId: string | null,
+  ): QueueArtifact | null {
+    const manifest = readJsonObject(manifestPath);
+    const fingerprint = job.runProvenance?.fingerprint;
+    if (
+      !manifest
+      || manifest.schema_version !== "ltx-cooperative-checkpoint.v1"
+      || manifest.job_fingerprint !== fingerprint
+      || typeof manifest.request_id !== "string"
+      || (expectedRequestId !== null && manifest.request_id !== expectedRequestId)
+      || manifest.state_file !== "state.pt"
+      || typeof manifest.loop_index !== "number"
+      || typeof manifest.next_step_index !== "number"
+    ) {
+      return null;
+    }
+    const statePath = join(dirname(manifestPath), "state.pt");
+    if (!this.fileReady(statePath)) return null;
+    return {
+      type: "ltx-cooperative-checkpoint",
+      path: manifestPath,
+      size_bytes: statSync(manifestPath).size + statSync(statePath).size,
+      note: `Euler loop ${String(manifest.loop_index)}, next diffusion step ${String(manifest.next_step_index)}`,
+    };
+  }
+
+  private async waitForQwenIdleGrace(job: RuntimeJob): Promise<boolean> {
+    let idleSince: number | null = null;
+    let demandWasVisible: boolean | null = null;
+    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
+      let visible = true;
+      try {
+        const demand = await this.dgxDemandOperations.read();
+        visible = demand.schema_version === "dgx-qwen-demand.v0"
+          && typeof demand.visible === "boolean"
+          ? demand.visible
+          : true;
+      } catch {
+        visible = true;
+      }
+      if (visible) {
+        idleSince = null;
+      } else {
+        idleSince ??= Date.now();
+        if (Date.now() - idleSince >= QWEN_IDLE_GRACE_MS) return true;
+      }
+      if (visible !== demandWasVisible) {
+        this.appendLog(
+          job,
+          visible
+            ? "LTX bleibt ressourcenfrei, solange Produktions-Qwen angefordert ist."
+            : `Qwen-Bedarf ist beendet; LTX wartet noch ${Math.ceil(QWEN_IDLE_GRACE_MS / 1000)} s Ruhezeit.`,
+        );
+        this.changed();
+        demandWasVisible = visible;
+      }
+      if (!await this.waitForDelay(job, QWEN_DEMAND_POLL_MS)) return false;
+    }
+    return false;
+  }
+
+  private async pauseAndReacquireDgxSlice(
+    job: RuntimeJob,
+    artifact: QueueArtifact,
+  ): Promise<boolean> {
+    const pausedJobId = job.dgxJobId;
+    if (!pausedJobId) {
+      this.failJob(job, "LTX-Checkpoint wurde geschrieben, aber die zugehörige DGX-Zuteilung fehlt.");
+      return false;
+    }
+    if (!await this.transitionDgxJob(job, "pausing", {
+      current_step: "LTX Euler checkpoint committed; process exited before resource release",
+      artifact,
+    })) {
+      this.failJob(job, "DGX-Queue konnte den LTX-Slice nicht auf pausing setzen.");
+      return false;
+    }
+    if (!await this.transitionDgxJob(job, "paused", {
+      current_step: "LTX process exited and cooperative checkpoint is durable",
+      artifact,
+    })) {
+      this.failJob(job, "DGX-Queue konnte die bestätigte ressourcenfreie LTX-Pause nicht speichern.");
+      return false;
+    }
+
+    job.status = "paused";
+    this.appendLog(
+      job,
+      `LTX-Slice ${pausedJobId} ist ressourcenfrei pausiert; Qwen erhält die Produktionspriorität.`,
+    );
+    this.changed();
+    if (!await this.waitForQwenIdleGrace(job)) return false;
+
+    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
+      try {
+        const cancelled = await this.dgxQueueOperations.transition(pausedJobId, "cancelled", {
+          current_step: "paused LTX slice retired before fresh resume admission",
+          artifact,
+        });
+        if (cancelled.job.state !== "cancelled") {
+          throw new Error(`Orchestrator bestätigte ${cancelled.job.state} statt cancelled`);
+        }
+        break;
+      } catch (error) {
+        this.appendLog(
+          job,
+          `Pausierter DGX-Slice konnte noch nicht abgeschlossen werden: ${error instanceof Error ? error.message : String(error)}.`,
+        );
+        this.changed();
+        if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
+      }
+    }
+    if (!isActiveJobStatus(job.status)) return false;
+
+    job.dgxJobId = null;
+    job.dgxJobTerminal = false;
+    delete job.dgxTerminalDelivery;
+    delete job.dgxTerminalDeliveryInFlight;
+    if (!await this.waitForDgxQueueStart(job)) return false;
+    this.appendLog(job, `LTX-Resume hat eine frische DGX-Zuteilung ${job.dgxJobId ?? "unbekannt"} erhalten.`);
+    this.changed();
+    return true;
+  }
+
   private async runLoggedProcess(
     job: RuntimeJob,
     executable: string,
@@ -1859,12 +2665,10 @@ export class JobManager extends EventEmitter {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    job.process = child;
+    await this.markProcessStarted(job, child);
     this.consumeProcessLogs(job, child);
-    this.changed();
     const result = await this.waitForProcess(child);
-    if (job.process === child) delete job.process;
-    this.changed();
+    await this.confirmProcessGroupGone(job, child);
     return result;
   }
 
@@ -1873,7 +2677,7 @@ export class JobManager extends EventEmitter {
       samples: thermalStartSamples,
       intervalMs: thermalStartSampleIntervalMs,
     });
-    if (job.status === "cancelled") return null;
+    if (this.jobShouldStop(job)) return null;
     if (maxC !== null && maxC < thermalPauseC) {
       const resumeBelowC = Math.min(maxC + 0.1, thermalPauseC - 0.1);
       job.thermalProfile = {
@@ -1973,7 +2777,7 @@ export class JobManager extends EventEmitter {
   private async waitForLongcatResources(job: RuntimeJob): Promise<boolean> {
     let lastAvailable: number | null = null;
     let lastLogAt = 0;
-    while (job.status === "queued") {
+    while (!this.shuttingDown && job.status === "queued") {
       const resource = readResourceSnapshot();
       const available = resource.availableMemoryGiB;
       if (available !== null && available >= longcatMinAvailableGiB) {
@@ -1981,7 +2785,7 @@ export class JobManager extends EventEmitter {
           samples: thermalStartSamples,
           intervalMs: thermalStartSampleIntervalMs,
         });
-        if (job.status !== "queued") return false;
+        if (this.shuttingDown || job.status !== "queued") return false;
         if (temperatureC !== null && temperatureC < longcatThermalStartMaxC) {
           this.appendLog(
             job,
@@ -2048,10 +2852,11 @@ export class JobManager extends EventEmitter {
         ...stored.slice(0, MAX_JOBS),
         ...stored.slice(MAX_JOBS).filter((entry) => {
           const hasPendingTerminal = normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery) !== undefined;
+          const hasPendingSubmit = entry.dgxSubmitPending === true;
           const hasActiveRemoteLease = isActiveJobStatus(entry.status)
             && typeof entry.dgxJobId === "string"
             && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId);
-          return hasPendingTerminal || hasActiveRemoteLease;
+          return hasPendingTerminal || hasPendingSubmit || hasActiveRemoteLease;
         }),
       ];
       for (const entry of retained) {
@@ -2059,7 +2864,13 @@ export class JobManager extends EventEmitter {
         if (!migratedRequest || typeof entry.id !== "string" || !/^[0-9a-f-]{36}$/i.test(entry.id)) continue;
         const storedStatus: JobStatus = ["queued", "running", "paused", "completed", "failed", "cancelled", "interrupted"]
           .includes(entry.status) ? entry.status : "interrupted";
-        let status: JobStatus = isActiveJobStatus(storedStatus) ? "interrupted" : storedStatus;
+        const dgxJobId = typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
+          ? entry.dgxJobId
+          : null;
+        const recoverableLocalQueue = storedStatus === "queued" && dgxJobId === null;
+        let status: JobStatus = recoverableLocalQueue
+          ? "queued"
+          : isActiveJobStatus(storedStatus) ? "interrupted" : storedStatus;
         const plan = buildCommand(migratedRequest);
         let outputReady = false;
         if (status === "completed") {
@@ -2076,11 +2887,12 @@ export class JobManager extends EventEmitter {
         const storedProgress = typeof entry.progress === "number" && Number.isFinite(entry.progress)
           ? Math.min(100, Math.max(0, entry.progress))
           : null;
-        const dgxJobId = typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
-          ? entry.dgxJobId
-          : null;
         const restoredTerminalDelivery = dgxJobId
           ? normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery)
+          : undefined;
+        const restoredProcessGroupIdentity = entry.localProcessGroupPending === true
+          && isLocalProcessGroupIdentity(entry.localProcessGroupIdentity)
+          ? entry.localProcessGroupIdentity
           : undefined;
         const interruptedRemoteDelivery = interrupted
           && isActiveJobStatus(storedStatus)
@@ -2102,6 +2914,19 @@ export class JobManager extends EventEmitter {
           : [];
         if (interruptedRemoteDelivery) {
           restoredLogs.push("Studio-Neustart: Remote-Queue-Lease wird als cancelled abgemeldet.");
+        } else if (recoverableLocalQueue) {
+          restoredLogs.push(
+            entry.dgxSubmitPending === true
+              ? "Studio-Neustart: unklarer Queue-Submit wird vor jeder Fortsetzung autoritativ abgeglichen."
+              : "Studio-Neustart: rein lokal wartender Job wird automatisch fortgesetzt.",
+          );
+        }
+        if (entry.localProcessGroupPending === true) {
+          restoredLogs.push(
+            restoredProcessGroupIdentity
+              ? "Studio-Neustart: frühere Prozessgruppe wird bootgebunden über /proc geprüft; bis zum Abwesenheitsbeweis bleibt die Remote-Lease gesperrt."
+              : "Studio-Neustart: Remote-Lease bleibt gesperrt, weil für die frühere lokale Prozessgruppe keine sichere Identität vorliegt.",
+          );
         }
         this.jobs.set(entry.id, {
           ...entry,
@@ -2167,10 +2992,17 @@ export class JobManager extends EventEmitter {
           dgxTerminalDelivery: dgxJobId
             ? restoredTerminalDelivery ?? interruptedRemoteDelivery
             : undefined,
+          localProcessGroupPending: entry.localProcessGroupPending === true || undefined,
+          localProcessGroupIdentity: restoredProcessGroupIdentity,
+          dgxSubmitPending: entry.dgxSubmitPending === true || undefined,
+          dgxSubmitStartedAt: entry.dgxSubmitPending === true
+            ? validTimestamp(entry.dgxSubmitStartedAt, now()) ?? undefined
+            : undefined,
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
           runProvenance: normalizeRunProvenance(entry.runProvenance),
           plan,
         });
+        if (recoverableLocalQueue) this.queue.push(entry.id);
       }
     } catch {
       // Invalid history never blocks a fresh local studio session.

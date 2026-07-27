@@ -38,7 +38,14 @@ describe("fail-closed start resources", () => {
     expect(validateStartResources(
       { ...healthy, swapFreeGiB: 1.96 },
       requirements,
-    )).toContain("mindestens 4 GiB");
+    )).toContain("gemeinsame Sicherheitsreserve");
+  });
+
+  it("accepts low free swap only when excess available RAM covers the reserve", () => {
+    expect(validateStartResources(
+      { ...healthy, availableMemoryGiB: 102, swapFreeGiB: 3.7 },
+      requirements,
+    )).toBeNull();
   });
 
   it("blocks unknown memory, swap and output evidence", () => {

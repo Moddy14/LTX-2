@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, expect, it } from "vitest";
 
-import { appRoot, pythonExecutable } from "../server/config.js";
+import { analysisTempRoot, appRoot, pythonExecutable } from "../server/config.js";
+import { capturePinnedPathRevision } from "../server/evaluatorBindings.js";
 import type { PhonemeVisemeEvaluatorState } from "../server/evaluatorManifest.js";
 import { writeOutputAnalysis } from "../server/analysisStore.js";
 import type { StudioJob } from "../server/jobs.js";
@@ -16,6 +17,8 @@ import {
   cleanupAnalysisTempRoot,
   combinedEvaluatorFingerprint,
   OutputAnalysisManager,
+  recoverPhonemeVisemeSandboxState,
+  stopSystemdUnit,
 } from "../server/outputAnalysis.js";
 import type { DialogueEvaluatorState } from "../server/dialogueEvaluator.js";
 import { OutputLibrary } from "../server/outputs.js";
@@ -34,6 +37,11 @@ const runtimeAvailable = existsSync(faceModel)
   && spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0
   && spawnSync(pythonExecutable, ["-c", "import cv2"], { stdio: "ignore" }).status === 0;
 const integrationIt = runtimeAvailable ? it : it.skip;
+const systemSandboxIt = spawnSync(
+  "/usr/bin/sudo",
+  ["-n", "/usr/bin/systemctl", "--version"],
+  { stdio: "ignore" },
+).status === 0 ? it : it.skip;
 const roots: string[] = [];
 const dialogueEvaluatorState: DialogueEvaluatorState = {
   status: "ready",
@@ -174,6 +182,78 @@ function job(
   };
 }
 
+async function writePythonScript(path: string, lines: string[]): Promise<string> {
+  const source = lines.join("\n");
+  await writeFile(path, source);
+  return createHash("sha256").update(source).digest("hex");
+}
+
+async function writePhonemeVisemeResultRunner(
+  path: string,
+  result: Record<string, unknown>,
+): Promise<string> {
+  return writePythonScript(path, [
+    "import hashlib,json,pathlib",
+    `result=json.loads(${JSON.stringify(JSON.stringify(result))})`,
+    "if result.get('measurement') is not None:",
+    "    result['measurement']['runnerFingerprint']=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()",
+    "print(json.dumps(result))",
+    "",
+  ]);
+}
+
+function evaluatorStateForRunner(
+  root: string,
+  runnerPath: string,
+  runnerSha256: string,
+  readOnlyPaths = [runnerPath],
+): PhonemeVisemeEvaluatorState {
+  const pythonRuntimeRoot = dirname(dirname(pythonExecutable));
+  return {
+    fingerprint: `manifest-v2-runner-fixture:${runnerSha256}`,
+    result: {
+      ...unavailablePhonemeVisemeResult("Measurement only.", "product-go-pending"),
+      manifestReleaseId: "pv-runner-fixture",
+      manifestSha256: "a".repeat(64),
+      preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+      visemeMapVersion: "viseme15-en-de.v1",
+    },
+    execution: {
+      method: "mfa-mediapipe-de.v1",
+      sandbox: "systemd-system-sandbox.v1",
+      artifactRoot: root,
+      readOnlyPaths,
+      manifestPath: join(root, "manifest.json"),
+      manifestSha256: "a".repeat(64),
+      legalApprovalSha256: "c".repeat(64),
+      runnerPath,
+      runnerSha256,
+      pythonExecutable,
+      pythonRuntimeRoot,
+      boundPathRevisions: [
+        ...readOnlyPaths.map((path) => capturePinnedPathRevision(path, "file")),
+        capturePinnedPathRevision(pythonRuntimeRoot, "directory"),
+      ],
+      mfaExecutablePath: join(root, "mfa"),
+      acousticModelPath: join(root, "acoustic.zip"),
+      dictionaryPath: join(root, "dictionary.dict"),
+      g2pModelPath: null,
+      faceLandmarkerPath: join(root, "face.task"),
+      visemeMappingPath: join(root, "viseme.json"),
+      runtime: {
+        pythonVersion: "3.12.3",
+        mfaVersion: "3.3.9",
+        mediaPipeVersion: "0.10.31",
+        openCvVersion: "4.13.0",
+        numpyVersion: "2.4.2",
+        ffmpegVersion: "7.1.1",
+        ffmpegSha256: "1".repeat(64),
+        ffprobeSha256: "2".repeat(64),
+      },
+    },
+  };
+}
+
 function measuredIdentity(
   preprocessingVersion: "yunet5-aligncrop-112.v1" | "yunet5-aligncrop-112-track.v2",
 ): ObjectiveWorkerResult["identity"] {
@@ -279,6 +359,760 @@ integrationIt("runs the bounded CPU worker through the persisted analysis queue"
       },
     },
   });
+}, 20_000);
+
+it("executes and persists a measurement-only phoneme/viseme result without granting quality GO", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-runner-"));
+  roots.push(root);
+  const outputName = "measurement-only.mp4";
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const expectedDialogue = completedJob.request.promptParts.dialogue;
+  const expectedDialogueHash = createHash("sha256").update(expectedDialogue, "utf8").digest("hex");
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const runnerMeasurementResult = {
+    schemaVersion: "ltx-studio-mfa-mediapipe-runner.v1",
+    status: "measurement-only",
+    error: "MFA/MediaPipe raw evidence only; independent Product-GO remains blocked.",
+    manifestReleaseId: "pv-measurement-test",
+    manifestSha256: "a".repeat(64),
+    preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+    visemeMapVersion: "viseme15-en-de.v1",
+    offset: {
+      status: "measured",
+      estimatedOffsetMilliseconds: 42,
+      confidence: 0.8,
+    },
+    measurement: {
+      method: "mfa-mediapipe-de.v1",
+      runnerFingerprint: "b".repeat(64),
+      expectedDialogueSha256: expectedDialogueHash,
+      globalAvLagMilliseconds: 42,
+      lagConfidence: 0.8,
+      bilabialClosureF1: 0.75,
+      openingCorrelation: 0.7,
+      roundingCorrelation: 0.6,
+      speechMotionRecall: 0.9,
+      pauseLeakRatio: 0.1,
+      phoneCoverage: 1,
+      unknownPhones: [],
+      faceTrackCoverage: 1,
+      mouthTrackCoverage: 1,
+      multiFaceFrameRatio: 0,
+      medianBlurVariance: 100,
+      yawP95Degrees: 5,
+      pitchP95Degrees: 4,
+      usableDurationSeconds: 4,
+      sampledFrames: 96,
+    },
+  };
+  const initialRunnerSha = await writePhonemeVisemeResultRunner(
+    pvRunnerScript,
+    runnerMeasurementResult,
+  );
+  runnerMeasurementResult.measurement.runnerFingerprint = initialRunnerSha;
+  const evaluatorState: PhonemeVisemeEvaluatorState = {
+    fingerprint: "manifest-v2-measurement-ready:test",
+    result: {
+      ...unavailablePhonemeVisemeResult(
+        "Measurement runner is ready; Product-GO remains blocked.",
+        "product-go-pending",
+      ),
+      manifestReleaseId: "pv-measurement-test",
+      manifestSha256: "a".repeat(64),
+      preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+      visemeMapVersion: "viseme15-en-de.v1",
+    },
+    execution: evaluatorStateForRunner(root, pvRunnerScript, initialRunnerSha).execution!,
+  };
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeSystemdSandbox: false,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 200
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      status: "insufficient",
+      capabilities: {
+        phonemeViseme: "measurement-only",
+      },
+      phonemeViseme: {
+        status: "measurement-only",
+        blockerCode: "product-go-pending",
+        productGo: { status: "blocked" },
+        offset: {
+          status: "measured",
+          gatePassed: false,
+          estimatedOffsetMilliseconds: 42,
+          confidence: 0.8,
+        },
+        content: {
+          status: "insufficient",
+          gatePassed: false,
+          frameMacroF1: null,
+          transitionF1: null,
+        },
+        measurement: runnerMeasurementResult.measurement,
+      },
+    },
+  });
+  expect(current?.result?.findings).toContainEqual(expect.objectContaining({
+    code: "phoneme-viseme-measurement-only",
+  }));
+
+  const unboundMeasurementResult = {
+    ...runnerMeasurementResult,
+    measurement: {
+      ...runnerMeasurementResult.measurement,
+      expectedDialogueSha256: "d".repeat(64),
+    },
+  };
+  if (!evaluatorState.execution) throw new Error("Test-Evaluator muss ausführbar sein.");
+  evaluatorState.execution.runnerSha256 = await writePhonemeVisemeResultRunner(
+    pvRunnerScript,
+    unboundMeasurementResult,
+  );
+  evaluatorState.execution.boundPathRevisions = [
+    capturePinnedPathRevision(pvRunnerScript, "file"),
+    capturePinnedPathRevision(evaluatorState.execution.pythonRuntimeRoot!, "directory"),
+  ];
+  manager.start(outputName, true);
+  current = manager.get(outputName);
+  for (let attempt = 0; attempt < 200
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      status: "insufficient",
+      phonemeViseme: {
+        status: "failed",
+        blockerCode: "evaluator-failed",
+        error: "Phonem-/Visem-Runner lieferte ungebundene Runner- oder Dialogevidenz.",
+      },
+    },
+  });
+
+  const inconsistentOffsetResult = {
+    ...runnerMeasurementResult,
+    offset: {
+      ...runnerMeasurementResult.offset,
+      estimatedOffsetMilliseconds: 84,
+    },
+  };
+  evaluatorState.execution.runnerSha256 = await writePhonemeVisemeResultRunner(
+    pvRunnerScript,
+    inconsistentOffsetResult,
+  );
+  evaluatorState.execution.boundPathRevisions = [
+    capturePinnedPathRevision(pvRunnerScript, "file"),
+    capturePinnedPathRevision(evaluatorState.execution.pythonRuntimeRoot!, "directory"),
+  ];
+  manager.start(outputName, true);
+  current = manager.get(outputName);
+  for (let attempt = 0; attempt < 200
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      status: "insufficient",
+      phonemeViseme: {
+        status: "failed",
+        blockerCode: "evaluator-failed",
+        error: expect.stringContaining("Phonem-/Visem-Runner lieferte ungültige Messdaten"),
+      },
+    },
+  });
+
+  const forgedProductGo = {
+    ...runnerMeasurementResult,
+    status: "measured",
+    productGo: { status: "passed", reason: "forged" },
+    gateVersion: "ltx-pv-release-gates.v1",
+    content: {
+      status: "measured",
+      gatePassed: true,
+      frameMacroF1: 1,
+      transitionF1: 1,
+    },
+  };
+  evaluatorState.execution.runnerSha256 = await writePhonemeVisemeResultRunner(
+    pvRunnerScript,
+    forgedProductGo,
+  );
+  evaluatorState.execution.boundPathRevisions = [
+    capturePinnedPathRevision(pvRunnerScript, "file"),
+    capturePinnedPathRevision(evaluatorState.execution.pythonRuntimeRoot!, "directory"),
+  ];
+  manager.start(outputName, true);
+  current = manager.get(outputName);
+  for (let attempt = 0; attempt < 200
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      status: "insufficient",
+      phonemeViseme: {
+        status: "failed",
+        blockerCode: "evaluator-failed",
+      },
+    },
+  });
+  if (current?.result?.schemaVersion !== "ltx-studio-objective-quality.v7") {
+    throw new Error("Aktuelles objektives Analyseschema erwartet.");
+  }
+  expect(current.result.phonemeViseme.error).toContain(
+    "Phonem-/Visem-Runner lieferte ungültige Messdaten",
+  );
+});
+
+systemSandboxIt("stops the complete transient measurement unit before cleaning an oversized runner", async () => {
+  await mkdir(analysisTempRoot, { recursive: true });
+  const root = await mkdtemp(join(analysisTempRoot, "systemd-test-"));
+  roots.push(root);
+  const outputName = "sandbox-oversized.mp4";
+  const outputPath = join(root, outputName);
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  await writeFile(outputPath, "synthetic video fixture");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const pvRunnerSha = await writePythonScript(pvRunnerScript, [
+    "import os",
+    "chunk=b'x' * 65536",
+    "while True:",
+    "    os.write(1,chunk)",
+    "",
+  ]);
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState: PhonemeVisemeEvaluatorState = {
+    fingerprint: "manifest-v2-system-sandbox-test",
+    result: {
+      ...unavailablePhonemeVisemeResult(
+        "Measurement runner is ready; Product-GO remains blocked.",
+        "product-go-pending",
+      ),
+      manifestReleaseId: "pv-system-sandbox-test",
+      manifestSha256: "a".repeat(64),
+      preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+      visemeMapVersion: "viseme15-en-de.v1",
+    },
+    execution: evaluatorStateForRunner(root, pvRunnerScript, pvRunnerSha).execution!,
+  };
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-temp"),
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeRuntimeVerifier: () => undefined,
+    phonemeVisemeTrustVerifier: () => undefined,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  const started = manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 400
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      phonemeViseme: {
+        status: "failed",
+        blockerCode: "evaluator-failed",
+        error: "Phonem-/Visem-Ausgabe überschritt das Größenlimit.",
+      },
+    },
+  });
+  expect(spawnSync(
+    "/usr/bin/sudo",
+    ["-n", "/usr/bin/systemctl", "is-active", "--quiet", `ltx-pv-${started.analysisId}`],
+    { stdio: "ignore" },
+  ).status).not.toBe(0);
+  expect(await readdir(join(root, "analysis-temp"))).toEqual([]);
+}, 20_000);
+
+systemSandboxIt("stops a timed-out transient measurement unit through the PV timer", async () => {
+  await mkdir(analysisTempRoot, { recursive: true });
+  const root = await mkdtemp(join(analysisTempRoot, "systemd-timeout-"));
+  roots.push(root);
+  const outputName = "sandbox-timeout.mp4";
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const runnerSha = await writePythonScript(pvRunnerScript, [
+    "import time",
+    "time.sleep(30)",
+    "",
+  ]);
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState = evaluatorStateForRunner(root, pvRunnerScript, runnerSha);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-temp"),
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeTimeoutMs: 100,
+    terminationGraceMs: 20,
+    phonemeVisemeRuntimeVerifier: () => undefined,
+    phonemeVisemeTrustVerifier: () => undefined,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  const started = manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 400
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      phonemeViseme: {
+        status: "failed",
+        error: expect.stringContaining("überschritt 1 Sekunden"),
+      },
+    },
+  });
+  expect(spawnSync(
+    "/usr/bin/sudo",
+    ["-n", "/usr/bin/systemctl", "is-active", "--quiet", `ltx-pv-${started.analysisId}`],
+    { stdio: "ignore" },
+  ).status).not.toBe(0);
+  expect(await readdir(join(root, "analysis-temp"))).toEqual([]);
+}, 20_000);
+
+integrationIt("terminates an unsandboxed measurement runner at its own timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-unsandboxed-timeout-"));
+  roots.push(root);
+  const outputName = "unsandboxed-timeout.mp4";
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const runnerSha = await writePythonScript(pvRunnerScript, [
+    "import time",
+    "time.sleep(30)",
+    "",
+  ]);
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState = evaluatorStateForRunner(root, pvRunnerScript, runnerSha);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeSystemdSandbox: false,
+    phonemeVisemeTimeoutMs: 100,
+    terminationGraceMs: 20,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 400
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      phonemeViseme: {
+        status: "failed",
+        error: expect.stringContaining("überschritt 1 Sekunden"),
+      },
+    },
+  });
+}, 20_000);
+
+integrationIt("kills an unsandboxed runner child that survives its parent on timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-unsandboxed-child-timeout-"));
+  roots.push(root);
+  const outputName = "unsandboxed-child-timeout.mp4";
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  const childPidPath = join(root, "child.pid");
+  const childReadyPath = join(root, "child.ready");
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const runnerSha = await writePythonScript(pvRunnerScript, [
+    "import pathlib",
+    "import subprocess",
+    "import sys",
+    "import time",
+    `pid_path = pathlib.Path(${JSON.stringify(childPidPath)})`,
+    `ready_path = pathlib.Path(${JSON.stringify(childReadyPath)})`,
+    "child = subprocess.Popen([",
+    "    sys.executable,",
+    "    '-c',",
+    `    ${JSON.stringify([
+      "import pathlib",
+      "import signal",
+      "import time",
+      "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+      `pathlib.Path(${JSON.stringify(childReadyPath)}).write_text('ready')`,
+      "time.sleep(30)",
+    ].join("; "))},`,
+    "], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)",
+    "pid_path.write_text(str(child.pid))",
+    "for _ in range(200):",
+    "    if ready_path.exists():",
+    "        break",
+    "    time.sleep(0.01)",
+    "time.sleep(30)",
+    "",
+  ]);
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState = evaluatorStateForRunner(root, pvRunnerScript, runnerSha);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeSystemdSandbox: false,
+    phonemeVisemeTimeoutMs: 200,
+    terminationGraceMs: 50,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 400
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      phonemeViseme: {
+        status: "failed",
+        error: expect.stringContaining("überschritt 1 Sekunden"),
+      },
+    },
+  });
+  const childPid = Number.parseInt(await readFile(childPidPath, "utf8"), 10);
+  expect(() => process.kill(childPid, 0)).toThrow();
+}, 20_000);
+
+integrationIt("fails a result when a bound artifact is changed and restored in-place", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-toctou-"));
+  roots.push(root);
+  const outputName = "toctou.mp4";
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  const boundArtifact = join(root, "bound.model");
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  await writeFile(boundArtifact, "original");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const runnerResult = {
+    schemaVersion: "ltx-studio-mfa-mediapipe-runner.v1",
+    status: "failed",
+    error: "synthetic runner result",
+    manifestReleaseId: "pv-runner-fixture",
+    manifestSha256: "a".repeat(64),
+    preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+    visemeMapVersion: "viseme15-en-de.v1",
+    offset: {
+      status: "not-run",
+      estimatedOffsetMilliseconds: null,
+      confidence: null,
+    },
+    measurement: null,
+  };
+  const runnerSha = await writePythonScript(pvRunnerScript, [
+    "import json,pathlib",
+    `path=pathlib.Path(${JSON.stringify(boundArtifact)})`,
+    "original=path.read_bytes()",
+    "path.write_bytes(b'changed!')",
+    "path.write_bytes(original)",
+    `print(${JSON.stringify(JSON.stringify(runnerResult))})`,
+    "",
+  ]);
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState = evaluatorStateForRunner(
+    root,
+    pvRunnerScript,
+    runnerSha,
+    [pvRunnerScript, boundArtifact],
+  );
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeSystemdSandbox: false,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 200
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+
+  expect(current).toMatchObject({
+    status: "completed",
+    result: {
+      phonemeViseme: {
+        status: "failed",
+        error: expect.stringContaining("Gebundene Phonem-/Visem-Evidenz wurde verändert"),
+      },
+    },
+  });
+  expect(await readFile(boundArtifact, "utf8")).toBe("original");
+}, 20_000);
+
+systemSandboxIt("stops an active measurement unit during manager shutdown", async () => {
+  await mkdir(analysisTempRoot, { recursive: true });
+  const root = await mkdtemp(join(analysisTempRoot, "systemd-shutdown-"));
+  roots.push(root);
+  const outputName = "sandbox-shutdown.mp4";
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  const runnerSha = await writePythonScript(pvRunnerScript, [
+    "import time",
+    "time.sleep(30)",
+    "",
+  ]);
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState = evaluatorStateForRunner(root, pvRunnerScript, runnerSha);
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-temp"),
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeRuntimeVerifier: () => undefined,
+    phonemeVisemeTrustVerifier: () => undefined,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+  });
+
+  const started = manager.start(outputName);
+  const unit = `ltx-pv-${started.analysisId}`;
+  let unitActive = false;
+  for (let attempt = 0; attempt < 200 && !unitActive; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    unitActive = spawnSync(
+      "/usr/bin/sudo",
+      ["-n", "/usr/bin/systemctl", "is-active", "--quiet", unit],
+      { stdio: "ignore" },
+    ).status === 0;
+  }
+  expect(unitActive).toBe(true);
+
+  await manager.shutdown();
+
+  expect(manager.get(outputName)?.status).toBe("cancelled");
+  expect(spawnSync(
+    "/usr/bin/sudo",
+    ["-n", "/usr/bin/systemctl", "is-active", "--quiet", unit],
+    { stdio: "ignore" },
+  ).status).not.toBe(0);
+}, 20_000);
+
+it("bounds shutdown even when a sandbox stop never settles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-shutdown-deadline-"));
+  roots.push(root);
+  const library = new OutputLibrary(root);
+  const manager = new OutputAnalysisManager(library, () => [], root);
+  const stops = Reflect.get(manager, "phonemeVisemeUnitStops") as Map<string, Promise<void>>;
+  stops.set("synthetic-hung-unit", new Promise<void>(() => undefined));
+  const startedAt = Date.now();
+
+  await expect(manager.shutdown(25)).rejects.toThrow("Shutdown-Zeitlimit");
+
+  expect(Date.now() - startedAt).toBeLessThan(500);
+});
+
+integrationIt("retries recovery without launching a measurement unit after cancellation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-cancel-"));
+  roots.push(root);
+  const outputName = "pv-cancel.mp4";
+  const baseWorkerScript = join(root, "base-worker.py");
+  const pvRunnerScript = join(root, "pv-runner.py");
+  const runnerMarker = join(root, "runner-started");
+  await writeFile(join(root, outputName), "synthetic video fixture");
+  await writeFile(baseWorkerScript, [
+    "import json",
+    `print(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    "",
+  ].join("\n"));
+  await writeFile(pvRunnerScript, [
+    "import pathlib",
+    `pathlib.Path(${JSON.stringify(runnerMarker)}).write_text('started')`,
+    "",
+  ].join("\n"));
+  const completedJob = job(outputName);
+  completedJob.request.promptParts.dialogue = "Hallo Welt.";
+  const evaluatorState: PhonemeVisemeEvaluatorState = {
+    fingerprint: "manifest-v2-cancel-race-test",
+    result: {
+      ...unavailablePhonemeVisemeResult("Measurement only.", "product-go-pending"),
+      manifestReleaseId: "pv-cancel-race-test",
+      manifestSha256: "a".repeat(64),
+      preprocessingVersion: "mfa-mediapipe-de-pts.v1",
+      visemeMapVersion: "viseme15-en-de.v1",
+    },
+    execution: evaluatorStateForRunner(
+      root,
+      pvRunnerScript,
+      createHash("sha256").update(await readFile(pvRunnerScript)).digest("hex"),
+    ).execution!,
+  };
+  let releaseRecovery = () => {};
+  let recoveryStarted = false;
+  let recoveryCalls = 0;
+  const recovery = new Promise<void>((resolve) => {
+    releaseRecovery = resolve;
+  });
+  const library = new OutputLibrary(root);
+  library.recordCompleted([completedJob]);
+  const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+    analysisTempRoot: join(root, "analysis-temp"),
+    workerScript: baseWorkerScript,
+    pythonExecutable,
+    phonemeVisemeRuntimeVerifier: () => undefined,
+    phonemeVisemeTrustVerifier: () => undefined,
+    phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+    dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+    phonemeVisemeUnitRecovery: () => {
+      recoveryCalls += 1;
+      if (recoveryCalls === 1) {
+        return Promise.reject(new Error("synthetic transient recovery failure"));
+      }
+      recoveryStarted = true;
+      return recovery;
+    },
+  });
+
+  manager.start(outputName);
+  let current = manager.get(outputName);
+  for (let attempt = 0; attempt < 200
+    && current
+    && ["queued", "running"].includes(current.status);
+  attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = manager.get(outputName);
+  }
+  expect(current).toMatchObject({
+    status: "failed",
+    error: { message: expect.stringContaining("transient recovery failure") },
+  });
+
+  const started = manager.start(outputName, true);
+  for (let attempt = 0; attempt < 200 && !recoveryStarted; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(recoveryStarted).toBe(true);
+  expect(recoveryCalls).toBe(2);
+  manager.cancel(outputName, started.analysisId);
+  releaseRecovery();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  expect(manager.get(outputName)?.status).toBe("cancelled");
+  expect(existsSync(runnerMarker)).toBe(false);
+  expect(await readdir(join(root, "analysis-temp"))).toEqual([]);
 }, 20_000);
 
 integrationIt("waits for a timed-out worker to close before starting the next queued analysis", async () => {
@@ -906,4 +1740,89 @@ it("cleans only stale managed analysis directories during Studio startup", async
   cleanupAnalysisTempRoot(root);
 
   expect(await readdir(root)).toEqual(["unrelated"]);
+});
+
+it("retries an uncertain unit status before deleting private measurement remnants", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-recovery-"));
+  roots.push(root);
+  const analysisId = "3c8a5dc6-8864-49f7-a639-85caef918888";
+  const unit = `ltx-pv-${analysisId}.service`;
+  const privateDirectory = join(root, `phoneme-viseme-${analysisId}`);
+  await mkdir(privateDirectory, { recursive: true });
+  await writeFile(join(privateDirectory, "request.json"), "private dialogue");
+  let stateReads = 0;
+  const controlCommand = async (args: string[]) => {
+    if (args.includes("list-units")) {
+      return { code: 0, stdout: `${unit} loaded active running fixture\n`, stderr: "" };
+    }
+    if (args.includes("stop")) return { code: 0, stdout: "", stderr: "" };
+    stateReads += 1;
+    if (stateReads === 1) {
+      return { code: null, stdout: "", stderr: "synthetic D-Bus failure" };
+    }
+    return {
+      code: 0,
+      stdout: "LoadState=not-found\nActiveState=inactive\n",
+      stderr: "",
+    };
+  };
+
+  await recoverPhonemeVisemeSandboxState(root, controlCommand);
+
+  expect(stateReads).toBe(2);
+  expect(existsSync(privateDirectory)).toBe(false);
+});
+
+it("does not accept not-found before a starting unit was observed", async () => {
+  let stateReads = 0;
+  const controlCommand = async (args: string[]) => {
+    if (args.includes("stop")) return { code: 0, stdout: "", stderr: "" };
+    stateReads += 1;
+    if (stateReads === 1) {
+      return {
+        code: 0,
+        stdout: "LoadState=not-found\nActiveState=inactive\n",
+        stderr: "",
+      };
+    }
+    if (stateReads === 2) {
+      return {
+        code: 0,
+        stdout: "LoadState=loaded\nActiveState=active\n",
+        stderr: "",
+      };
+    }
+    return {
+      code: 0,
+      stdout: "LoadState=not-found\nActiveState=inactive\n",
+      stderr: "",
+    };
+  };
+
+  await stopSystemdUnit("ltx-pv-start-race.service", controlCommand, {
+    clientFinished: () => false,
+  });
+
+  expect(stateReads).toBe(3);
+});
+
+it("bounds persistent control-channel failures with a hard stop deadline", async () => {
+  const startedAt = Date.now();
+  const controlCommand = async () => ({
+    code: null,
+    stdout: "",
+    stderr: "synthetic persistent D-Bus timeout",
+  });
+
+  await expect(stopSystemdUnit(
+    "ltx-pv-control-timeout.service",
+    controlCommand,
+    {
+      deadlineMs: 20,
+      pollIntervalMs: 0,
+      controlTimeoutMs: 1,
+    },
+  )).rejects.toThrow("unbestätigt");
+
+  expect(Date.now() - startedAt).toBeLessThan(500);
 });
