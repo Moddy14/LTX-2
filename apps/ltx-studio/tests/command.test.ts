@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { pipelineModes } from "../shared/pipelines.js";
-import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan } from "../server/command.js";
+import {
+  buildCommand,
+  suggestRequestPlan,
+  validateOfficialSpeechInventory,
+  validateRequestPlan,
+  warnRequestPlan,
+} from "../server/command.js";
+import { recommendedModelAssets, type ModelInventory } from "../shared/models.js";
 import * as mediaProbe from "../server/mediaProbe.js";
 import { validRequest } from "./fixtures.js";
 
@@ -50,6 +57,44 @@ describe("buildCommand", () => {
     enhanced.enhancePrompt = false;
     expect(buildCommand(enhanced).requiredPaths.map((entry) => entry.path))
       .not.toContain("/models/gemma/preprocessor_config.json");
+  });
+
+  it("blocks prompt enhancement for native exact dialogue at plan time without invalidating history", () => {
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "Dieser Wortlaut bleibt exakt.";
+    request.enhancePrompt = true;
+
+    expect(validateRequestPlan(request, buildCommand(request))).toContain(
+      "Für wortgetreuen nativen Dialog muss die Gemma-Promptverbesserung ausgeschaltet bleiben; "
+      + "sie kann den gesprochenen Wortlaut umformulieren.",
+    );
+  });
+
+  it("requires every selected official speech asset to have verified content", () => {
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "Guten Morgen.";
+    const inventory: ModelInventory = {
+      roots: [],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: recommendedModelAssets.map((asset) => ({
+        ...asset,
+        present: true,
+        integrity: asset.id === "ltx23-gemma" ? "sha256-mismatch" as const : "verified" as const,
+      })),
+    };
+
+    expect(validateOfficialSpeechInventory(request, inventory)).toEqual([
+      "LTX-2.3 Gemma QAT Q4: offizielles Asset ist nicht vollständig SHA-256-verifiziert "
+      + "(Status: sha256-mismatch).",
+    ]);
+    inventory.recommendations = inventory.recommendations.map((asset) => ({
+      ...asset,
+      integrity: "verified" as const,
+    }));
+    expect(validateOfficialSpeechInventory(request, inventory)).toEqual([]);
   });
 
   it("emits the full non-distilled retake contract", () => {
@@ -339,7 +384,7 @@ describe("buildCommand", () => {
     expect(suggestRequestPlan(request)).toEqual([]);
   });
 
-  it("warns when native LipDub is configured with non-reference model asset versions", () => {
+  it("blocks native LipDub when it is configured with non-reference model assets", () => {
     const request = validRequest("lipdub");
     vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
       width: 576,
@@ -350,9 +395,15 @@ describe("buildCommand", () => {
       hasAudio: true,
     });
 
-    expect(warnRequestPlan(request)).toEqual(expect.arrayContaining([
-      "LipDub-Checkpoint ist distilled.safetensors; offizieller Referenzstand ist ltx-2.3-22b-distilled-1.1.safetensors.",
-      "LipDub-Spatial-Upscaler ist upscaler.safetensors; offizieller Referenzstand ist ltx-2.3-spatial-upscaler-x2-1.1.safetensors.",
-    ]));
+    const errors = validateRequestPlan(request, buildCommand(request));
+    expect(errors.some((message) => message.startsWith(
+      "Distilled Checkpoint: der offizielle Sprachpfad verlangt ",
+    ))).toBe(true);
+    expect(errors.some((message) => message.startsWith(
+      "Spatial Upscaler: der offizielle Sprachpfad verlangt ",
+    ))).toBe(true);
+    expect(errors.some((message) => message.startsWith(
+      "LipDub IC-LoRA: der offizielle Sprachpfad verlangt ",
+    ))).toBe(true);
   });
 });

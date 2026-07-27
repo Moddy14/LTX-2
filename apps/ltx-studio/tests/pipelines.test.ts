@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   generationRequestSchema,
+  hasDialogueIntent,
   mergeGenerationRequest,
+  migrateGenerationRequest,
   pipelineModes,
   withLongCatLipsyncDisabled,
   type GenerationRequest,
@@ -127,6 +129,39 @@ describe("generationRequestSchema", () => {
 
     request.sourceMode = "text";
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("keeps legacy enhanced native-dialogue jobs readable for plan-time migration", () => {
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "Dieser Wortlaut muss erhalten bleiben";
+    request.prompt = 'The woman says exactly: "Dieser Wortlaut muss erhalten bleiben".';
+    request.enhancePrompt = true;
+
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    expect(migrateGenerationRequest(request)).not.toBeNull();
+  });
+
+  it("recognizes explicit speech verbs without treating a UI dialog as spoken dialogue", () => {
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "";
+    request.prompt = 'A woman whispers, "Hello".';
+    expect(hasDialogueIntent(request)).toBe(true);
+    request.prompt = "Eine Frau flüstert: Guten Morgen.";
+    expect(hasDialogueIntent(request)).toBe(true);
+    request.prompt = 'A woman asks, "Are you ready?"';
+    expect(hasDialogueIntent(request)).toBe(true);
+    request.prompt = "A man shouts: Stop!";
+    expect(hasDialogueIntent(request)).toBe(true);
+    request.prompt = "Eine Frau antwortet: Ja.";
+    expect(hasDialogueIntent(request)).toBe(true);
+    request.prompt = 'Dialogue: "This legacy label remains supported."';
+    expect(hasDialogueIntent(request)).toBe(true);
+    request.prompt = "A settings dialog opens on screen.";
+    expect(hasDialogueIntent(request)).toBe(false);
+    request.prompt = "A dialogue box opens on screen.";
+    expect(hasDialogueIntent(request)).toBe(false);
+    request.prompt = 'A sign reads "OPEN".';
+    expect(hasDialogueIntent(request)).toBe(false);
   });
 
   it("requires an explicit acknowledgement for clips longer than ten seconds", () => {

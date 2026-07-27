@@ -492,7 +492,8 @@ export function App() {
   };
 
   const loadJobSettings = (job: StudioJob) => {
-    const loaded = mergeGenerationRequest(job.request, job.mode);
+    const merged = mergeGenerationRequest(job.request, job.mode);
+    const loaded = modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged;
     setRequest({ ...loaded, outputName: nextEditableOutputName(loaded.outputName, jobs, outputs) });
     const matchingOutput = outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
     if (matchingOutput) setSelectedOutputName(matchingOutput.name);
@@ -514,7 +515,8 @@ export function App() {
       setPreflightSuggestions([]);
       return;
     }
-    const loaded = mergeGenerationRequest(output.request, output.request.mode);
+    const merged = mergeGenerationRequest(output.request, output.request.mode);
+    const loaded = modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged;
     setRequest({ ...loaded, outputName: nextEditableOutputName(output.name, jobs, outputs) });
     setSelectedOutputName(output.name);
     if (output.jobId) setSelectedJobId(output.jobId);

@@ -135,7 +135,7 @@ describe("quality output refresh", () => {
     expect(mergeOutputAnalysis(current, rerun).analysis).toEqual(rerun);
   });
 
-  it("offers the scorecard only for native audio-to-video and LipDub outputs", () => {
+  it("offers the scorecard for external-audio and native-dialogue outputs", () => {
     const audioOutput = output(null);
     expect(isSpeechQualityCandidate(audioOutput)).toBe(true);
     expect(isSpeechQualityCandidate({
@@ -143,7 +143,10 @@ describe("quality output refresh", () => {
       request: createDefaultRequest("lipdub"),
     })).toBe(true);
     const twoStage = createDefaultRequest("two-stage");
-    twoStage.promptParts.dialogue = "Dieser Dialogtext allein erzeugt keinen Sprachpipeline-Vertrag.";
+    twoStage.promptParts.dialogue = "Dieser Dialogtext wird nativ gesprochen.";
+    expect(isSpeechQualityCandidate({ ...audioOutput, request: twoStage })).toBe(true);
+    twoStage.promptParts.dialogue = "";
+    twoStage.prompt = "A silent portrait.";
     expect(isSpeechQualityCandidate({ ...audioOutput, request: twoStage })).toBe(false);
   });
 });

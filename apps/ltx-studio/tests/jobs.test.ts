@@ -22,10 +22,30 @@ import { hybridRoot, repoRoot } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
 import type { ResourceSnapshot } from "../server/system.js";
 import type { RunProvenance } from "../shared/provenance.js";
+import {
+  recommendedModelAsset,
+  recommendedModelAssets,
+  type ModelInventory,
+} from "../shared/models.js";
 import { RuntimeApiError } from "../server/runtimeApi.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
+
+function verifiedModelInventory(): ModelInventory {
+  return {
+    roots: [],
+    scannedAt: new Date(0).toISOString(),
+    truncated: false,
+    errors: [],
+    items: [],
+    recommendations: recommendedModelAssets.map((asset) => ({
+      ...asset,
+      present: true,
+      integrity: "verified" as const,
+    })),
+  };
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -1239,6 +1259,10 @@ describe("job persistence and reservations", () => {
     const root = await mkdtemp(join(tmpdir(), "ltx-queue-finalization-"));
     roots.push(root);
     const request = validRequest("audio-to-video");
+    request.models.checkpointPath = recommendedModelAsset("ltx23-dev-checkpoint").localPath;
+    request.models.gemmaRoot = recommendedModelAsset("ltx23-gemma").localPath;
+    request.models.distilledLora.path = recommendedModelAsset("ltx23-distilled-lora").localPath;
+    request.models.spatialUpscalerPath = recommendedModelAsset("ltx23-spatial-upscaler").localPath;
     request.audio.finalMix = {
       path: join(root, "final-mix.wav"),
       name: "final-mix.wav",
@@ -1284,6 +1308,9 @@ describe("job persistence and reservations", () => {
           job: { job_id: jobId, state },
         };
       },
+    });
+    Reflect.set(manager, "modelInventoryOperations", {
+      read: async () => verifiedModelInventory(),
     });
     const created = manager.create(request);
     createdId = created.id;
@@ -1769,6 +1796,36 @@ describe("job persistence and reservations", () => {
       resolution: "720p",
       blend: 0.65,
     });
+  });
+
+  it("migrates a recoverable queued native-dialogue job to the official speech stack", async () => {
+    const path = await statePath();
+    const manager = new JobManager(path, false);
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "Guten Morgen.";
+    request.enhancePrompt = true;
+    request.models.checkpointPath = "/legacy/dev.safetensors";
+    request.models.gemmaRoot = "/legacy/gemma";
+    request.models.distilledLora.path = "/legacy/distilled-lora.safetensors";
+    request.models.spatialUpscalerPath = "/legacy/upscaler.safetensors";
+
+    const created = manager.create(request);
+    const restored = new JobManager(path, false).get(created.id)!;
+
+    expect(restored.status).toBe("queued");
+    expect(restored.request.enhancePrompt).toBe(false);
+    expect(restored.request.models.checkpointPath).toBe(
+      recommendedModelAsset("ltx23-dev-checkpoint").localPath,
+    );
+    expect(restored.request.models.gemmaRoot).toBe(
+      recommendedModelAsset("ltx23-gemma").localPath,
+    );
+    expect(restored.request.models.distilledLora.path).toBe(
+      recommendedModelAsset("ltx23-distilled-lora").localPath,
+    );
+    expect(restored.request.models.spatialUpscalerPath).toBe(
+      recommendedModelAsset("ltx23-spatial-upscaler").localPath,
+    );
   });
 
   it("persists a frozen experiment binding across a Studio restart", async () => {

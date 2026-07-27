@@ -37,6 +37,26 @@ export const promptPartsSchema = z.object({
 
 export type PromptParts = z.infer<typeof promptPartsSchema>;
 
+const DIALOGUE_INTENT_PATTERN =
+  /\b(?:says?|said|saying|speaks?|speaking|talks?|talking|asks?|asking|answers?|answering|replies|replied|replying|shouts?|shouting|whispers?|whispering|murmurs?|murmuring|mutters?|muttering|sings?|singing|sagt|sagen|spricht|sprechen|redet|reden|fragt|fragen|antwortet|antworten|ruft|rufen|schreit|schreien|flüstert|flüstern|murmelt|murmeln|singt|singen|erzählt|erzählen)\b/i;
+const DIALOGUE_LABEL_PATTERN = /\bdialogue\s*:/i;
+
+export function hasDialogueIntent(
+  input: Pick<GenerationRequest, "mode" | "prompt" | "promptParts">,
+): boolean {
+  return input.mode === "lipdub"
+    || input.promptParts.dialogue.trim().length > 0
+    || DIALOGUE_INTENT_PATTERN.test(input.prompt)
+    || DIALOGUE_LABEL_PATTERN.test(input.prompt);
+}
+
+export function isNativeDialogueRequest(
+  input: Pick<GenerationRequest, "mode" | "prompt" | "promptParts">,
+): boolean {
+  return ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(input.mode)
+    && hasDialogueIntent(input);
+}
+
 export type PipelineDefinition = {
   id: PipelineMode;
   label: string;
@@ -141,9 +161,9 @@ export const PIPELINES: readonly PipelineDefinition[] = [
     id: "audio-to-video",
     label: "Audio zu Video",
     shortLabel: "Audio",
-    description: "Erzeugt die Bildspur passend zu einer vorhandenen Audiospur.",
+    description: "Lokaler externer Audio-Pfad mit derzeit begrenzter Lippenpräzision.",
     family: "condition",
-    quality: "Audio-synchron",
+    quality: "Experimentell",
     defaultHeight: 1024,
     defaultWidth: 1536,
     defaultSteps: 30,

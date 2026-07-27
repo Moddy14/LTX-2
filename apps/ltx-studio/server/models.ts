@@ -16,6 +16,7 @@ const MAX_DEPTH = 5;
 const IGNORED_DIRECTORIES = new Set([".cache", ".git", "gguf", "node_modules", "outputs", "uploads"]);
 let cached: { expiresAt: number; value: ModelInventory } | null = null;
 let inFlight: Promise<ModelInventory> | null = null;
+const verificationInFlight = new Map<string, Promise<ModelInventory>>();
 
 export function classifyModelFile(path: string): ModelKind | null {
   const name = basename(path).toLowerCase();
@@ -48,19 +49,83 @@ async function inventoryItem(kind: ModelKind, path: string): Promise<ModelInvent
   };
 }
 
-async function modelRecommendations(items: readonly ModelInventoryItem[]): Promise<ModelInventory["recommendations"]> {
+async function modelRecommendations(
+  items: readonly ModelInventoryItem[],
+  verifyAssetIds: readonly RecommendedModelAsset["id"][],
+): Promise<ModelInventory["recommendations"]> {
+  const verifyIds = new Set(verifyAssetIds);
+  const hashes = new Map<string, Promise<string>>();
+  const sha256 = (path: string, role: string): Promise<string> => {
+    const resolvedPath = resolve(path);
+    let pending = hashes.get(resolvedPath);
+    if (!pending) {
+      pending = captureProvenanceFile(resolvedPath, role).then((evidence) => evidence.sha256);
+      hashes.set(resolvedPath, pending);
+    }
+    return pending;
+  };
   return Promise.all(recommendedModelAssets.map(async (rawAsset) => {
     const asset: RecommendedModelAsset = rawAsset;
-    const match = items.find((item) =>
-      item.kind === asset.kind
-      && (item.name === asset.filename || item.path === asset.localPath),
-    );
+    const match = items.find((item) => item.kind === asset.kind && item.path === resolve(asset.localPath))
+      ?? items.find((item) =>
+        item.kind === asset.kind
+        && (item.name === asset.filename || item.path === asset.localPath),
+      );
     if (!match) {
       return {
         ...asset,
         actualSha256: null,
         integrity: "missing" as const,
         present: false,
+      };
+    }
+    if (asset.expectedContents && match.path === resolve(asset.localPath)) {
+      for (const expected of asset.expectedContents) {
+        const path = join(match.path, expected.relativePath);
+        let sizeBytes: number;
+        try {
+          const details = await stat(path);
+          if (!details.isFile()) throw new Error("not a file");
+          sizeBytes = details.size;
+        } catch {
+          return {
+            ...asset,
+            localPath: match.path,
+            actualSha256: null,
+            integrity: "missing" as const,
+            present: false,
+          };
+        }
+        if (sizeBytes !== expected.expectedSizeBytes) {
+          return {
+            ...asset,
+            localPath: match.path,
+            actualSha256: null,
+            integrity: "size-mismatch" as const,
+            present: false,
+          };
+        }
+        if (!verifyIds.has(asset.id)) continue;
+        const actualSha256 = await sha256(
+          path,
+          `model-inventory:${asset.id}:${expected.relativePath}`,
+        );
+        if (actualSha256 !== expected.expectedSha256) {
+          return {
+            ...asset,
+            localPath: match.path,
+            actualSha256,
+            integrity: "sha256-mismatch" as const,
+            present: false,
+          };
+        }
+      }
+      return {
+        ...asset,
+        localPath: match.path,
+        actualSha256: null,
+        integrity: verifyIds.has(asset.id) ? "verified" as const : "unverified" as const,
+        present: true,
       };
     }
     if (asset.expectedSizeBytes !== undefined && match.sizeBytes !== asset.expectedSizeBytes) {
@@ -73,10 +138,19 @@ async function modelRecommendations(items: readonly ModelInventoryItem[]): Promi
       };
     }
     if (asset.expectedSha256) {
-      const actualSha256 = (await captureProvenanceFile(
+      if (!verifyIds.has(asset.id)) {
+        return {
+          ...asset,
+          localPath: match.path,
+          actualSha256: null,
+          integrity: "unverified" as const,
+          present: true,
+        };
+      }
+      const actualSha256 = await sha256(
         match.path,
         `model-inventory:${asset.id}`,
-      )).sha256;
+      );
       const verified = actualSha256 === asset.expectedSha256;
       return {
         ...asset,
@@ -96,7 +170,10 @@ async function modelRecommendations(items: readonly ModelInventoryItem[]): Promi
   }));
 }
 
-export async function discoverModels(roots: readonly string[] = modelRoots): Promise<ModelInventory> {
+export async function discoverModels(
+  roots: readonly string[] = modelRoots,
+  verifyAssetIds: readonly RecommendedModelAsset["id"][] = [],
+): Promise<ModelInventory> {
   const items: ModelInventoryItem[] = [];
   const errors: string[] = [];
   const pending = roots.map((root) => ({ path: resolve(root), depth: 0 }));
@@ -141,12 +218,35 @@ export async function discoverModels(roots: readonly string[] = modelRoots): Pro
     truncated: truncated || pending.length > 0 || visited >= MAX_ENTRIES,
     errors,
     items,
-    recommendations: await modelRecommendations(items),
+    recommendations: await modelRecommendations(items, verifyAssetIds),
   };
 }
 
-export async function getModelInventory(force = false): Promise<ModelInventory> {
-  if (!force && cached && cached.expiresAt > Date.now()) return cached.value;
+export async function getModelInventory(
+  force = false,
+  verifyAssetIds: readonly RecommendedModelAsset["id"][] = [],
+): Promise<ModelInventory> {
+  const normalizedVerifyIds = [...new Set(verifyAssetIds)].sort();
+  const cacheSatisfiesVerification = (value: ModelInventory) => normalizedVerifyIds.every((id) => {
+    const asset = value.recommendations.find((candidate) => candidate.id === id);
+    return asset?.present && asset.integrity === "verified";
+  });
+  if (!force && cached && cached.expiresAt > Date.now() && cacheSatisfiesVerification(cached.value)) {
+    return cached.value;
+  }
+  if (normalizedVerifyIds.length > 0) {
+    const verificationKey = normalizedVerifyIds.join(",");
+    const existing = verificationInFlight.get(verificationKey);
+    if (existing) return existing;
+    const pending = discoverModels(modelRoots, normalizedVerifyIds).then((value) => {
+      cached = { expiresAt: Date.now() + 30_000, value };
+      return value;
+    }).finally(() => {
+      verificationInFlight.delete(verificationKey);
+    });
+    verificationInFlight.set(verificationKey, pending);
+    return pending;
+  }
   if (!force && inFlight) return inFlight;
   inFlight = discoverModels().then((value) => {
     cached = { expiresAt: Date.now() + 30_000, value };

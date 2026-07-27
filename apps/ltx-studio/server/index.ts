@@ -14,6 +14,11 @@ import {
 } from "../shared/experiments.js";
 import { qualityReviewInputSchema } from "../shared/quality.js";
 import {
+  recommendedModelAssets,
+  requiredOfficialSpeechAssetIds,
+  usesOfficialSpeechStack,
+} from "../shared/models.js";
+import {
   admissionClientAvailable,
   listQueueJobs,
   type QueueJobState,
@@ -271,7 +276,10 @@ app.get("/api/health", async (_request, response) => {
 });
 
 app.get("/api/models", async (request, response) => {
-  response.json(await getModelInventory(request.query.refresh === "1"));
+  response.json(await getModelInventory(
+    request.query.refresh === "1",
+    request.query.verify === "1" ? recommendedModelAssets.map((asset) => asset.id) : [],
+  ));
 });
 
 app.post("/api/uploads/:kind", upload.single("file"), (request, response) => {
@@ -366,13 +374,16 @@ app.post("/api/images/crop", async (request, response) => {
   });
 });
 
-app.post("/api/jobs/plan", (request, response) => {
+app.post("/api/jobs/plan", async (request, response) => {
   const payload = generationRequestSchema.parse(request.body);
   const plan = buildCommand(payload);
+  const inventory = usesOfficialSpeechStack(payload)
+    ? await getModelInventory(false, requiredOfficialSpeechAssetIds(payload))
+    : undefined;
   response.json({
     command: plan.displayCommand,
     outputPath: plan.outputPath,
-    pathErrors: validateRequestPlan(payload, plan),
+    pathErrors: validateRequestPlan(payload, plan, inventory),
     pathWarnings: warnRequestPlan(payload),
     suggestions: suggestRequestPlan(payload),
   });
@@ -486,7 +497,10 @@ app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
     }
   }
   const plan = buildCommand(selected.request);
-  const planErrors = validateRequestPlan(selected.request, plan);
+  const inventory = usesOfficialSpeechStack(selected.request)
+    ? await getModelInventory(false, requiredOfficialSpeechAssetIds(selected.request))
+    : undefined;
+  const planErrors = validateRequestPlan(selected.request, plan, inventory);
   if (planErrors.length > 0) {
     throw new ExperimentConflictError(`Experimentarm kann nicht gestartet werden: ${planErrors.join(" ")}`);
   }

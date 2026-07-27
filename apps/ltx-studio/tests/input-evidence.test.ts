@@ -61,6 +61,21 @@ describe("identity input evidence", () => {
     }]);
   });
 
+  it("binds native image-to-video dialogue references for identity analysis", async () => {
+    const { assets, asset, path } = await fixture();
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "Hallo.";
+    request.images = [{ path, name: "reference.png", frameIndex: 0, strength: 1, crf: 33 }];
+
+    const captured = await captureIdentityEvidence(request, assets);
+
+    expect(captured).toMatchObject({
+      status: "captured",
+      source: "image-conditioning",
+      references: [{ assetId: asset.id, kind: "image" }],
+    });
+  });
+
   it("detects a changed reference and never exposes its path to the evaluator", async () => {
     const { assets, path } = await fixture();
     const request = validRequest("audio-to-video");

@@ -25,6 +25,11 @@ import {
 } from "../shared/experiments.js";
 import { migrateGenerationRequest, type GenerationRequest } from "../shared/pipelines.js";
 import {
+  requiredOfficialSpeechAssetIds,
+  withOfficialSpeechModelPaths,
+  type ModelInventory,
+} from "../shared/models.js";
+import {
   decisionMessage,
   cooperativeCheckpointPath,
   listQueueJobs,
@@ -41,6 +46,7 @@ import {
   type QueueTransitionState,
 } from "./admission.js";
 import { buildCommand, type CommandPlan, validateRequestPlan } from "./command.js";
+import { getModelInventory } from "./models.js";
 import {
   admissionPythonExecutable,
   appRoot,
@@ -194,6 +200,9 @@ type DgxDemandOperations = {
 type RunProvenanceOperations = {
   capture: typeof captureRunProvenance;
   verify: typeof verifyRunProvenance;
+};
+type ModelInventoryOperations = {
+  read: typeof getModelInventory;
 };
 
 const MAX_JOBS = 100;
@@ -726,6 +735,9 @@ export class JobManager extends EventEmitter {
     private readonly dgxDemandOperations: DgxDemandOperations = {
       read: readQwenDemand,
     },
+    private readonly modelInventoryOperations: ModelInventoryOperations = {
+      read: getModelInventory,
+    },
   ) {
     super();
     this.restore();
@@ -1151,7 +1163,21 @@ export class JobManager extends EventEmitter {
   }
 
   private async run(job: RuntimeJob): Promise<void> {
-    const pathErrors = validateRequestPlan(job.request, job.plan);
+    const requiredAssetIds = requiredOfficialSpeechAssetIds(job.request);
+    let inventory: ModelInventory | undefined;
+    const pathErrors: string[] = [];
+    if (requiredAssetIds.length > 0) {
+      try {
+        inventory = await this.modelInventoryOperations.read(true, requiredAssetIds);
+      } catch (error) {
+        pathErrors.push(
+          `Die offizielle Modellintegrität konnte nicht geprüft werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    pathErrors.push(...validateRequestPlan(job.request, job.plan, inventory));
     const hybridEnabled = job.request.postprocess.longcatLipsync.enabled;
     const finalAudioMixEnabled = job.request.mode === "audio-to-video"
       && Boolean(job.request.audio.finalMix.path);
@@ -2860,7 +2886,7 @@ export class JobManager extends EventEmitter {
         }),
       ];
       for (const entry of retained) {
-        const migratedRequest = migrateGenerationRequest(entry.request);
+        let migratedRequest = migrateGenerationRequest(entry.request);
         if (!migratedRequest || typeof entry.id !== "string" || !/^[0-9a-f-]{36}$/i.test(entry.id)) continue;
         const storedStatus: JobStatus = ["queued", "running", "paused", "completed", "failed", "cancelled", "interrupted"]
           .includes(entry.status) ? entry.status : "interrupted";
@@ -2868,6 +2894,9 @@ export class JobManager extends EventEmitter {
           ? entry.dgxJobId
           : null;
         const recoverableLocalQueue = storedStatus === "queued" && dgxJobId === null;
+        if (recoverableLocalQueue) {
+          migratedRequest = withOfficialSpeechModelPaths(migratedRequest);
+        }
         let status: JobStatus = recoverableLocalQueue
           ? "queued"
           : isActiveJobStatus(storedStatus) ? "interrupted" : storedStatus;

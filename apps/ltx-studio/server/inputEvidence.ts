@@ -101,21 +101,20 @@ function referenceRequests(request: GenerationRequest): {
         : [],
     };
   }
-  if (request.mode === "audio-to-video") {
-    const seen = new Set<string>();
-    const longCatReference = request.postprocess.longcatLipsync.enabled
-      ? request.images.slice(0, 1)
-      : [];
-    const references = [...longCatReference, ...request.images.filter((image) => image.strength > 0)]
-      .sort((left, right) => left.frameIndex - right.frameIndex)
-      .flatMap((image) => {
-        if (seen.has(image.path)) return [];
-        seen.add(image.path);
-        return [{ kind: "image" as const, path: image.path }];
-      });
-    return { source: "image-conditioning", references };
-  }
-  return { source: null, references: [] };
+  const seen = new Set<string>();
+  const longCatReference = request.postprocess.longcatLipsync.enabled
+    ? request.images.slice(0, 1)
+    : [];
+  const references = [...longCatReference, ...request.images.filter((image) => image.strength > 0)]
+    .sort((left, right) => left.frameIndex - right.frameIndex)
+    .flatMap((image) => {
+      if (seen.has(image.path)) return [];
+      seen.add(image.path);
+      return [{ kind: "image" as const, path: image.path }];
+    });
+  return references.length > 0
+    ? { source: "image-conditioning", references }
+    : { source: null, references: [] };
 }
 
 function currentRevision(asset: StudioAsset): Omit<IdentityReferenceEvidence, "sha256"> {

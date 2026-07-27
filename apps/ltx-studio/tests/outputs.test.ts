@@ -343,7 +343,6 @@ describe("generated output library", () => {
     const silentName = "silent-score.mp4";
     await writeFile(join(root, silentName), "video");
     const silentJob = completedJob(silentName, completedAt.toISOString());
-    silentJob.request.promptParts.dialogue = "Dialogtext allein macht diese Pipeline nicht zu einem Sprachvideo.";
     library.recordCompleted([silentJob]);
     expect(() => library.setQualityReview(silentName, score, [silentJob])).toThrow("Nur ein fertiges Sprachvideo");
 
@@ -375,8 +374,18 @@ describe("generated output library", () => {
     const silentJob = completedJob(silentName, completedAt.toISOString(), "two-stage");
     library.recordCompleted([silentJob]);
     expect(() => library.resolveAnalysisTarget(silentName)).toThrow(
-      "Nur ein fertiges Audio- oder LipDub-Video",
+      "Nur ein fertiges Sprachvideo",
     );
+
+    const nativeName = "native-dialogue-analysis.mp4";
+    await writeFile(join(root, nativeName), "video");
+    const nativeJob = completedJob(nativeName, completedAt.toISOString(), "two-stage");
+    nativeJob.request.promptParts.dialogue = "Dieser Satz wird nativ gesprochen.";
+    library.recordCompleted([nativeJob]);
+    expect(library.resolveAnalysisTarget(nativeName)).toMatchObject({
+      outputName: nativeName,
+      request: { mode: "two-stage" },
+    });
 
     await appendFile(join(root, outputName), "changed");
     expect(() => library.resolveAnalysisTarget(outputName)).toThrow("nachträglich verändert");

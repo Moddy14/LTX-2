@@ -45,7 +45,6 @@ function sentence(value: string): string {
 function dialogueLine(input: ComposePromptRequest): string {
   const dialogue = input.parts.dialogue.trim();
   if (!dialogue) return "";
-  if (!["audio-to-video", "lipdub"].includes(input.mode)) return `Dialogue: ${sentence(dialogue)}`;
 
   const explicitSpeech = /^["“]/.test(dialogue) || /\b(?:says|speaks|spricht|sagt|saying)\b/i.test(dialogue);
   const spokenText = explicitSpeech ? dialogue : `"${dialogue}"`;

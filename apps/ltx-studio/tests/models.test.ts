@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { withDiscoveredModelDefaults } from "../shared/models.js";
+import { recommendedModelAssets, withDiscoveredModelDefaults } from "../shared/models.js";
 import { createDefaultRequest } from "../shared/pipelines.js";
 import { classifyModelFile, discoverModels } from "../server/models.js";
 
@@ -110,7 +110,7 @@ describe("model discovery", () => {
     });
   });
 
-  it("prefers the official LTX-2.3 A2V stack over alphabetically earlier legacy assets", async () => {
+  it("does not silently fall back to unverified speech assets", async () => {
     const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
     temporaryRoots.push(root);
     const ltx = join(root, "Lightricks__LTX-2.3");
@@ -135,18 +135,64 @@ describe("model discovery", () => {
     const request = withDiscoveredModelDefaults(createDefaultRequest("audio-to-video"), inventory);
 
     expect(request.models.checkpointPath).toBe(
-      join(ltx, "ltx-2.3-22b-dev.safetensors"),
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-dev-checkpoint")?.localPath,
     );
-    expect(request.models.gemmaRoot).toBe(officialGemma);
+    expect(request.models.gemmaRoot).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-gemma")?.localPath,
+    );
     expect(request.models.distilledLora.path).toBe(
-      join(ltx, "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"),
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-distilled-lora")?.localPath,
     );
     expect(request.models.spatialUpscalerPath).toBe(
-      join(ltx, "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"),
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-spatial-upscaler")?.localPath,
+    );
+    expect(inventory.recommendations.find((item) => item.id === "ltx23-dev-checkpoint")).toMatchObject({
+      present: false,
+      integrity: "size-mismatch",
+    });
+  });
+
+  it("migrates a stored native-dialogue job onto the verified official stack", () => {
+    const request = createDefaultRequest("two-stage");
+    request.promptParts.dialogue = "Guten Morgen";
+    request.prompt = 'The woman says exactly: "Guten Morgen".';
+    request.enhancePrompt = true;
+    request.models.checkpointPath = "/legacy/ltx-dev.safetensors";
+    request.models.gemmaRoot = "/legacy/DreamFast__gemma-3-12b-it-heretic";
+    request.models.distilledLora.path = "/legacy/ltx-2.3-22b-distilled-lora-384.safetensors";
+    request.models.spatialUpscalerPath = "/legacy/ltx-2.3-spatial-upscaler-x2-1.0.safetensors";
+    const inventory = {
+      roots: [],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: recommendedModelAssets.map((asset) => ({
+        ...asset,
+        present: true,
+        integrity: "verified" as const,
+        actualSha256: "expectedSha256" in asset ? asset.expectedSha256 : null,
+      })),
+    };
+
+    const resolved = withDiscoveredModelDefaults(request, inventory);
+
+    expect(resolved.enhancePrompt).toBe(false);
+    expect(resolved.models.checkpointPath).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-dev-checkpoint")?.localPath,
+    );
+    expect(resolved.models.gemmaRoot).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-gemma")?.localPath,
+    );
+    expect(resolved.models.distilledLora.path).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-distilled-lora")?.localPath,
+    );
+    expect(resolved.models.spatialUpscalerPath).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-spatial-upscaler")?.localPath,
     );
   });
 
-  it("reports an incomplete official Gemma directory instead of treating a fallback as official", async () => {
+  it("keeps the canonical speech path when the official Gemma directory is incomplete", async () => {
     const root = await mkdtemp(join(tmpdir(), "ltx-models-"));
     temporaryRoots.push(root);
     const incompleteOfficialGemma = join(root, "google__gemma-3-12b-it-qat-q4_0-unquantized");
@@ -165,11 +211,15 @@ describe("model discovery", () => {
     expect(inventory.recommendations.find((item) => item.id === "ltx23-gemma")).toMatchObject({
       present: false,
     });
-    expect(request.models.gemmaRoot).toBe(fallbackGemma);
+    expect(request.models.gemmaRoot).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-gemma")?.localPath,
+    );
   });
 
-  it("never overwrites explicit model selections with recommendations", () => {
-    const request = createDefaultRequest("audio-to-video");
+  it("never overwrites explicit model selections for non-speech generation", () => {
+    const request = createDefaultRequest("two-stage");
+    request.prompt = "A silent landscape.";
+    request.promptParts.dialogue = "";
     request.models.gemmaRoot = "/models/custom-gemma";
     request.models.distilledLora.path = "/models/custom-lora.safetensors";
     request.models.spatialUpscalerPath = "/models/custom-upscaler.safetensors";

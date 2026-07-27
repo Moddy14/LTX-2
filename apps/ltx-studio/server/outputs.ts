@@ -14,6 +14,7 @@ import {
   outputNameSchema,
   type GenerationRequest,
 } from "../shared/pipelines.js";
+import { usesOfficialSpeechStack } from "../shared/models.js";
 import {
   normalizeJobQualityReview,
   qualityReviewInputSchema,
@@ -192,7 +193,7 @@ function hasStrongRevision(record: OutputSettingsRecord): record is StrongOutput
 }
 
 function supportsSpeechQuality(request: GenerationRequest): boolean {
-  return request.mode === "lipdub" || request.mode === "audio-to-video";
+  return usesOfficialSpeechStack(request);
 }
 
 export class OutputLibrary {
@@ -303,7 +304,7 @@ export class OutputLibrary {
       );
     }
     if (!supportsSpeechQuality(record.request)) {
-      throw new OutputQualityError("Nur ein fertiges Audio- oder LipDub-Video kann analysiert werden.", 409);
+      throw new OutputQualityError("Nur ein fertiges Sprachvideo kann analysiert werden.", 409);
     }
     return {
       outputName,

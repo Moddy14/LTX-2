@@ -1,7 +1,18 @@
 import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import type { GenerationRequest, PipelineMode } from "../shared/pipelines.js";
+import {
+  recommendedModelAsset,
+  requiredOfficialSpeechAssetIds,
+  usesOfficialSpeechStack,
+  type ModelInventory,
+  type RecommendedModelAsset,
+} from "../shared/models.js";
+import {
+  isNativeDialogueRequest,
+  type GenerationRequest,
+  type PipelineMode,
+} from "../shared/pipelines.js";
 import type { PlanSuggestion } from "../shared/plan.js";
 import { outputRoot, pythonExecutable } from "./config.js";
 import {
@@ -38,9 +49,6 @@ export type CommandPlan = {
   outputPath: string;
   requiredPaths: PathRequirement[];
 };
-
-const LIPDUB_EXPECTED_DISTILLED_CHECKPOINT = "ltx-2.3-22b-distilled-1.1.safetensors";
-const LIPDUB_EXPECTED_SPATIAL_UPSCALER = "ltx-2.3-spatial-upscaler-x2-1.1.safetensors";
 
 function appendFlag(args: string[], flag: string, value: string | number): void {
   args.push(flag, String(value));
@@ -97,10 +105,6 @@ function appendGuidanceArgs(request: GenerationRequest, args: string[], includeA
   }
 }
 
-function basename(path: string): string {
-  return path.split(/[\\/]/).at(-1) ?? path;
-}
-
 function lipDubInspectionInput(request: GenerationRequest): LipDubReferenceInspectionInput {
   return {
     path: request.lipDub.referenceVideo.path,
@@ -141,21 +145,65 @@ function validateLipDubReference(request: GenerationRequest): string[] {
   return errors;
 }
 
+function validateOfficialSpeechAssets(request: GenerationRequest): string[] {
+  if (!usesOfficialSpeechStack(request)) return [];
+
+  const errors: string[] = [];
+  const requireAsset = (
+    id: RecommendedModelAsset["id"],
+    selectedPath: string,
+    label: string,
+  ) => {
+    const expected = recommendedModelAsset(id);
+    if (resolve(selectedPath) !== resolve(expected.localPath)) {
+      errors.push(
+        `${label}: der offizielle Sprachpfad verlangt ${expected.localPath}; ausgewählt ist ${selectedPath || "nichts"}.`,
+      );
+    }
+  };
+  const usesDistilledCheckpoint = ["distilled", "ic-lora", "lipdub"].includes(request.mode)
+    || (request.mode === "retake" && request.retake.distilled);
+
+  requireAsset("ltx23-gemma", request.models.gemmaRoot, "Gemma");
+  requireAsset(
+    usesDistilledCheckpoint ? "lipdub-distilled-checkpoint" : "ltx23-dev-checkpoint",
+    usesDistilledCheckpoint ? request.models.distilledCheckpointPath : request.models.checkpointPath,
+    usesDistilledCheckpoint ? "Distilled Checkpoint" : "Dev Checkpoint",
+  );
+  if (!["one-stage", "retake"].includes(request.mode)) {
+    requireAsset(
+      request.mode === "lipdub" ? "lipdub-spatial-upscaler" : "ltx23-spatial-upscaler",
+      request.models.spatialUpscalerPath,
+      "Spatial Upscaler",
+    );
+  }
+  if (["two-stage", "two-stage-hq", "keyframes", "audio-to-video"].includes(request.mode)) {
+    requireAsset("ltx23-distilled-lora", request.models.distilledLora.path, "Distilled LoRA");
+  }
+  if (request.mode === "lipdub") {
+    requireAsset("lipdub-lora", request.lipDub.lora.path, "LipDub IC-LoRA");
+  }
+
+  return errors;
+}
+
+export function validateOfficialSpeechInventory(
+  request: GenerationRequest,
+  inventory: ModelInventory,
+): string[] {
+  return requiredOfficialSpeechAssetIds(request).flatMap((id) => {
+    const expected = recommendedModelAsset(id);
+    const actual = inventory.recommendations.find((asset) => asset.id === id);
+    if (actual?.present && actual.integrity === "verified") return [];
+    return [
+      `${expected.label}: offizielles Asset ist nicht vollständig SHA-256-verifiziert `
+      + `(Status: ${actual?.integrity ?? "missing"}).`,
+    ];
+  });
+}
+
 function warnLipDubReference(request: GenerationRequest): string[] {
   const warnings: string[] = [];
-
-  const distilledName = basename(request.models.distilledCheckpointPath);
-  if (distilledName && distilledName !== LIPDUB_EXPECTED_DISTILLED_CHECKPOINT) {
-    warnings.push(
-      `LipDub-Checkpoint ist ${distilledName}; offizieller Referenzstand ist ${LIPDUB_EXPECTED_DISTILLED_CHECKPOINT}.`,
-    );
-  }
-  const upscalerName = basename(request.models.spatialUpscalerPath);
-  if (upscalerName && upscalerName !== LIPDUB_EXPECTED_SPATIAL_UPSCALER) {
-    warnings.push(
-      `LipDub-Spatial-Upscaler ist ${upscalerName}; offizieller Referenzstand ist ${LIPDUB_EXPECTED_SPATIAL_UPSCALER}.`,
-    );
-  }
 
   if (request.lipDub.referenceVideo.path) {
     warnings.push(...inspectLipDubReference(lipDubInspectionInput(request)).findings
@@ -341,8 +389,19 @@ export function validatePlanPaths(plan: CommandPlan): string[] {
   return errors;
 }
 
-export function validateRequestPlan(request: GenerationRequest, plan: CommandPlan): string[] {
-  const errors = validatePlanPaths(plan);
+export function validateRequestPlan(
+  request: GenerationRequest,
+  plan: CommandPlan,
+  inventory?: ModelInventory,
+): string[] {
+  const errors = [...validatePlanPaths(plan), ...validateOfficialSpeechAssets(request)];
+  if (isNativeDialogueRequest(request) && request.enhancePrompt) {
+    errors.push(
+      "Für wortgetreuen nativen Dialog muss die Gemma-Promptverbesserung ausgeschaltet bleiben; "
+      + "sie kann den gesprochenen Wortlaut umformulieren.",
+    );
+  }
+  if (inventory) errors.push(...validateOfficialSpeechInventory(request, inventory));
   if (request.mode === "lipdub") errors.push(...validateLipDubReference(request));
   return errors;
 }

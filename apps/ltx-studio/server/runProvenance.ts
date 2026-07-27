@@ -61,7 +61,9 @@ const REQUIRED_GEMMA_FILES = [
   "tokenizer_config.json",
   "special_tokens_map.json",
   "added_tokens.json",
+  "chat_template.json",
   "chat_template.jinja",
+  "processor_config.json",
   "model.safetensors.index.json",
   "model.safetensors",
 ];

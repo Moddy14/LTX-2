@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import { hasDialogueIntent, PIPELINES, type GenerationRequest } from "../../shared/pipelines";
 import type { LipDubReferenceDiagnostics, PreparedLipDubReference } from "../../shared/plan";
 import {
   DURATION_PRESETS,
@@ -124,8 +124,7 @@ export function Editor({
   const sourceSelectable = ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(request.mode);
   const imageEnabled = request.mode !== "retake" && !isLipDub && (!sourceSelectable || request.sourceMode === "image");
   const visibleTextIntent = /\b(text|schrift|logo|label|etikett|titel|wort|zeichen)\b/i.test(request.prompt);
-  const dialogueIntent = request.promptParts.dialogue.trim().length > 0
-    || /(?:dialogue|dialog|sagt|spricht|says|speaks|["“][^"”]{2,}["”])/i.test(request.prompt);
+  const dialogueIntent = hasDialogueIntent(request);
   const resolutionPreset = matchingResolutionPreset(request.width, request.height);
   const durationPreset = matchingDurationPreset(request.numFrames, request.frameRate);
   const duration = videoDurationSeconds(request.numFrames, request.frameRate);

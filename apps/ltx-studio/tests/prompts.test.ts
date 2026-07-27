@@ -71,6 +71,23 @@ describe("local structured prompt composition", () => {
     );
   });
 
+  it("formats native joint audio-video dialogue as exact spoken text with lip movement intent", () => {
+    const nativeInput = composePromptRequestSchema.parse({
+      ...input,
+      mode: "two-stage",
+      parts: {
+        ...input.parts,
+        dialogue: "Dieser Satz wird gemeinsam mit dem Video erzeugt",
+        ambience: "",
+        music: "",
+      },
+    });
+
+    expect(composePromptFromParts(nativeInput).prompt).toContain(
+      'The speaking subject speaks clearly with natural lip movement, saying exactly: "Dieser Satz wird gemeinsam mit dem Video erzeugt".',
+    );
+  });
+
   it("formats LipDub dialogue as exact spoken text with lip movement intent", () => {
     const lipdubInput = composePromptRequestSchema.parse({
       ...input,

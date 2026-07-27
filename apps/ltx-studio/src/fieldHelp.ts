@@ -2,7 +2,7 @@ export const fieldHelp = {
   prompt:
     "Wofür: Beschreibt Inhalt und Gestaltung des Videos. Gute Eingabe: Motiv, Handlung, Umgebung, Kamera, Licht und gewünschten Ton in klaren Sätzen nennen.",
   enhancePrompt:
-    "Wofür: Der ohnehin benötigte Gemma-Textencoder erweitert den positiven Prompt und verwendet bei Bild-zu-Video auch das Referenzbild. Danach erzeugt dieselbe Modellinstanz die LTX-Konditionierung. Empfehlung: Bei kurzen Ideen einschalten; bei exakt formulierten Prompts ausschalten.",
+    "Wofür: Der ohnehin benötigte Gemma-Textencoder erweitert den positiven Prompt und verwendet bei Bild-zu-Video auch das Referenzbild. Danach erzeugt dieselbe Modellinstanz die LTX-Konditionierung. Empfehlung: Bei kurzen visuellen Ideen einschalten; bei nativ erzeugtem Dialog bleibt die Option aus, damit der exakte Wortlaut nicht umformuliert wird.",
   negativePrompt:
     "Wofür: Nennt Bild- oder Audioeigenschaften, die vermieden werden sollen. Gute Eingabe: konkrete Begriffe wie Flimmern, Text, verzerrte Hände oder Rauschen; leer lassen, wenn keine Ausschlüsse nötig sind.",
   imagePath:
@@ -86,7 +86,7 @@ export const fieldHelp = {
   distilledCheckpoint:
     "Wofür: Für wenige Inferenzschritte optimierter LTX-2 Checkpoint. Gute Eingabe: absoluter Pfad zum kompatiblen Distilled-.safetensors-Modell.",
   gemmaRoot:
-    "Wofür: Modellordner des von LTX-2 benötigten Gemma-Textencoders. Derselbe Encoder kann optional auch den Prompt verbessern. Gute Eingabe: absoluter Pfad zum vollständigen lokalen Gemma-Modellordner einschließlich Tokenizer und preprocessor_config.json.",
+    "Wofür: Modellordner des von LTX-2 benötigten Gemma-Textencoders. Für Sprach- und LipDub-Läufe verlangt das Studio den vollständig geprüften offiziellen Google-Gemma-QAT-Q4-Ordner einschließlich Tokenizer und preprocessor_config.json.",
   spatialUpscaler:
     "Wofür: Modell für die zweite Stufe, die das Video räumlich vergrößert und verfeinert. Gute Eingabe: absoluter Pfad zum zu diesem LTX-Checkpoint passenden Upscaler.",
   distilledLora:
@@ -156,7 +156,7 @@ export const fieldHelp = {
   promptLighting:
     "Wofür: Definiert Beleuchtung und visuellen Look. Gute Eingabe: Hauptlicht, Richtung, Härte, Kontrast, Farbtemperatur und Materialwirkung beschreiben.",
   promptDialogue:
-    "Wofür: Gibt hörbare Sprache vor. Gute Eingabe: Sprecher und exakten Wortlaut in Anführungszeichen nennen; bei Audio zu Video exakt die Audiodatei transkribieren. Kurze Sätze sind zuverlässiger als lange Monologe.",
+    "Wofür: Gibt hörbare Sprache vor. Im nativen Text/Bild-zu-Video-Modus erzeugt LTX Stimme und Mundbewegung gemeinsam aus diesem exakten Wortlaut. Gute Eingabe: ein kurzer Satz im gewünschten Schriftsystem; bei Audio zu Video exakt die vorhandene Audiodatei transkribieren.",
   promptAmbience:
     "Wofür: Beschreibt die Geräuschkulisse. Gute Eingabe: wenige konkrete Geräusche, räumliche Nähe und Lautstärkeverhältnis zur Sprache nennen.",
   promptMusic:
