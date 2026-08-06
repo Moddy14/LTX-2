@@ -1,16 +1,22 @@
+import argparse
 import logging
 from collections.abc import Iterator
+from functools import partial
+from typing import Literal
 
 import torch
 
+from ltx_core.components.diffusion_steps import EulerAncestralRFDiffusionStep, EulerCfgPpDiffusionStep
+from ltx_core.components.guiders import MultiModalGuiderParams, create_multimodal_guider_factory
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.conditioning import ConditioningItem
 from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import Registry
+from ltx_core.model.audio_vae import encode_audio as vae_encode_audio
 from ltx_core.model.transformer.compiling import CompilationConfig
 from ltx_core.model.video_vae import TilingConfig, VideoEncoder, get_video_chunks_number
 from ltx_core.quantization import QuantizationPolicy
-from ltx_core.types import Audio, VideoPixelShape
+from ltx_core.types import Audio, AudioLatentShape, VideoPixelShape
 from ltx_pipelines.iclora_utils import (
     append_ic_lora_reference_video_conditionings,
     read_lora_reference_downscale_factor,
@@ -22,10 +28,10 @@ from ltx_pipelines.utils.args import (
     VideoConditioningAction,
     VideoMaskConditioningAction,
     default_2_stage_distilled_arg_parser,
-    resolve_cli_params,
 )
 from ltx_pipelines.utils.blocks import (
     AudioDecoder,
+    AudioConditioner,
     DiffusionStage,
     ImageConditioner,
     PromptEncoder,
@@ -34,12 +40,35 @@ from ltx_pipelines.utils.blocks import (
 )
 from ltx_pipelines.utils.constants import (
     DISTILLED_SIGMAS,
+    LTX_2_3_PARAMS,
     STAGE_2_DISTILLED_SIGMAS,
 )
-from ltx_pipelines.utils.denoisers import SimpleDenoiser
-from ltx_pipelines.utils.helpers import assert_resolution, combined_image_conditionings, get_device
-from ltx_pipelines.utils.media_io import decode_video_by_frame, encode_video, video_preprocess
+from ltx_pipelines.utils.control_preprocess import preprocess_control_video
+from ltx_pipelines.utils.denoisers import FactoryGuidedDenoiser, SimpleDenoiser
+from ltx_pipelines.utils.helpers import (
+    assert_resolution,
+    combined_image_conditionings,
+    conform_latent_length,
+    get_device,
+)
+from ltx_pipelines.utils.media_io import (
+    decode_audio_from_file,
+    decode_video_by_frame,
+    encode_video,
+    video_preprocess,
+)
+from ltx_pipelines.utils.samplers import euler_ancestral_rf_denoising_loop, euler_cfg_pp_denoising_loop
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
+
+OfficialICLoraSampler = Literal[
+    "euler-ancestral-rf",
+    "euler-ancestral-cfg-pp",
+    "euler-cfg-pp",
+]
+
+
+def _audio_noise_scale(initial_audio_latent: torch.Tensor | None) -> float:
+    return 0.0 if initial_audio_latent is not None else 1.0
 
 
 class ICLoraPipeline:
@@ -53,12 +82,15 @@ class ICLoraPipeline:
     Both stages use distilled models for efficiency.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         distilled_checkpoint_path: str,
-        spatial_upsampler_path: str,
+        spatial_upsampler_path: str | None,
         gemma_root: str,
         loras: list[LoraPathStrengthAndSDOps],
+        gemma_loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
+        official_comfy_workflow: bool = False,
+        official_comfy_sampler: OfficialICLoraSampler = "euler-ancestral-rf",
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
         registry: Registry | None = None,
@@ -68,15 +100,21 @@ class ICLoraPipeline:
     ):
         self.device = device or get_device()
         self.dtype = torch.bfloat16
+        self._official_comfy_workflow = official_comfy_workflow
+        self._official_comfy_sampler = official_comfy_sampler
+        if not official_comfy_workflow and official_comfy_sampler != "euler-ancestral-rf":
+            raise ValueError("An official Comfy sampler can only be selected with official_comfy_workflow=True")
 
         self.prompt_encoder = PromptEncoder(
             distilled_checkpoint_path,
             gemma_root,
             self.dtype,
             self.device,
+            gemma_loras=gemma_loras,
             registry=registry,
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
+            official_comfy_prompt_enhancement=official_comfy_workflow,
         )
         self.image_conditioner = ImageConditioner(
             distilled_checkpoint_path,
@@ -96,25 +134,30 @@ class ICLoraPipeline:
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
         )
-        self.stage_2 = DiffusionStage.from_checkpoint(
-            distilled_checkpoint_path,
-            self.dtype,
-            self.device,
-            loras=(),
-            quantization=quantization,
-            registry=registry,
-            compilation_config=compilation_config,
-            offload_mode=offload_mode,
-            alloc_trim_strategy=alloc_trim_strategy,
-        )
-        self.upsampler = VideoUpsampler(
-            distilled_checkpoint_path,
-            spatial_upsampler_path,
-            self.dtype,
-            self.device,
-            registry=registry,
-            alloc_trim_strategy=alloc_trim_strategy,
-        )
+        self.stage_2 = None
+        self.upsampler = None
+        if not official_comfy_workflow:
+            if spatial_upsampler_path is None:
+                raise ValueError("The two-stage IC-LoRA path requires a spatial upsampler.")
+            self.stage_2 = DiffusionStage.from_checkpoint(
+                distilled_checkpoint_path,
+                self.dtype,
+                self.device,
+                loras=(),
+                quantization=quantization,
+                registry=registry,
+                compilation_config=compilation_config,
+                offload_mode=offload_mode,
+                alloc_trim_strategy=alloc_trim_strategy,
+            )
+            self.upsampler = VideoUpsampler(
+                distilled_checkpoint_path,
+                spatial_upsampler_path,
+                self.dtype,
+                self.device,
+                registry=registry,
+                alloc_trim_strategy=alloc_trim_strategy,
+            )
         self.video_decoder = VideoDecoder(
             distilled_checkpoint_path,
             self.dtype,
@@ -123,6 +166,13 @@ class ICLoraPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_decoder = AudioDecoder(
+            distilled_checkpoint_path,
+            self.dtype,
+            self.device,
+            registry=registry,
+            alloc_trim_strategy=alloc_trim_strategy,
+        )
+        self.audio_conditioner = AudioConditioner(
             distilled_checkpoint_path,
             self.dtype,
             self.device,
@@ -165,11 +215,14 @@ class ICLoraPipeline:
         frame_rate: float,
         images: list[ImageConditioningInput],
         video_conditioning: list[tuple[str, float]],
+        negative_prompt: str = "",
         enhance_prompt: bool = False,
         tiling_config: TilingConfig | None = None,
         conditioning_attention_strength: float = 1.0,
         skip_stage_2: bool = False,
         conditioning_attention_mask: torch.Tensor | None = None,
+        repeat_static_video_conditioning: bool = False,
+        freeze_control_audio_path: str | None = None,
         stage_1_sigmas: torch.Tensor = DISTILLED_SIGMAS,
         stage_2_sigmas: torch.Tensor = STAGE_2_DISTILLED_SIGMAS,
     ) -> tuple[Iterator[torch.Tensor], Audio]:
@@ -205,7 +258,11 @@ class ICLoraPipeline:
         Returns:
             Tuple of (video_iterator, audio_tensor).
         """
-        assert_resolution(height=height, width=width, is_two_stage=True)
+        assert_resolution(
+            height=height,
+            width=width,
+            is_two_stage=not self._official_comfy_workflow,
+        )
         if not (0.0 <= conditioning_attention_strength <= 1.0):
             raise ValueError(
                 f"conditioning_attention_strength must be in [0.0, 1.0], got {conditioning_attention_strength}"
@@ -214,8 +271,12 @@ class ICLoraPipeline:
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
 
-        (ctx_p,) = self.prompt_encoder(
-            [prompt],
+        cfg_pp = self._official_comfy_workflow and self._official_comfy_sampler in {
+            "euler-ancestral-cfg-pp",
+            "euler-cfg-pp",
+        }
+        contexts = self.prompt_encoder(
+            [prompt, negative_prompt] if cfg_pp else [prompt],
             enhance_first_prompt=enhance_prompt,
             enhance_prompt_image=(
                 images[0][0]
@@ -226,14 +287,16 @@ class ICLoraPipeline:
             ),
             enhance_prompt_seed=seed,
         )
+        ctx_p = contexts[0]
+        ctx_n = contexts[1] if cfg_pp else None
         video_context, audio_context = ctx_p.video_encoding, ctx_p.audio_encoding
 
-        # Stage 1: Initial low resolution video generation.
+        scale = 1 if self._official_comfy_workflow else 2
         stage_1_output_shape = VideoPixelShape(
             batch=1,
             frames=num_frames,
-            width=width // 2,
-            height=height // 2,
+            width=width // scale,
+            height=height // scale,
             fps=frame_rate,
         )
 
@@ -248,13 +311,77 @@ class ICLoraPipeline:
                 num_frames=num_frames,
                 conditioning_attention_strength=conditioning_attention_strength,
                 conditioning_attention_mask=conditioning_attention_mask,
+                repeat_static_video_conditioning=repeat_static_video_conditioning,
             )
         )
 
         stage_1_sigmas = stage_1_sigmas.to(dtype=torch.float32, device=self.device)
 
+        denoiser = SimpleDenoiser(video_context, audio_context)
+        stepper = None
+        loop = None
+        if self._official_comfy_workflow:
+            if self._official_comfy_sampler == "euler-ancestral-rf":
+                stepper = EulerAncestralRFDiffusionStep()
+                loop = partial(euler_ancestral_rf_denoising_loop, noise_seed=seed)
+            else:
+                if ctx_n is None:
+                    raise RuntimeError("CFG++ sampling requires negative text conditioning")
+                guider_params = MultiModalGuiderParams(
+                    cfg_scale=1.0,
+                    stg_scale=0.0,
+                    rescale_scale=0.0,
+                    modality_scale=1.0,
+                    skip_step=0,
+                    stg_blocks=[],
+                )
+                denoiser = FactoryGuidedDenoiser(
+                    v_context=video_context,
+                    a_context=audio_context,
+                    video_guider_factory=create_multimodal_guider_factory(
+                        params=guider_params,
+                        negative_context=ctx_n.video_encoding,
+                    ),
+                    audio_guider_factory=create_multimodal_guider_factory(
+                        params=guider_params,
+                        negative_context=ctx_n.audio_encoding,
+                    ),
+                    force_uncond_pass=True,
+                )
+                ancestral = self._official_comfy_sampler == "euler-ancestral-cfg-pp"
+                stepper = EulerCfgPpDiffusionStep(
+                    eta=1.0 if ancestral else 0.0,
+                    s_noise=1.0 if ancestral else 0.0,
+                )
+                loop = partial(euler_cfg_pp_denoising_loop, noise_seed=seed)
+
+        initial_audio_latent = None
+        preserved_audio = None
+        if freeze_control_audio_path:
+            decoded_audio = decode_audio_from_file(
+                freeze_control_audio_path,
+                self.device,
+                0.0,
+                num_frames / frame_rate,
+            )
+            if decoded_audio is not None:
+                preserved_audio = Audio(
+                    waveform=decoded_audio.waveform.squeeze(0),
+                    sampling_rate=decoded_audio.sampling_rate,
+                )
+                initial_audio_latent = self.audio_conditioner(
+                    lambda enc: vae_encode_audio(decoded_audio, enc, None)
+                )
+                expected_audio_frames = AudioLatentShape.from_video_pixel_shape(stage_1_output_shape).frames
+                initial_audio_latent = conform_latent_length(initial_audio_latent, expected_audio_frames)
+            else:
+                logging.warning(
+                    "[IC-LoRA] Control video has no decodable audio; audio will be generated instead: %s",
+                    freeze_control_audio_path,
+                )
+
         video_state, audio_state = self.stage_1(
-            denoiser=SimpleDenoiser(video_context, audio_context),
+            denoiser=denoiser,
             sigmas=stage_1_sigmas,
             noiser=noiser,
             width=stage_1_output_shape.width,
@@ -267,17 +394,27 @@ class ICLoraPipeline:
             ),
             audio=ModalitySpec(
                 context=audio_context,
+                frozen=initial_audio_latent is not None,
+                noise_scale=_audio_noise_scale(initial_audio_latent),
+                initial_latent=initial_audio_latent,
             ),
+            stepper=stepper,
+            loop=loop,
         )
 
-        if skip_stage_2:
-            # Skip Stage 2: Decode directly from Stage 1 output at half resolution
-            logging.info("[IC-LoRA] Skipping Stage 2 (--skip-stage-2 enabled)")
+        if self._official_comfy_workflow or skip_stage_2:
+            logging.info(
+                "[IC-LoRA] Decoding the official single-stage output"
+                if self._official_comfy_workflow
+                else "[IC-LoRA] Skipping Stage 2 (--skip-stage-2 enabled)"
+            )
             decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
-            decoded_audio = self.audio_decoder(audio_state.latent)
-            return decoded_video, decoded_audio
+            output_audio = preserved_audio or self.audio_decoder(audio_state.latent)
+            return decoded_video, output_audio
 
         # Stage 2: Upsample and refine the video at higher resolution with distilled LORA.
+        if self.upsampler is None or self.stage_2 is None:
+            raise RuntimeError("IC-LoRA second-stage components were not initialized.")
         upscaled_video_latent = self.upsampler(video_state.latent[:1])
 
         stage_2_sigmas = stage_2_sigmas.to(dtype=torch.float32, device=self.device)
@@ -315,8 +452,8 @@ class ICLoraPipeline:
         )
 
         decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
-        decoded_audio = self.audio_decoder(audio_state.latent)
-        return decoded_video, decoded_audio
+        output_audio = preserved_audio or self.audio_decoder(audio_state.latent)
+        return decoded_video, output_audio
 
     def _create_conditionings(
         self,
@@ -328,6 +465,7 @@ class ICLoraPipeline:
         video_encoder: VideoEncoder,
         conditioning_attention_strength: float = 1.0,
         conditioning_attention_mask: torch.Tensor | None = None,
+        repeat_static_video_conditioning: bool = False,
     ) -> list[ConditioningItem]:
         """
         Create conditioning items for video generation.
@@ -365,6 +503,7 @@ class ICLoraPipeline:
             reference_temporal_scale_factor=self.reference_temporal_scale_factor,
             conditioning_attention_strength=conditioning_attention_strength,
             conditioning_attention_mask=conditioning_attention_mask,
+            repeat_static_reference=repeat_static_video_conditioning,
             tiling_config=None,
         )
 
@@ -374,11 +513,48 @@ class ICLoraPipeline:
         return conditionings
 
 
-@torch.inference_mode()
-def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-    params = resolve_cli_params(distilled=True)
-    parser = default_2_stage_distilled_arg_parser(params=params)
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = default_2_stage_distilled_arg_parser(params=LTX_2_3_PARAMS)
+    for action in parser._actions:
+        if "--spatial-upsampler-path" in action.option_strings:
+            action.required = False
+        if "--distilled-checkpoint-path" in action.option_strings:
+            # The alias must also live in argparse's option lookup; appending to
+            # option_strings alone only changes the usage text.
+            action.option_strings.append("--checkpoint-path")
+            parser._option_string_actions["--checkpoint-path"] = action
+    parser.add_argument(
+        "--official-comfy-workflow",
+        action="store_true",
+        help="Use an official single-stage, eight-step LTX-2.3 IC-LoRA workflow.",
+    )
+    parser.add_argument(
+        "--official-comfy-sampler",
+        choices=("euler-ancestral-rf", "euler-ancestral-cfg-pp", "euler-cfg-pp"),
+        default="euler-ancestral-rf",
+        help=(
+            "Sampler used by the selected official example. Union Control, Ingredients, "
+            "Motion Track and V2V use euler-ancestral-cfg-pp; "
+            "Pixel Spatial Upscaler uses euler-cfg-pp."
+        ),
+    )
+    parser.add_argument(
+        "--negative-prompt",
+        type=str,
+        default="",
+        help="Negative prompt used by the official CFG++ IC-LoRA examples.",
+    )
+    parser.add_argument(
+        "--repeat-static-control",
+        action="store_true",
+        help="Repeat a one-frame IC-LoRA reference across the full sequence, as in Ingredients.",
+    )
+    parser.add_argument(
+        "--freeze-control-audio",
+        type=str,
+        default=None,
+        help="Freeze and preserve the audio latent decoded from the selected source video.",
+    )
     parser.add_argument(
         "--video-conditioning",
         action=VideoConditioningAction,
@@ -410,7 +586,37 @@ def main() -> None:
             "(height//2, width//2). Useful for faster iteration or when GPU memory is limited."
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--control-preprocessor",
+        choices=("prepared", "depth", "canny", "pose"),
+        default="prepared",
+        help="Convert raw control videos to depth or Canny maps; prepared/pose inputs pass through unchanged.",
+    )
+    parser.add_argument(
+        "--control-cache-dir",
+        type=str,
+        default=".ltx-control-cache",
+        help="Persistent cache directory for deterministic control maps.",
+    )
+    parser.add_argument(
+        "--moge-model-path",
+        type=str,
+        default=None,
+        help="MoGe checkpoint required when --control-preprocessor=depth.",
+    )
+    parser.add_argument(
+        "--comfy-root",
+        type=str,
+        default="/home/moddy/ComfyUI",
+        help="ComfyUI root containing the native MoGe implementation.",
+    )
+    return parser
+
+
+@torch.inference_mode()
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    args = _build_arg_parser().parse_args()
 
     # Load mask video if provided via --conditioning-attention-mask
     conditioning_attention_mask = None
@@ -420,16 +626,34 @@ def main() -> None:
         conditioning_attention_strength = mask_strength
         conditioning_attention_mask = _load_mask_video(
             mask_path=mask_path,
-            height=args.height // 2,  # Stage 1 operates at half resolution
-            width=args.width // 2,
+            height=args.height if args.official_comfy_workflow else args.height // 2,
+            width=args.width if args.official_comfy_workflow else args.width // 2,
             num_frames=args.num_frames,
         )
+
+    video_conditioning = [
+        (
+            preprocess_control_video(
+                path,
+                args.control_preprocessor,
+                args.control_cache_dir,
+                args.num_frames,
+                moge_model_path=args.moge_model_path,
+                comfy_root=args.comfy_root,
+            ),
+            strength,
+        )
+        for path, strength in args.video_conditioning
+    ]
 
     pipeline = ICLoraPipeline(
         distilled_checkpoint_path=args.distilled_checkpoint_path,
         spatial_upsampler_path=args.spatial_upsampler_path,
         gemma_root=args.gemma_root,
         loras=tuple(args.lora) if args.lora else (),
+        gemma_loras=tuple(args.gemma_lora) if args.gemma_lora else (),
+        official_comfy_workflow=args.official_comfy_workflow,
+        official_comfy_sampler=args.official_comfy_sampler,
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
@@ -444,11 +668,14 @@ def main() -> None:
         num_frames=args.num_frames,
         frame_rate=args.frame_rate,
         images=args.images,
-        video_conditioning=args.video_conditioning,
+        video_conditioning=video_conditioning,
+        negative_prompt=args.negative_prompt,
         tiling_config=tiling_config,
         conditioning_attention_strength=conditioning_attention_strength,
         skip_stage_2=args.skip_stage_2,
         conditioning_attention_mask=conditioning_attention_mask,
+        repeat_static_video_conditioning=args.repeat_static_control,
+        freeze_control_audio_path=args.freeze_control_audio,
         enhance_prompt=args.enhance_prompt,
     )
 

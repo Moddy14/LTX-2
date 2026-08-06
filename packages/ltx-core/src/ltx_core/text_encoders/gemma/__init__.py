@@ -12,6 +12,7 @@ from ltx_core.text_encoders.gemma.encoders.base_encoder import (
 from ltx_core.text_encoders.gemma.encoders.encoder_configurator import (
     EMBEDDINGS_PROCESSOR_KEY_OPS,
     GEMMA_LLM_KEY_OPS,
+    GEMMA_LORA_COMFY_KEY_OPS,
     GEMMA_MODEL_OPS,
     VIDEO_ONLY_EMBEDDINGS_PROCESSOR_KEY_OPS,
     EmbeddingsProcessorConfigurator,
@@ -21,6 +22,7 @@ from ltx_core.text_encoders.gemma.encoders.encoder_configurator import (
 __all__ = [
     "EMBEDDINGS_PROCESSOR_KEY_OPS",
     "GEMMA_LLM_KEY_OPS",
+    "GEMMA_LORA_COMFY_KEY_OPS",
     "GEMMA_MODEL_OPS",
     "VIDEO_ONLY_EMBEDDINGS_PROCESSOR_KEY_OPS",
     "EmbeddingsProcessor",

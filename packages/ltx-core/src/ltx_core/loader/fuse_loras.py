@@ -190,9 +190,12 @@ def _products_for_sd_key(
     prefix = key[: -len(".weight")]
     key_a = f"{prefix}.lora_A.weight"
     key_b = f"{prefix}.lora_B.weight"
+    alpha_key = f"{prefix}.alpha"
     for lsd, coef in lora_sd_and_strengths:
         if key_a not in lsd.sd or key_b not in lsd.sd:
             continue
         a = lsd.sd[key_a].to(device=device, dtype=dtype, non_blocking=True)
         b = lsd.sd[key_b].to(device=device, dtype=dtype, non_blocking=True)
-        yield LoraProduct(a, b, coef)
+        alpha = lsd.sd.get(alpha_key)
+        alpha_scale = float(alpha.item()) / a.shape[0] if alpha is not None else 1.0
+        yield LoraProduct(a, b, coef * alpha_scale)

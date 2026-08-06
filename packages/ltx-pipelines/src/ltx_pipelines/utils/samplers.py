@@ -6,7 +6,11 @@ from typing import Callable
 import torch
 from tqdm import tqdm
 
-from ltx_core.components.diffusion_steps import EulerCfgPpDiffusionStep, Res2sDiffusionStep
+from ltx_core.components.diffusion_steps import (
+    EulerAncestralRFDiffusionStep,
+    EulerCfgPpDiffusionStep,
+    Res2sDiffusionStep,
+)
 from ltx_core.components.protocols import DiffusionStepProtocol
 from ltx_core.devices import highest_precision_float
 from ltx_core.model.transformer import X0Model
@@ -90,6 +94,112 @@ def euler_denoising_loop(
 
     complete_restored_euler_loop(loop_index, start_step)
     return (video_state, audio_state)
+
+
+def euler_ancestral_rf_denoising_loop(
+    sigmas: torch.Tensor,
+    video_state: LatentState | None,
+    audio_state: LatentState | None,
+    stepper: DiffusionStepProtocol,
+    transformer: X0Model,
+    denoiser: Denoiser,
+    noise_seed: int,
+) -> tuple[LatentState | None, LatentState | None]:
+    """Run ComfyUI's rectified-flow Euler ancestral sampler cooperatively."""
+    if not isinstance(stepper, EulerAncestralRFDiffusionStep):
+        raise ValueError(
+            "euler_ancestral_rf_denoising_loop requires EulerAncestralRFDiffusionStep, "
+            f"got {type(stepper).__name__}"
+        )
+    present_state = video_state or audio_state
+    if present_state is None:
+        raise ValueError("At least one of video_state or audio_state must be provided")
+
+    loop_index, start_step, video_state, audio_state = restore_euler_checkpoint(
+        sigmas,
+        video_state,
+        audio_state,
+    )
+    generator = torch.Generator(device=present_state.latent.device).manual_seed(noise_seed)
+
+    # Checkpoints contain the updated latents but not RNG state. Replaying only
+    # the already-consumed draws preserves exact stochastic continuation.
+    if stepper.eta > 0:
+        for step_idx in range(start_step):
+            if sigmas[step_idx + 1].item() == 0:
+                continue
+            if video_state is not None:
+                _get_plain_noise(video_state.latent, generator)
+            if audio_state is not None:
+                _get_plain_noise(audio_state.latent, generator)
+
+    for step_idx in tqdm(range(start_step, len(sigmas) - 1)):
+        video_result, audio_result = denoiser(transformer, video_state, audio_state, sigmas, step_idx)
+        denoised_video = video_result.denoised if video_result is not None else None
+        denoised_audio = audio_result.denoised if audio_result is not None else None
+
+        if video_state is not None and denoised_video is not None:
+            denoised_video = post_process_latent(
+                denoised_video,
+                video_state.denoise_mask,
+                video_state.clean_latent,
+            )
+            video_noise = (
+                _get_plain_noise(video_state.latent, generator)
+                if stepper.eta > 0 and sigmas[step_idx + 1].item() != 0
+                else None
+            )
+            next_video = stepper.step(
+                video_state.latent,
+                denoised_video,
+                sigmas,
+                step_idx,
+                noise=video_noise,
+            )
+            if video_noise is not None:
+                next_video = post_process_latent(
+                    next_video,
+                    video_state.denoise_mask,
+                    video_state.clean_latent,
+                )
+            video_state = replace(video_state, latent=next_video.to(video_state.latent.dtype))
+
+        if audio_state is not None and denoised_audio is not None:
+            denoised_audio = post_process_latent(
+                denoised_audio,
+                audio_state.denoise_mask,
+                audio_state.clean_latent,
+            )
+            audio_noise = (
+                _get_plain_noise(audio_state.latent, generator)
+                if stepper.eta > 0 and sigmas[step_idx + 1].item() != 0
+                else None
+            )
+            next_audio = stepper.step(
+                audio_state.latent,
+                denoised_audio,
+                sigmas,
+                step_idx,
+                noise=audio_noise,
+            )
+            if audio_noise is not None:
+                next_audio = post_process_latent(
+                    next_audio,
+                    audio_state.denoise_mask,
+                    audio_state.clean_latent,
+                )
+            audio_state = replace(audio_state, latent=next_audio.to(audio_state.latent.dtype))
+
+        checkpoint_and_yield_if_requested(
+            loop_index=loop_index,
+            next_step_index=step_idx + 1,
+            sigmas=sigmas,
+            video_state=video_state,
+            audio_state=audio_state,
+        )
+
+    complete_restored_euler_loop(loop_index, start_step)
+    return video_state, audio_state
 
 
 def gradient_estimating_euler_denoising_loop(

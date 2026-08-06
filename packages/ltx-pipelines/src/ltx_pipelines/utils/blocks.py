@@ -554,10 +554,12 @@ class PromptEncoder:
         gemma_root: str,
         dtype: torch.dtype,
         device: torch.device,
+        gemma_loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
         registry: Registry | None = None,
         offload_mode: OffloadMode = OffloadMode.NONE,
         text_encoder_builder: BuilderProtocol | None = None,
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
+        official_comfy_prompt_enhancement: bool = False,
     ) -> None:
         self._gemma_root = gemma_root
         self._checkpoint_path = checkpoint_path
@@ -565,8 +567,16 @@ class PromptEncoder:
         self._device = device
         self._offload_mode = offload_mode
         self._alloc_trim_strategy = alloc_trim_strategy
+        self._official_comfy_prompt_enhancement = official_comfy_prompt_enhancement
+        self._enhancement_text_encoder_builder = None
+        self._streaming_enhancement_text_encoder_builder = None
 
         if text_encoder_builder is not None:
+            if official_comfy_prompt_enhancement and gemma_loras:
+                raise ValueError(
+                    "A custom text_encoder_builder cannot be combined with separate "
+                    "official Comfy prompt-enhancement LoRAs."
+                )
             if offload_mode != OffloadMode.NONE:
                 raise ValueError(
                     "text_encoder_builder cannot be used with offload_mode != OffloadMode.NONE "
@@ -578,11 +588,13 @@ class PromptEncoder:
             module_ops = module_ops_from_gemma_root(gemma_root)
             model_folder = find_matching_file(gemma_root, "model*.safetensors").parent
             weight_paths = [str(p) for p in model_folder.rglob("*.safetensors")]
+            encoding_loras = () if official_comfy_prompt_enhancement else gemma_loras
             self._text_encoder_builder = Builder(
                 model_path=tuple(weight_paths),
                 model_class_configurator=GemmaTextEncoderConfigurator,
                 model_sd_ops=GEMMA_LLM_KEY_OPS,
                 module_ops=(GEMMA_MODEL_OPS, *module_ops),
+                loras=encoding_loras,
                 registry=registry or DummyRegistry(),
             )
             self._streaming_text_encoder_builder = StreamingModelBuilder(
@@ -590,11 +602,32 @@ class PromptEncoder:
                 model_class_configurator=GemmaTextEncoderConfigurator,
                 model_sd_ops=GEMMA_LLM_KEY_OPS,
                 module_ops=(GEMMA_MODEL_OPS, *module_ops),
+                loras=encoding_loras,
                 registry=registry or DummyRegistry(),
                 blocks_attr="model.model.language_model.layers",
                 blocks_prefix="model.model.language_model.layers",
                 cpu_slots_count=DISK_CPU_SLOTS if offload_mode == OffloadMode.DISK else None,
             )
+            if official_comfy_prompt_enhancement and gemma_loras:
+                self._enhancement_text_encoder_builder = Builder(
+                    model_path=tuple(weight_paths),
+                    model_class_configurator=GemmaTextEncoderConfigurator,
+                    model_sd_ops=GEMMA_LLM_KEY_OPS,
+                    module_ops=(GEMMA_MODEL_OPS, *module_ops),
+                    loras=gemma_loras,
+                    registry=registry or DummyRegistry(),
+                )
+                self._streaming_enhancement_text_encoder_builder = StreamingModelBuilder(
+                    model_path=tuple(weight_paths),
+                    model_class_configurator=GemmaTextEncoderConfigurator,
+                    model_sd_ops=GEMMA_LLM_KEY_OPS,
+                    module_ops=(GEMMA_MODEL_OPS, *module_ops),
+                    loras=gemma_loras,
+                    registry=registry or DummyRegistry(),
+                    blocks_attr="model.model.language_model.layers",
+                    blocks_prefix="model.model.language_model.layers",
+                    cpu_slots_count=DISK_CPU_SLOTS if offload_mode == OffloadMode.DISK else None,
+                )
         self._embeddings_processor_builder = Builder(
             model_path=checkpoint_path,
             model_class_configurator=EmbeddingsProcessorConfigurator,
@@ -602,20 +635,33 @@ class PromptEncoder:
             registry=registry or DummyRegistry(),
         )
 
-    def _build_text_encoder(self) -> torch.nn.Module:
+    def _build_text_encoder(self, *, enhancement: bool = False) -> torch.nn.Module:
         """Build the Gemma text encoder (non-streaming path)."""
-        return self._text_encoder_builder.build(device=self._device, dtype=self._dtype).eval()
+        builder = self._enhancement_text_encoder_builder if enhancement else self._text_encoder_builder
+        if builder is None:
+            raise RuntimeError("The requested prompt-enhancement text encoder is not configured.")
+        return builder.build(device=self._device, dtype=self._dtype).eval()
 
     def _build_embeddings_processor(self) -> EmbeddingsProcessor:
         """Build the embeddings processor on the target device."""
         return self._embeddings_processor_builder.build(device=self._device, dtype=self._dtype).eval()
 
-    def _text_encoder_ctx(self) -> AbstractContextManager:
+    def _text_encoder_ctx(self, *, enhancement: bool = False) -> AbstractContextManager:
         if self._offload_mode != OffloadMode.NONE:
-            return _streaming_model(
-                self._streaming_text_encoder_builder, self._device, self._dtype, self._alloc_trim_strategy
+            builder = (
+                self._streaming_enhancement_text_encoder_builder
+                if enhancement
+                else self._streaming_text_encoder_builder
             )
-        return gpu_model(self._build_text_encoder(), alloc_trim_strategy=self._alloc_trim_strategy)
+            if builder is None:
+                raise RuntimeError("The requested streaming prompt-enhancement text encoder is not configured.")
+            return _streaming_model(
+                builder, self._device, self._dtype, self._alloc_trim_strategy
+            )
+        return gpu_model(
+            self._build_text_encoder(enhancement=enhancement),
+            alloc_trim_strategy=self._alloc_trim_strategy,
+        )
 
     def __call__(
         self,
@@ -627,11 +673,34 @@ class PromptEncoder:
     ) -> list[EmbeddingsProcessorOutput]:
         """Encode *prompts* through Gemma -> embeddings processor, freeing each model after use."""
         logger.info("Building text encoder from %s", self._gemma_root)
+        if enhance_first_prompt and self._enhancement_text_encoder_builder is not None:
+            with self._text_encoder_ctx(enhancement=True) as enhancement_encoder:
+                prompts = list(prompts)
+                prompts[0] = generate_enhanced_prompt(
+                    enhancement_encoder,
+                    prompts[0],
+                    enhance_prompt_image,
+                    seed=0,
+                    max_new_tokens=2048,
+                    top_k=64,
+                    top_p=0.95,
+                    min_p=0.05,
+                    repetition_penalty=1.05,
+                )
+            enhance_first_prompt = False
         with self._text_encoder_ctx() as text_encoder:
             if enhance_first_prompt:
                 prompts = list(prompts)
                 prompts[0] = generate_enhanced_prompt(
-                    text_encoder, prompts[0], enhance_prompt_image, seed=enhance_prompt_seed
+                    text_encoder,
+                    prompts[0],
+                    enhance_prompt_image,
+                    seed=0 if self._official_comfy_prompt_enhancement else enhance_prompt_seed,
+                    max_new_tokens=2048 if self._official_comfy_prompt_enhancement else 512,
+                    top_k=64 if self._official_comfy_prompt_enhancement else None,
+                    top_p=0.95 if self._official_comfy_prompt_enhancement else None,
+                    min_p=0.05 if self._official_comfy_prompt_enhancement else None,
+                    repetition_penalty=1.05 if self._official_comfy_prompt_enhancement else None,
                 )
             raw_outputs = text_encoder.encode(prompts)
         logger.info("Text encoder done, building embeddings processor from %s", self._checkpoint_path)

@@ -18,8 +18,14 @@ DISTILLED_SIGMA_VALUES = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725,
 # Reduced schedule for super-resolution stage 2 (subset of distilled values)
 STAGE_2_DISTILLED_SIGMA_VALUES = [0.909375, 0.725, 0.421875, 0.0]
 
+# The current official ComfyUI T2V, I2V, IA2V, and ID-LoRA templates
+# start the high-resolution refinement at 0.85 rather than 0.909375.
+OFFICIAL_COMFY_STAGE_2_SIGMA_VALUES = [0.85, 0.725, 0.421875, 0.0]
+OFFICIAL_COMFY_STAGE_2_SEED = 42
+
 DISTILLED_SIGMAS = torch.tensor(DISTILLED_SIGMA_VALUES)
 STAGE_2_DISTILLED_SIGMAS = torch.tensor(STAGE_2_DISTILLED_SIGMA_VALUES)
+OFFICIAL_COMFY_STAGE_2_SIGMAS = torch.tensor(OFFICIAL_COMFY_STAGE_2_SIGMA_VALUES)
 # Stage 2 schedule for the tiled-data-parallel multi-GPU runner.
 TDP_DISTILLED_SIGMAS = torch.tensor([0.625, 0.4, 0.0])
 

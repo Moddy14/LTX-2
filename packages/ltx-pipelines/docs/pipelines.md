@@ -56,13 +56,15 @@ Two-stage generation with 8 predefined sigmas (8 steps in stage 1, 4 steps in st
 
 ## 5. ICLoraPipeline
 
-**Best for:** Video-to-video and image-to-video transformations using IC-LoRA.
+**Best for:** Union Control and model-specific video/image transformations using IC-LoRA.
 
 **Source**: [`src/ltx_pipelines/ic_lora.py`](../src/ltx_pipelines/ic_lora.py)
 
-Two-stage generation with IC-LoRA support. Can condition on reference videos (video-to-video) or images at specific frames. CFG guidance in stage 1, upsampling in stage 2. Requires IC-LoRA trained model.
-
-**Note:** ICLoraPipeline can only be used with a distilled model.
+Supports the documented one-stage Union Control workflow and Lightricks'
+model-specific IC-LoRA examples. It can condition on aligned control videos,
+static references, or source videos. The selected profile determines whether
+the dev or distilled checkpoint, a one- or two-stage schedule, and RF or CFG++
+sampling are required.
 
 **Use when:** Video-to-video transformations, image-to-video with strong control, or when you have reference videos to guide generation.
 
@@ -130,7 +132,14 @@ Two-stage video-to-video on the distilled model with an HDR IC-LoRA. Decoded lat
 
 **Source**: [`src/ltx_pipelines/lipdub.py`](../src/ltx_pipelines/lipdub.py)
 
-Uses IC-LoRA on a **distilled** checkpoint with a **single** lip-dub IC-LoRA applied in **both** stages. The reference clip provides video and audio reference tokens whose VAE latents are appended to the target audio sequence as frozen reference tokens. The frame count and frame rate are derived from the reference video (frame count is silently snapped to the nearest `8k+1`), so the CLI does not accept `--num-frames` or `--frame-rate`. Required: `--reference-video`. Optional: `--reference-strength`. LoRA: [`Lightricks/LTX-2.3-22b-IC-LoRA-LipDub`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-LipDub).
+Offers two explicit, reproducible profiles. `official-comfy-hq` mirrors the published ComfyUI workflow: the **dev**
+checkpoint, distilled 1.1 LoRA at `0.5`, and the lip-dub IC-LoRA at `1.0` in both stages, with the published Euler
+sigma schedules and an independent second-stage seed. `native-distilled` preserves the original **distilled**
+checkpoint plus single lip-dub IC-LoRA path. The reference clip provides video and audio reference tokens whose VAE
+latents are appended to the target audio sequence as frozen reference tokens. The frame count and frame rate are
+derived from the reference video (frame count is silently snapped to the nearest `8k+1`), so the CLI does not accept
+`--num-frames` or `--frame-rate`. Required: `--reference-video`. Optional: `--reference-strength`. LoRA:
+[`Lightricks/LTX-2.3-22b-IC-LoRA-LipDub`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-LipDub).
 
 **Note:** Requires a distilled model checkpoint and one lip-dub IC-LoRA (`--lora` exactly once).
 
@@ -149,3 +158,42 @@ Single-stage, **audio-only** generation: the video branch is absent (`video=None
 **Extra CLI arguments (all optional, with sensible defaults):** `--num-frames`, `--frame-rate`, `--negative-prompt`, `--audio-cfg-guidance-scale`, `--audio-stg-guidance-scale`, `--audio-stg-blocks`, `--audio-rescale-scale`, `--audio-skip-step`. No `--height/--width/--image` (audio has no spatial dimensions).
 
 **Use when:** You need speech/audio from text alone, or to evaluate an audio-only LoRA (accent, voice style) without generating video.
+
+---
+
+## 12. FLF2VPipeline
+
+**Best for:** The current LTX-2.3 first/last-frame ComfyUI workflow.
+
+**Source**: [`src/ltx_pipelines/flf2v.py`](../src/ltx_pipelines/flf2v.py)
+
+Runs the distilled-FP8 model in one fixed eight-step stage. It requires exactly
+two image guides: frame `0` and the final `8k` frame. It does not add a
+transformer LoRA or spatial upscaler.
+
+---
+
+## 13. IDLoraPipeline
+
+**Best for:** TalkVid person and speaker identity from one image and a short reference recording.
+
+**Source**: [`src/ltx_pipelines/id_lora.py`](../src/ltx_pipelines/id_lora.py)
+
+Mirrors the current ComfyUI ID-LoRA graph: dev FP8, dynamic-rank distilled LoRA
+at `0.5`, TalkVid ID-LoRA at `1.0`, identity guidance `3/0/1`, image strengths
+`0.7` then `1.0`, fixed eight-step generation and the independent seed-42
+three-step x2 refinement.
+
+---
+
+## 14. InOutpaintPipeline
+
+**Best for:** Masked video repair and centered canvas extension.
+
+**Source**: [`src/ltx_pipelines/inoutpaint.py`](../src/ltx_pipelines/inoutpaint.py)
+
+Implements the published two-stage In-/Outpainting graph with green-screen
+masked conditioning, source audio frozen across both stages, ancestral CFG++
+generation, deterministic CFG++ refinement, per-stage mask dilation, and
+Laplacian-pyramid blending. Inpainting requires `--mask-video`; outpainting
+derives its padding mask from `--width` and `--height`.

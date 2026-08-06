@@ -24,17 +24,44 @@ from ltx_pipelines.utils.blocks import (
     VideoUpsampler,
 )
 from ltx_pipelines.utils.constants import (
+    DISTILLED_SIGMAS,
+    OFFICIAL_COMFY_STAGE_2_SEED,
+    OFFICIAL_COMFY_STAGE_2_SIGMAS,
     STAGE_2_DISTILLED_SIGMAS,
 )
 from ltx_pipelines.utils.denoisers import GuidedDenoiser, SimpleDenoiser
 from ltx_pipelines.utils.helpers import (
     assert_resolution,
+    cap_image_conditioning_strength,
     combined_image_conditionings,
     conform_latent_length,
     get_device,
 )
 from ltx_pipelines.utils.media_io import decode_audio_from_file, encode_video
-from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
+from ltx_pipelines.utils.types import Denoiser, ModalitySpec, OffloadMode
+
+
+def _stage_1_denoiser(
+    *,
+    official_comfy_workflow: bool,
+    v_context_p: torch.Tensor,
+    a_context_p: torch.Tensor,
+    v_context_n: torch.Tensor,
+    video_guider_params: MultiModalGuiderParams,
+) -> Denoiser:
+    if official_comfy_workflow:
+        return SimpleDenoiser(v_context_p, a_context_p)
+    return GuidedDenoiser(
+        v_context=v_context_p,
+        a_context=a_context_p,
+        video_guider=MultiModalGuider(
+            params=video_guider_params,
+            negative_context=v_context_n,
+        ),
+        audio_guider=MultiModalGuider(
+            params=MultiModalGuiderParams(),
+        ),
+    )
 
 
 class A2VidPipelineTwoStage:
@@ -42,7 +69,7 @@ class A2VidPipelineTwoStage:
     Two-stage audio to video generation pipeline.
     Stage 1 generates video at half the target resolution with audio conditioning
     (video-only denoising, audio frozen), then Stage 2 upsamples by 2x and refines
-    both video and audio using a distilled LoRA for higher quality output.
+    the video using a distilled LoRA while preserving the input audio.
     """
 
     def __init__(  # noqa: PLR0913
@@ -52,6 +79,8 @@ class A2VidPipelineTwoStage:
         spatial_upsampler_path: str,
         gemma_root: str,
         loras: list[LoraPathStrengthAndSDOps],
+        gemma_loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
+        official_comfy_workflow: bool = False,
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
         registry: Registry | None = None,
@@ -62,15 +91,18 @@ class A2VidPipelineTwoStage:
         self.device = device or get_device()
         self.dtype = torch.bfloat16
         self._scheduler = LTX2Scheduler()
+        self._official_comfy_workflow = official_comfy_workflow
 
         self.prompt_encoder = PromptEncoder(
             checkpoint_path,
             gemma_root,
             self.dtype,
             self.device,
+            gemma_loras=gemma_loras,
             registry=registry,
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
+            official_comfy_prompt_enhancement=official_comfy_workflow,
         )
         self.image_conditioner = ImageConditioner(
             checkpoint_path, self.dtype, self.device, registry=registry, alloc_trim_strategy=alloc_trim_strategy
@@ -82,7 +114,7 @@ class A2VidPipelineTwoStage:
             checkpoint_path,
             self.dtype,
             self.device,
-            loras=tuple(loras),
+            loras=(*tuple(loras), *tuple(distilled_lora)) if official_comfy_workflow else tuple(loras),
             quantization=quantization,
             registry=registry,
             compilation_config=compilation_config,
@@ -143,7 +175,13 @@ class A2VidPipelineTwoStage:
         ctx_p, ctx_n = self.prompt_encoder(
             [prompt, negative_prompt],
             enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=images[0][0] if len(images) > 0 else audio_path,
+            enhance_prompt_image=(
+                None
+                if self._official_comfy_workflow
+                else images[0][0]
+                if len(images) > 0
+                else None
+            ),
         )
         v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
         v_context_n, _ = ctx_n.video_encoding, ctx_n.audio_encoding
@@ -166,9 +204,14 @@ class A2VidPipelineTwoStage:
             height=height // 2,
             fps=frame_rate,
         )
+        stage_1_images = (
+            cap_image_conditioning_strength(images, 0.7)
+            if self._official_comfy_workflow
+            else images
+        )
         stage_1_conditionings = self.image_conditioner(
             lambda enc: combined_image_conditionings(
-                images=images,
+                images=stage_1_images,
                 height=stage_1_output_shape.height,
                 width=stage_1_output_shape.width,
                 video_encoder=enc,
@@ -177,21 +220,21 @@ class A2VidPipelineTwoStage:
             )
         )
 
-        sigmas = (
-            stage_1_sigmas if stage_1_sigmas is not None else self._scheduler.execute(steps=num_inference_steps)
-        ).to(dtype=torch.float32, device=self.device)
+        if stage_1_sigmas is None:
+            stage_1_sigmas = (
+                DISTILLED_SIGMAS
+                if self._official_comfy_workflow
+                else self._scheduler.execute(steps=num_inference_steps)
+            )
+        sigmas = stage_1_sigmas.to(dtype=torch.float32, device=self.device)
 
         video_state, _ = self.stage_1(
-            denoiser=GuidedDenoiser(
-                v_context=v_context_p,
-                a_context=a_context_p,
-                video_guider=MultiModalGuider(
-                    params=video_guider_params,
-                    negative_context=v_context_n,
-                ),
-                audio_guider=MultiModalGuider(
-                    params=MultiModalGuiderParams(),
-                ),
+            denoiser=_stage_1_denoiser(
+                official_comfy_workflow=self._official_comfy_workflow,
+                v_context_p=v_context_p,
+                a_context_p=a_context_p,
+                v_context_n=v_context_n,
+                video_guider_params=video_guider_params,
             ),
             sigmas=sigmas,
             noiser=noiser,
@@ -215,7 +258,15 @@ class A2VidPipelineTwoStage:
         # Stage 2: Upsample and refine the video at higher resolution with distilled LoRA.
         upscaled_video_latent = self.upsampler(video_state.latent[:1])
 
+        if self._official_comfy_workflow:
+            stage_2_sigmas = OFFICIAL_COMFY_STAGE_2_SIGMAS
         stage_2_sigmas = stage_2_sigmas.to(dtype=torch.float32, device=self.device)
+        stage_2_noiser = noiser
+        if self._official_comfy_workflow:
+            stage_2_generator = torch.Generator(device=self.device).manual_seed(
+                OFFICIAL_COMFY_STAGE_2_SEED
+            )
+            stage_2_noiser = GaussianNoiser(generator=stage_2_generator)
         stage_2_output_shape = VideoPixelShape(batch=1, frames=num_frames, width=width, height=height, fps=frame_rate)
         stage_2_conditionings = self.image_conditioner(
             lambda enc: combined_image_conditionings(
@@ -231,7 +282,7 @@ class A2VidPipelineTwoStage:
         video_state, _ = self.stage_2(
             denoiser=SimpleDenoiser(v_context_p, a_context_p),
             sigmas=stage_2_sigmas,
-            noiser=noiser,
+            noiser=stage_2_noiser,
             width=width,
             height=height,
             frames=num_frames,
@@ -264,6 +315,11 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     parser = default_2_stage_arg_parser()
     parser.add_argument(
+        "--official-comfy-workflow",
+        action="store_true",
+        help="Use the official LTX-2.3 IA2V 8+3 schedule and distilled LoRA in both stages.",
+    )
+    parser.add_argument(
         "--audio-path",
         type=str,
         required=True,
@@ -288,6 +344,8 @@ def main() -> None:
         spatial_upsampler_path=args.spatial_upsampler_path,
         gemma_root=args.gemma_root,
         loras=tuple(args.lora) if args.lora else (),
+        gemma_loras=tuple(args.gemma_lora) if args.gemma_lora else (),
+        official_comfy_workflow=args.official_comfy_workflow,
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,

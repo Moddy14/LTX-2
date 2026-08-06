@@ -1,7 +1,9 @@
 import logging
+from functools import partial
 
 import torch
 
+from ltx_core.components.diffusion_steps import EulerCfgPpDiffusionStep
 from ltx_core.components.guiders import (
     MultiModalGuiderFactory,
     MultiModalGuiderParams,
@@ -26,8 +28,10 @@ from ltx_pipelines.utils.blocks import (
     DiffusionStage,
     PromptEncoder,
 )
+from ltx_pipelines.utils.constants import DISTILLED_SIGMAS
 from ltx_pipelines.utils.denoisers import FactoryGuidedDenoiser
 from ltx_pipelines.utils.media_io import encode_audio
+from ltx_pipelines.utils.samplers import euler_cfg_pp_denoising_loop
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
 # Placeholder pixel dimensions used for ``VideoPixelShape`` construction.
@@ -107,6 +111,7 @@ class T2AOneStagePipeline:
         enhance_prompt: bool = False,
         max_batch_size: int = 1,
         sigmas: torch.Tensor | None = None,
+        official_comfy_workflow: bool = False,
     ) -> Audio:
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
@@ -120,7 +125,14 @@ class T2AOneStagePipeline:
         a_context_p = ctx_p.audio_encoding
         a_context_n = ctx_n.audio_encoding
 
-        sigmas = (sigmas if sigmas is not None else self._scheduler.execute(steps=num_inference_steps)).to(
+        resolved_sigmas = (
+            sigmas
+            if sigmas is not None
+            else DISTILLED_SIGMAS
+            if official_comfy_workflow
+            else self._scheduler.execute(steps=num_inference_steps)
+        )
+        resolved_sigmas = resolved_sigmas.to(
             dtype=torch.float32, device=self.device
         )
 
@@ -133,14 +145,24 @@ class T2AOneStagePipeline:
             negative_context=a_context_n,
         )
 
+        stage_kwargs = {}
+        if official_comfy_workflow:
+            stage_kwargs = {
+                "stepper": EulerCfgPpDiffusionStep(),
+                "loop": partial(euler_cfg_pp_denoising_loop, noise_seed=seed),
+            }
+
         _, audio_state = self.stage(
             denoiser=FactoryGuidedDenoiser(
                 v_context=None,
                 a_context=a_context_p,
                 video_guider_factory=None,
                 audio_guider_factory=audio_guider_factory,
+                # ComfyUI disables its CFG=1 optimization for CFG++ so the
+                # sampler always receives the unconditional prediction.
+                force_uncond_pass=official_comfy_workflow,
             ),
-            sigmas=sigmas,
+            sigmas=resolved_sigmas,
             noiser=noiser,
             width=_AUDIO_ONLY_PLACEHOLDER_RES,
             height=_AUDIO_ONLY_PLACEHOLDER_RES,
@@ -149,6 +171,7 @@ class T2AOneStagePipeline:
             video=None,
             audio=ModalitySpec(context=a_context_p),
             max_batch_size=max_batch_size,
+            **stage_kwargs,
         )
 
         return self.audio_decoder(audio_state.latent)
@@ -159,6 +182,11 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     params = resolve_cli_params()
     parser = default_1_stage_t2a_arg_parser(params=params)
+    parser.add_argument(
+        "--official-comfy-workflow",
+        action="store_true",
+        help="Use the official LTX-2.3 T2A 8-sigma schedule and Euler ancestral CFG++ sampler.",
+    )
     args = parser.parse_args()
     pipeline = T2AOneStagePipeline(
         checkpoint_path=args.checkpoint_path,
@@ -186,6 +214,8 @@ def main() -> None:
             stg_blocks=args.audio_stg_blocks,
         ),
         max_batch_size=args.max_batch_size,
+        enhance_prompt=args.enhance_prompt,
+        official_comfy_workflow=args.official_comfy_workflow,
     )
 
     encode_audio(audio=audio, output_path=args.output_path)

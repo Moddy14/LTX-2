@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 from collections.abc import Iterator
 
@@ -54,10 +55,11 @@ class LipDubPipeline:
 
     def __init__(
         self,
-        distilled_checkpoint_path: str,
+        checkpoint_path: str,
         spatial_upsampler_path: str,
         gemma_root: str,
         ic_lora: LoraPathStrengthAndSDOps,
+        distilled_lora: LoraPathStrengthAndSDOps | None = None,
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
         registry: Registry | None = None,
@@ -68,10 +70,10 @@ class LipDubPipeline:
         self.device = device or get_device()
         self.dtype = torch.bfloat16
         self.ic_lora = ic_lora
-        loras = (ic_lora,)
+        loras = (*((distilled_lora,) if distilled_lora is not None else ()), ic_lora)
 
         self.prompt_encoder = PromptEncoder(
-            distilled_checkpoint_path,
+            checkpoint_path,
             gemma_root,
             self.dtype,
             self.device,
@@ -80,21 +82,21 @@ class LipDubPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.image_conditioner = ImageConditioner(
-            distilled_checkpoint_path,
+            checkpoint_path,
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_conditioner = AudioConditioner(
-            distilled_checkpoint_path,
+            checkpoint_path,
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.stage = DiffusionStage.from_checkpoint(
-            distilled_checkpoint_path,
+            checkpoint_path,
             self.dtype,
             self.device,
             loras=loras,
@@ -105,7 +107,7 @@ class LipDubPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.upsampler = VideoUpsampler(
-            distilled_checkpoint_path,
+            checkpoint_path,
             spatial_upsampler_path,
             self.dtype,
             self.device,
@@ -113,14 +115,14 @@ class LipDubPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.video_decoder = VideoDecoder(
-            distilled_checkpoint_path,
+            checkpoint_path,
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_decoder = AudioDecoder(
-            distilled_checkpoint_path,
+            checkpoint_path,
             self.dtype,
             self.device,
             registry=registry,
@@ -180,6 +182,7 @@ class LipDubPipeline:
         images: list[ImageConditioningInput],
         reference_video_path: str,
         reference_strength: float = 1.0,
+        stage_2_seed: int | None = None,
         enhance_prompt: bool = False,
         tiling_config: TilingConfig | None = None,
         stage_1_sigmas: torch.Tensor = DISTILLED_SIGMAS,
@@ -191,8 +194,8 @@ class LipDubPipeline:
         num_frames = _snap_frames_to_8k1(meta.frames)
         frame_rate = float(meta.fps)
 
-        generator = torch.Generator(device=self.device).manual_seed(seed)
-        noiser = GaussianNoiser(generator=generator)
+        stage_1_generator = torch.Generator(device=self.device).manual_seed(seed)
+        stage_1_noiser = GaussianNoiser(generator=stage_1_generator)
 
         (ctx_p,) = self.prompt_encoder(
             [prompt],
@@ -242,7 +245,7 @@ class LipDubPipeline:
         video_state, audio_state = self.stage(
             denoiser=SimpleDenoiser(video_context, audio_context),
             sigmas=stage_1_sigmas_tensor,
-            noiser=noiser,
+            noiser=stage_1_noiser,
             width=stage_1_output_shape.width,
             height=stage_1_output_shape.height,
             frames=num_frames,
@@ -265,11 +268,17 @@ class LipDubPipeline:
         stage_2_conditionings = build_image_conditionings(stage_2_output_shape)
 
         stage_2_audio_conditionings = [build_audio_ref_conditioning(s1_audio_latent)]
+        if stage_2_seed is None:
+            stage_2_generator = stage_1_generator
+            stage_2_noiser = stage_1_noiser
+        else:
+            stage_2_generator = torch.Generator(device=self.device).manual_seed(stage_2_seed)
+            stage_2_noiser = GaussianNoiser(generator=stage_2_generator)
 
         video_state, _audio_unused = self.stage(
             denoiser=SimpleDenoiser(video_context, audio_context),
             sigmas=stage_2_sigmas_tensor,
-            noiser=noiser,
+            noiser=stage_2_noiser,
             width=width,
             height=height,
             frames=num_frames,
@@ -289,7 +298,7 @@ class LipDubPipeline:
             ),
         )
 
-        decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
+        decoded_video = self.video_decoder(video_state.latent, tiling_config, stage_2_generator)
         decoded_audio = self.audio_decoder(s1_audio_latent)
         return decoded_video, decoded_audio
 
@@ -319,18 +328,29 @@ def patchify_lipdub_audio_reference_latent(
 @torch.inference_mode()
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    params = resolve_cli_params(distilled=True)
-    parser = lipdub_arg_parser(params=params)
+    profile_parser = argparse.ArgumentParser(add_help=False)
+    profile_parser.add_argument(
+        "--pipeline-profile",
+        choices=("official-comfy-hq", "native-distilled"),
+        default="native-distilled",
+    )
+    profile, _ = profile_parser.parse_known_args()
+    official_comfy_hq = profile.pipeline_profile == "official-comfy-hq"
+    params = resolve_cli_params(distilled=not official_comfy_hq)
+    parser = lipdub_arg_parser(params=params, distilled=not official_comfy_hq)
     args = parser.parse_args()
 
     if not args.lora or len(args.lora) != 1:
         raise ValueError("LipDub requires exactly one --lora (the lip-dub IC-LoRA).")
+    if official_comfy_hq and len(args.distilled_lora) != 1:
+        raise ValueError("The official Comfy HQ LipDub profile requires exactly one --distilled-lora.")
 
     pipeline = LipDubPipeline(
-        distilled_checkpoint_path=args.distilled_checkpoint_path,
+        checkpoint_path=args.checkpoint_path if official_comfy_hq else args.distilled_checkpoint_path,
         spatial_upsampler_path=args.spatial_upsampler_path,
         gemma_root=args.gemma_root,
         ic_lora=args.lora[0],
+        distilled_lora=args.distilled_lora[0] if official_comfy_hq else None,
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
@@ -346,12 +366,13 @@ def main() -> None:
         images=[],
         reference_video_path=args.reference_video,
         reference_strength=args.reference_strength,
+        stage_2_seed=args.stage_2_seed if official_comfy_hq else None,
         tiling_config=tiling_config,
         enhance_prompt=args.enhance_prompt,
     )
     encode_video(
         video=video,
-        fps=int(src.fps),
+        fps=src.fps,
         audio=audio,
         output_path=args.output_path,
         video_chunks_number=video_chunks_number,

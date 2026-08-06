@@ -301,6 +301,39 @@ def _prepare_audio_stream(container: av.container.Container, audio_sample_rate: 
     return audio_stream
 
 
+def _container_frame_rate(fps: int | float) -> Fraction:
+    value = float(fps)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"fps must be a positive finite number; got {fps!r}.")
+    return Fraction(str(value)).limit_denominator(1_000_000)
+
+
+def _fit_audio_to_video_duration(
+    audio: Audio,
+    *,
+    video_frames: int,
+    frame_rate: Fraction,
+) -> Audio:
+    """Pad or trim only the audio tail to match the encoded video timeline."""
+    samples = _normalize_audio_waveform(audio.waveform)
+    target_samples = round(Fraction(video_frames * audio.sampling_rate, 1) / frame_rate)
+    current_samples = samples.shape[0]
+    if current_samples < target_samples:
+        padding = samples.new_zeros((target_samples - current_samples, 2))
+        samples = torch.cat((samples, padding), dim=0)
+    elif current_samples > target_samples:
+        samples = samples[:target_samples]
+    if current_samples != target_samples:
+        logger.info(
+            "Adjusted audio tail from %d to %d samples to match %d frames at %s fps.",
+            current_samples,
+            target_samples,
+            video_frames,
+            frame_rate,
+        )
+    return Audio(waveform=samples, sampling_rate=audio.sampling_rate)
+
+
 def _resample_audio(
     container: av.container.Container, audio_stream: av.audio.AudioStream, frame_in: av.AudioFrame
 ) -> None:
@@ -332,7 +365,7 @@ def _resample_audio(
 
 def encode_video(
     video: torch.Tensor | Iterator[torch.Tensor],
-    fps: int,
+    fps: int | float,
     audio: Audio | None,
     output_path: str,
     video_chunks_number: int,
@@ -345,7 +378,7 @@ def encode_video(
     Args:
         video: RGB frames as a ``(F, H, W, C)`` float ``[0, 1]`` tensor, or an iterator of
             such per-chunk tensors (e.g. the VAE decoder output). An empty iterator raises.
-        fps: Output frame rate.
+        fps: Output frame rate. Fractional rates such as 30000/1001 are preserved.
         audio: Audio track to mux, or None for a video-only file. Waveform must be stereo
             ``(2, N)`` or ``(N, 2)``.
         output_path: Destination path. Partial output is removed if encoding fails.
@@ -359,6 +392,7 @@ def encode_video(
     """
     if audio is not None:
         _validate_audio_waveform(audio)
+    frame_rate = _container_frame_rate(fps)
 
     if isinstance(video, torch.Tensor):
         video = iter([video])
@@ -380,7 +414,7 @@ def encode_video(
     container = av.open(output_path, mode="w")
     success = False
     try:
-        stream = container.add_stream("libx264", rate=int(fps), options={"crf": str(crf), "preset": preset})
+        stream = container.add_stream("libx264", rate=frame_rate, options={"crf": str(crf), "preset": preset})
         stream.width = width
         stream.height = height
         stream.pix_fmt = "yuv420p"
@@ -401,7 +435,7 @@ def encode_video(
             for chunk in video:
                 yield convert(chunk).to("cpu").numpy()
 
-        _encode_chunks_threaded(
+        encoded_frames = _encode_chunks_threaded(
             container=container,
             stream=stream,
             av_format=av_format,
@@ -410,7 +444,12 @@ def encode_video(
         )
 
         if audio is not None:
-            _write_audio(container, audio_stream, audio)
+            fitted_audio = _fit_audio_to_video_duration(
+                audio,
+                video_frames=encoded_frames,
+                frame_rate=frame_rate,
+            )
+            _write_audio(container, audio_stream, fitted_audio)
         success = True
     finally:
         container.close()
@@ -444,7 +483,7 @@ def _encode_chunks_threaded(
     av_format: str,
     chunks: Iterator[np.ndarray],
     progress_total: int,
-) -> None:
+) -> int:
     """Run libx264 frame.encode + container.mux on a background thread while
     the caller produces numpy chunks on the current thread. The 1-slot queue
     lets the producer get one chunk ahead (so the next VAE/gather chunk
@@ -480,8 +519,10 @@ def _encode_chunks_threaded(
 
     encoder_thread = threading.Thread(target=encoder_worker, name="h264-encoder")
     encoder_thread.start()
+    frame_count = 0
     try:
         for arr in tqdm(chunks, total=progress_total):
+            frame_count += len(arr)
             chunk_queue.put(arr)
     finally:
         chunk_queue.put(None)
@@ -489,6 +530,7 @@ def _encode_chunks_threaded(
 
     if encoder_error:
         raise encoder_error[0]
+    return frame_count
 
 
 _INT_FORMAT_MAX: dict[str, float] = {

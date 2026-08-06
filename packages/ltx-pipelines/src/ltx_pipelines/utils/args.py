@@ -8,6 +8,7 @@ from typing import Any, NamedTuple
 from ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
 from ltx_core.model.transformer.compiling import CompilationConfig
 from ltx_core.quantization import QuantizationPolicy
+from ltx_core.text_encoders.gemma import GEMMA_LORA_COMFY_KEY_OPS
 from ltx_pipelines.utils.constants import (
     DEFAULT_IMAGE_CRF,
     DEFAULT_LORA_STRENGTH,
@@ -111,6 +112,26 @@ class LoraAction(argparse.Action):
 
         current = getattr(namespace, self.dest) or []
         current.append(LoraPathStrengthAndSDOps(resolved_path, strength, LTXV_LORA_COMFY_RENAMING_MAP))
+        setattr(namespace, self.dest, current)
+
+
+class GemmaLoraAction(argparse.Action):
+    """Parse a Comfy-format Gemma LoRA separately from transformer LoRAs."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,  # noqa: ARG002
+        namespace: argparse.Namespace,
+        values: list[str],
+        option_string: str | None = None,
+    ) -> None:
+        if len(values) > 2:
+            msg = f"{option_string} accepts at most 2 arguments (PATH and optional STRENGTH)"
+            raise argparse.ArgumentError(self, msg)
+        path = resolve_existing_path(values[0])
+        strength = float(values[1]) if len(values) > 1 else DEFAULT_LORA_STRENGTH
+        current = getattr(namespace, self.dest) or []
+        current.append(LoraPathStrengthAndSDOps(path, strength, GEMMA_LORA_COMFY_KEY_OPS))
         setattr(namespace, self.dest, current)
 
 
@@ -348,6 +369,18 @@ def basic_arg_parser(
             "Example: --lora path/to/lora1.safetensors 0.8 --lora path/to/lora2.safetensors"
         ),
     )
+    parser.add_argument(
+        "--gemma-lora",
+        dest="gemma_lora",
+        action=GemmaLoraAction,
+        nargs="+",
+        metavar=("PATH", "STRENGTH"),
+        default=[],
+        help=(
+            "Comfy-format Gemma text-encoder LoRA: path and optional strength. "
+            "This is separate from transformer --lora adapters."
+        ),
+    )
 
     parser.add_argument(
         "--enhance-prompt",
@@ -500,13 +533,40 @@ def video_editing_arg_parser(
 
 def lipdub_arg_parser(
     params: PipelineParams = LTX_2_3_PARAMS,
+    *,
+    distilled: bool = True,
 ) -> argparse.ArgumentParser:
     """Argument parser for the lip-dub pipeline.
     Frame count and frame rate are derived from the reference video at runtime (the frame count
     is silently snapped down to the nearest 8k+1), so this parser intentionally omits
-    --num-frames, --frame-rate, and --image. Distilled checkpoint only.
+    --num-frames, --frame-rate, and --image.
+
+    ``distilled=True`` preserves the original native pipeline.  The official
+    Comfy HQ profile uses the dev checkpoint plus the 1.1 Distilled LoRA.
     """
-    parser = basic_arg_parser(params=params, distilled=True)
+    parser = basic_arg_parser(params=params, distilled=distilled)
+    parser.add_argument(
+        "--pipeline-profile",
+        choices=("official-comfy-hq", "native-distilled"),
+        default="native-distilled" if distilled else "official-comfy-hq",
+        help="LipDub model stack. official-comfy-hq mirrors the published ComfyUI workflow.",
+    )
+    if not distilled:
+        parser.add_argument(
+            "--distilled-lora",
+            dest="distilled_lora",
+            action=LoraAction,
+            nargs="+",
+            metavar=("PATH", "STRENGTH"),
+            default=[],
+            help="Distilled LoRA applied before the LipDub IC-LoRA; the official workflow uses strength 0.5.",
+        )
+        parser.add_argument(
+            "--stage-2-seed",
+            type=int,
+            default=None,
+            help="Independent stage-2 noise seed. The official workflow uses the stage-1 seed minus one.",
+        )
     parser.add_argument(
         "--height",
         type=int,

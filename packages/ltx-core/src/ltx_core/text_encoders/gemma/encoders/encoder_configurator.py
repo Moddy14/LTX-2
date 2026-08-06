@@ -143,6 +143,31 @@ def _build_gemma_llm_key_ops(*, transformers_v5: bool) -> SDOps:
 
 GEMMA_LLM_KEY_OPS = _build_gemma_llm_key_ops(transformers_v5=_TRANSFORMERS_V5)
 
+
+def _build_gemma_lora_comfy_key_ops(*, transformers_v5: bool) -> SDOps:
+    """Map Comfy's Gemma LoRA keys onto the native Gemma module tree."""
+    language_prefix = "text_encoders.transformer.model."
+    vision_prefix = "text_encoders.transformer.vision_model."
+    target_vision_prefix = (
+        "model.model.vision_tower."
+        if transformers_v5
+        else "model.model.vision_tower.vision_model."
+    )
+    return (
+        SDOps("GEMMA_LORA_COMFY_KEY_OPS")
+        .with_matching(prefix=language_prefix)
+        .with_matching(prefix=vision_prefix)
+        .with_replacement(language_prefix, "model.model.language_model.")
+        .with_replacement(vision_prefix, target_vision_prefix)
+        .with_replacement(".lora_down.weight", ".lora_A.weight")
+        .with_replacement(".lora_up.weight", ".lora_B.weight")
+    )
+
+
+GEMMA_LORA_COMFY_KEY_OPS = _build_gemma_lora_comfy_key_ops(
+    transformers_v5=_TRANSFORMERS_V5,
+)
+
 EMBEDDINGS_PROCESSOR_KEY_OPS = (
     SDOps("EMBEDDINGS_PROCESSOR_KEY_OPS")
     # 1. Map the feature extractor (V1: aggregate_embed inside feature_extractor)

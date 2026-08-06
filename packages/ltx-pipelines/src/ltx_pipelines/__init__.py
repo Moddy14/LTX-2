@@ -5,6 +5,7 @@ This package provides ready-to-use pipelines for video generation:
 - T2AOneStagePipeline: Text-to-audio in a single stage (audio-only output)
 - TI2VidTwoStagesPipeline: Two-stage generation with upsampling
 - DistilledPipeline: Fast distilled two-stage generation
+- FLF2VPipeline: Official-style first/last-frame interpolation
 - ICLoraPipeline: Image/video conditioning with distilled LoRA
 - LipDubPipeline: Lip dubbing with IC-LoRA and audio conditioning
 - KeyframeInterpolationPipeline: Keyframe-based video interpolation
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ltx_pipelines.a2vid_two_stage import A2VidPipelineTwoStage
     from ltx_pipelines.distilled import DistilledPipeline
+    from ltx_pipelines.flf2v import FLF2VPipeline
     from ltx_pipelines.ic_lora import ICLoraPipeline
     from ltx_pipelines.keyframe_interpolation import KeyframeInterpolationPipeline
     from ltx_pipelines.lipdub import LipDubPipeline
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
 _EXPORTS = {
     "A2VidPipelineTwoStage": "ltx_pipelines.a2vid_two_stage",
     "DistilledPipeline": "ltx_pipelines.distilled",
+    "FLF2VPipeline": "ltx_pipelines.flf2v",
     "ICLoraPipeline": "ltx_pipelines.ic_lora",
     "KeyframeInterpolationPipeline": "ltx_pipelines.keyframe_interpolation",
     "LipDubPipeline": "ltx_pipelines.lipdub",
@@ -47,6 +50,7 @@ _EXPORTS = {
 __all__ = [
     "A2VidPipelineTwoStage",
     "DistilledPipeline",
+    "FLF2VPipeline",
     "ICLoraPipeline",
     "KeyframeInterpolationPipeline",
     "LipDubPipeline",

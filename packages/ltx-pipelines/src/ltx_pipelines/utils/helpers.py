@@ -35,6 +35,14 @@ def cleanup_memory() -> None:
     cleanup_accelerator_memory()
 
 
+def cap_image_conditioning_strength(
+    images: list[ImageConditioningInput],
+    maximum: float,
+) -> list[ImageConditioningInput]:
+    """Preserve image guides while limiting their denoise-mask strength."""
+    return [image._replace(strength=min(image.strength, maximum)) for image in images]
+
+
 def conform_latent_length(latent: torch.Tensor, expected_frames_count: int) -> torch.Tensor:
     actual_frames = latent.shape[2]
     if actual_frames > expected_frames_count:
@@ -304,6 +312,11 @@ def generate_enhanced_prompt(
     image_path: str | None = None,
     image_long_side: int = 896,
     seed: int = 42,
+    max_new_tokens: int = 512,
+    top_k: int | None = None,
+    top_p: float | None = None,
+    min_p: float | None = None,
+    repetition_penalty: float | None = None,
 ) -> str:
     """Generate an enhanced prompt from a text encoder and a prompt."""
     image = None
@@ -311,9 +324,26 @@ def generate_enhanced_prompt(
         image = decode_image(image_path=image_path)
         image = torch.tensor(image)
         image = resize_aspect_ratio_preserving(image, image_long_side).to(torch.uint8)
-        prompt = text_encoder.enhance_i2v(prompt, image, seed=seed)
+        prompt = text_encoder.enhance_i2v(
+            prompt,
+            image,
+            max_new_tokens=max_new_tokens,
+            seed=seed,
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+        )
     else:
-        prompt = text_encoder.enhance_t2v(prompt, seed=seed)
+        prompt = text_encoder.enhance_t2v(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            seed=seed,
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+        )
     logging.info(f"Enhanced prompt: {prompt}")
     return clean_response(prompt)
 

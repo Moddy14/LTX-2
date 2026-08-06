@@ -713,6 +713,7 @@ def _process_single_video(  # noqa: PLR0913
     exr_executor: "ThreadPoolExecutor",  # noqa: F821
     exr_futures: list,
     high_quality_hdr: bool = False,
+    output_path: Path | None = None,
 ) -> None:
     """Run inference on a single video: generate EXR frames + optional H.264 .mp4 preview."""
     import gc  # noqa: PLC0415
@@ -720,8 +721,8 @@ def _process_single_video(  # noqa: PLR0913
 
     from ltx_pipelines.utils.media_io import encode_exr_sequence_to_mp4, save_exr_tensor  # noqa: PLC0415
 
-    output_mp4 = output_dir / f"{video_path.stem}.mp4"
-    exr_dir = output_dir / f"{video_path.stem}_exr"
+    output_mp4 = output_path or output_dir / f"{video_path.stem}.mp4"
+    exr_dir = output_mp4.parent / f"{output_mp4.stem}_exr"
 
     t0 = time.time()
     hdr_video = pipeline(
@@ -799,6 +800,7 @@ Max frames by resolution (fp8_cast, bfloat16 VAE, tiled decode)
     )
     parser.add_argument("--input", required=True, help="Single .mp4 or directory of .mp4 videos.")
     parser.add_argument("--output-dir", required=True, help="Directory for .mov and EXR folders.")
+    parser.add_argument("--output-path", default=None, help="Exact MP4 preview path for a single input video.")
     parser.add_argument("--hdr-lora", required=True, help="HDR IC-LoRA .safetensors file.")
     parser.add_argument("--text-embeddings", required=True, help="Pre-computed text embeddings (.safetensors file).")
     parser.add_argument("--distilled-checkpoint-path", required=True, help="Distilled model checkpoint (.safetensors).")
@@ -809,6 +811,9 @@ Max frames by resolution (fp8_cast, bfloat16 VAE, tiled decode)
         default=DEFAULT_NUM_FRAMES,
         help=f"Number of output frames.  Must satisfy (n-1) %% 8 == 0 (default: {DEFAULT_NUM_FRAMES}).",
     )
+    parser.add_argument("--width", type=int, default=None, help="Optional output width override.")
+    parser.add_argument("--height", type=int, default=None, help="Optional output height override.")
+    parser.add_argument("--frame-rate", type=float, default=None, help="Optional output frame-rate override.")
     parser.add_argument(
         "--spatial-tile",
         type=int,
@@ -864,6 +869,8 @@ def main() -> None:
     if not videos:
         logger.error("No valid videos to process.")
         return
+    if args.output_path and len(videos) != 1:
+        raise ValueError("--output-path requires exactly one input video")
     logger.info("Found %d video(s), generating %d frames each", len(videos), num_frames)
 
     logger.info("Loading pipeline...")
@@ -891,10 +898,10 @@ def main() -> None:
         _process_single_video(
             pipeline=pipeline,
             video_path=video_path,
-            vid_w=vid_w,
-            vid_h=vid_h,
+            vid_w=args.width or vid_w,
+            vid_h=args.height or vid_h,
             num_frames=num_frames,
-            frame_rate=meta.fps,
+            frame_rate=args.frame_rate or meta.fps,
             output_dir=output_dir,
             tiling_config=tiling_config,
             seed=args.seed,
@@ -903,6 +910,7 @@ def main() -> None:
             exr_executor=exr_executor,
             exr_futures=exr_futures,
             high_quality_hdr=high_quality,
+            output_path=Path(args.output_path) if args.output_path else None,
         )
         successes += 1
 

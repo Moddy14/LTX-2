@@ -64,6 +64,10 @@ class GemmaTextEncoder(torch.nn.Module):
         image: torch.Tensor | None = None,
         max_new_tokens: int = 512,
         seed: int = 10,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         if self.processor is None:
             raise RuntimeError(
@@ -83,11 +87,22 @@ class GemmaTextEncoder(torch.nn.Module):
         fork_devices = [self.model.device] if self.model.device.type == "cuda" else []
         with torch.inference_mode(), torch.random.fork_rng(devices=fork_devices):
             torch.manual_seed(seed)
+            generation_options = {
+                key: value
+                for key, value in {
+                    "top_k": top_k,
+                    "top_p": top_p,
+                    "min_p": min_p,
+                    "repetition_penalty": repetition_penalty,
+                }.items()
+                if value is not None
+            }
             outputs = self.model.generate(
                 **model_inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=True,
                 temperature=0.7,
+                **generation_options,
             )
             generated_ids = outputs[0][len(model_inputs.input_ids[0]) :]
             enhanced_prompt = self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True)
@@ -100,6 +115,10 @@ class GemmaTextEncoder(torch.nn.Module):
         max_new_tokens: int = 512,
         system_prompt: str | None = None,
         seed: int = 10,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """Enhance a text prompt for T2V generation."""
         system_prompt = system_prompt or self.default_gemma_t2v_system_prompt
@@ -109,7 +128,15 @@ class GemmaTextEncoder(torch.nn.Module):
             {"role": "user", "content": f"user prompt: {prompt}"},
         ]
 
-        return self._enhance(messages, max_new_tokens=max_new_tokens, seed=seed)
+        return self._enhance(
+            messages,
+            max_new_tokens=max_new_tokens,
+            seed=seed,
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+        )
 
     def enhance_i2v(
         self,
@@ -118,6 +145,10 @@ class GemmaTextEncoder(torch.nn.Module):
         max_new_tokens: int = 512,
         system_prompt: str | None = None,
         seed: int = 10,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """Enhance a text prompt for I2V generation using a reference image."""
         system_prompt = system_prompt or self.default_gemma_i2v_system_prompt
@@ -131,7 +162,16 @@ class GemmaTextEncoder(torch.nn.Module):
                 ],
             },
         ]
-        return self._enhance(messages, image=image, max_new_tokens=max_new_tokens, seed=seed)
+        return self._enhance(
+            messages,
+            image=image,
+            max_new_tokens=max_new_tokens,
+            seed=seed,
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+        )
 
     @functools.cached_property
     def default_gemma_i2v_system_prompt(self) -> str:
