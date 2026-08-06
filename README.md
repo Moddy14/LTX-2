@@ -63,8 +63,13 @@ For pipelines beyond the quickstart, download the relevant models from the [LTX-
 **Temporal Upscaler** - Supported by the model and will be required for future pipeline implementations
   * [`ltx-2.3-temporal-upscaler-x2-1.0.safetensors`](https://huggingface.co/Lightricks/LTX-2.3/blob/main/ltx-2.3-temporal-upscaler-x2-1.0.safetensors) - [Download](https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-temporal-upscaler-x2-1.0.safetensors)
 
-**Distilled LoRA** - Required for current two-stage pipeline implementations in this repository (except DistilledPipeline, ICLoraPipeline, and LipDubPipeline)
+**Distilled LoRA** - Required for current two-stage pipeline implementations in this repository. DistilledPipeline and
+ICLoraPipeline use distilled checkpoints directly; LipDub requires the LoRA only in its official Comfy HQ profile.
   * [`ltx-2.3-22b-distilled-lora-384-1.1.safetensors`](https://huggingface.co/Lightricks/LTX-2.3/blob/main/ltx-2.3-22b-distilled-lora-384-1.1.safetensors) - [Download](https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384-1.1.safetensors)
+  * [`ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors`](https://huggingface.co/Comfy-Org/ltx-2.3/blob/main/split_files/loras/ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors) - Exact dynamic-rank LoRA used by the current native ComfyUI T2V, I2V, IA2V, and ID-LoRA templates
+
+**ID-LoRA**
+  * [`ltx-2.3-id-lora-talkvid-3k.safetensors`](https://huggingface.co/Comfy-Org/ltx-2.3/blob/main/split_files/loras/ltx-2.3-id-lora-talkvid-3k.safetensors) - TalkVid person and speaker identity transfer
 
 **Gemma Text Encoder** (download all assets from the repository)
   * [`Gemma 3`](https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/tree/main)
@@ -90,12 +95,19 @@ For pipelines beyond the quickstart, download the relevant models from the [LTX-
 * **[TI2VidTwoStagesHQPipeline](packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages_hq.py)** - Same two-stage flow as above but uses the res_2s second-order sampler (fewer steps, better quality)
 * **[TI2VidOneStagePipeline](packages/ltx-pipelines/src/ltx_pipelines/ti2vid_one_stage.py)** - Single-stage generation for quick prototyping
 * **[DistilledPipeline](packages/ltx-pipelines/src/ltx_pipelines/distilled.py)** - Fastest inference with 8 predefined sigmas
-* **[ICLoraPipeline](packages/ltx-pipelines/src/ltx_pipelines/ic_lora.py)** - Video-to-video and image-to-video transformations (uses distilled model.)
+* **[ICLoraPipeline](packages/ltx-pipelines/src/ltx_pipelines/ic_lora.py)** - Union Control and model-specific video/image reference transformations
+  The CLI can prepare Union-Control inputs as cached MoGe depth maps or Canny edges, or consume prepared pose/control maps.
+* **[IDLoraPipeline](packages/ltx-pipelines/src/ltx_pipelines/id_lora.py)** - Official-style LTX-2.3 TalkVid identity
+  transfer from a reference image and short speaker-reference audio, including native identity guidance.
+* **[FLF2VPipeline](packages/ltx-pipelines/src/ltx_pipelines/flf2v.py)** - Current LTX-2.3 distilled-FP8 first/last-frame workflow
+* **[InOutpaintPipeline](packages/ltx-pipelines/src/ltx_pipelines/inoutpaint.py)** - Two-stage video inpainting and centered outpainting with masked IC-LoRA conditioning and Laplacian compositing
 * **[KeyframeInterpolationPipeline](packages/ltx-pipelines/src/ltx_pipelines/keyframe_interpolation.py)** - Interpolate between keyframe images
 * **[A2VidPipelineTwoStage](packages/ltx-pipelines/src/ltx_pipelines/a2vid_two_stage.py)** - Audio-to-video generation conditioned on an input audio file
 * **[RetakePipeline](packages/ltx-pipelines/src/ltx_pipelines/retake.py)** - Regenerate a specific time region of an existing video
 * **[HDRICLoraPipeline](packages/ltx-pipelines/src/ltx_pipelines/hdr_ic_lora.py)** - Video-to-video with HDR output (linear float frames via LogC3 inverse decode, suitable for EXR export and tonemapping)
-* **[LipDubPipeline](packages/ltx-pipelines/src/ltx_pipelines/lipdub.py)** - Lip dubbing, rephrasing, matching speaker identity (distilled model, single IC-LoRA, Two stages).
+* **[LipDubPipeline](packages/ltx-pipelines/src/ltx_pipelines/lipdub.py)** - Lip dubbing, rephrasing, and speaker
+  matching in two stages. `official-comfy-hq` mirrors the published dev checkpoint + distilled LoRA `0.5` + LipDub
+  IC-LoRA workflow; `native-distilled` preserves the original distilled-checkpoint contract for old runs.
 
 ### ⚡ Optimization Tips
 

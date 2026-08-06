@@ -1,6 +1,19 @@
 # LipDub SOTA-Plan
 
-Stand: 2026-07-25
+Stand: 2026-08-03
+
+Der systemweite Ist-Audit, die Bewertung der Zuständigkeitsgrenzen und der
+phasenweise Releaseplan stehen in
+[`QUALITY_AUDIT_2026-08-03.md`](./QUALITY_AUDIT_2026-08-03.md). Dieses Dokument
+bleibt die detaillierte LipDub-Claim-, Evaluator- und Experiment-Spezifikation.
+
+> **Seither eingetreten** (Details jeweils im Audit, dortige Nachträge):
+> Der unter „Aktueller Blocker" geforderte separat evaluierte LipSync-Refiner
+> hat mit LipForcing seine erste faire A/B-Evidenz — knapper Sieg in der
+> verblindeten Sichtprüfung bei uneindeutiger Metriklage, deshalb weiterhin
+> standardmäßig aus. Alle fünf sichtbaren Modi haben zudem einen
+> provenienzverifizierten Canary-Lauf (2026-08-05/06). Die Qualitätsgates
+> dieses Dokuments bleiben davon unberührt offen.
 
 ## Ziel
 
@@ -38,15 +51,23 @@ Der lokale Code ist maßgeblich:
 - `packages/ltx-pipelines/src/ltx_pipelines/utils/args.py`
 - `packages/ltx-pipelines/docs/pipelines.md`
 
-Der native LipDub-Pfad benötigt:
+Neue Läufe verwenden das Profil `official-comfy-hq`, das den veröffentlichten
+Lightricks-ComfyUI-Workflow nativ abbildet:
 
-- `ltx-2.3-22b-distilled-1.1.safetensors`
+- `ltx-2.3-22b-dev.safetensors`
+- `ltx-2.3-22b-distilled-lora-384-1.1.safetensors` mit Stärke `0,5`
 - `ltx-2.3-spatial-upscaler-x2-1.1.safetensors`
 - einen vollständigen Gemma-Root
-- `ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors`
+- `ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors` mit Stärke `1,0`
 - ein Referenzvideo mit Video- und Audiospur
 - eine explizite Zielsprache und einen Zieltext in deren üblichem Schriftsystem
 - genau einen sichtbaren Sprecher
+
+Das Profil verwendet die veröffentlichten Euler-/CFG-1-Schedules, getrennte
+Seeds für Stufe 1 und 2 und eine seitenverhältnistreue Ausgabe mit ungefähr
+`1920 x 1088` Pixel Gesamtfläche. Alte gespeicherte Jobs werden ausdrücklich
+als `native-distilled` migriert und behalten Distilled-Checkpoint sowie
+bisherige Auflösung.
 
 Frames und FPS kommen ausschließlich aus dem Referenzvideo. Die Pipeline
 snappt Frames nach unten auf `8k+1` und kodiert die Ausgabe mit ganzzahliger
@@ -147,6 +168,47 @@ Framezahl Qualitätsvoraussetzungen.
   Signaturprüfung, getrennte Blind-Scorer-ACLs und Release-Attestierungen
   implementiert und unabhängig geprüft sind.
 - LongCat bleibt vorhanden, ist aber standardmäßig aus und kein SOTA-Hauptpfad.
+- LatentSync 1.6 ist als optionaler, standardmäßig deaktivierter
+  Audio-Gesichtsrefiner integriert. Der Offline-Container verwendet den
+  gepinnten 512er-Checkpoint, die offizielle InsightFace-`buffalo_l`-
+  Gesichtserkennung mit 106 Landmarken und eine eigene 24-GiB-
+  Orchestrator-Zuteilung innerhalb desselben GUI-Jobs. Die InsightFace-
+  Modellgewichte sind nur für nichtkommerzielle Forschung freigegeben; dieser
+  Arm ist deshalb zusätzlich zur Qualitätsfreigabe rechtlich nicht
+  produktionsfähig.
+- MuseTalk 1.5 ist als dritter, standardmäßig deaktivierter Vergleichsarm
+  integriert. Der gepinnte Offline-Container verwendet das offizielle
+  256-x-256-Latent-Inpainting, Whisper Tiny, SD-VAE und die semantische
+  Untergesichtsmaske. Auf ARM64 ersetzt die bereits verifizierte
+  InsightFace-106-Ausrichtung ausschließlich den nicht installierbaren
+  DWPose-`mmcv`-Pfad. Die finale Datei erhält atomar exakt die Bildzahl,
+  Bildrate, Auflösung und Tonspur der LTX-Basis zurück. Der Arm bleibt bis zu
+  einem bestandenen P/B/M-, Identitäts- und Mundnaturvergleich ausdrücklich
+  aus.
+- LatentSync, MuseTalk und LipForcing verwenden exakt die Sprachkonditionierung
+  des gewählten Modus: IA2V die auf Start und Maximallänge begrenzte Audiodatei,
+  ID-LoRA seinen Referenzton und LipDub die Tonspur des Referenzvideos. Sie wird
+  auf die LTX-Dauer gepolstert, steuert den Mund und wird ohne separaten Endmix
+  auch zur autoritativen Ausgabetonspur. Ein Musik-/Endmix wird erst nach dem
+  Refiner eingebunden. Nur native Dialoggeneration ohne bereitgestellte
+  Sprachspur behält ihren gemeinsam generierten Originalton.
+- Identische native LTX-Basen können für Refinervergleiche ohne erneuten
+  22B-Render übernommen werden. Die Quelle muss abgeschlossen und verifiziert
+  sein; Request, Generationsmodelle, Runtime und Identitätsreferenz müssen
+  übereinstimmen. Die kopierte Basis wird als eigener SHA-256-gebundener Input
+  in die Zielprovenienz aufgenommen und unmittelbar vor dem Refiner erneut
+  vollständig geprüft.
+- Der kontrollierte Experimentbereich kann LipForcing als einzigen Request-Diff
+  einfrieren. Eine bereits vorhandene, unveränderte und provenienzverifizierte
+  Ausgabe wird dabei mit Job-ID, Dateikennung, Größe, Revisionszeit und
+  Laufprovenienz als Baseline gebunden. So benötigt der Kandidatenarm keinen
+  redundanten 22B-Basisrender und kann dennoch keine ausgetauschte Datei als
+  Vergleich akzeptieren.
+- Eine turnusmäßige Hintergrund-Neuverifikation des Phonem-/Visem-Evaluators
+  behält den letzten verifizierten Zustand stabil. Erst ein tatsächlicher
+  Prüfungsfehler schaltet fail-closed. Dadurch scheitert die automatische
+  Analyse nach langen Rendern nicht mehr an einem kurzlebigen
+  `verification-pending`-Fingerprint.
 - DGX-Queue, Thermalwächter und Wiederanlauf bleiben Teil jedes GPU-Laufs.
 - Vollständige Laufprovenienz bindet Eingaben, Generationsmodelle, Codezustand,
   Runtime und verifizierten Zeitpunkt mit SHA-256 an Job und Output-Sidecar.
@@ -191,27 +253,143 @@ Framezahl Qualitätsvoraussetzungen.
 
 ## Aktueller Blocker
 
-Das offizielle gated LipDub-LoRA fehlt lokal:
+Alle vier Generationsassets des offiziellen HQ-Profils sind lokal vorhanden
+und SHA-256-verifiziert. Der Blocker ist Ergebnisqualität, nicht Modellzugang.
+Die zwei bisherigen 512-x-512-Legacy-Läufe erreichten bei Referenzstärke `1,0`
+beziehungsweise `0,8` jeweils `bilabialClosureF1 = 0`. `0,8` verschlechterte
+zusätzlich Identität, Mundformkorrelation und Pausenruhe. Deshalb bleibt
+Referenzstärke `1,0` der Ausgangspunkt.
 
-`/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-LipDub/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors`
+Am 30.07.2026 wurden mit Seed `43`, Stufe-2-Seed `42`, Referenzstärke `1,0`,
+LipDub-LoRA `1,0`, Distilled-LoRA `0,5`, identischem deutschen P/B/M-Dialog und
+deaktiviertem LongCat drei kontrollierte `official-comfy-hq`-Läufe ausgeführt:
 
-Der Studio-Modellcheck darf diesen Zustand nicht übergehen. Codex akzeptiert
-keine Modelllizenz stellvertretend. Nach Freigabe durch den Benutzer darf der
-Download ausschließlich über den DGX-Modell- und Orchestratorweg erfolgen.
+| Lauf | Ausgabe | Bilabial-F1 | Öffnungskorrelation | Identität Median / p10 / Minimum |
+| --- | --- | ---: | ---: | --- |
+| quellengetreu | 896 x 896, 97 Frames, 24 FPS | 0 | 0,222 | 0,895 / 0,859 / 0,832 |
+| 30-FPS-Kontrolle | 896 x 896, 121 Frames, 30 FPS | 0 | 0,217 | 0,891 / 0,846 / 0,798 |
+| Schärfekontrolle | 1216 x 1216, 97 Frames, 24 FPS | 0,387 | 0,189 | 0,888 / 0,863 / 0,803 |
 
-Die offizielle Repository-Freigabe verlangt, dass der Benutzer bei Hugging Face
-angemeldet ist, die Modellbedingungen für
-`Lightricks/LTX-2.3-22b-IC-LoRA-LipDub` selbst akzeptiert und anschließend ein
-Lesetoken mit Zugriff auf gated Repositories bereitstellt. Die erwartete Datei
-ist 2,47 GB groß. Distilled-Checkpoint 1.1 und Spatial Upscaler 1.1 sind lokal
-bereits vorhanden.
+Alle drei Audiospuren trafen den exakten Dialog mit `0 %` WER. Erst die
+1216er-Variante erreichte nach der aktuellen Evaluator-v7-Auswertung überhaupt
+teilweise passend liegende Bilabialschlüsse. Frame-für-Frame sind vollständige
+Lippenschlüsse sichtbar, sie liegen jedoch nicht verlässlich
+auf den erwarteten P/B/M-Zeitfenstern. Die 30-FPS-Konvertierung verschlechterte
+den gemessenen Phonemversatz; sie wird deshalb nicht allgemein erzwungen. Die
+größere Ausgabe erhöhte die temporale Artikulationsinformation nicht und
+unterschritt weiterhin die Schärfeschwelle des Evaluators. Weitere Seed-,
+FPS- oder Auflösungsversuche sind ohne neue Konditionierungsinformation nicht
+begründet.
 
-Zusätzlich ist vor dem ersten offiziellen LipDub-Lauf die lokale Runtime zu
-bereinigen: Die editierbaren Pipelinequellen melden 1.1.7, während installierte
-Paketmetadaten 1.0.0 melden. Der aktuelle Torch-Build warnt auf dem GB10 zudem
-für Compute Capability 12.1 bei offiziell bis 12.0 ausgewiesenem Support. Diese
-Drifts sind kein Qualitätsnachweis und müssen durch einen reproduzierbaren
-Preflight beziehungsweise einen kompatiblen Runtime-Build geschlossen werden.
+Der native Text-Redubbing-Pfad bleibt für verständliche gemeinsame Audio-/
+Videogenerierung nutzbar, ist aber kein wortzeitgenauer Phonem-Lipsync. Der
+nächste Qualitätsarm muss deshalb eine echte Audio-/Phonemkonditionierung oder
+einen separat evaluierten, bewegungsstabilen LipSync-Refiner einführen. Ohne
+belegten Bilabialschluss, belastbaren AV-Versatz und bestandene Identitätsgates
+bleibt `10/10` ausdrücklich offen.
+
+### LatentSync-1.6-Befund
+
+Am selben 1216-x-1216-P/B/M-Fall wurden die native Basis und vier
+LatentSync-Varianten objektiv sowie frameweise verglichen:
+
+| Arm | Bilabial-F1 | Öffnungskorr. | Sprachbewegung | Pausenleck | Schärfe | Identität Median / p10 / Minimum |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| native LTX-Basis | 0,387 | 0,189 | 58,5 % | 25,6 % | 7,51 | 0,888 / 0,863 / 0,803 |
+| alter 5-Punkt-Adapter, 30 / 2,0 | 0 | 0,113 | 67,3 % | 23,9 % | 8,76 | 0,866 / 0,831 / 0,730 |
+| InsightFace 106 Punkte, 30 / 2,0 vor Zeitachsenfix | 0 | 0,336 | 70,9 % | 15,2 % | 8,65 | 0,866 / 0,828 / 0,728 |
+| InsightFace 106 Punkte, 30 / 2,0 mit Zeitachsenfix | 0,581 | 0,321 | 66,0 % | 16,3 % | 9,36 | 0,868 / 0,831 / 0,738 |
+| offizieller Default 20 / 1,5 mit Zeitachsenfix | 0,516 | 0,246 | 66,0 % | 16,3 % | 9,34 | 0,867 / 0,839 / 0,777 |
+
+Die offizielle 106-Punkt-Ausrichtung entfernt die sichtbare horizontale
+Stirnkante des alten Adapters. Der 25-fps-Zeitachsenfix hebt den
+Bilabialschluss deutlich an und beide aktuellen Konfigurationen verbessern die
+Ruhe in Sprachpausen. Sie erfüllen die Abnahme trotzdem nicht:
+
+- der beste Bilabial-F1 bleibt mit `0,581` weit von einer zuverlässigen
+  Phonemtreue entfernt;
+- der klassische AV-Peak besteht das Nullmodell nicht;
+- der Identitätsmedian sinkt gegenüber der nativen Basis;
+- alle gemessenen Mundschärfen unterschreiten das Inhaltsgate des
+  Phonem-/Visem-Evaluators;
+- frameweise sind ein überglatter, stärker rosafarbener Mund und unnatürlich
+  gespitzte Zwischenformen sichtbar.
+
+Sowohl `30 / 2,0` als auch der offizielle Default `20 / 1,5` sind damit als
+Produktionskandidaten verworfen. LatentSync bleibt optional aus; weitere
+Parameterläufe sind ohne ein neues Modell oder neue Konditionierungsinformation
+nicht begründet.
+
+### MuseTalk- und LipForcing-Befund
+
+MuseTalk 1.5 erhöhte auf der 1024er ID-LoRA-Basis die Öffnungskorrelation nur
+von `0,342` auf `0,367`, senkte Bilabial-F1 von `0,452` auf `0,387` und
+verschlechterte den Identitätsmedian von `0,861` auf `0,798`. Der sichtbare
+Mund ist sauberer begrenzt als beim alten LongCat-Compositing, verändert aber
+Gesicht und Lippenform zu stark. Dieser Arm ist als Produktionskandidat
+verworfen und bleibt optional aus.
+
+LipForcing 14B bewahrte auf einer 512er IA2V-Basis den Identitätsmedian
+praktisch unverändert (`0,884` auf `0,883`) und hob Bilabial-F1 von `0` auf
+`0,348`. Gleichzeitig fiel die Öffnungskorrelation von `0,455` auf `0,217`,
+das Pausenleck stieg von `23,8 %` auf `28,6 %`, und die Audiospur enthielt in
+beiden Armen denselben Whisper-Fehler (`12,5 %` WER). Dieser Lauf ist wegen
+anderer Basis, anderem Dialog und der damals noch nicht einheitlichen
+Audiofensterbehandlung kein fairer PBM-Vergleich.
+
+Der Audiovertrag ist nun vereinheitlicht und durch Medientests belegt. Der
+nächste einzige begründete GPU-Vergleich ist daher LipForcing mit Wan-VAE auf
+derselben verifizierten 1024er ID-LoRA-PBM-Basis, demselben sauberen
+`Mama/Papa/Mappe`-Audio und unverändertem Seed wie der native Basisarm. Besteht
+er Bilabialschluss, Öffnung, Identität, Schärfe und Pausenruhe nicht
+gleichzeitig, bleibt auch LipForcing optional aus.
+
+Dieser Vergleich wurde am 02.08.2026 als Experiment
+`43ef6ecb-aca9-4ba0-ac34-de5f90ecc1b7` mit Protokoll-Hash
+`40af1453a8d3c3945bc3f9dbfc51bf5406951bcf05764c550e375060e70625bc`
+eingefroren. Die unveränderte, provenienzgebundene Basis ist
+`traumfrau-id-lora-talkvid-pbm-1024-20260730-v01.mp4`; der einzige Request-Diff
+ist `postprocess.lipForcing.enabled`. Der Runner hat die vorhandene LTX-Basis
+kryptografisch übernommen und beim Orchestrator ausschließlich den
+52-GiB-LipForcing-Pass angefordert. Nach mehr als 18 Stunden ohne zulässiges
+Ressourcenfenster wurde der Kandidatenjob am 03.08. sauber als `cancelled`
+beendet. Die unveränderte Baseline, das eingefrorene Protokoll und die
+Versuchshistorie bleiben erhalten; es existiert noch keine Kandidatenausgabe
+und damit kein neues Qualitätsergebnis.
+
+### Audit vom 03.08.2026: 25-fps-Eingabedomäne und Orchestrator-Drift
+
+Der gepinnte offizielle LipForcing-Quellcode wurde vollständig gegen das
+lokale Containerimage verglichen. Die lokalen Änderungen betreffen nur
+`weights_only`, speichersparendes Meta-Loading und den kryptografisch
+gebundenen InsightFace-Pfad; der erfolgreiche 14B-Lauf lud alle 1137
+Checkpoint-Einträge mit `0 missing` und `0 unexpected`.
+
+Dabei wurde eine echte Integrationsabweichung gefunden: Training und
+Audiomerkmale verwenden fest 25 fps, während LTX Studio 24-fps-Videos direkt
+an die Gesichtsausrichtung übergab. Beim 97-Frame-Entwicklungsclip wurden die
+4,042 Sekunden dadurch intern als nur 3,88 Sekunden Quellbewegung behandelt
+und am Ende mit vier Ping-Pong-Frames ergänzt. Der Adapter normalisiert die
+Quellbewegung nun vor Face-Alignment und VAE-Encoding auf 25-fps-CFR (101
+Frames), führt LipForcing in seiner trainierten Zeitdomäne aus und stellt
+anschließend weiterhin exakt 97 Frames bei 24 fps sowie die gewählte saubere
+Tonspur wieder her. Ein CPU-Medientest beweist beide Zeitachsen.
+
+Der veröffentlichte 14B-Student ist ausdrücklich für den Zeitplan
+`0,999 -> 0,769 -> 0` destilliert. Obwohl die Paper-Ablation einen früheren
+Landepunkt als Sync/Fidelity-Regler untersucht, wird `0,833` nicht als
+Produktoption auf denselben Gewichten angeboten. Der freigegebene Zeitplan ist
+jetzt explizit gepinnt, damit weder ein Upstream-Default noch eine irreführende
+GUI-Option die Checkpoint-Semantik verändern kann.
+
+Das eingefrorene Experiment wurde am 03.08. nach mehr als 18 Stunden ohne
+Compute beendet. Ursache war kein LTX-Fehler: Die Übergabe vom 24.07 versprach
+eine automatische Qwen-Verdrängung, der aktuelle Produktionsvertrag vom
+30.07 deaktiviert diesen Pfad ausdrücklich. Mit 52 GiB LipForcing-Profil plus
+12 GiB Headroom und 52,7 GiB verfügbarem RAM konnte kein Submit angenommen
+werden. Protokoll, Baseline und Kandidatenspezifikation bleiben unverändert
+erhalten; ein neuer Kandidatenversuch ist erst nach einem zulässigen
+Orchestrator-Fenster sinnvoll.
 
 ## Referenzset
 
