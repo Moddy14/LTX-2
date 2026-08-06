@@ -11,6 +11,7 @@ const LIPDUB_MIN_DIALOGUE_WPM = 65;
 const LIPDUB_MAX_DIALOGUE_WPM = 220;
 const LIPDUB_OUTPUT_SIZE_MULTIPLE = 64;
 const LIPDUB_OUTPUT_SIZE_CANDIDATE_RADIUS = 1;
+export const OFFICIAL_COMFY_LIPDUB_OUTPUT_AREA = 1920 * 1088;
 
 export type LipDubReferenceInspectionInput = {
   path: string;
@@ -18,6 +19,7 @@ export type LipDubReferenceInspectionInput = {
   height: number;
   dialogue: string;
   prompt: string;
+  pipelineProfile?: "official-comfy-hq" | "native-distilled";
 };
 
 export function snapLipDubFrames(frames: number): number {
@@ -42,16 +44,22 @@ function sizeCandidatesAround(value: number): number[] {
   return [...candidates].sort((left, right) => left - right);
 }
 
-export function recommendedLipDubOutputSize(metadata: VideoMetadata): { width: number; height: number } | null {
+export function recommendedLipDubOutputSize(
+  metadata: VideoMetadata,
+  targetArea: number | null = null,
+): { width: number; height: number } | null {
   if (metadata.width === null || metadata.height === null) return null;
   const referenceAspect = metadata.width / metadata.height;
   const referenceArea = metadata.width * metadata.height;
+  const scale = targetArea === null ? 1 : Math.sqrt(targetArea / referenceArea);
+  const targetWidth = metadata.width * scale;
+  const targetHeight = metadata.height * scale;
   let best: { width: number; height: number; score: number } | null = null;
 
-  for (const width of sizeCandidatesAround(metadata.width)) {
-    for (const height of sizeCandidatesAround(metadata.height)) {
+  for (const width of sizeCandidatesAround(targetWidth)) {
+    for (const height of sizeCandidatesAround(targetHeight)) {
       const aspectDrift = Math.abs(Math.log((width / height) / referenceAspect));
-      const areaDrift = Math.abs(Math.log((width * height) / referenceArea));
+      const areaDrift = Math.abs(Math.log((width * height) / (targetArea ?? referenceArea)));
       const score = aspectDrift * 100 + areaDrift;
       if (best === null || score < best.score) best = { width, height, score };
     }
@@ -244,7 +252,11 @@ export function inspectLipDubReference(input: LipDubReferenceInspectionInput): L
     ));
   }
 
-  const recommendedSize = recommendedLipDubOutputSize(metadata);
+  const officialComfyHq = input.pipelineProfile === "official-comfy-hq";
+  const recommendedSize = recommendedLipDubOutputSize(
+    metadata,
+    officialComfyHq ? OFFICIAL_COMFY_LIPDUB_OUTPUT_AREA : null,
+  );
   if (metadata.width === null || metadata.height === null) {
     findings.push(finding(
       "dimensions-unreadable",
@@ -278,7 +290,9 @@ export function inspectLipDubReference(input: LipDubReferenceInspectionInput): L
         "output-size-mismatch",
         "warning",
         `LipDub-Referenz ist ${metadata.width} x ${metadata.height}, Ausgabe ist ${input.width} x ${input.height}. `
-        + "Für höchste Qualität sollte die Ausgabe der Referenzauflösung oder dem nächstliegenden durch 64 teilbaren Format entsprechen.",
+        + (officialComfyHq
+          ? "Der offizielle Comfy-HQ-Pfad sollte die Referenz proportional auf etwa 1920 x 1088 Pixel Gesamtfläche skalieren."
+          : "Für höchste Legacy-Qualität sollte die Ausgabe der Referenzauflösung oder dem nächstliegenden durch 64 teilbaren Format entsprechen."),
       ));
     }
     const aspectDelta = Math.abs(referenceAspect - outputAspect) / referenceAspect;

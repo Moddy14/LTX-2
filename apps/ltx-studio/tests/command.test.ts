@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pipelineModes } from "../shared/pipelines.js";
 import {
   buildCommand,
+  renderPrompt,
   suggestRequestPlan,
   validateOfficialSpeechInventory,
   validateRequestPlan,
@@ -17,8 +18,11 @@ const expectedModules = {
   "two-stage-hq": "ltx_pipelines.ti2vid_two_stages_hq",
   "one-stage": "ltx_pipelines.ti2vid_one_stage",
   distilled: "ltx_pipelines.distilled",
+  "text-to-audio": "ltx_pipelines.t2a_one_stage",
   "ic-lora": "ltx_pipelines.ic_lora",
-  keyframes: "ltx_pipelines.keyframe_interpolation",
+  "id-lora": "ltx_pipelines.id_lora",
+  keyframes: "ltx_pipelines.flf2v",
+  "image-audio-to-video": "ltx_pipelines.a2vid_two_stage",
   "audio-to-video": "ltx_pipelines.a2vid_two_stage",
   lipdub: "ltx_pipelines.lipdub",
   retake: "ltx_pipelines.retake",
@@ -30,9 +34,76 @@ describe("buildCommand", () => {
   it.each(pipelineModes)("maps %s to its typed Python module", (mode) => {
     const plan = buildCommand(validRequest(mode));
     expect(plan.args.slice(0, 2)).toEqual(["-m", expectedModules[mode]]);
-    expect(plan.outputPath.endsWith(`ltx-${mode}.mp4`)).toBe(true);
-    if (mode === "lipdub") expect(plan.args).not.toContain("--enhance-prompt");
+    expect(plan.outputPath.endsWith(`ltx-${mode}.${mode === "text-to-audio" ? "wav" : "mp4"}`)).toBe(true);
+    if (["lipdub", "id-lora", "keyframes", "ic-lora", "text-to-audio"].includes(mode)) expect(plan.args).not.toContain("--enhance-prompt");
     else expect(plan.args).toContain("--enhance-prompt");
+  });
+
+  it("builds official T2A as an audio-only WAV run with the exact Comfy sampling contract", () => {
+    const request = validRequest("text-to-audio");
+    request.promptParts.dialogue = "Bitte öffne die Tür.";
+    const plan = buildCommand(request);
+
+    expect(plan.outputPath.endsWith(".wav")).toBe(true);
+    expect(plan.args).toContain("--official-comfy-workflow");
+    expect(plan.args).toContain("--checkpoint-path");
+    expect(plan.args).toContain("--negative-prompt");
+    expect(plan.args).not.toContain("--distilled-lora");
+    expect(plan.args).not.toContain("--height");
+    expect(plan.args).not.toContain("--width");
+    expect(plan.args).not.toContain("--spatial-upsampler-path");
+    expect(plan.args.slice(plan.args.indexOf("--lora") + 1, plan.args.indexOf("--lora") + 3)).toEqual([
+      request.models.distilledLora.path,
+      "0.5",
+    ]);
+    expect(plan.args[plan.args.indexOf("--prompt") + 1]).toContain("Bitte öffne die Tür.");
+  });
+
+  it("builds FLF2V with only the official distilled checkpoint and two guide images", () => {
+    const plan = buildCommand(validRequest("keyframes"));
+
+    expect(plan.args).toContain("--distilled-checkpoint-path");
+    expect(plan.args).not.toContain("--checkpoint-path");
+    expect(plan.args).not.toContain("--distilled-lora");
+    expect(plan.args).not.toContain("--spatial-upsampler-path");
+    expect(plan.args).not.toContain("--negative-prompt");
+    expect(plan.args).not.toContain("--num-inference-steps");
+    expect(plan.args.filter((value) => value === "--image")).toHaveLength(2);
+  });
+
+  it("builds official T2V/I2V and IA2V with the fixed native Comfy workflow contract", () => {
+    for (const mode of ["two-stage", "image-audio-to-video"] as const) {
+      const request = validRequest(mode);
+      const args = buildCommand(request).args;
+      const loraIndex = args.indexOf("--distilled-lora");
+
+      expect(args).toContain("--official-comfy-workflow");
+      expect(args).not.toContain("--num-inference-steps");
+      expect(args).not.toContain("--video-cfg-guidance-scale");
+      if (mode === "two-stage") {
+        expect(args).toEqual(expect.arrayContaining(["--negative-prompt", request.negativePrompt]));
+      } else {
+        expect(args).not.toContain("--negative-prompt");
+      }
+      expect(args.slice(loraIndex + 1, loraIndex + 3)).toEqual([
+        request.models.distilledLora.path,
+        "0.5",
+      ]);
+    }
+  });
+
+  it("passes the official Gemma LoRA separately from transformer LoRAs", () => {
+    const request = validRequest("two-stage");
+    request.quantization.amaxPath = "/models/ignored-amax.json";
+    const args = buildCommand(request).args;
+    const gemmaLoraIndex = args.indexOf("--gemma-lora");
+
+    expect(gemmaLoraIndex).toBeGreaterThan(-1);
+    expect(args.slice(gemmaLoraIndex + 1, gemmaLoraIndex + 3)).toEqual([
+      request.models.gemmaLora.path,
+      "1",
+    ]);
+    expect(args).not.toContain("/models/ignored-amax.json");
   });
 
   it("keeps prompt metacharacters in one argv element", () => {
@@ -43,6 +114,28 @@ describe("buildCommand", () => {
     expect(plan.args[promptIndex + 1]).toBe(request.prompt);
     expect(plan.executable).not.toMatch(/(?:^|\/)sh$/);
     expect(plan.displayCommand).toContain("'camera'\"'\"'s move; $(touch /tmp/not-run)'");
+  });
+
+  it("binds the visible dialogue field to every native render prompt without requiring prompt composition", () => {
+    const request = validRequest("two-stage");
+    request.prompt = "A close portrait in a quiet room.";
+    request.promptParts.dialogue = "Dieser Wortlaut erreicht den Render.";
+
+    const prompt = renderPrompt(request);
+    const plan = buildCommand(request);
+    const promptIndex = plan.args.indexOf("--prompt");
+
+    expect(prompt).toContain(request.prompt);
+    expect(prompt).toContain(request.promptParts.dialogue);
+    expect(plan.args[promptIndex + 1]).toBe(prompt);
+  });
+
+  it("does not duplicate dialogue that is already present in the positive prompt", () => {
+    const request = validRequest("two-stage");
+    request.promptParts.dialogue = "Guten Morgen.";
+    request.prompt = 'A woman says exactly: "Guten Morgen."';
+
+    expect(renderPrompt(request)).toBe(request.prompt);
   });
 
   it("requires Gemma processor metadata only for prompt enhancement", () => {
@@ -151,7 +244,234 @@ describe("buildCommand", () => {
     });
   });
 
-  it("emits only the native LipDub CLI contract", () => {
+  it("binds IC-LoRA to the dedicated official Union-Control model exactly once", () => {
+    const request = validRequest("ic-lora");
+    request.models.loras = [
+      { ...request.icLora.lora },
+      { path: "/models/ltx/style-lora.safetensors", strength: 0.4 },
+    ];
+    const plan = buildCommand(request);
+    const loraPaths = plan.args
+      .flatMap((value, index) => value === "--lora" ? [plan.args[index + 1]] : []);
+
+    expect(loraPaths.filter((path) => path === request.icLora.lora.path)).toHaveLength(1);
+    expect(loraPaths).toContain("/models/ltx/style-lora.safetensors");
+    expect(plan.requiredPaths).toContainEqual({
+      path: request.icLora.lora.path,
+      label: "LTX-2.3 Union-Control IC-LoRA",
+      kind: "file",
+    });
+    expect(plan.args).toContain("--official-comfy-workflow");
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--checkpoint-path",
+      request.models.checkpointPath,
+      "--official-comfy-sampler",
+      "euler-ancestral-cfg-pp",
+      "--negative-prompt",
+      request.negativePrompt,
+      "--gemma-lora",
+      request.models.gemmaLora.path,
+      "1",
+    ]));
+    expect(loraPaths).toContain(request.models.distilledLora.path);
+    expect(plan.requiredPaths).toContainEqual({
+      path: request.models.distilledLora.path,
+      label: "Distilled LoRA",
+      kind: "file",
+    });
+    expect(plan.args).not.toContain("--distilled-checkpoint-path");
+    expect(plan.args).not.toContain("--spatial-upsampler-path");
+  });
+
+  it("builds Ingredients with one image repeated as the full-sequence IC-LoRA guide", () => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = "ingredients";
+    request.icLora.controlType = "prepared";
+    request.icLora.lora.path = "/models/ltx/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors";
+    request.icLora.videoConditioning = [];
+    request.icLora.attentionMaskPath = "/inputs/ignored-mask.mp4";
+    const plan = buildCommand(request);
+    const args = plan.args;
+
+    expect(args).toEqual(expect.arrayContaining([
+      "--checkpoint-path",
+      request.models.checkpointPath,
+      "--lora",
+      request.models.distilledLora.path,
+      "0.5",
+      "--lora",
+      request.icLora.lora.path,
+      "1",
+      "--official-comfy-sampler",
+      "euler-ancestral-cfg-pp",
+      "--video-conditioning",
+      request.images[0].path,
+      "1",
+      "--repeat-static-control",
+      "--control-preprocessor",
+      "prepared",
+    ]));
+    expect(args).not.toContain("--moge-model-path");
+    expect(args).not.toContain("--conditioning-attention-mask");
+    expect(args).not.toContain("--gemma-lora");
+    expect(args).not.toContain("--image");
+    expect(plan.requiredPaths).toContainEqual({
+      path: request.icLora.lora.path,
+      label: "LTX-2.3 Ingredients IC-LoRA",
+      kind: "file",
+    });
+  });
+
+  it.each([
+    ["motion-track", "euler-ancestral-cfg-pp", false, false],
+    ["pixel-upscaler", "euler-cfg-pp", true, false],
+    ["v2v-instant-shave", "euler-ancestral-cfg-pp", true, true],
+  ] as const)(
+    "builds the official %s IC-LoRA contract",
+    (profile, sampler, freezesAudio, prefixesPrompt) => {
+      const request = validRequest("ic-lora");
+      request.icLora.profile = profile;
+      request.icLora.controlType = "prepared";
+      request.images = profile === "motion-track" ? request.images : [];
+      request.icLora.videoConditioning = [
+        { path: "/inputs/source.mp4", name: "source.mp4", strength: 1 },
+      ];
+      request.icLora.lora.path = `/models/${profile}.safetensors`;
+      request.prompt = "A precise transformation preserving motion.";
+      const args = buildCommand(request).args;
+
+      expect(args).toEqual(expect.arrayContaining([
+        "--official-comfy-sampler",
+        sampler,
+        "--control-preprocessor",
+        "prepared",
+        "--video-conditioning",
+        "/inputs/source.mp4",
+        "1",
+      ]));
+      expect(args.includes("--freeze-control-audio")).toBe(freezesAudio);
+      const rendered = args[args.indexOf("--prompt") + 1];
+      expect(rendered.startsWith("REMOVEBEARD ")).toBe(prefixesPrompt);
+    },
+  );
+
+  it.each([
+    ["inpainting", "inpaint", true],
+    ["outpainting", "outpaint", false],
+  ] as const)("builds the official two-stage %s contract", (profile, editMode, needsMask) => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = profile;
+    request.images = [];
+    request.icLora.videoConditioning = [
+      { path: "/inputs/source.mp4", name: "source.mp4", strength: 1 },
+    ];
+    request.icLora.attentionMaskPath = "/inputs/mask.mp4";
+    request.icLora.lora = {
+      path: "/models/ltx/inoutpaint-0.9.safetensors",
+      strength: 1,
+    };
+    const plan = buildCommand(request);
+
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "-m",
+      "ltx_pipelines.inoutpaint",
+      "--checkpoint-path",
+      request.models.checkpointPath,
+      "--source-video",
+      "/inputs/source.mp4",
+      "--edit-mode",
+      editMode,
+      "--stage-2-seed",
+      "42",
+      "--lora",
+      request.models.distilledLora.path,
+      "0.5",
+      "--lora",
+      request.icLora.lora.path,
+      "1",
+    ]));
+    expect(plan.args.includes("--mask-video")).toBe(needsMask);
+    expect(plan.args).not.toContain("--spatial-upsampler-path");
+    expect(plan.requiredPaths).toContainEqual({
+      path: request.icLora.lora.path,
+      label: "In-/Outpainting IC-LoRA",
+      kind: "file",
+    });
+  });
+
+  it("builds HDR as the native linear-EXR pipeline with an exact MP4 preview path", () => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = "hdr";
+    request.images = [];
+    request.icLora.videoConditioning = [
+      { path: "/inputs/hdr-source.mp4", name: "hdr-source.mp4", strength: 1 },
+    ];
+    request.icLora.lora = { path: "/models/ltx/hdr-lora.safetensors", strength: 1 };
+    request.icLora.hdrTextEmbeddingsPath = "/models/ltx/hdr-scene-emb.safetensors";
+    request.icLora.hdrHighQuality = true;
+    const plan = buildCommand(request);
+
+    expect(plan.args.slice(0, 2)).toEqual(["-m", "ltx_pipelines.hdr_ic_lora"]);
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--input",
+      "/inputs/hdr-source.mp4",
+      "--output-path",
+      plan.outputPath,
+      "--hdr-lora",
+      request.icLora.lora.path,
+      "--text-embeddings",
+      request.icLora.hdrTextEmbeddingsPath,
+      "--distilled-checkpoint-path",
+      request.models.distilledCheckpointPath,
+      "--spatial-upsampler-path",
+      request.models.spatialUpscalerPath,
+      "--num-frames",
+      String(request.numFrames),
+      "--high-quality",
+    ]));
+    expect(plan.args).not.toContain("--gemma-root");
+    expect(plan.args).not.toContain("--prompt");
+    expect(plan.args).not.toContain("--lora");
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Gemma Root" }));
+  });
+
+  it("emits the official ID-LoRA prompt and identity-guidance contract", () => {
+    const request = validRequest("id-lora");
+    request.prompt = "A close portrait looks into the camera.";
+    request.promptParts.ambience = "Quiet studio room tone.";
+    const plan = buildCommand(request);
+    const prompt = plan.args[plan.args.indexOf("--prompt") + 1];
+
+    expect(prompt).toBe(
+      "[VISUAL]: A close portrait looks into the camera.\n"
+      + "[SPEECH]: Dieser Text wird mit der Referenzstimme neu erzeugt.\n"
+      + "[SOUNDS]: Quiet studio room tone.",
+    );
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--reference-audio-path",
+      request.idLora.referenceAudio.path,
+      "--id-lora",
+      request.idLora.lora.path,
+      "1",
+      "--distilled-lora",
+      request.models.distilledLora.path,
+      "0.5",
+      "--identity-guidance-scale",
+      "3",
+      "--identity-guidance-start",
+      "0",
+      "--identity-guidance-end",
+      "1",
+      "--stage-1-image-strength",
+      "0.7",
+    ]));
+    expect(plan.requiredPaths).toEqual(expect.arrayContaining([
+      { path: request.idLora.referenceAudio.path, label: "ID-LoRA-Referenzton", kind: "file" },
+      { path: request.idLora.lora.path, label: "ID-LoRA TalkVid", kind: "file" },
+    ]));
+  });
+
+  it("emits the official Comfy HQ LipDub CLI contract", () => {
     const request = validRequest("lipdub");
     request.models.loras = [{ path: "/models/ignored-style.safetensors", strength: 0.4 }];
     request.images = [{ path: "/inputs/ignored.png", name: "ignored.png", frameIndex: 0, strength: 1, crf: 33 }];
@@ -160,8 +480,15 @@ describe("buildCommand", () => {
 
     expect(args.slice(0, 2)).toEqual(["-m", "ltx_pipelines.lipdub"]);
     expect(args).toEqual(expect.arrayContaining([
-      "--distilled-checkpoint-path",
-      request.models.distilledCheckpointPath,
+      "--pipeline-profile",
+      "official-comfy-hq",
+      "--checkpoint-path",
+      request.models.checkpointPath,
+      "--distilled-lora",
+      request.models.distilledLora.path,
+      "0.5",
+      "--stage-2-seed",
+      "9",
       "--reference-video",
       request.lipDub.referenceVideo.path,
       "--reference-strength",
@@ -186,6 +513,22 @@ describe("buildCommand", () => {
     expect(args[promptIndex + 1]).toContain(
       'Target dialogue (verbatim): "Das ist ein nativer LTX LipDub Test".',
     );
+  });
+
+  it("preserves the legacy native Distilled LipDub CLI contract when explicitly selected", () => {
+    const request = validRequest("lipdub");
+    request.lipDub.pipelineProfile = "native-distilled";
+    const args = buildCommand(request).args;
+
+    expect(args).toEqual(expect.arrayContaining([
+      "--pipeline-profile",
+      "native-distilled",
+      "--distilled-checkpoint-path",
+      request.models.distilledCheckpointPath,
+    ]));
+    expect(args).not.toContain("--checkpoint-path");
+    expect(args).not.toContain("--distilled-lora");
+    expect(args).not.toContain("--stage-2-seed");
   });
 
   it("blocks a native LipDub rerun until its explicit language and speaker contract is confirmed", () => {
@@ -357,21 +700,22 @@ describe("buildCommand", () => {
     expect(suggestRequestPlan(request)).toEqual([{
       id: "lipdub-reference-format",
       level: "info",
-      label: "Format 768 x 1344 übernehmen",
-      message: "Referenzvideo 720 x 1280; empfohlenes 64er-LipDub-Format 768 x 1344 mit möglichst geringer Seitenverhältnisdrift.",
-      patch: { width: 768, height: 1344 },
+      label: "Format 1088 x 1920 übernehmen",
+      message: "Referenzvideo 720 x 1280; empfohlenes 64er-LipDub-Format 1088 x 1920 mit möglichst geringer Seitenverhältnisdrift.",
+      patch: { width: 1088, height: 1920 },
     }]);
 
-    request.width = 768;
-    request.height = 1344;
+    request.width = 1088;
+    request.height = 1920;
     expect(suggestRequestPlan(request)).toEqual([]);
     expect(warnRequestPlan(request)).not.toContain(
-      "LipDub-Referenz ist 720 x 1280, Ausgabe ist 768 x 1344. Für höchste Qualität sollte die Ausgabe der Referenzauflösung oder dem nächstliegenden durch 64 teilbaren Format entsprechen.",
+      "LipDub-Referenz ist 720 x 1280, Ausgabe ist 1088 x 1920. Der offizielle Comfy-HQ-Pfad sollte die Referenz proportional auf etwa 1920 x 1088 Pixel Gesamtfläche skalieren.",
     );
   });
 
   it("does not suggest LipDub output formats outside the request schema limits", () => {
     const request = validRequest("lipdub");
+    request.lipDub.pipelineProfile = "native-distilled";
     vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
       width: 7680,
       height: 4320,
@@ -384,7 +728,7 @@ describe("buildCommand", () => {
     expect(suggestRequestPlan(request)).toEqual([]);
   });
 
-  it("blocks native LipDub when it is configured with non-reference model assets", () => {
+  it("blocks official Comfy HQ LipDub when it is configured with non-reference model assets", () => {
     const request = validRequest("lipdub");
     vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
       width: 576,
@@ -397,13 +741,16 @@ describe("buildCommand", () => {
 
     const errors = validateRequestPlan(request, buildCommand(request));
     expect(errors.some((message) => message.startsWith(
-      "Distilled Checkpoint: der offizielle Sprachpfad verlangt ",
+      "Dev Checkpoint: die offizielle LTX-2.3-Pipeline verlangt ",
     ))).toBe(true);
     expect(errors.some((message) => message.startsWith(
-      "Spatial Upscaler: der offizielle Sprachpfad verlangt ",
+      "Distilled LoRA: die offizielle LTX-2.3-Pipeline verlangt ",
     ))).toBe(true);
     expect(errors.some((message) => message.startsWith(
-      "LipDub IC-LoRA: der offizielle Sprachpfad verlangt ",
+      "Spatial Upscaler: die offizielle LTX-2.3-Pipeline verlangt ",
+    ))).toBe(true);
+    expect(errors.some((message) => message.startsWith(
+      "LipDub IC-LoRA: die offizielle LTX-2.3-Pipeline verlangt ",
     ))).toBe(true);
   });
 });

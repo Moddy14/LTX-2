@@ -1,4 +1,9 @@
 import type { GenerationRequest } from "../shared/pipelines.js";
+import {
+  admissionPreflightPlan,
+  type AdmissionPreflightReport,
+  type AdmissionPreflightStep,
+} from "../shared/admissionPreflight.js";
 import { estimateResources } from "../shared/estimates.js";
 import { join } from "node:path";
 import { admissionRequired, dataRoot } from "./config.js";
@@ -10,7 +15,6 @@ export type CooperativeScheduling = {
   yield_after_each_segment: true;
   expected_segment_seconds: number;
   resume_checkpoint: string;
-  qwen_pressure_reclaim: "required_before_start";
 };
 
 export type AdmissionRequest = {
@@ -126,7 +130,14 @@ export type QwenDemandResponse = {
 };
 
 export function supportsCooperativeCheckpoint(request: GenerationRequest): boolean {
-  return request.mode !== "two-stage-hq";
+  // The CFG++ sampler loop has no restore/yield hooks; promising resumability
+  // there would let a job ignore orchestrator yield requests under Qwen pressure.
+  return request.mode !== "two-stage-hq"
+    && request.mode !== "text-to-audio"
+    && request.mode !== "ic-lora"
+    && !request.postprocess.latentSync.enabled
+    && !request.postprocess.museTalk.enabled
+    && !request.postprocess.lipForcing.enabled;
 }
 
 export function cooperativeCheckpointPath(callerJobId: string): string {
@@ -139,7 +150,8 @@ export function buildAdmissionRequests(
   callerJobId?: string,
 ): AdmissionRequest[] {
   const requestMemoryGiB = estimatedMemoryGiB ?? estimateResources(request).memoryGiB;
-  const cooperativeScheduling = callerJobId && supportsCooperativeCheckpoint(request)
+  const cooperativeScheduling = callerJobId
+    && supportsCooperativeCheckpoint(request)
     ? {
         resumability: "required" as const,
         scheduling: {
@@ -148,7 +160,6 @@ export function buildAdmissionRequests(
           yield_after_each_segment: true as const,
           expected_segment_seconds: 60,
           resume_checkpoint: cooperativeCheckpointPath(callerJobId),
-          qwen_pressure_reclaim: "required_before_start" as const,
         },
       }
     : {};
@@ -199,6 +210,53 @@ export function shouldRetryQueueSubmit(decision: AdmissionDecision): boolean {
     return decision.client_action === "retry_when_resources_free";
   }
   return typeof decision.reason === "string" && TRANSIENT_REASONS.has(decision.reason);
+}
+
+export async function checkQueueAdmission(
+  request: GenerationRequest,
+  estimatedMemoryGiB?: number,
+  signal?: AbortSignal,
+): Promise<AdmissionDecision> {
+  const [admissionRequest] = buildAdmissionRequests(request, estimatedMemoryGiB);
+  return runtimeApiJson("POST", "/dgx/admission/check", admissionRequest, {
+    timeoutMs: 30_000,
+    signal,
+  });
+}
+
+export async function admissionPreflight(
+  request: GenerationRequest,
+  check: (
+    request: GenerationRequest,
+    estimatedMemoryGiB?: number,
+  ) => Promise<AdmissionDecision> = checkQueueAdmission,
+): Promise<AdmissionPreflightReport> {
+  const { steps: plan, notes } = admissionPreflightPlan(request);
+  const steps: AdmissionPreflightStep[] = [];
+  let unverifiable = false;
+  for (const step of plan) {
+    try {
+      const decision = await check(request, step.estimatedMemoryGiB);
+      steps.push({
+        ...step,
+        decision: decision.decision ?? "unbekannt",
+        accepted: decision.decision === "accepted",
+        message: decisionMessage(decision),
+      });
+    } catch (error) {
+      unverifiable = true;
+      steps.push({
+        ...step,
+        decision: "nicht-pruefbar",
+        accepted: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const verdict: AdmissionPreflightReport["verdict"] = unverifiable
+    ? "nicht-pruefbar"
+    : steps.every((step) => step.accepted) ? "start-frei" : "wartet";
+  return { checkedAt: new Date().toISOString(), verdict, notes, steps };
 }
 
 export async function submitQueueAdmission(

@@ -15,15 +15,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomInt, randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
   experimentRunBindingSchema,
+  isAdoptedLipForcingCandidate,
   type ExperimentRunBinding,
 } from "../shared/experiments.js";
-import { migrateGenerationRequest, type GenerationRequest } from "../shared/pipelines.js";
+import { refinerAdmissionMemoryGiB } from "../shared/admissionPreflight.js";
+import {
+  isAudioConditionedMode,
+  migrateGenerationRequest,
+  type GenerationRequest,
+} from "../shared/pipelines.js";
 import {
   requiredOfficialSpeechAssetIds,
   withOfficialSpeechModelPaths,
@@ -37,6 +43,7 @@ import {
   readQueueJob,
   retryAfterMs,
   shouldRetryQueueSubmit,
+  checkQueueAdmission,
   submitQueueAdmission,
   supportsCooperativeCheckpoint,
   transitionQueueJob,
@@ -53,12 +60,18 @@ import {
   executableAvailable,
   hybridCacheRoot,
   hybridRoot,
+  latentSyncCheckpointPath,
+  latentSyncImage,
+  latentSyncInsightFaceRoot,
+  latentSyncVaeRoot,
+  latentSyncWhisperPath,
+  lipForcingImage,
+  lipForcingModelRoot,
   longcatProjectRoot,
   longcatMinAvailableGiB,
   longcatThermalStartMaxC,
-  minAvailableGiB,
-  minResidualMemoryGiB,
-  minSwapFreeGiB,
+  museTalkImage,
+  museTalkModelRoot,
   outputRoot,
   pythonExecutable,
   pythonRuntimeAvailable,
@@ -75,7 +88,6 @@ import {
 import {
   readResourceSnapshot,
   validatePreAdmissionResources,
-  validateStartResources,
   type ResourceSnapshot,
 } from "./system.js";
 import { estimateRequest } from "./estimates.js";
@@ -90,6 +102,7 @@ import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } fro
 import { buildFinalAudioRemuxArgs } from "./audioRemux.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import {
+  bindRunProvenanceFile,
   captureRunProvenance,
   normalizeRunProvenance,
   verifyRunProvenance,
@@ -151,6 +164,24 @@ type RuntimeJob = StudioJob & {
   dgxTerminalRetry?: NodeJS.Timeout;
 };
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
+
+export function describeLipForcingFailure(
+  logs: readonly string[],
+  result: ProcessResult,
+): string {
+  if (result.error) return `LipForcing konnte nicht gestartet werden: ${result.error.message}`;
+  const recentLogs = logs.slice(-120);
+  if (recentLogs.some((line) => /CUDA error: out of memory|cudaErrorMemoryAllocation/i.test(line))) {
+    return "LipForcing konnte das 14B-Modell nicht vollständig in den gemeinsamen CPU-/GPU-Speicher laden. "
+      + "Der Lauf wurde sauber beendet; die vorhandene LTX-Basis und ältere Videos bleiben unverändert.";
+  }
+  const adapterError = [...recentLogs]
+    .reverse()
+    .find((line) => line.startsWith("LipForcing: Fehler: "));
+  if (adapterError) return adapterError.slice("LipForcing: Fehler: ".length);
+  return `LipForcing beendet mit Code ${String(result.code)}`
+    + `${result.signal ? ` (${result.signal})` : ""}.`;
+}
 type IdentityEvidenceOperations = {
   capture: typeof captureIdentityEvidence;
   verify: typeof verifyIdentityEvidence;
@@ -174,11 +205,6 @@ type LocalProcessGroupIdentity = {
   processGroupId: number;
   leaderStartTicks: string;
 };
-type AcceptedResourceWaitOutcome =
-  | { kind: "ready"; snapshot: ResourceSnapshot }
-  | { kind: "queued" }
-  | { kind: "resubmit" }
-  | { kind: "stopped" };
 type PersistedStudioJob = StudioJob & {
   dgxTerminalDelivery?: DgxTerminalDelivery;
   localProcessGroupPending?: boolean;
@@ -193,6 +219,7 @@ type DgxQueueOperations = {
 type DgxAdmissionOperations = {
   submit: typeof submitQueueAdmission;
   list?: typeof listQueueJobs;
+  check?: typeof checkQueueAdmission;
 };
 type DgxDemandOperations = {
   read: typeof readQwenDemand;
@@ -200,6 +227,7 @@ type DgxDemandOperations = {
 type RunProvenanceOperations = {
   capture: typeof captureRunProvenance;
   verify: typeof verifyRunProvenance;
+  bindFile?: typeof bindRunProvenanceFile;
 };
 type ModelInventoryOperations = {
   read: typeof getModelInventory;
@@ -215,8 +243,6 @@ const MAX_RUNNING_PROCESS_PROGRESS = 95;
 const DEFAULT_DGX_TERMINAL_RETRY_BASE_MS = 5_000;
 const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
 const DGX_START_FENCE_RETRY_MS = 30_000;
-const DGX_ACCEPTED_REMOTE_POLL_MS = 30_000;
-const DGX_ACCEPTED_LOCAL_GATE_MAX_WAIT_MS = 20 * 60_000;
 const DGX_SUBMIT_AMBIGUITY_MAX_MS = 125_000;
 const DGX_SUBMIT_RECONCILE_POLL_MS = 2_000;
 const LOCAL_PROCESS_GROUP_RECONCILE_MS = 2_000;
@@ -228,6 +254,13 @@ const QWEN_DEMAND_POLL_MS = Math.max(
 const QWEN_IDLE_GRACE_MS = Math.max(
   0,
   Number.parseInt(process.env.LTX_STUDIO_QWEN_IDLE_GRACE_MS ?? "30000", 10) || 30_000,
+);
+// A waiting consumer may renew its demand forever; the paused runner therefore
+// probes the read-only admission check as its wake-up call instead of trusting
+// the demand flag alone.
+const QWEN_PAUSED_ADMISSION_PROBE_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.LTX_STUDIO_QWEN_ADMISSION_PROBE_MS ?? "120000", 10) || 120_000,
 );
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
 const DGX_TERMINAL_STATES = new Set<DgxTerminalState>(["completed", "failed", "cancelled"]);
@@ -246,7 +279,10 @@ function runtimePayloadError(error: RuntimeApiError): string | null {
 
 function retryableStartFenceDelayMs(error: unknown): number | null {
   if (error instanceof RuntimeApiError) {
-    if (error.statusCode === 409 && runtimePayloadError(error) === "qwen_gate_active") {
+    if (
+      error.statusCode === 409
+      && ["qwen_gate_active", "start_gate_active"].includes(runtimePayloadError(error) ?? "")
+    ) {
       const payload = error.payload as Record<string, unknown>;
       const seconds = payload.retry_after_seconds;
       return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
@@ -274,19 +310,24 @@ export class JobConflictError extends Error {
 }
 
 export function nextVariantOutputName(outputName: string, unavailable: (name: string) => boolean): string {
-  const base = outputName.replace(/\.mp4$/i, "").replace(/-v\d+$/i, "");
+  const extension = outputName.toLowerCase().endsWith(".wav") ? ".wav" : ".mp4";
+  const base = outputName.replace(/\.(?:mp4|wav)$/i, "").replace(/-v\d+$/i, "");
   for (let index = 1; index <= 999; index += 1) {
-    const candidate = `${base}-v${String(index).padStart(2, "0")}.mp4`;
+    const candidate = `${base}-v${String(index).padStart(2, "0")}${extension}`;
     if (!unavailable(candidate)) return candidate;
   }
-  return `${base}-${Date.now()}.mp4`;
+  return `${base}-${Date.now()}${extension}`;
 }
 
 function ltxBaseComparable(request: GenerationRequest): object {
   const generation: Partial<GenerationRequest> = structuredClone(request);
   const otherPostprocess: Partial<GenerationRequest["postprocess"]> = { ...generation.postprocess };
   delete generation.outputName;
+  delete generation.continuity;
   delete otherPostprocess.longcatLipsync;
+  delete otherPostprocess.latentSync;
+  delete otherPostprocess.museTalk;
+  delete otherPostprocess.lipForcing;
   generation.postprocess = otherPostprocess as GenerationRequest["postprocess"];
   if (generation.audio) {
     generation.audio = {
@@ -305,28 +346,107 @@ export function publishedOutputIsReusableLtxBase(
   source: GenerationRequest,
   target: GenerationRequest,
 ): boolean {
-  return !source.audio.finalMix.path && requestsShareLtxBase(source, target);
+  return !source.audio.finalMix.path
+    && !source.postprocess.longcatLipsync.enabled
+    && !source.postprocess.latentSync.enabled
+    && !source.postprocess.museTalk.enabled
+    && !source.postprocess.lipForcing.enabled
+    && requestsShareLtxBase(source, target);
 }
 
 export function runProvenanceSharesLtxBase(
   source: RunProvenance | null,
   target: RunProvenance | null,
 ): boolean {
-  if (!source?.verifiedAt || !target?.verifiedAt) return false;
+  if (!source?.verifiedAt || !target) return false;
   const ltxFiles = (evidence: RunProvenance) => evidence.files
     .filter((file) =>
       file.role !== "code:longcat-adapter"
       && file.role !== "model:longcat-face-detector"
+      && !file.role.startsWith("code:latentsync-")
+      && !file.role.startsWith("model:latentsync-")
+      && !file.role.startsWith("code:musetalk-")
+      && !file.role.startsWith("model:musetalk-")
+      && !file.role.startsWith("code:lipforcing-")
+      && !file.role.startsWith("model:lipforcing-")
+      && !file.role.startsWith("input:reused-ltx-base:")
       && file.role !== "input:final-audio-mix")
     .map((file) => ({ role: file.role, sha256: file.sha256 }))
     .sort((left, right) => left.role.localeCompare(right.role));
-  const ltxCode = (evidence: RunProvenance) => evidence.code
-    .filter((repository) => repository.repositoryRoot === repoRoot)
-    .map((repository) => repository.fingerprint);
   return isDeepStrictEqual(ltxFiles(source), ltxFiles(target))
-    && isDeepStrictEqual(ltxCode(source), ltxCode(target))
-    && ltxCode(source).length === 1
     && source.runtime.fingerprint === target.runtime.fingerprint;
+}
+
+export type ReusableLtxBaseCandidate = {
+  outputName: string;
+  outputPath: string;
+  jobId: string;
+  request: GenerationRequest;
+  identityEvidence: IdentityInputEvidence;
+  runProvenance: RunProvenance;
+};
+
+export type ReusableLtxBaseSource = {
+  reusableLtxBaseCandidates: () => ReusableLtxBaseCandidate[];
+};
+
+type ReusableLtxBase = {
+  id: string;
+  outputPath: string;
+  description: string;
+};
+
+export function identityEvidenceMatches(
+  left: IdentityInputEvidence | null,
+  right: IdentityInputEvidence | null,
+): boolean {
+  if (left?.status !== "verified" || !["captured", "verified"].includes(right?.status ?? "")) return false;
+  return left.source === right?.source
+    && isDeepStrictEqual(
+      left.references.map(({ assetId, kind, sizeBytes, modifiedAtMs, changedAtMs, fileId, sha256 }) => ({
+        assetId,
+        kind,
+        sizeBytes,
+        modifiedAtMs,
+        changedAtMs,
+        fileId,
+        sha256,
+      })),
+      right?.references.map(({ assetId, kind, sizeBytes, modifiedAtMs, changedAtMs, fileId, sha256 }) => ({
+        assetId,
+        kind,
+        sizeBytes,
+        modifiedAtMs,
+        changedAtMs,
+        fileId,
+        sha256,
+      })),
+    );
+}
+
+export function reusableLtxBaseFromSidecars(
+  candidates: readonly ReusableLtxBaseCandidate[],
+  target: {
+    id: string;
+    request: GenerationRequest;
+    identityEvidence: IdentityInputEvidence | null;
+    runProvenance: RunProvenance | null;
+  },
+  fileReady: (path: string) => boolean,
+): ReusableLtxBase | undefined {
+  const match = candidates.find((candidate) =>
+    candidate.jobId !== target.id
+    && !candidate.request.postprocess.longcatLipsync.enabled
+    && publishedOutputIsReusableLtxBase(candidate.request, target.request)
+    && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
+    && runProvenanceSharesLtxBase(candidate.runProvenance, target.runProvenance)
+    && fileReady(candidate.outputPath));
+  if (!match) return undefined;
+  return {
+    id: match.jobId,
+    outputPath: match.outputPath,
+    description: `persistierter Ausgabe „${match.outputName}" (Job ${match.jobId})`,
+  };
 }
 
 export function resolveRenderOutputPaths(
@@ -334,18 +454,58 @@ export function resolveRenderOutputPaths(
   stageRoot: string,
   hybridEnabled: boolean,
   finalAudioMixEnabled: boolean,
-): { ltxOutput: string; compositeOutput: string; remuxInput: string } {
-  const ltxOutput = hybridEnabled || finalAudioMixEnabled
+  latentSyncEnabled = false,
+  museTalkEnabled = false,
+  lipForcingEnabled = false,
+): { ltxOutput: string; compositeOutput: string; refinedOutput: string; remuxInput: string } {
+  const refinerEnabled = latentSyncEnabled || museTalkEnabled || lipForcingEnabled;
+  const ltxOutput = hybridEnabled || finalAudioMixEnabled || refinerEnabled
     ? join(stageRoot, "ltx-base.mp4")
     : finalOutput;
-  const compositeOutput = finalAudioMixEnabled
+  const compositeOutput = finalAudioMixEnabled || refinerEnabled
     ? join(stageRoot, "longcat-composite.mp4")
+    : finalOutput;
+  const refinedOutput = finalAudioMixEnabled
+    ? join(
+        stageRoot,
+        lipForcingEnabled
+          ? "lipforcing-refined.mp4"
+          : museTalkEnabled ? "musetalk-refined.mp4" : "latentsync-refined.mp4",
+      )
     : finalOutput;
   return {
     ltxOutput,
     compositeOutput,
-    remuxInput: hybridEnabled ? compositeOutput : ltxOutput,
+    refinedOutput,
+    remuxInput: refinerEnabled
+      ? refinedOutput
+      : hybridEnabled ? compositeOutput : ltxOutput,
   };
+}
+
+export function buildRefinerAudioArgs(request: GenerationRequest): string[] {
+  let path = "";
+  let startTime = 0;
+  let maxDuration: number | null = null;
+  if (isAudioConditionedMode(request.mode)) {
+    path = request.audio.path;
+    startTime = request.audio.startTime;
+    maxDuration = request.audio.maxDuration;
+  } else if (request.mode === "lipdub") {
+    path = request.lipDub.referenceVideo.path;
+  }
+  // ID-LoRA intentionally passes no audio override: its reference audio is a
+  // voice-cloning sample, while the spoken dialogue lives in the base video's
+  // native speech track, which the refiner extracts itself.
+  if (!path) return [];
+  const args = [
+    "--audio", path,
+    "--audio-start", String(startTime),
+  ];
+  if (maxDuration !== null) {
+    args.push("--audio-duration", String(maxDuration));
+  }
+  return args;
 }
 
 function now(): string {
@@ -668,7 +828,7 @@ function cleanLogLine(line: string): string {
 }
 
 function expectedDenoisingStages(request: GenerationRequest): number {
-  if (request.mode === "one-stage" || request.mode === "retake") return 1;
+  if (request.mode === "one-stage" || request.mode === "retake" || request.mode === "text-to-audio") return 1;
   if (request.mode === "ic-lora" && request.icLora.skipStage2) return 1;
   return 2;
 }
@@ -711,6 +871,8 @@ export class JobManager extends EventEmitter {
     remotePending: number;
   }> | null = null;
 
+  private reusableBaseSource: ReusableLtxBaseSource | null = null;
+
   constructor(
     private readonly storagePath = statePath,
     private readonly autoStart = true,
@@ -727,10 +889,12 @@ export class JobManager extends EventEmitter {
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
       submit: submitQueueAdmission,
       list: listQueueJobs,
+      check: checkQueueAdmission,
     },
     private readonly runProvenanceOperations: RunProvenanceOperations = {
       capture: captureRunProvenance,
       verify: verifyRunProvenance,
+      bindFile: bindRunProvenanceFile,
     },
     private readonly dgxDemandOperations: DgxDemandOperations = {
       read: readQwenDemand,
@@ -746,6 +910,12 @@ export class JobManager extends EventEmitter {
       this.scheduleDgxTerminalRetry(job, 0);
     }
     if (this.autoStart && this.queue.length > 0) queueMicrotask(() => void this.pump());
+  }
+
+  // The output library lives beside the manager in index.ts; wiring it after
+  // construction avoids threading a tenth positional constructor default.
+  wireReusableBaseSource(source: ReusableLtxBaseSource): void {
+    this.reusableBaseSource = source;
   }
 
   list(): StudioJob[] {
@@ -767,6 +937,12 @@ export class JobManager extends EventEmitter {
       deferStart?: boolean;
     } = {},
   ): StudioJob {
+    // The frozen experiment request is the authority for an A/B run. Normal
+    // jobs are still canonicalized here; experiment requests are canonicalized
+    // before freeze or are bound to an exact, verified historical output.
+    request = metadata.experiment
+      ? structuredClone(request)
+      : withOfficialSpeechModelPaths(request);
     if (this.shuttingDown) {
       throw new JobConflictError("LTX Studio wird beendet und nimmt keine neuen Aufträge mehr an.");
     }
@@ -835,7 +1011,7 @@ export class JobManager extends EventEmitter {
     if (!source || isActiveJobStatus(source.status)) return undefined;
     const unavailable = (name: string) =>
       [...this.jobs.values()].some((job) => job.outputName === name) || existsSync(join(outputRoot, name));
-    const request = structuredClone(source.request);
+    const request = withOfficialSpeechModelPaths(structuredClone(source.request));
     request.outputName = nextVariantOutputName(source.outputName, unavailable);
     if (mode === "random-seed") request.seed = randomInt(0, 2_147_483_647);
     return this.create(request, { variantOf: source.variantOf ?? source.id });
@@ -846,6 +1022,33 @@ export class JobManager extends EventEmitter {
     if (!job) return undefined;
     job.favorite = favorite;
     this.changed();
+    return publicJob(job);
+  }
+
+  remove(id: string): StudioJob | undefined {
+    const job = this.jobs.get(id);
+    if (!job) return undefined;
+    if (
+      isActiveJobStatus(job.status)
+      || job.process
+      || job.processTermination
+      || job.localProcessGroupPending
+      || job.dgxSubmitPending
+      || job.dgxStateTransitionInFlight
+      || job.dgxTerminalDelivery
+      || job.dgxTerminalDeliveryInFlight
+    ) {
+      throw new JobConflictError(
+        "Der Job ist noch aktiv oder seine DGX-Abschlussmeldung ist noch nicht bestätigt.",
+      );
+    }
+    this.jobs.delete(id);
+    try {
+      this.changed();
+    } catch (error) {
+      this.jobs.set(id, job);
+      throw error;
+    }
     return publicJob(job);
   }
 
@@ -1163,7 +1366,10 @@ export class JobManager extends EventEmitter {
   }
 
   private async run(job: RuntimeJob): Promise<void> {
-    const requiredAssetIds = requiredOfficialSpeechAssetIds(job.request);
+    const exactAdoptedRefinerRun = isAdoptedLipForcingCandidate(job.experiment);
+    const requiredAssetIds = exactAdoptedRefinerRun
+      ? []
+      : requiredOfficialSpeechAssetIds(job.request);
     let inventory: ModelInventory | undefined;
     const pathErrors: string[] = [];
     if (requiredAssetIds.length > 0) {
@@ -1177,17 +1383,149 @@ export class JobManager extends EventEmitter {
         );
       }
     }
-    pathErrors.push(...validateRequestPlan(job.request, job.plan, inventory));
+    pathErrors.push(...validateRequestPlan(job.request, job.plan, inventory, {
+      enforceOfficialAssets: !exactAdoptedRefinerRun,
+    }));
     const hybridEnabled = job.request.postprocess.longcatLipsync.enabled;
-    const finalAudioMixEnabled = job.request.mode === "audio-to-video"
+    const latentSyncEnabled = job.request.postprocess.latentSync.enabled;
+    const museTalkEnabled = job.request.postprocess.museTalk.enabled;
+    const lipForcingEnabled = job.request.postprocess.lipForcing.enabled;
+    const refinerEnabled = latentSyncEnabled || museTalkEnabled || lipForcingEnabled;
+    const finalAudioMixEnabled = isAudioConditionedMode(job.request.mode)
       && Boolean(job.request.audio.finalMix.path);
     const hybridScript = join(appRoot, "scripts", "longcat-hybrid.py");
     const hybridFaceModel = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
+    const latentSyncScript = join(appRoot, "scripts", "latentsync-refiner.py");
+    const museTalkScript = join(appRoot, "scripts", "musetalk-refiner.py");
+    const lipForcingScript = join(appRoot, "scripts", "lipforcing-refiner.py");
     if (hybridEnabled) {
       if (!existsSync(hybridScript)) pathErrors.push(`LongCat-Adapter fehlt (${hybridScript})`);
       if (!existsSync(hybridFaceModel)) pathErrors.push(`YuNet-Gesichtsmodell fehlt (${hybridFaceModel})`);
       if (!existsSync(join(longcatProjectRoot, "scripts", "avatar_worker_supervisor.py"))) {
         pathErrors.push(`LongCat-Projekt ist unvollständig (${longcatProjectRoot})`);
+      }
+    }
+    if (latentSyncEnabled) {
+      for (const [label, path] of [
+        ["LatentSync-Adapter", latentSyncScript],
+        ["LatentSync-1.6-Checkpoint", latentSyncCheckpointPath],
+        ["LatentSync-Whisper-Tiny", latentSyncWhisperPath],
+        ["LatentSync-VAE-Konfiguration", join(latentSyncVaeRoot, "config.json")],
+        ["LatentSync-VAE", join(latentSyncVaeRoot, "diffusion_pytorch_model.safetensors")],
+        [
+          "LatentSync-InsightFace-SCRFD-Gesichtsmodell",
+          join(latentSyncInsightFaceRoot, "models", "buffalo_l", "det_10g.onnx"),
+        ],
+        [
+          "LatentSync-InsightFace-106-Punkt-Landmark-Modell",
+          join(latentSyncInsightFaceRoot, "models", "buffalo_l", "2d106det.onnx"),
+        ],
+      ] as const) {
+        if (!existsSync(path)) pathErrors.push(`${label} fehlt (${path})`);
+      }
+      if (!executableAvailable("docker")) {
+        pathErrors.push("Docker für den LatentSync-Refiner ist nicht verfügbar.");
+      } else {
+        const imageCheck = spawnSync("docker", ["image", "inspect", latentSyncImage], {
+          encoding: "utf8",
+          shell: false,
+          stdio: "ignore",
+          timeout: 20_000,
+        });
+        if (imageCheck.status !== 0 || imageCheck.error) {
+          pathErrors.push(`LatentSync-Containerimage fehlt (${latentSyncImage}).`);
+        }
+      }
+    }
+    if (museTalkEnabled) {
+      for (const [label, path] of [
+        ["MuseTalk-Adapter", museTalkScript],
+        ["MuseTalk-1.5-UNet-Konfiguration", join(museTalkModelRoot, "musetalkV15", "musetalk.json")],
+        ["MuseTalk-1.5-UNet", join(museTalkModelRoot, "musetalkV15", "unet.pth")],
+        ["MuseTalk-VAE-Konfiguration", join(museTalkModelRoot, "sd-vae", "config.json")],
+        ["MuseTalk-VAE", join(museTalkModelRoot, "sd-vae", "diffusion_pytorch_model.bin")],
+        ["MuseTalk-Whisper-Konfiguration", join(museTalkModelRoot, "whisper", "config.json")],
+        ["MuseTalk-Whisper", join(museTalkModelRoot, "whisper", "pytorch_model.bin")],
+        ["MuseTalk-Whisper-Vorverarbeitung", join(museTalkModelRoot, "whisper", "preprocessor_config.json")],
+        ["MuseTalk-Gesichtsparser", join(museTalkModelRoot, "face-parse-bisent", "79999_iter.pth")],
+        ["MuseTalk-ResNet18", join(museTalkModelRoot, "face-parse-bisent", "resnet18-5c106cde.pth")],
+        [
+          "MuseTalk-InsightFace-SCRFD-Gesichtsmodell",
+          join(latentSyncInsightFaceRoot, "models", "buffalo_l", "det_10g.onnx"),
+        ],
+        [
+          "MuseTalk-InsightFace-106-Punkt-Landmark-Modell",
+          join(latentSyncInsightFaceRoot, "models", "buffalo_l", "2d106det.onnx"),
+        ],
+      ] as const) {
+        if (!existsSync(path)) pathErrors.push(`${label} fehlt (${path})`);
+      }
+      if (!executableAvailable("docker")) {
+        pathErrors.push("Docker für den MuseTalk-Refiner ist nicht verfügbar.");
+      } else {
+        const imageCheck = spawnSync("docker", ["image", "inspect", museTalkImage], {
+          encoding: "utf8",
+          shell: false,
+          stdio: "ignore",
+          timeout: 20_000,
+        });
+        if (imageCheck.status !== 0 || imageCheck.error) {
+          pathErrors.push(`MuseTalk-Containerimage fehlt (${museTalkImage}).`);
+        }
+      }
+    }
+    if (lipForcingEnabled) {
+      for (const [label, path] of [
+        ["LipForcing-Adapter", lipForcingScript],
+        ["LipForcing-14B-Modell", join(lipForcingModelRoot, "lipforcing_14b.pth")],
+        ["LipForcing-Wan-VAE", join(lipForcingModelRoot, "Wan2.1_VAE.pth")],
+        [
+          "LipForcing-wav2vec2",
+          join(lipForcingModelRoot, "wav2vec2-base-960h", "model.safetensors"),
+        ],
+        [
+          "LipForcing-wav2vec2-Merkmalsextraktion",
+          join(lipForcingModelRoot, "wav2vec2-base-960h", "feature_extractor_config.json"),
+        ],
+        ["LipForcing-Mundmaske", join(lipForcingModelRoot, "mask.png")],
+        ["LipForcing-Text-Embedding", join(lipForcingModelRoot, "text_emb.pt")],
+        [
+          "LipForcing-Text-Embedding-Provenienz",
+          join(lipForcingModelRoot, "text-embedding-provenance.json"),
+        ],
+        [
+          "LipForcing-Modellmanifest",
+          join(lipForcingModelRoot, "ltx-studio-model-manifest.json"),
+        ],
+        [
+          "LipForcing-InsightFace-SCRFD-Gesichtsmodell",
+          join(latentSyncInsightFaceRoot, "models", "buffalo_l", "det_10g.onnx"),
+        ],
+        [
+          "LipForcing-InsightFace-106-Punkt-Landmark-Modell",
+          join(latentSyncInsightFaceRoot, "models", "buffalo_l", "2d106det.onnx"),
+        ],
+      ] as const) {
+        if (!existsSync(path)) pathErrors.push(`${label} fehlt (${path})`);
+      }
+      if (
+        job.request.postprocess.lipForcing.decoder === "streaming-taehv"
+        && !existsSync(join(lipForcingModelRoot, "taew2_1.pth"))
+      ) {
+        pathErrors.push(`LipForcing-TAEHV fehlt (${join(lipForcingModelRoot, "taew2_1.pth")})`);
+      }
+      if (!executableAvailable("docker")) {
+        pathErrors.push("Docker für den LipForcing-Refiner ist nicht verfügbar.");
+      } else {
+        const imageCheck = spawnSync("docker", ["image", "inspect", lipForcingImage], {
+          encoding: "utf8",
+          shell: false,
+          stdio: "ignore",
+          timeout: 20_000,
+        });
+        if (imageCheck.status !== 0 || imageCheck.error) {
+          pathErrors.push(`LipForcing-Containerimage fehlt (${lipForcingImage}).`);
+        }
       }
     }
     if (pathErrors.length > 0) {
@@ -1206,7 +1544,7 @@ export class JobManager extends EventEmitter {
       this.changed();
       return;
     }
-    if (finalAudioMixEnabled && !executableAvailable("ffmpeg")) {
+    if ((finalAudioMixEnabled || refinerEnabled) && !executableAvailable("ffmpeg")) {
       job.status = "failed";
       job.finishedAt = now();
       job.error = "FFmpeg für die finale Tonspur ist nicht verfügbar.";
@@ -1258,13 +1596,16 @@ export class JobManager extends EventEmitter {
 
     const stageRoot = join(hybridRoot, job.id);
     const longcatOutput = join(stageRoot, "longcat.mp4");
-    const { ltxOutput, compositeOutput, remuxInput } = resolveRenderOutputPaths(
+    const { ltxOutput, compositeOutput, refinedOutput, remuxInput } = resolveRenderOutputPaths(
       job.plan.outputPath,
       stageRoot,
       hybridEnabled,
       finalAudioMixEnabled,
+      latentSyncEnabled,
+      museTalkEnabled,
+      lipForcingEnabled,
     );
-    if (hybridEnabled || finalAudioMixEnabled) {
+    if (hybridEnabled || refinerEnabled || finalAudioMixEnabled) {
       mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
     }
     if (hybridEnabled) {
@@ -1341,19 +1682,63 @@ export class JobManager extends EventEmitter {
       this.changed();
     }
 
-    const reusableBase = hybridEnabled ? this.findReusableLtxBase(job) : undefined;
+    const reusableBase = hybridEnabled || refinerEnabled
+      ? this.findReusableLtxBase(job)
+      : undefined;
     if (reusableBase) {
-      copyFileSync(reusableBase.plan.outputPath, ltxOutput);
+      copyFileSync(reusableBase.outputPath, ltxOutput);
       if (!this.fileReady(ltxOutput)) {
         this.failJob(job, "Die identische vorhandene LTX-Basis konnte nicht übernommen werden.");
         return;
       }
-      job.progress = 70;
+      if (!job.runProvenance) {
+        this.failJob(job, "Laufprovenienz fehlt vor der Bindung der wiederverwendeten LTX-Basis.");
+        return;
+      }
+      try {
+        const bindFile = this.runProvenanceOperations.bindFile ?? bindRunProvenanceFile;
+        job.runProvenance = await bindFile(
+          job.runProvenance,
+          ltxOutput,
+          `input:reused-ltx-base:${reusableBase.id}`,
+        );
+      } catch (error) {
+        this.failJob(
+          job,
+          `Die wiederverwendete LTX-Basis konnte nicht kryptografisch gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+      job.progress = refinerEnabled ? 80 : 70;
       this.appendLog(
         job,
-        `Identische LTX-Basis aus GUI-Job ${reusableBase.id} übernommen; kein redundanter DGX-Render nötig.`,
+        `Identische LTX-Basis aus ${reusableBase.description} übernommen und kryptografisch gebunden; `
+          + "kein redundanter DGX-Render nötig.",
       );
       this.changed();
+      if (refinerEnabled) {
+        const refinerMemoryGiB = refinerAdmissionMemoryGiB(job.request) ?? 16;
+        if (!await this.waitForDgxQueueStart(job, refinerMemoryGiB)) return;
+        const refinerName = lipForcingEnabled
+          ? "LipForcing"
+          : museTalkEnabled ? "MuseTalk" : "LatentSync";
+        if (!await this.verifyJobIdentityEvidence(job, `unmittelbar vor dem ${refinerName}-Start`)) {
+          await this.transitionDgxJob(job, "failed", {
+            current_step: `identity reference changed before ${refinerName} allocation`,
+            last_error: job.error ?? "identity reference verification failed",
+          });
+          return;
+        }
+        if (!await this.verifyJobRunProvenance(job, `unmittelbar vor dem ${refinerName}-Start`)) {
+          await this.transitionDgxJob(job, "failed", {
+            current_step: `run provenance changed before ${refinerName} allocation`,
+            last_error: job.error ?? "run provenance verification failed",
+          });
+          return;
+        }
+      }
     } else {
       if (!await this.waitForDgxQueueStart(job)) return;
       if (!await this.verifyJobIdentityEvidence(job, "unmittelbar vor dem LTX-Start")) {
@@ -1389,7 +1774,9 @@ export class JobManager extends EventEmitter {
       ltxArgs[outputArgumentIndex + 1] = ltxOutput;
       const ltxProgressEnd = hybridEnabled
         ? finalAudioMixEnabled ? 80 : 85
-        : finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
+        : refinerEnabled
+          ? finalAudioMixEnabled ? 80 : 85
+          : finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
       const progressTracker = new PipelineProgressTracker(
         hybridEnabled ? 20 : 0,
         ltxProgressEnd,
@@ -1549,6 +1936,303 @@ export class JobManager extends EventEmitter {
       job.progress = finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
     }
 
+    if (latentSyncEnabled) {
+      const latentSyncInput = hybridEnabled ? compositeOutput : ltxOutput;
+      const containerName = `ltx-latentsync-${job.id}`;
+      const thermalBaselineC = await this.readThermalBaseline(job);
+      if (this.jobShouldStop(job)) return;
+      if (thermalBaselineC === null) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "thermal start gate failed before LatentSync allocation",
+          last_error: job.error ?? "thermal start gate failed",
+        });
+        return;
+      }
+      if (!await this.verifyJobRunProvenance(job, "unmittelbar vor dem LatentSync-Start")) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "run provenance changed before LatentSync start",
+          last_error: job.error ?? "run provenance verification failed",
+        });
+        return;
+      }
+      this.appendLog(
+        job,
+        "LatentSync 1.6 startet als audiogeführter Gesichtsrefiner. LTX-Kopfbewegung, Körper und Hintergrund bleiben erhalten.",
+      );
+      rmSync(refinedOutput, { force: true });
+      const latentSyncArgs = [
+        latentSyncScript,
+        "--video", latentSyncInput,
+        "--output", refinedOutput,
+        "--stage-root", stageRoot,
+        "--checkpoint", latentSyncCheckpointPath,
+        "--whisper", latentSyncWhisperPath,
+        "--vae-root", latentSyncVaeRoot,
+        "--insightface-root", latentSyncInsightFaceRoot,
+        "--image", latentSyncImage,
+        "--container-name", containerName,
+        "--steps", String(job.request.postprocess.latentSync.steps),
+        "--guidance", String(job.request.postprocess.latentSync.guidance),
+        "--seed", String(job.request.seed),
+      ];
+      const latentSyncAudioArgs = buildRefinerAudioArgs(job.request);
+      if (latentSyncAudioArgs.length > 0) {
+        latentSyncArgs.push(...latentSyncAudioArgs);
+        this.appendLog(
+          job,
+          "LatentSync verwendet die unveränderte saubere Sprachkonditionierung als Mund- und Ausgabetonspur.",
+        );
+      }
+      const child = spawn(
+        pythonExecutable,
+        latentSyncArgs,
+        {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            DGX_JOB_ID: job.dgxJobId ?? undefined,
+            PYTHONUNBUFFERED: "1",
+          },
+          detached: true,
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      job.status = "running";
+      job.startedAt ??= now();
+      await this.markProcessStarted(job, child);
+      if (reusableBase && !await this.transitionDgxJob(job, "running", {
+        current_step: "LatentSync 1.6 face refinement running on reused LTX base",
+      })) {
+        if (this.jobShouldStop(job)) return;
+        await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
+        this.failJob(job, "DGX-Queue-Running-State wurde für LatentSync nicht freigegeben.");
+        return;
+      }
+      this.consumeProcessLogs(job, child);
+      const stopThermalWatcher = this.watchOwnedDockerThermals(
+        job,
+        child,
+        thermalBaselineC,
+        containerName,
+      );
+      const latentSyncResult = await this.waitForProcess(child);
+      stopThermalWatcher();
+      await this.confirmProcessGroupGone(job, child);
+      if (this.jobShouldStop(job)) return;
+      if (latentSyncResult.error || latentSyncResult.code !== 0 || !this.fileReady(refinedOutput)) {
+        await this.failDgxJob(
+          job,
+          latentSyncResult.error?.message
+            ?? `LatentSync beendet mit Code ${String(latentSyncResult.code)}`
+              + `${latentSyncResult.signal ? ` (${latentSyncResult.signal})` : ""}.`,
+          "LatentSync face refinement failed",
+        );
+        return;
+      }
+      job.progress = finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
+      this.appendLog(job, "LatentSync-Gesichtsrefiner erfolgreich abgeschlossen.");
+      this.changed();
+    }
+
+    if (museTalkEnabled) {
+      const museTalkInput = hybridEnabled ? compositeOutput : ltxOutput;
+      const containerName = `ltx-musetalk-${job.id}`;
+      const thermalBaselineC = await this.readThermalBaseline(job);
+      if (this.jobShouldStop(job)) return;
+      if (thermalBaselineC === null) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "thermal start gate failed before MuseTalk allocation",
+          last_error: job.error ?? "thermal start gate failed",
+        });
+        return;
+      }
+      if (!await this.verifyJobRunProvenance(job, "unmittelbar vor dem MuseTalk-Start")) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "run provenance changed before MuseTalk start",
+          last_error: job.error ?? "run provenance verification failed",
+        });
+        return;
+      }
+      this.appendLog(
+        job,
+        "MuseTalk 1.5 startet als bildweises Lippen-Inpainting mit InsightFace-106-Ausrichtung. "
+          + "LTX-Kopfbewegung, Körper und Hintergrund bleiben erhalten.",
+      );
+      rmSync(refinedOutput, { force: true });
+      const museTalkArgs = [
+        museTalkScript,
+        "--video", museTalkInput,
+        "--output", refinedOutput,
+        "--stage-root", stageRoot,
+        "--model-root", museTalkModelRoot,
+        "--insightface-root", latentSyncInsightFaceRoot,
+        "--image", museTalkImage,
+        "--container-name", containerName,
+        "--extra-margin", String(job.request.postprocess.museTalk.extraMargin),
+        "--cheek-width", String(job.request.postprocess.museTalk.cheekWidth),
+        "--audio-padding-left", String(job.request.postprocess.museTalk.audioPaddingLeft),
+        "--audio-padding-right", String(job.request.postprocess.museTalk.audioPaddingRight),
+      ];
+      const museTalkAudioArgs = buildRefinerAudioArgs(job.request);
+      if (museTalkAudioArgs.length > 0) {
+        museTalkArgs.push(...museTalkAudioArgs);
+        this.appendLog(
+          job,
+          "MuseTalk verwendet die unveränderte saubere Sprachkonditionierung als Mund- und Ausgabetonspur.",
+        );
+      }
+      const child = spawn(
+        pythonExecutable,
+        museTalkArgs,
+        {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            DGX_JOB_ID: job.dgxJobId ?? undefined,
+            PYTHONUNBUFFERED: "1",
+          },
+          detached: true,
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      job.status = "running";
+      job.startedAt ??= now();
+      await this.markProcessStarted(job, child);
+      if (reusableBase && !await this.transitionDgxJob(job, "running", {
+        current_step: "MuseTalk 1.5 frame inpainting running on reused LTX base",
+      })) {
+        if (this.jobShouldStop(job)) return;
+        await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
+        this.failJob(job, "DGX-Queue-Running-State wurde für MuseTalk nicht freigegeben.");
+        return;
+      }
+      this.consumeProcessLogs(job, child);
+      const stopThermalWatcher = this.watchOwnedDockerThermals(
+        job,
+        child,
+        thermalBaselineC,
+        containerName,
+      );
+      const museTalkResult = await this.waitForProcess(child);
+      stopThermalWatcher();
+      await this.confirmProcessGroupGone(job, child);
+      if (this.jobShouldStop(job)) return;
+      if (museTalkResult.error || museTalkResult.code !== 0 || !this.fileReady(refinedOutput)) {
+        await this.failDgxJob(
+          job,
+          museTalkResult.error?.message
+            ?? `MuseTalk beendet mit Code ${String(museTalkResult.code)}`
+              + `${museTalkResult.signal ? ` (${museTalkResult.signal})` : ""}.`,
+          "MuseTalk frame inpainting failed",
+        );
+        return;
+      }
+      job.progress = finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
+      this.appendLog(job, "MuseTalk-1.5-Lippen-Inpainting erfolgreich abgeschlossen.");
+      this.changed();
+    }
+
+    if (lipForcingEnabled) {
+      const lipForcingInput = hybridEnabled ? compositeOutput : ltxOutput;
+      const containerName = `ltx-lipforcing-${job.id}`;
+      const thermalBaselineC = await this.readThermalBaseline(job);
+      if (this.jobShouldStop(job)) return;
+      if (thermalBaselineC === null) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "thermal start gate failed before LipForcing allocation",
+          last_error: job.error ?? "thermal start gate failed",
+        });
+        return;
+      }
+      if (!await this.verifyJobRunProvenance(job, "unmittelbar vor dem LipForcing-Start")) {
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "run provenance changed before LipForcing start",
+          last_error: job.error ?? "run provenance verification failed",
+        });
+        return;
+      }
+      this.appendLog(
+        job,
+        "LipForcing 14B startet mit offizieller 512x512-Gesichtsausrichtung und audiogeführter "
+          + "Zwei-Schritt-Diffusion. Kopfbewegung, Körper, Hintergrund und die exakte LTX-Zeitachse bleiben erhalten.",
+      );
+      rmSync(refinedOutput, { force: true });
+      const lipForcingArgs = [
+        lipForcingScript,
+        "--video", lipForcingInput,
+        "--output", refinedOutput,
+        "--stage-root", stageRoot,
+        "--model-root", lipForcingModelRoot,
+        "--insightface-root", latentSyncInsightFaceRoot,
+        "--image", lipForcingImage,
+        "--container-name", containerName,
+        "--decoder", job.request.postprocess.lipForcing.decoder,
+        "--seed", String(job.request.seed),
+      ];
+      const lipForcingAudioArgs = buildRefinerAudioArgs(job.request);
+      if (lipForcingAudioArgs.length > 0) {
+        lipForcingArgs.push(...lipForcingAudioArgs);
+        this.appendLog(
+          job,
+          "LipForcing verwendet die unveränderte saubere Sprachkonditionierung; ein separater Musik-Endmix wird erst danach eingebunden.",
+        );
+      }
+      const child = spawn(
+        pythonExecutable,
+        lipForcingArgs,
+        {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            DGX_JOB_ID: job.dgxJobId ?? undefined,
+            PYTHONUNBUFFERED: "1",
+          },
+          detached: true,
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      job.status = "running";
+      job.startedAt ??= now();
+      await this.markProcessStarted(job, child);
+      if (reusableBase && !await this.transitionDgxJob(job, "running", {
+        current_step: "LipForcing 14B refinement running on reused LTX base",
+      })) {
+        if (this.jobShouldStop(job)) return;
+        await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
+        this.failJob(job, "DGX-Queue-Running-State wurde für LipForcing nicht freigegeben.");
+        return;
+      }
+      this.consumeProcessLogs(job, child);
+      const stopThermalWatcher = this.watchOwnedDockerThermals(
+        job,
+        child,
+        thermalBaselineC,
+        containerName,
+      );
+      const lipForcingResult = await this.waitForProcess(child);
+      stopThermalWatcher();
+      await this.confirmProcessGroupGone(job, child);
+      if (this.jobShouldStop(job)) return;
+      if (
+        lipForcingResult.error
+        || lipForcingResult.code !== 0
+        || !this.fileReady(refinedOutput)
+      ) {
+        await this.failDgxJob(
+          job,
+          describeLipForcingFailure(job.logs, lipForcingResult),
+          "LipForcing 14B refinement failed",
+        );
+        return;
+      }
+      job.progress = finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
+      this.appendLog(job, "LipForcing-14B-Lippenrefiner erfolgreich abgeschlossen.");
+      this.changed();
+    }
+
     if (finalAudioMixEnabled) {
       const remuxPath = join(stageRoot, "final-audio-remux.tmp");
       rmSync(remuxPath, { force: true });
@@ -1622,11 +2306,19 @@ export class JobManager extends EventEmitter {
     const completionMetadata: DgxTransitionMetadata = {
       current_step: "all LTX Studio processing, identity and run provenance verification completed",
       artifact: {
-        type: "video",
+        type: job.request.mode === "text-to-audio" ? "audio" : "video",
         path: job.plan.outputPath,
-        note: finalAudioMixEnabled
+        note: job.request.mode === "text-to-audio"
+          ? "final LTX Studio text-to-audio WAV output"
+          : finalAudioMixEnabled
           ? "final LTX Studio output with separately remuxed audio"
-          : hybridEnabled ? "final LTX Studio output after LongCat compositing" : "final LTX Studio output",
+          : latentSyncEnabled
+            ? "final LTX Studio output after LatentSync 1.6 refinement"
+            : museTalkEnabled
+              ? "final LTX Studio output after MuseTalk 1.5 frame inpainting"
+              : lipForcingEnabled
+                ? "final LTX Studio output after LipForcing 14B refinement"
+            : hybridEnabled ? "final LTX Studio output after LongCat compositing" : "final LTX Studio output",
       },
     };
     this.prepareDgxTerminalDelivery(job, "completed", completionMetadata);
@@ -1637,9 +2329,17 @@ export class JobManager extends EventEmitter {
     if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
     this.appendLog(
       job,
-      hybridEnabled
+      latentSyncEnabled
+        ? "Video mit LatentSync-Gesichtsrefiner erfolgreich erzeugt."
+        : museTalkEnabled
+        ? "Video mit MuseTalk-1.5-Lippen-Inpainting erfolgreich erzeugt."
+        : lipForcingEnabled
+        ? "Video mit LipForcing-14B-Lippenrefiner erfolgreich erzeugt."
+        : hybridEnabled
         ? "Hybridvideo erfolgreich erzeugt; LTX-Basis und LongCat-Mundspur bleiben als Zwischenstände erhalten."
-        : "Video erfolgreich erzeugt.",
+        : job.request.mode === "text-to-audio"
+          ? "Audio erfolgreich erzeugt."
+          : "Video erfolgreich erzeugt.",
     );
     this.changed();
     await this.flushDgxTerminalDelivery(job);
@@ -1687,43 +2387,31 @@ export class JobManager extends EventEmitter {
     return true;
   }
 
-  private findReusableLtxBase(job: RuntimeJob): RuntimeJob | undefined {
-    return [...this.jobs.values()].find((candidate) =>
+  private findReusableLtxBase(job: RuntimeJob): ReusableLtxBase | undefined {
+    const fromHistory = [...this.jobs.values()].find((candidate) =>
       candidate.id !== job.id
       && candidate.status === "completed"
       && !candidate.request.postprocess.longcatLipsync.enabled
       && publishedOutputIsReusableLtxBase(candidate.request, job.request)
-      && this.identityEvidenceMatches(candidate.identityEvidence, job.identityEvidence)
+      && identityEvidenceMatches(candidate.identityEvidence, job.identityEvidence)
       && runProvenanceSharesLtxBase(candidate.runProvenance, job.runProvenance)
       && this.fileReady(candidate.plan.outputPath));
-  }
-
-  private identityEvidenceMatches(
-    left: IdentityInputEvidence | null,
-    right: IdentityInputEvidence | null,
-  ): boolean {
-    if (left?.status !== "verified" || !["captured", "verified"].includes(right?.status ?? "")) return false;
-    return left.source === right?.source
-      && isDeepStrictEqual(
-        left.references.map(({ assetId, kind, sizeBytes, modifiedAtMs, changedAtMs, fileId, sha256 }) => ({
-          assetId,
-          kind,
-          sizeBytes,
-          modifiedAtMs,
-          changedAtMs,
-          fileId,
-          sha256,
-        })),
-        right?.references.map(({ assetId, kind, sizeBytes, modifiedAtMs, changedAtMs, fileId, sha256 }) => ({
-          assetId,
-          kind,
-          sizeBytes,
-          modifiedAtMs,
-          changedAtMs,
-          fileId,
-          sha256,
-        })),
-      );
+    if (fromHistory) {
+      return {
+        id: fromHistory.id,
+        outputPath: fromHistory.plan.outputPath,
+        description: `GUI-Job ${fromHistory.id}`,
+      };
+    }
+    if (!this.reusableBaseSource) return undefined;
+    // Fail-closed: unreadable sidecars only cost a regular render, never a crash.
+    let candidates: readonly ReusableLtxBaseCandidate[];
+    try {
+      candidates = this.reusableBaseSource.reusableLtxBaseCandidates();
+    } catch {
+      return undefined;
+    }
+    return reusableLtxBaseFromSidecars(candidates, job, (path) => this.fileReady(path));
   }
 
   private async waitForDelay(job: RuntimeJob, delayMs: number): Promise<boolean> {
@@ -1800,7 +2488,10 @@ export class JobManager extends EventEmitter {
     return undefined;
   }
 
-  private async waitForDgxQueueStart(job: RuntimeJob): Promise<boolean> {
+  private async waitForDgxQueueStart(
+    job: RuntimeJob,
+    estimatedMemoryGiBOverride?: number,
+  ): Promise<boolean> {
     if (!await this.waitForLocalPreAdmissionResources(job)) return false;
     while (!this.shuttingDown && isActiveJobStatus(job.status)) {
       if (job.dgxSubmitPending) {
@@ -1832,15 +2523,11 @@ export class JobManager extends EventEmitter {
       try {
         this.appendLog(job, "DGX-Queue: Renderbedarf wird beim Orchestrator eingereicht; laufende Anwendungen werden nicht direkt beendet.");
         const estimate = estimateRequest(job.request, this.list());
-        const requiredStartMemoryGiB = Math.max(
-          minAvailableGiB,
-          estimate.memoryGiB + minResidualMemoryGiB,
-        );
+        const requestedMemoryGiB = estimatedMemoryGiBOverride ?? estimate.memoryGiB;
         this.appendLog(
           job,
-          `DGX-Queue: Modellbedarf ${estimate.memoryGiB} GiB RAM; das separate lokale Start-Gate verlangt `
-            + `${requiredStartMemoryGiB} GiB inklusive ${minResidualMemoryGiB} GiB Restpuffer, `
-            + `${estimate.outputGiB.toFixed(2)} GiB Ausgabe.`,
+          `DGX-Queue: Modellbedarf ${requestedMemoryGiB} GiB RAM und `
+            + `${estimate.outputGiB.toFixed(2)} GiB Ausgabe; der Orchestrator entscheidet das Start-Fence.`,
         );
         job.dgxSubmitPending = true;
         job.dgxSubmitStartedAt = now();
@@ -1848,7 +2535,7 @@ export class JobManager extends EventEmitter {
         this.changed();
         response = await this.dgxAdmissionOperations.submit(
           job.request,
-          estimate.memoryGiB,
+          requestedMemoryGiB,
           job.id,
           submitAbortController.signal,
         );
@@ -1981,21 +2668,13 @@ export class JobManager extends EventEmitter {
   }
 
   private async startAcceptedDgxJob(job: RuntimeJob): Promise<DgxStartOutcome> {
-    const estimate = estimateRequest(job.request, this.list());
-    const requirements = {
-      estimatedMemoryGiB: estimate.memoryGiB,
-      minAvailableGiB,
-      minResidualMemoryGiB,
-      minSwapFreeGiB,
-      outputGiB: estimate.outputGiB,
-    };
-    const gate = await this.waitForAcceptedLocalStartResources(job, requirements);
-    if (gate.kind !== "ready") return gate.kind;
-    const { snapshot } = gate;
+    const snapshot = this.readStartResourceSnapshot();
     this.appendLog(
       job,
-      `Lokales Start-Gate erfüllt: ${snapshot.availableMemoryGiB?.toFixed(2)} GiB RAM, `
-        + `${snapshot.swapFreeGiB?.toFixed(2)} GiB Swap und ${snapshot.outputFreeGiB?.toFixed(2)} GiB Ausgabeplatz frei.`,
+      `DGX-Admission ist akzeptiert; Start-Fence wird jetzt autoritativ beim Orchestrator geprüft. `
+        + `Lokale Messung: ${snapshot.availableMemoryGiB?.toFixed(2) ?? "unbekannt"} GiB RAM, `
+        + `${snapshot.swapFreeGiB?.toFixed(2) ?? "unbekannt"} GiB Swap und `
+        + `${snapshot.outputFreeGiB?.toFixed(2) ?? "unbekannt"} GiB Ausgabeplatz frei.`,
     );
     this.changed();
     const started = await this.transitionDgxJob(job, "starting", {
@@ -2011,82 +2690,6 @@ export class JobManager extends EventEmitter {
     this.failJob(job, message);
     await this.flushDgxTerminalDelivery(job);
     return "stopped";
-  }
-
-  private async waitForAcceptedLocalStartResources(
-    job: RuntimeJob,
-    requirements: Parameters<typeof validateStartResources>[1],
-  ): Promise<AcceptedResourceWaitOutcome> {
-    let lastIssue: string | null = null;
-    let lastLogAt = 0;
-    const acceptedAt = Date.now();
-    let nextRemotePollAt = acceptedAt + DGX_ACCEPTED_REMOTE_POLL_MS;
-    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
-      const snapshot = this.readStartResourceSnapshot();
-      const issue = validateStartResources(snapshot, requirements);
-      const currentTime = Date.now();
-      if (issue === null) return { kind: "ready", snapshot };
-      if (currentTime >= nextRemotePollAt && job.dgxJobId) {
-        nextRemotePollAt = currentTime + DGX_ACCEPTED_REMOTE_POLL_MS;
-        try {
-          const remote = (await this.dgxQueueOperations.read(job.dgxJobId)).job;
-          if (remote.state === "queued") {
-            this.appendLog(job, `DGX-Queue-Job ${remote.job_id} wurde wieder eingereiht; lokales accepted-Gate wird beendet.`);
-            this.changed();
-            return { kind: "queued" };
-          }
-          if (remote.state === "cancelled") {
-            job.dgxJobTerminal = true;
-            this.resetDgxLeaseForResubmit(job, `Remote-Job ${remote.job_id} wurde während des lokalen Start-Gates abgebrochen.`);
-            return { kind: "resubmit" };
-          }
-          if (["completed", "failed", "rejected"].includes(remote.state)) {
-            job.dgxJobTerminal = true;
-            this.failJob(job, `DGX-Queue-Job ist während des lokalen Start-Gates terminal: ${remote.state}.`);
-            return { kind: "stopped" };
-          }
-          if (!["accepted", "starting", "running"].includes(remote.state)) {
-            this.appendLog(job, `DGX-Queue-Status ${remote.state} wird vor dem lokalen Start erneut geprüft.`);
-            this.changed();
-          }
-        } catch (error) {
-          this.appendLog(
-            job,
-            `DGX-Queue-Status im lokalen Start-Gate vorübergehend nicht lesbar: ${
-              error instanceof Error ? error.message : String(error)
-            }.`,
-          );
-          this.changed();
-        }
-      }
-      if (currentTime - acceptedAt >= DGX_ACCEPTED_LOCAL_GATE_MAX_WAIT_MS) {
-        const message = "Lokales Start-Gate blieb 20 Minuten blockiert; accepted-Lease wird freigegeben und neu eingereiht.";
-        this.appendLog(job, message);
-        this.prepareDgxTerminalDelivery(job, "cancelled", {
-          current_step: "accepted local start gate timed out before compute allocation",
-          last_error: message,
-        });
-        this.changed();
-        const delivered = await this.flushDgxTerminalDelivery(job);
-        if (delivered && job.dgxJobTerminal) {
-          this.resetDgxLeaseForResubmit(job, message);
-          return { kind: "resubmit" };
-        }
-        this.failJob(job, `${message} Die Freigabe konnte nicht bestätigt werden.`);
-        return { kind: "stopped" };
-      }
-      if (issue !== lastIssue || currentTime - lastLogAt >= RESOURCE_WAIT_LOG_INTERVAL_MS) {
-        this.appendLog(
-          job,
-          `DGX-Queue-Job ist akzeptiert; lokales Start-Gate wartet vor starting/Prozessstart: ${issue}`,
-        );
-        this.changed();
-        lastIssue = issue;
-        lastLogAt = currentTime;
-      }
-      if (!await this.waitForDelay(job, RESOURCE_RETRY_INTERVAL_MS)) return { kind: "stopped" };
-    }
-    return { kind: "stopped" };
   }
 
   private resetDgxLeaseForResubmit(job: RuntimeJob, detail: string): void {
@@ -2118,14 +2721,14 @@ export class JobManager extends EventEmitter {
         this.appendLog(
           job,
           `Lokales Queue-Vorab-Gate erfüllt: ${snapshot.outputFreeGiB?.toFixed(2)} GiB Ausgabeplatz frei; `
-            + "RAM und Swap werden nach Orchestrator-Acceptance erneut geprüft.",
+            + "RAM, Swap, Reservierungen und zulässiger Reclaim werden vom DGX-Orchestrator entschieden.",
         );
         this.changed();
         return true;
       }
       const currentTime = Date.now();
       if (issue !== lastIssue || currentTime - lastLogAt >= RESOURCE_WAIT_LOG_INTERVAL_MS) {
-        this.appendLog(job, `Lokales Start-Gate wartet: ${issue}`);
+        this.appendLog(job, `Lokale Ausgabeplatz-Prüfung wartet: ${issue}`);
         this.changed();
         lastIssue = issue;
         lastLogAt = currentTime;
@@ -2230,11 +2833,12 @@ export class JobManager extends EventEmitter {
       if (remote.state === "queued") {
         this.appendLog(
           job,
-          `DGX-Start-Fence wurde wieder auf queued gesetzt; nächste Prüfung in ${(retryDelayMs / 1000).toFixed(0)} s.`,
+          `DGX-Start-Fence wartet mit Queue-Job ${remote.job_id} auf seine Auswahl; `
+            + `neuer Versuch in ${(retryDelayMs / 1000).toFixed(0)} s.`,
         );
         this.changed();
         if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
-        continue;
+        return "retry";
       }
       this.appendLog(
         job,
@@ -2584,6 +3188,7 @@ export class JobManager extends EventEmitter {
   private async waitForQwenIdleGrace(job: RuntimeJob): Promise<boolean> {
     let idleSince: number | null = null;
     let demandWasVisible: boolean | null = null;
+    let lastAdmissionProbe = Date.now();
     while (!this.shuttingDown && isActiveJobStatus(job.status)) {
       let visible = true;
       try {
@@ -2597,6 +3202,26 @@ export class JobManager extends EventEmitter {
       }
       if (visible) {
         idleSince = null;
+        // The demand flag cannot distinguish a waiting consumer from a working
+        // one, so a renewed demand alone must not starve the paused slice: the
+        // read-only admission check is the authoritative wake-up call.
+        const check = this.dgxAdmissionOperations.check;
+        if (check && Date.now() - lastAdmissionProbe >= QWEN_PAUSED_ADMISSION_PROBE_MS) {
+          lastAdmissionProbe = Date.now();
+          try {
+            const probe = await check(job.request);
+            if (probe.decision === "accepted") {
+              this.appendLog(
+                job,
+                "Admission-Probe akzeptiert trotz angemeldetem Qwen-Bedarf; LTX beantragt den regulären Resume.",
+              );
+              this.changed();
+              return true;
+            }
+          } catch {
+            // A failed probe changes nothing about the resource-free wait.
+          }
+        }
       } else {
         idleSince ??= Date.now();
         if (Date.now() - idleSince >= QWEN_IDLE_GRACE_MS) return true;
@@ -2796,6 +3421,99 @@ export class JobManager extends EventEmitter {
       this.appendLog(
         job,
         `Thermalprofil (gesamter Host): Basis ${baselineC.toFixed(1)} °C, Peak ${peakC.toFixed(1)} °C, beobachteter Anstieg ${(peakC - baselineC).toFixed(1)} °C.`,
+      );
+    };
+  }
+
+  private watchOwnedDockerThermals(
+    job: RuntimeJob,
+    child: ChildProcess,
+    baselineC: number,
+    containerName: string,
+  ): () => void {
+    const resumeBelowC = Math.min(baselineC + 0.1, thermalPauseC - 0.1);
+    let peakC = baselineC;
+    const guard = new ThermalPauseGuard({
+      pauseAtC: thermalPauseC,
+      pausePolls: thermalPausePolls,
+      resumeBelowC,
+      resumePolls: thermalResumePolls,
+      unreadablePolls: thermalUnreadablePolls,
+    });
+    const dockerAction = (action: "pause" | "unpause"): boolean => {
+      const result = spawnSync("docker", [action, containerName], {
+        encoding: "utf8",
+        shell: false,
+        timeout: 20_000,
+      });
+      if (result.status === 0 && !result.error) return true;
+      const detail = result.error?.message || result.stderr.trim() || `Exit ${String(result.status)}`;
+      this.appendLog(
+        job,
+        `LatentSync-Thermalschutz konnte den eigenen Container nicht mit docker ${action} steuern: ${detail}`,
+      );
+      signalProcessGroup(child, "SIGTERM");
+      this.changed();
+      return false;
+    };
+    const timer = setInterval(() => {
+      if (!processIsAlive(child) || !["running", "paused"].includes(job.status)) return;
+      try {
+        const temperatureC = readMaxTemperatureC();
+        if (temperatureC !== null) peakC = Math.max(peakC, temperatureC);
+        if (job.thermalProfile) {
+          job.thermalProfile = {
+            ...job.thermalProfile,
+            currentC: temperatureC,
+            peakC,
+            riseC: peakC - baselineC,
+            updatedAt: now(),
+          };
+        }
+        const action = guard.observe(temperatureC, job.status === "paused");
+        if (action === "pause_hot" || action === "pause_unreadable") {
+          if (!dockerAction("pause")) return;
+          job.status = "paused";
+          const reason = action === "pause_hot"
+            ? `${temperatureC?.toFixed(1)} °C über ${thermalPausePolls} Messungen`
+            : `${thermalUnreadablePolls} Temperaturmessungen ohne verwertbaren Sensorwert`;
+          this.appendLog(
+            job,
+            `Thermalpause: ${reason}. Der LatentSync-Container bleibt vollständig im Speicher und wird nach Abkühlung nahtlos fortgesetzt.`,
+          );
+          this.changed();
+          return;
+        }
+        if (action === "resume") {
+          if (!dockerAction("unpause")) return;
+          job.status = "running";
+          this.appendLog(
+            job,
+            `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen unter dem Lauf-Basiswert ${baselineC.toFixed(1)} °C. LatentSync läuft ohne Neustart weiter.`,
+          );
+          this.changed();
+          return;
+        }
+        this.changed();
+      } catch (error) {
+        process.stderr.write(`LTX Studio LatentSync-Thermalwächter: ${String(error)}\n`);
+      }
+    }, thermalPollIntervalMs);
+    timer.unref();
+    return () => {
+      clearInterval(timer);
+      if (job.thermalProfile) {
+        job.thermalProfile = {
+          ...job.thermalProfile,
+          currentC: null,
+          peakC,
+          riseC: peakC - baselineC,
+          updatedAt: now(),
+        };
+      }
+      this.appendLog(
+        job,
+        `LatentSync-Thermalprofil (gesamter Host): Basis ${baselineC.toFixed(1)} °C, Peak ${peakC.toFixed(1)} °C, beobachteter Anstieg ${(peakC - baselineC).toFixed(1)} °C.`,
       );
     };
   }

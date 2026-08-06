@@ -17,6 +17,7 @@ import {
   experimentKind,
   experimentRunBindingSchema,
   type ControlledExperiment,
+  type ExperimentBaselineEvidence,
   type ExperimentCreateInput,
   type ExperimentRunBinding,
   validateControlledExperimentDifference,
@@ -53,12 +54,48 @@ export function requestSettingsSha256(request: GenerationRequest): string {
   return sha256Json(settings);
 }
 
+export function outputVerifiesExperimentArmRun(
+  output: StudioOutput,
+  experiment: ControlledExperiment,
+  arm: "baseline" | "candidate",
+): boolean {
+  if (arm === "baseline") return outputVerifiesExperimentBaseline(output, experiment);
+  const selected = experiment.arms[1];
+  const binding = output.experiment;
+  return Boolean(
+    experiment.status === "frozen"
+    && experiment.protocolSha256
+    && selected.jobId
+    && output.name === selected.request.outputName
+    && output.jobId === selected.jobId
+    && binding?.experimentId === experiment.id
+    && binding.protocolSha256 === experiment.protocolSha256
+    && binding.arm === "candidate"
+    && binding.requestSha256 === selected.requestSha256
+    && output.experimentRequestVerified === true
+    && output.provenance?.verifiedAt
+    && output.provenance.fingerprint.length === 64,
+  );
+}
+
 export function outputVerifiesExperimentBaseline(
   output: StudioOutput,
   experiment: ControlledExperiment,
 ): boolean {
   const baseline = experiment.arms[0];
   const binding = output.experiment;
+  const adoptedEvidence = experiment.baselineEvidence;
+  const bindingMatches = binding?.experimentId === experiment.id
+    && binding.protocolSha256 === experiment.protocolSha256
+    && binding.arm === "baseline"
+    && binding.requestSha256 === baseline.requestSha256;
+  const adoptedOutputMatches = adoptedEvidence !== null
+    && output.name === adoptedEvidence.outputName
+    && output.jobId === adoptedEvidence.jobId
+    && output.sizeBytes === adoptedEvidence.sizeBytes
+    && output.changedAt === adoptedEvidence.changedAt
+    && output.fileId === adoptedEvidence.fileId
+    && output.provenance?.fingerprint === adoptedEvidence.provenanceFingerprint;
   return Boolean(
     experiment.status === "frozen"
     && experiment.protocolSha256
@@ -68,10 +105,7 @@ export function outputVerifiesExperimentBaseline(
     && output.settingsAvailable
     && output.request
     && sha256Json(output.request) === baseline.requestSha256
-    && binding?.experimentId === experiment.id
-    && binding.protocolSha256 === experiment.protocolSha256
-    && binding.arm === "baseline"
-    && binding.requestSha256 === baseline.requestSha256
+    && (bindingMatches || adoptedOutputMatches)
     && output.provenance?.verifiedAt
     && output.provenance.fingerprint.length === 64
   );
@@ -93,6 +127,7 @@ function protocolPayload(experiment: ControlledExperiment): unknown {
     candidate: experiment.candidate,
     changedRequestPaths: experiment.changedRequestPaths,
     createdAt: experiment.createdAt,
+    ...(experiment.baselineEvidence ? { baselineEvidence: experiment.baselineEvidence } : {}),
     arms: experiment.arms.map((arm) => ({
       arm: arm.arm,
       request: arm.request,
@@ -124,16 +159,49 @@ export class ExperimentStore {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  listAvailable(): { experiments: ControlledExperiment[]; warnings: string[] } {
+    const warnings: string[] = [];
+    const experiments = readdirSync(this.root, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /^[0-9a-f-]{36}\.json$/i.test(entry.name))
+      .flatMap((entry) => {
+        try {
+          const experiment = this.read(entry.name.slice(0, -5));
+          return experiment ? [experiment] : [];
+        } catch (error) {
+          warnings.push(error instanceof Error ? error.message : `Experimentdatei ${entry.name} ist nicht lesbar.`);
+          return [];
+        }
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return { experiments, warnings };
+  }
+
   get(id: string): ControlledExperiment | null {
     return this.read(id);
   }
 
-  create(input: ExperimentCreateInput, createdAt = new Date().toISOString()): ControlledExperiment {
+  create(
+    input: ExperimentCreateInput,
+    createdAt = new Date().toISOString(),
+    baselineEvidence: ExperimentBaselineEvidence | null = null,
+  ): ControlledExperiment {
     const parsed = experimentCreateInputSchema.parse(input);
     const id = randomUUID();
     const baseline = structuredClone(parsed.baselineRequest);
-    baseline.outputName = experimentOutputName(parsed.baselineRequest.outputName, id, "a");
-    const candidateRequest = applyExperimentCandidate(parsed.baselineRequest, parsed.candidate);
+    if (parsed.baselineOutputName) {
+      if (!baselineEvidence || baselineEvidence.outputName !== parsed.baselineOutputName) {
+        throw new ExperimentConflictError(
+          "Die angeforderte vorhandene Baseline wurde nicht mit aktueller Ausgabenprovenienz belegt.",
+        );
+      }
+      baseline.outputName = baselineEvidence.outputName;
+    } else {
+      if (baselineEvidence) {
+        throw new ExperimentConflictError("Baseline-Evidenz ohne ausgewählte vorhandene Ausgabe ist nicht zulässig.");
+      }
+      baseline.outputName = experimentOutputName(parsed.baselineRequest.outputName, id, "a");
+    }
+    const candidateRequest = applyExperimentCandidate(baseline, parsed.candidate);
     candidateRequest.outputName = experimentOutputName(parsed.baselineRequest.outputName, id, "b");
     const changedRequestPaths = validateControlledExperimentDifference(
       baseline,
@@ -154,6 +222,7 @@ export class ExperimentStore {
       supersededAt: null,
       supersededReason: null,
       replacementExperimentId: null,
+      baselineEvidence,
       protocolSha256: null,
       arms: [
         {
@@ -161,8 +230,8 @@ export class ExperimentStore {
           request: baseline,
           requestSha256: sha256Json(baseline),
           settingsSha256: requestSettingsSha256(baseline),
-          jobId: null,
-          attemptJobIds: [],
+          jobId: baselineEvidence?.jobId ?? null,
+          attemptJobIds: baselineEvidence ? [baselineEvidence.jobId] : [],
         },
         {
           arm: "candidate",
@@ -270,6 +339,9 @@ export class ExperimentStore {
       requestSha256: selected.requestSha256,
       baselineJobId: arm === "candidate" ? baselineJobId : null,
       baselineOutputName: current.arms[0].request.outputName,
+      ...(arm === "candidate" && current.baselineEvidence
+        ? { adoptedBaseline: true as const }
+        : {}),
     });
     return binding;
   }
@@ -377,15 +449,40 @@ export class ExperimentStore {
     if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
     const path = join(this.root, `${id}.json`);
     if (!existsSync(path)) return null;
+    let decoded: unknown;
     try {
-      const parsed = controlledExperimentSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
-      if (!parsed.success) {
-        throw new ExperimentConflictError(`Experimentdatei ${id} ist ungültig und wird nicht verwendet.`);
-      }
-      return parsed.data;
+      decoded = JSON.parse(readFileSync(path, "utf8"));
     } catch {
       throw new ExperimentConflictError(`Experimentdatei ${id} ist beschädigt und wird nicht verwendet.`);
     }
+    const parsed = controlledExperimentSchema.safeParse(decoded);
+    if (parsed.success) return parsed.data;
+    const legacyRequestFields = new Set([
+      "models.gemmaLora",
+      "icLora.controlType",
+      "icLora.lora",
+      "icLora.mogeModelPath",
+      "icLora.hdrTextEmbeddingsPath",
+      "icLora.hdrHighQuality",
+      "idLora",
+      "lipDub.pipelineProfile",
+      "postprocess.latentSync",
+      "postprocess.museTalk",
+      "postprocess.lipForcing",
+    ]);
+    const usesLegacyRequestSchema = parsed.error.issues.length > 0
+      && parsed.error.issues.every((issue) => {
+        if (issue.path[0] !== "arms" || typeof issue.path[1] !== "number" || issue.path[2] !== "request") {
+          return false;
+        }
+        return legacyRequestFields.has(issue.path.slice(3).join("."));
+      });
+    if (usesLegacyRequestSchema) {
+      throw new ExperimentConflictError(
+        `Experiment ${id} stammt aus einer älteren Studio-Version und bleibt unverändert schreibgeschützt archiviert.`,
+      );
+    }
+    throw new ExperimentConflictError(`Experimentdatei ${id} ist ungültig und wird nicht verwendet.`);
   }
 
   private write(experiment: ControlledExperiment): void {

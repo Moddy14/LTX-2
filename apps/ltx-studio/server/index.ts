@@ -16,12 +16,12 @@ import { qualityReviewInputSchema } from "../shared/quality.js";
 import {
   recommendedModelAssets,
   requiredOfficialSpeechAssetIds,
-  usesOfficialSpeechStack,
+  withOfficialSpeechModelPaths,
 } from "../shared/models.js";
 import {
   admissionClientAvailable,
+  admissionPreflight,
   listQueueJobs,
-  type QueueJobState,
 } from "./admission.js";
 import { AssetStore } from "./assets.js";
 import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan } from "./command.js";
@@ -50,11 +50,18 @@ import { estimateRequest } from "./estimates.js";
 import {
   ExperimentConflictError,
   ExperimentStore,
+  outputVerifiesExperimentArmRun,
   outputVerifiesExperimentBaseline,
+  requestSettingsSha256,
 } from "./experimentStore.js";
+import { releaseRetryableExperimentArm } from "./experimentRetry.js";
 import { getModelInventory } from "./models.js";
 import { readOrchestratorStatus } from "./orchestrator.js";
-import { OutputLibrary, OutputQualityError } from "./outputs.js";
+import {
+  OutputDeleteError,
+  OutputLibrary,
+  OutputQualityError,
+} from "./outputs.js";
 import {
   cleanupAnalysisTempRoot,
   OutputAnalysisManager,
@@ -65,6 +72,7 @@ import { captureProvenanceFile, verifyProvenanceFileEvidence } from "./runProven
 import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
 import { PhonemeVisemeEvaluatorStateProvider } from "./evaluatorStateProvider.js";
+import { shouldAutoAnalyzeCompletedJob } from "./autoAnalysis.js";
 
 ensureRuntimeDirectories();
 cleanupAnalysisTempRoot(analysisTempRoot);
@@ -80,6 +88,7 @@ const app = express();
 const assets = new AssetStore();
 const jobs = new JobManager(undefined, true, assets);
 const outputs = new OutputLibrary(outputRoot);
+jobs.wireReusableBaseSource(outputs);
 const experiments = new ExperimentStore(experimentRoot);
 const phonemeVisemeEvaluatorStates = new PhonemeVisemeEvaluatorStateProvider();
 experiments.reconcileJobs(jobs.list());
@@ -89,7 +98,23 @@ const analyses = new OutputAnalysisManager(outputs, () => jobs.list(), outputRoo
   phonemeVisemeEvaluatorStateResolver: () => phonemeVisemeEvaluatorStates.get(),
 });
 outputs.recordCompleted(jobs.list());
-jobs.on("changed", (value: StudioJob[]) => outputs.recordCompleted(value));
+const observedJobStatuses = new Map(jobs.list().map((job) => [job.id, job.status]));
+jobs.on("changed", (value: StudioJob[]) => {
+  outputs.recordCompleted(value);
+  for (const job of value) {
+    const previousStatus = observedJobStatuses.get(job.id);
+    observedJobStatuses.set(job.id, job.status);
+    if (!shouldAutoAnalyzeCompletedJob(previousStatus, job)) continue;
+    try {
+      analyses.start(job.outputName);
+    } catch (error) {
+      console.error(
+        `Automatische Qualitätsanalyse für ${job.outputName} konnte nicht gestartet werden:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+});
 const allowedBrowserOrigins = new Set([
   `http://127.0.0.1:${serverPort}`,
   `http://localhost:${serverPort}`,
@@ -101,43 +126,22 @@ function routeParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
 }
 
-const activeRemoteQueueStates = new Set<QueueJobState>([
-  "submitted",
-  "accepted",
-  "queued",
-  "starting",
-  "running",
-  "pausing",
-  "paused",
-  "resuming",
-]);
-
-async function releaseRetryableExperimentArm(
+async function releaseRetryableArm(
   experiment: ControlledExperiment,
   arm: "baseline" | "candidate",
 ): Promise<ControlledExperiment> {
-  const selected = experiment.arms[arm === "baseline" ? 0 : 1];
-  if (!selected.jobId) return experiment;
-  const previous = jobs.get(selected.jobId);
-  if (!previous || !["failed", "cancelled", "interrupted"].includes(previous.status)) return experiment;
-
-  let remoteJobs;
-  try {
-    remoteJobs = (await listQueueJobs()).jobs;
-  } catch {
-    throw new ExperimentConflictError(
-      "Der frühere Experimentlauf ist terminal, aber sein DGX-Queue-Zustand kann nicht sicher geprüft werden.",
-    );
-  }
-  const remote = previous.dgxJobId
-    ? remoteJobs.find((job) => job.job_id === previous.dgxJobId)
-    : remoteJobs.find((job) => job.requested_by === `ltx-studio:${previous.id}`);
-  if (remote && activeRemoteQueueStates.has(remote.state)) {
-    throw new ExperimentConflictError(
-      `Der frühere Experimentlauf besitzt noch den aktiven DGX-Queue-Job ${remote.job_id} (${remote.state}).`,
-    );
-  }
-  return experiments.releaseArmForRetry(experiment.id, arm, previous.id);
+  return releaseRetryableExperimentArm(experiment, arm, {
+    getJob: (jobId) => {
+      const job = jobs.get(jobId);
+      return job ? { status: job.status, dgxJobId: job.dgxJobId } : undefined;
+    },
+    hasVerifiedArmOutput: (boundExperiment, boundArm) =>
+      outputs.list(jobs.list()).some((output) =>
+        outputVerifiesExperimentArmRun(output, boundExperiment, boundArm)),
+    listRemoteJobs: listQueueJobs,
+    releaseArm: (experimentId, armToRelease, previousJobId) =>
+      experiments.releaseArmForRetry(experimentId, armToRelease, previousJobId),
+  });
 }
 
 app.disable("x-powered-by");
@@ -181,12 +185,14 @@ const lipDubReferenceInspectionRequestSchema = z.object({
   height: lipDubReferenceDimensionSchema,
   dialogue: z.string().max(20_000).default(""),
   prompt: z.string().max(20_000).default(""),
+  pipelineProfile: z.enum(["official-comfy-hq", "native-distilled"]).optional(),
 });
 const lipDubReferencePreparationRequestSchema = z.object({
   mode: z.literal("lipdub").optional(),
   width: lipDubReferenceDimensionSchema,
   height: lipDubReferenceDimensionSchema,
   lipDub: z.object({
+    pipelineProfile: z.enum(["official-comfy-hq", "native-distilled"]).default("native-distilled"),
     referenceVideo: z.object({
       path: lipDubReferencePathSchema,
       name: z.string().trim().max(255).default(""),
@@ -375,10 +381,11 @@ app.post("/api/images/crop", async (request, response) => {
 });
 
 app.post("/api/jobs/plan", async (request, response) => {
-  const payload = generationRequestSchema.parse(request.body);
+  const payload = withOfficialSpeechModelPaths(generationRequestSchema.parse(request.body));
   const plan = buildCommand(payload);
-  const inventory = usesOfficialSpeechStack(payload)
-    ? await getModelInventory(false, requiredOfficialSpeechAssetIds(payload))
+  const requiredAssetIds = requiredOfficialSpeechAssetIds(payload);
+  const inventory = requiredAssetIds.length > 0
+    ? await getModelInventory(false, requiredAssetIds)
     : undefined;
   response.json({
     command: plan.displayCommand,
@@ -450,11 +457,48 @@ app.post("/api/lipdub/reference/prepare", async (request, response) => {
 
 app.get("/api/jobs", (_request, response) => response.json({ jobs: jobs.list() }));
 app.get("/api/outputs", (_request, response) => response.json({ outputs: outputs.list(jobs.list()) }));
-app.get("/api/experiments", (_request, response) => response.json({ experiments: experiments.list() }));
+app.get("/api/experiments", (_request, response) => response.json(experiments.listAvailable()));
 
 app.post("/api/experiments", (request, response) => {
-  const payload = experimentCreateInputSchema.parse(request.body);
-  response.status(201).json({ experiment: experiments.create(payload) });
+  let payload = experimentCreateInputSchema.parse(request.body);
+  let baselineEvidence = null;
+  if (payload.baselineOutputName) {
+    const output = outputs.list(jobs.list()).find((item) => item.name === payload.baselineOutputName);
+    if (
+      !output?.settingsAvailable
+      || !output.request
+      || !output.jobId
+      || !output.provenance?.verifiedAt
+      || output.provenance.fingerprint.length !== 64
+    ) {
+      throw new ExperimentConflictError(
+        "Die ausgewählte vorhandene Baseline ist nicht vollständig und unverändert provenienzverifiziert.",
+      );
+    }
+    if (requestSettingsSha256(output.request) !== requestSettingsSha256(payload.baselineRequest)) {
+      throw new ExperimentConflictError(
+        "Die ausgewählte vorhandene Baseline stimmt nicht exakt mit den aktuellen Experimentparametern überein.",
+      );
+    }
+    baselineEvidence = {
+      outputName: output.name,
+      jobId: output.jobId,
+      sizeBytes: output.sizeBytes,
+      changedAt: output.changedAt,
+      fileId: output.fileId,
+      provenanceFingerprint: output.provenance.fingerprint,
+    };
+    payload = experimentCreateInputSchema.parse({
+      ...payload,
+      baselineRequest: output.request,
+    });
+  } else {
+    payload = experimentCreateInputSchema.parse({
+      ...payload,
+      baselineRequest: withOfficialSpeechModelPaths(payload.baselineRequest),
+    });
+  }
+  response.status(201).json({ experiment: experiments.create(payload, undefined, baselineEvidence) });
 });
 
 app.post("/api/experiments/:id/freeze", (request, response) => {
@@ -479,8 +523,14 @@ app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
   const arm = z.enum(["baseline", "candidate"]).parse(request.params.arm);
   let experiment = experiments.get(request.params.id);
   if (!experiment) throw new ExperimentConflictError("Experiment nicht gefunden.");
-  experiment = await releaseRetryableExperimentArm(experiment, arm);
+  experiment = await releaseRetryableArm(experiment, arm);
   const selected = experiment.arms[arm === "baseline" ? 0 : 1];
+  const exactAdoptedRefinerRun = arm === "candidate"
+    && experiment.baselineEvidence !== null
+    && experiment.candidate.variable === "lipforcing-enabled"
+    && experiment.changedRequestPaths.length === 1
+    && experiment.changedRequestPaths[0] === "postprocess.lipForcing.enabled";
+  const selectedRequest = generationRequestSchema.parse(structuredClone(selected.request));
   if (arm === "candidate") {
     const baselineJobId = experiment.arms[0].jobId;
     const baseline = baselineJobId ? jobs.get(baselineJobId) : null;
@@ -496,16 +546,21 @@ app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
       );
     }
   }
-  const plan = buildCommand(selected.request);
-  const inventory = usesOfficialSpeechStack(selected.request)
-    ? await getModelInventory(false, requiredOfficialSpeechAssetIds(selected.request))
+  const plan = buildCommand(selectedRequest);
+  const requiredAssetIds = exactAdoptedRefinerRun
+    ? []
+    : requiredOfficialSpeechAssetIds(selectedRequest);
+  const inventory = requiredAssetIds.length > 0
+    ? await getModelInventory(false, requiredAssetIds)
     : undefined;
-  const planErrors = validateRequestPlan(selected.request, plan, inventory);
+  const planErrors = validateRequestPlan(selectedRequest, plan, inventory, {
+    enforceOfficialAssets: !exactAdoptedRefinerRun,
+  });
   if (planErrors.length > 0) {
     throw new ExperimentConflictError(`Experimentarm kann nicht gestartet werden: ${planErrors.join(" ")}`);
   }
   const binding = experiments.bindingFor(experiment.id, arm);
-  const job = jobs.create(selected.request, {
+  const job = jobs.create(selectedRequest, {
     variantOf: arm === "candidate" ? experiment.arms[0].jobId : null,
     experiment: binding,
     deferStart: true,
@@ -525,8 +580,13 @@ app.post("/api/estimates", (request, response) => {
   response.json(estimateRequest(payload, jobs.list()));
 });
 
-app.post("/api/jobs", (request, response) => {
+app.post("/api/admission/preflight", async (request, response) => {
   const payload = generationRequestSchema.parse(request.body);
+  response.json(await admissionPreflight(payload));
+});
+
+app.post("/api/jobs", (request, response) => {
+  const payload = withOfficialSpeechModelPaths(generationRequestSchema.parse(request.body));
   response.status(202).json({ job: jobs.create(payload) });
 });
 
@@ -550,12 +610,18 @@ app.patch("/api/jobs/:id", (request, response) => {
   response.json({ job });
 });
 
+app.delete("/api/jobs/:id", (request, response) => {
+  const job = jobs.remove(request.params.id);
+  if (!job) return response.status(404).json({ error: "Job nicht gefunden." });
+  response.json({ deleted: job });
+});
+
 app.get("/api/jobs/:id/output", (request, response) => {
   const job = jobs.get(request.params.id);
   if (!job || job.status !== "completed") return response.status(404).json({ error: "Ausgabe nicht verfügbar." });
   const outputPath = resolve(outputRoot, job.outputName);
   if (!outputPath.startsWith(`${resolve(outputRoot)}/`)) return response.status(400).json({ error: "Ungültiger Pfad." });
-  response.type("video/mp4").sendFile(outputPath, { dotfiles: "allow" });
+  response.sendFile(outputPath, { dotfiles: "allow" });
 });
 
 app.get("/api/outputs/:filename", (request, response) => {
@@ -567,7 +633,20 @@ app.get("/api/outputs/:filename", (request, response) => {
   if (!outputPath.startsWith(`${resolve(outputRoot)}/`)) {
     return response.status(400).json({ error: "Ungültiger Pfad." });
   }
-  response.type("video/mp4").sendFile(outputPath, { dotfiles: "allow" });
+  response.sendFile(outputPath, { dotfiles: "allow" });
+});
+
+app.delete("/api/outputs/:filename", (request, response) => {
+  const filename = routeParam(request.params.filename);
+  if (!outputNameSchema.safeParse(filename).success) {
+    return response.status(404).json({ error: "Ausgabe nicht gefunden." });
+  }
+  if (analyses.isActive(filename)) {
+    return response.status(409).json({
+      error: "Die objektive Analyse dieses Videos läuft noch. Analyse zuerst abbrechen.",
+    });
+  }
+  response.json({ deleted: outputs.delete(filename, jobs.list()) });
 });
 
 app.put("/api/outputs/:filename/quality-review", (request, response) => {
@@ -656,6 +735,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof OutputQualityError) {
+    return response.status(error.statusCode).json({ error: error.message });
+  }
+  if (error instanceof OutputDeleteError) {
     return response.status(error.statusCode).json({ error: error.message });
   }
   const message = error instanceof Error ? error.message : "Unbekannter Serverfehler";

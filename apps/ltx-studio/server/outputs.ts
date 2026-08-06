@@ -1,10 +1,12 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   readFileSync,
   readdirSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -21,12 +23,12 @@ import {
   type JobQualityReview,
   type QualityReviewInput,
 } from "../shared/quality.js";
-import type { StudioOutput } from "../shared/outputs.js";
+import type { DeletedStudioOutput, StudioOutput } from "../shared/outputs.js";
 import {
   experimentRunBindingSchema,
   type ExperimentRunBinding,
 } from "../shared/experiments.js";
-import type { StudioJob } from "./jobs.js";
+import type { ReusableLtxBaseCandidate, StudioJob } from "./jobs.js";
 import {
   normalizeIdentityInputEvidence,
   type IdentityInputEvidence,
@@ -80,6 +82,16 @@ export class OutputQualityError extends Error {
   ) {
     super(message);
     this.name = "OutputQualityError";
+  }
+}
+
+export class OutputDeleteError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: 404 | 409,
+  ) {
+    super(message);
+    this.name = "OutputDeleteError";
   }
 }
 
@@ -192,12 +204,51 @@ function hasStrongRevision(record: OutputSettingsRecord): record is StrongOutput
   return record.changedAtMs !== null && record.fileId !== null;
 }
 
-function supportsSpeechQuality(request: GenerationRequest): boolean {
-  return usesOfficialSpeechStack(request);
+export function supportsSpeechQuality(request: GenerationRequest): boolean {
+  return request.mode !== "text-to-audio" && usesOfficialSpeechStack(request);
 }
 
 export class OutputLibrary {
   constructor(private readonly root: string) {}
+
+  delete(outputName: string, jobs: readonly StudioJob[]): DeletedStudioOutput {
+    if (!outputNameSchema.safeParse(outputName).success) {
+      throw new OutputDeleteError("Ausgabe nicht gefunden.", 404);
+    }
+    const activeJob = jobs.find((job) =>
+      job.outputName === outputName && ["queued", "running", "paused"].includes(job.status));
+    if (activeJob) {
+      throw new OutputDeleteError(
+        `Die Ausgabe gehört zum aktiven Job ${activeJob.id.slice(0, 8)} und kann erst danach gelöscht werden.`,
+        409,
+      );
+    }
+
+    const outputPath = join(this.root, outputName);
+    if (!existsSync(outputPath)) throw new OutputDeleteError("Ausgabe nicht gefunden.", 404);
+    const stats = lstatSync(outputPath);
+    if (!stats.isFile()) throw new OutputDeleteError("Ausgabe nicht gefunden.", 404);
+
+    const reportName = outputName.replace(/\.(?:mp4|wav)$/i, ".report.json");
+    const artifactNames = [
+      outputName,
+      `${outputName}${SIDECAR_SUFFIX}`,
+      `${outputName}.ltx-analysis.json`,
+      reportName,
+    ];
+    const deletedArtifacts: string[] = [];
+    for (const artifactName of artifactNames) {
+      const artifactPath = join(this.root, artifactName);
+      if (!existsSync(artifactPath) || !lstatSync(artifactPath).isFile()) continue;
+      unlinkSync(artifactPath);
+      deletedArtifacts.push(artifactName);
+    }
+    return {
+      name: outputName,
+      sizeBytes: stats.size,
+      deletedArtifacts,
+    };
+  }
 
   recordCompleted(jobs: readonly StudioJob[]): void {
     for (const job of jobs) {
@@ -281,6 +332,32 @@ export class OutputLibrary {
       throw new OutputQualityError("Ausgabe ist nach dem Speichern nicht mehr unverändert verfügbar.", 409);
     }
     return updated;
+  }
+
+  reusableLtxBaseCandidates(): ReusableLtxBaseCandidate[] {
+    return readdirSync(this.root, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && outputNameSchema.safeParse(entry.name).success)
+      .flatMap((entry): ReusableLtxBaseCandidate[] => {
+        const outputPath = join(this.root, entry.name);
+        let stats;
+        try {
+          stats = statSync(outputPath);
+        } catch {
+          return [];
+        }
+        if (!stats.isFile() || stats.size <= 0) return [];
+        const record = readRecord(this.root, entry.name);
+        if (!record || !hasStrongRevision(record) || !recordMatchesFile(record, stats)) return [];
+        if (!record.identityEvidence || !record.runProvenance) return [];
+        return [{
+          outputName: record.outputName,
+          outputPath,
+          jobId: record.jobId,
+          request: record.request,
+          identityEvidence: record.identityEvidence,
+          runProvenance: record.runProvenance,
+        }];
+      });
   }
 
   resolveAnalysisTarget(outputName: string): OutputAnalysisTarget {

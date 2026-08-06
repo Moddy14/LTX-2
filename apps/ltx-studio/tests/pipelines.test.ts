@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createDefaultRequest,
   generationRequestSchema,
   hasDialogueIntent,
   mergeGenerationRequest,
@@ -12,6 +13,43 @@ import {
 import { validRequest } from "./fixtures.js";
 
 describe("generationRequestSchema", () => {
+  it("uses the official prompt-enhancement defaults", () => {
+    expect(createDefaultRequest("two-stage").enhancePrompt).toBe(true);
+    expect(createDefaultRequest("image-audio-to-video").enhancePrompt).toBe(true);
+    expect(createDefaultRequest("ic-lora").enhancePrompt).toBe(false);
+    expect(createDefaultRequest("keyframes").enhancePrompt).toBe(false);
+    expect(createDefaultRequest("id-lora").enhancePrompt).toBe(false);
+    expect(createDefaultRequest("text-to-audio").enhancePrompt).toBe(false);
+    expect(createDefaultRequest("text-to-audio").outputName).toBe("ltx-text-to-audio.wav");
+    expect(createDefaultRequest("text-to-audio").audioGuidance.cfgScale).toBe(1);
+  });
+
+  it("uses the current native Comfy workflow frame rates and durations", () => {
+    for (const mode of ["two-stage", "keyframes", "ic-lora"] as const) {
+      expect(createDefaultRequest(mode)).toMatchObject({ frameRate: 25, numFrames: 129 });
+    }
+    expect(createDefaultRequest("image-audio-to-video")).toMatchObject({
+      frameRate: 24,
+      numFrames: 217,
+    });
+    expect(createDefaultRequest("id-lora")).toMatchObject({
+      frameRate: 25,
+      numFrames: 249,
+    });
+  });
+
+  it("adapts the documented 1280x720 Comfy workflows to native-safe 1280x704", () => {
+    for (const mode of [
+      "two-stage",
+      "keyframes",
+      "image-audio-to-video",
+      "ic-lora",
+      "id-lora",
+    ] as const) {
+      expect(createDefaultRequest(mode)).toMatchObject({ width: 1280, height: 704 });
+    }
+  });
+
   it.each(pipelineModes)("accepts a complete %s request", (mode) => {
     expect(generationRequestSchema.safeParse(validRequest(mode)).success).toBe(true);
   });
@@ -20,6 +58,16 @@ describe("generationRequestSchema", () => {
     const request = validRequest();
     request.outputName = "../outside.mp4";
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("requires media-specific output extensions", () => {
+    const audio = validRequest("text-to-audio");
+    audio.outputName = "wrong.mp4";
+    expect(generationRequestSchema.safeParse(audio).success).toBe(false);
+
+    const video = validRequest("two-stage");
+    video.outputName = "wrong.wav";
+    expect(generationRequestSchema.safeParse(video).success).toBe(false);
   });
 
   it("migrates legacy negative random seeds to a concrete default", () => {
@@ -48,15 +96,35 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
   });
 
+  it("migrates the formerly reversed ID-LoRA image-strength field to stage 1", () => {
+    const current = structuredClone(validRequest("id-lora"));
+    const legacy = current as unknown as {
+      idLora: Omit<GenerationRequest["idLora"], "stage1ImageStrength"> & {
+        stage2ImageStrength: number;
+        stage1ImageStrength?: number;
+      };
+    };
+    delete legacy.idLora.stage1ImageStrength;
+    legacy.idLora.stage2ImageStrength = 0.65;
+
+    const migrated = mergeGenerationRequest(legacy);
+
+    expect(migrated.idLora.stage1ImageStrength).toBe(0.65);
+    expect("stage2ImageStrength" in migrated.idLora).toBe(false);
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+  });
+
   it("keeps legacy LipDub jobs readable while requiring the new contract only at plan time", () => {
     const legacy = structuredClone(validRequest("lipdub")) as unknown as {
       lipDub: {
         referenceVideo: GenerationRequest["lipDub"]["referenceVideo"];
         lora: GenerationRequest["lipDub"]["lora"];
+        pipelineProfile?: GenerationRequest["lipDub"]["pipelineProfile"];
         targetLanguage?: string;
         singleSpeakerAcknowledged?: boolean;
       };
     };
+    delete legacy.lipDub.pipelineProfile;
     delete legacy.lipDub.targetLanguage;
     delete legacy.lipDub.singleSpeakerAcknowledged;
 
@@ -64,7 +132,112 @@ describe("generationRequestSchema", () => {
 
     expect(migrated.lipDub.targetLanguage).toBe("");
     expect(migrated.lipDub.singleSpeakerAcknowledged).toBe(false);
+    expect(migrated.lipDub.pipelineProfile).toBe("native-distilled");
     expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+  });
+
+  it("uses the official Comfy HQ LipDub stack only for new requests", () => {
+    const request = createDefaultRequest("lipdub");
+    expect(request.lipDub.pipelineProfile).toBe("official-comfy-hq");
+    expect(request.models.distilledLora.strength).toBe(0.5);
+    expect([request.width, request.height]).toEqual([1088, 1920]);
+  });
+
+  it("uses the official single-stage IC-LoRA dimensions and migrates the profile", () => {
+    const request = createDefaultRequest("ic-lora");
+    expect([request.width, request.height]).toEqual([1280, 704]);
+    expect(request.icLora.profile).toBe("union-control");
+    expect(request.models.distilledLora.strength).toBe(1);
+
+    const legacy = structuredClone(validRequest("ic-lora")) as unknown as {
+      icLora: Omit<GenerationRequest["icLora"], "profile"> & {
+        profile?: GenerationRequest["icLora"]["profile"];
+      };
+    };
+    delete legacy.icLora.profile;
+    expect(mergeGenerationRequest(legacy).icLora.profile).toBe("union-control");
+  });
+
+  it("requires exactly one image but no control video for Ingredients", () => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = "ingredients";
+    request.icLora.controlType = "prepared";
+    request.icLora.videoConditioning = [];
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.images = [];
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.images = [
+      { path: "/inputs/a.png", name: "a.png", frameIndex: 0, strength: 1, crf: 18 },
+      { path: "/inputs/b.png", name: "b.png", frameIndex: 0, strength: 1, crf: 18 },
+    ];
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it.each(["pixel-upscaler", "v2v-instant-shave"] as const)(
+    "requires exactly one source video and no separate image for %s",
+    (profile) => {
+      const request = validRequest("ic-lora");
+      request.icLora.profile = profile;
+      request.icLora.controlType = "prepared";
+      request.images = [];
+      expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+      request.images = [
+        { path: "/inputs/hidden.png", name: "hidden.png", frameIndex: 0, strength: 1, crf: 18 },
+      ];
+      expect(generationRequestSchema.safeParse(request).success).toBe(false);
+      request.images = [];
+      request.icLora.videoConditioning = [];
+      expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    },
+  );
+
+  it("requires one image and a track sequence for Motion Track", () => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = "motion-track";
+    request.icLora.controlType = "prepared";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    request.images = [];
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it.each([
+    ["inpainting", true],
+    ["outpainting", false],
+  ] as const)("requires the official source and mask contract for %s", (profile, needsMask) => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = profile;
+    request.images = [];
+    request.icLora.videoConditioning = [
+      { path: "/inputs/source.mp4", name: "source.mp4", strength: 1 },
+    ];
+    request.icLora.attentionMaskPath = needsMask ? "/inputs/mask.mp4" : "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.icLora.videoConditioning = [];
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.icLora.videoConditioning = [
+      { path: "/inputs/source.mp4", name: "source.mp4", strength: 1 },
+    ];
+    if (needsMask) {
+      request.icLora.attentionMaskPath = "";
+      expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    }
+  });
+
+  it("requires one HDR source, scene embeddings and fixed LoRA strength", () => {
+    const request = validRequest("ic-lora");
+    request.icLora.profile = "hdr";
+    request.images = [];
+    request.icLora.hdrTextEmbeddingsPath = "/models/hdr-scene-emb.safetensors";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.icLora.hdrTextEmbeddingsPath = "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.icLora.hdrTextEmbeddingsPath = "/models/hdr-scene-emb.safetensors";
+    request.icLora.lora.strength = 0.9;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
   });
 
   it("strips removed top-level fields while preserving valid legacy values", () => {
@@ -103,10 +276,29 @@ describe("generationRequestSchema", () => {
     }
   });
 
+  it("enforces the two-stage 64er grid for in/outpaint IC profiles", () => {
+    const inpaint = validRequest("ic-lora");
+    inpaint.icLora.profile = "inpainting";
+    inpaint.icLora.attentionMaskPath = "/inputs/mask.mp4";
+    inpaint.width = 736;
+    const rejected = generationRequestSchema.safeParse(inpaint);
+    expect(rejected.success).toBe(false);
+    if (!rejected.success) {
+      expect(rejected.error.issues.map((issue) => issue.message)).toEqual(expect.arrayContaining([
+        "Breite und Höhe müssen durch 64 teilbar sein.",
+      ]));
+    }
+
+    const union = validRequest("ic-lora");
+    union.width = 736;
+    expect(generationRequestSchema.safeParse(union).success).toBe(true);
+  });
+
   it("requires paths for every configured media and LoRA row", () => {
     const request = validRequest("ic-lora");
     request.images = [{ path: "", name: "empty", frameIndex: 0, strength: 1, crf: 33 }];
-    request.models.loras[0].path = "";
+    request.models.loras = [{ path: "", strength: 1 }];
+    request.icLora.lora.path = "";
     request.icLora.videoConditioning[0].path = "";
     const result = generationRequestSchema.safeParse(request);
     expect(result.success).toBe(false);
@@ -114,6 +306,7 @@ describe("generationRequestSchema", () => {
       expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(expect.arrayContaining([
         "images.0.path",
         "models.loras.0.path",
+        "icLora.lora.path",
         "icLora.videoConditioning.0.path",
       ]));
     }
@@ -172,7 +365,7 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(request).success).toBe(true);
   });
 
-  it("requires in-range, strictly increasing keyframe indices", () => {
+  it("requires the official FLF2V start and final frame indices", () => {
     const request = validRequest("keyframes");
     request.images[1].frameIndex = request.numFrames;
     let result = generationRequestSchema.safeParse(request);
@@ -181,21 +374,19 @@ describe("generationRequestSchema", () => {
       expect(result.error.issues.map((issue) => issue.path.join("."))).toContain("images.1.frameIndex");
     }
 
-    request.images[1].frameIndex = request.images[0].frameIndex;
+    request.images[1].frameIndex = 64;
     result = generationRequestSchema.safeParse(request);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.map((issue) => issue.message)).toContain(
-        "Keyframe-Indizes müssen in der eingegebenen Reihenfolge strikt ansteigen.",
+        `Das Endbild muss auf dem letzten Frame ${request.numFrames - 1} liegen.`,
       );
     }
   });
 
-  it("requires an AMAX file only for scaled matrix multiplication", () => {
+  it("accepts scaled FP8 checkpoints without an external AMAX file", () => {
     const request = validRequest();
     request.quantization = { mode: "fp8-scaled-mm", amaxPath: "" };
-    expect(generationRequestSchema.safeParse(request).success).toBe(false);
-    request.quantization.amaxPath = "/models/ltx/amax.json";
     expect(generationRequestSchema.safeParse(request).success).toBe(true);
   });
 
@@ -204,6 +395,50 @@ describe("generationRequestSchema", () => {
     request.retake.regenerateVideo = false;
     request.retake.regenerateAudio = false;
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("requires both a reference image and audio for the official IA2V mode", () => {
+    const request = validRequest("image-audio-to-video");
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.images = [];
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+
+    request.images = [{
+      path: "/inputs/speaker.png",
+      name: "speaker.png",
+      frameIndex: 0,
+      strength: 1,
+      crf: 33,
+    }];
+    request.audio.path = "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("requires the complete official ID-LoRA identity contract", () => {
+    const request = validRequest("id-lora");
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.images = [];
+    request.idLora.referenceAudio.path = "";
+    request.idLora.lora.path = "";
+    request.promptParts.dialogue = "";
+    request.enhancePrompt = true;
+    request.idLora.identityGuidanceStart = 0.8;
+    request.idLora.identityGuidanceEnd = 0.2;
+    const result = generationRequestSchema.safeParse(request);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(expect.arrayContaining([
+        "images",
+        "idLora.referenceAudio.path",
+        "idLora.lora.path",
+        "promptParts.dialogue",
+        "enhancePrompt",
+        "idLora.identityGuidanceEnd",
+      ]));
+    }
   });
 
   it("keeps the LongCat lip pass optional and requires audio-to-video inputs when enabled", () => {
@@ -225,6 +460,52 @@ describe("generationRequestSchema", () => {
 
     enabled.mode = "two-stage";
     expect(generationRequestSchema.safeParse(enabled).success).toBe(false);
+  });
+
+  it("keeps LatentSync optional, bounded, and mutually exclusive with LongCat", () => {
+    const request = validRequest("lipdub");
+    request.postprocess.latentSync.enabled = true;
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.postprocess.latentSync.steps = 19;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.postprocess.latentSync.steps = 30;
+    request.postprocess.latentSync.guidance = 3.1;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.postprocess.latentSync.guidance = 2;
+    request.postprocess.longcatLipsync.enabled = true;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("keeps MuseTalk optional, bounded, and exclusive from other lip refiners", () => {
+    const request = validRequest("lipdub");
+    expect(request.postprocess.museTalk.enabled).toBe(false);
+    request.postprocess.museTalk.enabled = true;
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.postprocess.museTalk.extraMargin = 81;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.postprocess.museTalk.extraMargin = 10;
+    request.postprocess.museTalk.audioPaddingLeft = 13;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.postprocess.museTalk.audioPaddingLeft = 2;
+    request.postprocess.latentSync.enabled = true;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("keeps LipForcing off by default and exclusive from every other lip refiner", () => {
+    const request = validRequest("lipdub");
+    expect(request.postprocess.lipForcing).toEqual({
+      enabled: false,
+      decoder: "wan-vae",
+    });
+    request.postprocess.lipForcing.enabled = true;
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.postprocess.lipForcing.decoder = "streaming-taehv";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    request.postprocess.museTalk.enabled = true;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
   });
 
   it("requires the native LipDub reference contract", () => {

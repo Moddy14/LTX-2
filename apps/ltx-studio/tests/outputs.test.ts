@@ -549,4 +549,60 @@ describe("generated output library", () => {
     expect(output.request).toEqual(job.request);
     expect(output.qualityReview).toBeNull();
   });
+
+  it("deletes an output together with settings, analysis, and matching report", async () => {
+    const root = await outputRoot();
+    const outputName = "obsolete-speech.mp4";
+    await writeFile(join(root, outputName), "video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, "2026-07-24T10:00:00.000Z", "audio-to-video");
+    library.recordCompleted([job]);
+    const target = library.resolveAnalysisTarget(outputName);
+    writeOutputAnalysis(root, {
+      schemaVersion: "ltx-studio-output-analysis.v1",
+      outputName,
+      sizeBytes: target.sizeBytes,
+      modifiedAtMs: target.modifiedAtMs,
+      changedAtMs: target.changedAtMs,
+      fileId: target.fileId,
+      jobId: target.jobId,
+      analysisId: "4c8a5dc6-8864-49f7-a639-85caef918888",
+      attempt: 1,
+      status: "failed",
+      progress: 10,
+      createdAt: "2026-07-24T10:00:01.000Z",
+      startedAt: "2026-07-24T10:00:01.000Z",
+      finishedAt: "2026-07-24T10:00:02.000Z",
+      updatedAt: "2026-07-24T10:00:02.000Z",
+      error: { code: "test", message: "Test record." },
+      result: null,
+    });
+    await writeFile(join(root, "obsolete-speech.report.json"), "{}");
+
+    const deleted = library.delete(outputName, [job]);
+
+    expect(deleted).toMatchObject({ name: outputName, sizeBytes: 5 });
+    expect(deleted.deletedArtifacts.sort()).toEqual([
+      outputName,
+      `${outputName}.ltx-analysis.json`,
+      `${outputName}.ltx-settings.json`,
+      "obsolete-speech.report.json",
+    ].sort());
+    await expect(stat(join(root, outputName))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(library.list([job])).toEqual([]);
+  });
+
+  it("refuses deletion for invalid names, missing files, and active jobs", async () => {
+    const root = await outputRoot();
+    const outputName = "active-output.mp4";
+    await writeFile(join(root, outputName), "video");
+    const activeJob = completedJob(outputName, "2026-07-24T10:05:00.000Z");
+    activeJob.status = "running";
+    const library = new OutputLibrary(root);
+
+    expect(() => library.delete("../active-output.mp4", [])).toThrow("Ausgabe nicht gefunden");
+    expect(() => library.delete("missing-output.mp4", [])).toThrow("Ausgabe nicht gefunden");
+    expect(() => library.delete(outputName, [activeJob])).toThrow("aktiven Job");
+    expect((await stat(join(root, outputName))).isFile()).toBe(true);
+  });
 });

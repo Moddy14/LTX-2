@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import {
   generationRequestSchema,
+  isAudioConditionedMode,
+  outputNameSchema,
   type GenerationRequest,
 } from "./pipelines.js";
 
@@ -26,6 +28,9 @@ export const experimentCandidateSchema = z.discriminatedUnion("variable", [
     value: z.number().finite().min(0).max(2),
   }).strict(),
   z.object({
+    variable: z.literal("lipforcing-enabled"),
+  }).strict(),
+  z.object({
     variable: z.literal("replicate-seed"),
     value: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   }).strict(),
@@ -45,10 +50,22 @@ export const experimentCreateInputSchema = z.object({
     message: "NUL-Zeichen sind nicht erlaubt.",
   }),
   baselineRequest: generationRequestSchema,
+  baselineOutputName: outputNameSchema.optional(),
   candidate: experimentCandidateSchema,
 }).strict();
 
 export type ExperimentCreateInput = z.infer<typeof experimentCreateInputSchema>;
+
+export const experimentBaselineEvidenceSchema = z.object({
+  outputName: outputNameSchema,
+  jobId: z.string().uuid(),
+  sizeBytes: z.number().int().positive(),
+  changedAt: timestampSchema,
+  fileId: z.string().regex(/^\d{1,64}$/),
+  provenanceFingerprint: sha256Schema,
+}).strict();
+
+export type ExperimentBaselineEvidence = z.infer<typeof experimentBaselineEvidenceSchema>;
 
 export const experimentRunArmSchema = z.object({
   arm: z.enum(["baseline", "candidate"]),
@@ -73,6 +90,7 @@ export const controlledExperimentSchema = z.object({
   supersededAt: timestampSchema.nullable().default(null),
   supersededReason: z.string().trim().min(1).max(500).nullable().default(null),
   replacementExperimentId: z.string().uuid().nullable().default(null),
+  baselineEvidence: experimentBaselineEvidenceSchema.nullable().default(null),
   protocolSha256: sha256Schema.nullable(),
   arms: z.tuple([
     experimentRunArmSchema.extend({ arm: z.literal("baseline") }),
@@ -114,6 +132,7 @@ export const experimentRunBindingSchema = z.object({
   requestSha256: sha256Schema,
   baselineJobId: z.string().uuid().nullable(),
   baselineOutputName: z.string().min(1).max(120),
+  adoptedBaseline: z.literal(true).optional(),
 }).strict().superRefine((value, context) => {
   if (value.arm === "candidate" && !value.baselineJobId) {
     context.addIssue({
@@ -133,11 +152,22 @@ export const experimentRunBindingSchema = z.object({
 
 export type ExperimentRunBinding = z.infer<typeof experimentRunBindingSchema>;
 
+export function isAdoptedLipForcingCandidate(
+  binding: ExperimentRunBinding | null | undefined,
+): boolean {
+  return binding?.arm === "candidate"
+    && binding.adoptedBaseline === true
+    && binding.variableId === "lipforcing-enabled"
+    && binding.changedRequestPaths.length === 1
+    && binding.changedRequestPaths[0] === "postprocess.lipForcing.enabled";
+}
+
 export const experimentVariableLabels: Record<ExperimentVariableId, string> = {
   "a2v-guidance": "A2V Guidance",
   "reference-image-strength": "Referenzbildstärke",
   "reference-image-crf": "Referenzbild-CRF",
   "lipdub-reference-strength": "LipDub-Referenzstärke",
+  "lipforcing-enabled": "LipForcing an",
   "replicate-seed": "Seed-Replikat",
   resolution: "Auflösung",
 };
@@ -156,6 +186,8 @@ export function allowedExperimentPaths(candidate: ExperimentCandidate): string[]
       return ["images[0].crf"];
     case "lipdub-reference-strength":
       return ["lipDub.referenceVideo.strength"];
+    case "lipforcing-enabled":
+      return ["postprocess.lipForcing.enabled"];
     case "replicate-seed":
       return ["seed"];
     case "resolution":
@@ -170,7 +202,7 @@ export function applyExperimentCandidate(
   const request = structuredClone(generationRequestSchema.parse(baseline));
   switch (candidate.variable) {
     case "a2v-guidance":
-      if (request.mode !== "audio-to-video") {
+      if (!isAudioConditionedMode(request.mode)) {
         throw new Error("A2V Guidance ist nur für Audio zu Video als kontrollierte Variable zulässig.");
       }
       request.videoGuidance.modalityScale = candidate.value;
@@ -188,6 +220,17 @@ export function applyExperimentCandidate(
         throw new Error("LipDub-Referenzstärke ist nur im LipDub-Modus zulässig.");
       }
       request.lipDub.referenceVideo.strength = candidate.value;
+      break;
+    case "lipforcing-enabled":
+      if (
+        request.postprocess.longcatLipsync.enabled
+        || request.postprocess.latentSync.enabled
+        || request.postprocess.museTalk.enabled
+        || request.postprocess.lipForcing.enabled
+      ) {
+        throw new Error("Der LipForcing-Vergleich benötigt eine Baseline ohne aktiven Lippenrefiner.");
+      }
+      request.postprocess.lipForcing.enabled = true;
       break;
     case "replicate-seed":
       request.seed = candidate.value;

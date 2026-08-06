@@ -67,6 +67,29 @@ describe("controlled experiment contract", () => {
     )).toThrow("Nicht freigegebene Request-Änderung: seed");
   });
 
+  it("registers LipForcing as the only changed treatment on an identical speech baseline", () => {
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing.decoder = "wan-vae";
+    const candidate = applyExperimentCandidate(baseline, {
+      variable: "lipforcing-enabled",
+    });
+
+    expect(candidate.postprocess.lipForcing).toEqual({
+      enabled: true,
+      decoder: "wan-vae",
+    });
+    expect(validateControlledExperimentDifference(
+      baseline,
+      candidate,
+      { variable: "lipforcing-enabled" },
+    )).toEqual(["postprocess.lipForcing.enabled"]);
+
+    baseline.postprocess.latentSync.enabled = true;
+    expect(() => applyExperimentCandidate(baseline, {
+      variable: "lipforcing-enabled",
+    })).toThrow("Baseline ohne aktiven Lippenrefiner");
+  });
+
   it("treats a seed change as a replicate rather than an ablation", async () => {
     const store = new ExperimentStore(await experimentRoot());
     const experiment = store.create({
@@ -313,6 +336,75 @@ describe("controlled experiment contract", () => {
     expect(outputVerifiesExperimentBaseline(output, current)).toBe(false);
   });
 
+  it("adopts an unchanged verified output as a durable baseline without rerendering it", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const request = baselineRequest();
+    request.outputName = "verified-existing-baseline.mp4";
+    const jobId = "11111111-1111-4111-8111-111111111111";
+    const evidence = {
+      outputName: request.outputName,
+      jobId,
+      sizeBytes: 12_345,
+      changedAt: "2026-07-30T10:00:00.000Z",
+      fileId: "4567",
+      provenanceFingerprint: "a".repeat(64),
+    };
+    const frozen = store.freeze(store.create({
+      title: "Bestehende Basis gegen LipForcing",
+      baselineRequest: request,
+      baselineOutputName: request.outputName,
+      candidate: { variable: "lipforcing-enabled" },
+    }, "2026-07-30T10:01:00.000Z", evidence).id);
+
+    expect(frozen.arms[0]).toMatchObject({
+      jobId,
+      attemptJobIds: [jobId],
+      request: { outputName: request.outputName },
+    });
+    expect(frozen.arms[1].request.postprocess.lipForcing.enabled).toBe(true);
+    const binding = store.bindingFor(frozen.id, "candidate");
+    expect(binding.baselineJobId).toBe(jobId);
+    expect(binding.adoptedBaseline).toBe(true);
+
+    const output: StudioOutput = {
+      name: request.outputName,
+      url: "/api/outputs/verified-existing-baseline.mp4",
+      sizeBytes: evidence.sizeBytes,
+      modifiedAt: "2026-07-30T09:59:00.000Z",
+      changedAt: evidence.changedAt,
+      fileId: evidence.fileId,
+      jobId,
+      jobStatus: "completed",
+      request: frozen.arms[0].request,
+      settingsAvailable: true,
+      qualityReview: null,
+      analysis: null,
+      provenance: {
+        schemaVersion: "ltx-studio-run-provenance.v1",
+        capturedAt: "2026-07-30T09:00:00.000Z",
+        verifiedAt: "2026-07-30T10:00:00.000Z",
+        files: [],
+        code: [],
+        runtime: {
+          platform: "linux",
+          architecture: "arm64",
+          kernelRelease: "test",
+          nodeVersion: "test",
+          pythonExecutable: "/python",
+          pythonVersion: "3.12",
+          packages: {},
+          ffmpegVersion: "test",
+          fingerprint: "b".repeat(64),
+        },
+        fingerprint: evidence.provenanceFingerprint,
+      },
+    };
+
+    expect(outputVerifiesExperimentBaseline(output, frozen)).toBe(true);
+    output.fileId = "9999";
+    expect(outputVerifiesExperimentBaseline(output, frozen)).toBe(false);
+  });
+
   it("fails closed on a corrupted experiment file", async () => {
     const root = await experimentRoot();
     const id = "11111111-1111-4111-8111-111111111111";
@@ -321,6 +413,43 @@ describe("controlled experiment contract", () => {
 
     expect(() => store.get(id)).toThrow(ExperimentConflictError);
     expect(() => store.list()).toThrow("beschädigt");
+    expect(store.listAvailable()).toEqual({
+      experiments: [],
+      warnings: [expect.stringContaining("beschädigt")],
+    });
+  });
+
+  it("keeps a legacy experiment archived without hiding current experiments", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const current = store.create({
+      title: "Aktueller Vergleich",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    });
+    const legacyId = "22222222-2222-4222-8222-222222222222";
+    const legacy = JSON.parse(
+      await readFile(join(root, `${current.id}.json`), "utf8"),
+    ) as Record<string, unknown>;
+    legacy.id = legacyId;
+    const arms = legacy.arms as Array<{ request: {
+      icLora: Record<string, unknown>;
+      models: Record<string, unknown>;
+      postprocess: Record<string, unknown>;
+    } }>;
+    for (const arm of arms) {
+      delete arm.request.models.gemmaLora;
+      delete arm.request.icLora.hdrTextEmbeddingsPath;
+      delete arm.request.icLora.hdrHighQuality;
+      delete arm.request.postprocess.lipForcing;
+    }
+    await writeFile(join(root, `${legacyId}.json`), JSON.stringify(legacy));
+
+    const available = store.listAvailable();
+    expect(available.experiments.map((experiment) => experiment.id)).toEqual([current.id]);
+    expect(available.warnings).toEqual([
+      expect.stringContaining("älteren Studio-Version"),
+    ]);
   });
 
   it("keeps output names out of substantive request diffs", () => {

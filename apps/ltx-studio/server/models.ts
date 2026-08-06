@@ -22,6 +22,8 @@ export function classifyModelFile(path: string): ModelKind | null {
   const name = basename(path).toLowerCase();
   const extension = extname(name);
   if ((extension === ".json" || extension === ".pt") && name.includes("amax")) return "amax";
+  if (extension === ".safetensors" && name.startsWith("moge_")) return "geometry";
+  if (extension === ".safetensors" && name.includes("gemma") && name.includes("lora")) return "lora";
   if (extension !== ".safetensors" || !name.includes("ltx")) return null;
   if (name.includes("spatial-upscaler")) return "spatial-upscaler";
   if (name.includes("lora")) return "lora";

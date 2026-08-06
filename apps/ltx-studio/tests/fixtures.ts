@@ -3,6 +3,7 @@ import {
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines.js";
+import { documentedLtx23CheckpointAssetId } from "../shared/models.js";
 
 export function validRequest(mode: PipelineMode = "two-stage"): GenerationRequest {
   const request = createDefaultRequest(mode);
@@ -10,22 +11,56 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
   request.models.checkpointPath = "/models/ltx/checkpoint.safetensors";
   request.models.distilledCheckpointPath = "/models/ltx/distilled.safetensors";
   request.models.gemmaRoot = "/models/gemma";
+  request.models.gemmaLora = { path: "/models/gemma/gemma-abliterated-lora.safetensors", strength: 1 };
   request.models.spatialUpscalerPath = "/models/ltx/upscaler.safetensors";
   request.models.distilledLora = { path: "/models/ltx/distilled-lora.safetensors", strength: 1 };
+  if (
+    mode === "two-stage"
+    || mode === "image-audio-to-video"
+    || mode === "ic-lora"
+    || mode === "lipdub"
+    || mode === "text-to-audio"
+  ) {
+    request.models.distilledLora.strength = 0.5;
+  }
+  if (documentedLtx23CheckpointAssetId(request)?.includes("fp8")) {
+    request.quantization.mode = "fp8-scaled-mm";
+  } else if (mode === "text-to-audio") {
+    request.quantization.mode = "fp8-cast";
+  }
 
   if (mode === "keyframes") {
     request.images = [
-      { path: "/inputs/first.png", name: "first.png", frameIndex: 0, strength: 1, crf: 33 },
-      { path: "/inputs/last.png", name: "last.png", frameIndex: 120, strength: 1, crf: 33 },
+      { path: "/inputs/first.png", name: "first.png", frameIndex: 0, strength: 0.7, crf: 33 },
+      {
+        path: "/inputs/last.png",
+        name: "last.png",
+        frameIndex: request.numFrames - 1,
+        strength: 0.7,
+        crf: 33,
+      },
     ];
   }
   if (mode === "ic-lora") {
-    request.models.loras = [{ path: "/models/ltx/ic-lora.safetensors", strength: 1 }];
+    request.images = [
+      { path: "/inputs/reference.png", name: "reference.png", frameIndex: 0, strength: 1, crf: 33 },
+    ];
+    request.icLora.lora = { path: "/models/ltx/ic-lora.safetensors", strength: 1 };
+    request.icLora.mogeModelPath = "/models/moge_2_vitl_normal_fp16.safetensors";
     request.icLora.videoConditioning = [
       { path: "/inputs/control.mp4", name: "control.mp4", strength: 1 },
     ];
   }
-  if (mode === "audio-to-video") {
+  if (mode === "id-lora") {
+    request.images = [
+      { path: "/inputs/person.png", name: "person.png", frameIndex: 0, strength: 1, crf: 33 },
+    ];
+    request.promptParts.dialogue = "Dieser Text wird mit der Referenzstimme neu erzeugt.";
+    request.idLora.referenceAudio = { path: "/inputs/voice-reference.wav", name: "voice-reference.wav" };
+    request.idLora.lora = { path: "/models/ltx/ltx-2.3-id-lora-talkvid-3k.safetensors", strength: 1 };
+    request.enhancePrompt = false;
+  }
+  if (mode === "image-audio-to-video" || mode === "audio-to-video") {
     request.audio = {
       ...request.audio,
       path: "/inputs/source.wav",
@@ -33,6 +68,11 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
       startTime: 0,
       maxDuration: 5,
     };
+  }
+  if (mode === "image-audio-to-video") {
+    request.images = [
+      { path: "/inputs/speaker.png", name: "speaker.png", frameIndex: 0, strength: 1, crf: 33 },
+    ];
   }
   if (mode === "lipdub") {
     request.promptParts.dialogue = "Das ist ein nativer LTX LipDub Test";

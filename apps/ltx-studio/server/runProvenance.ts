@@ -21,10 +21,17 @@ import type {
   ProvenanceRuntimeEvidence,
   RunProvenance,
 } from "../shared/provenance.js";
+import { upstreamWorkflowContractsForRequest } from "../shared/upstreamWorkflowContracts.js";
 import type { CommandPlan, PathRequirement } from "./command.js";
 import {
   appRoot,
+  latentSyncCheckpointPath,
+  latentSyncInsightFaceRoot,
+  latentSyncVaeRoot,
+  latentSyncWhisperPath,
+  lipForcingModelRoot,
   longcatProjectRoot,
+  museTalkModelRoot,
   provenanceCachePath,
   pythonExecutable,
   repoRoot,
@@ -406,12 +413,183 @@ export async function captureRunProvenance(
       await captureProvenanceFile(join(appRoot, "models", "face_detection_yunet_2023mar.onnx"), "model:longcat-face-detector"),
     );
   }
+  if (request.postprocess.latentSync.enabled) {
+    files.push(
+      await captureProvenanceFile(join(appRoot, "scripts", "latentsync-refiner.py"), "code:latentsync-adapter"),
+      await captureProvenanceFile(join(appRoot, "scripts", "refiner_audio.py"), "code:refiner-audio-window"),
+      await captureProvenanceFile(join(appRoot, "deploy", "latentsync", "Dockerfile"), "code:latentsync-dockerfile"),
+      await captureProvenanceFile(join(appRoot, "deploy", "latentsync", "runner.py"), "code:latentsync-runner"),
+      await captureProvenanceFile(join(appRoot, "deploy", "latentsync", "timeline.py"), "code:latentsync-timeline"),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "latentsync", "patch_arm64_decord.py"),
+        "code:latentsync-arm64-patch",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "latentsync", "face_detector_insightface.py"),
+        "code:latentsync-face-detector-adapter",
+      ),
+      await captureProvenanceFile(latentSyncCheckpointPath, "model:latentsync-unet"),
+      await captureProvenanceFile(latentSyncWhisperPath, "model:latentsync-whisper"),
+      await captureProvenanceFile(
+        join(latentSyncVaeRoot, "diffusion_pytorch_model.safetensors"),
+        "model:latentsync-vae",
+      ),
+      await captureProvenanceFile(join(latentSyncVaeRoot, "config.json"), "model:latentsync-vae-config"),
+      await captureProvenanceFile(
+        join(latentSyncInsightFaceRoot, "models", "buffalo_l", "det_10g.onnx"),
+        "model:latentsync-face-detector",
+      ),
+      await captureProvenanceFile(
+        join(latentSyncInsightFaceRoot, "models", "buffalo_l", "2d106det.onnx"),
+        "model:latentsync-106-landmarks",
+      ),
+    );
+  }
+  if (request.postprocess.museTalk.enabled) {
+    files.push(
+      await captureProvenanceFile(join(appRoot, "scripts", "musetalk-refiner.py"), "code:musetalk-adapter"),
+      await captureProvenanceFile(join(appRoot, "scripts", "refiner_audio.py"), "code:refiner-audio-window"),
+      await captureProvenanceFile(join(appRoot, "deploy", "musetalk", "Dockerfile"), "code:musetalk-dockerfile"),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "musetalk", "container_runner.py"),
+        "code:musetalk-container-runner",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "musetalk", "preprocessing_insightface.py"),
+        "code:musetalk-insightface-adapter",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "musetalk", "patch_verified_legacy_weights.py"),
+        "code:musetalk-pytorch-legacy-patch",
+      ),
+      await captureProvenanceFile(join(appRoot, "deploy", "musetalk", "timeline.py"), "code:musetalk-timeline"),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "musetalkV15", "musetalk.json"),
+        "model:musetalk-unet-config",
+      ),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "musetalkV15", "unet.pth"),
+        "model:musetalk-unet",
+      ),
+      await captureProvenanceFile(join(museTalkModelRoot, "sd-vae", "config.json"), "model:musetalk-vae-config"),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "sd-vae", "diffusion_pytorch_model.bin"),
+        "model:musetalk-vae",
+      ),
+      await captureProvenanceFile(join(museTalkModelRoot, "whisper", "config.json"), "model:musetalk-whisper-config"),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "whisper", "preprocessor_config.json"),
+        "model:musetalk-whisper-preprocessor",
+      ),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "whisper", "pytorch_model.bin"),
+        "model:musetalk-whisper",
+      ),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "face-parse-bisent", "79999_iter.pth"),
+        "model:musetalk-face-parser",
+      ),
+      await captureProvenanceFile(
+        join(museTalkModelRoot, "face-parse-bisent", "resnet18-5c106cde.pth"),
+        "model:musetalk-face-parser-resnet",
+      ),
+      await captureProvenanceFile(
+        join(latentSyncInsightFaceRoot, "models", "buffalo_l", "det_10g.onnx"),
+        "model:musetalk-face-detector",
+      ),
+      await captureProvenanceFile(
+        join(latentSyncInsightFaceRoot, "models", "buffalo_l", "2d106det.onnx"),
+        "model:musetalk-106-landmarks",
+      ),
+    );
+  }
+  if (request.postprocess.lipForcing.enabled) {
+    files.push(
+      await captureProvenanceFile(
+        join(appRoot, "scripts", "lipforcing-refiner.py"),
+        "code:lipforcing-adapter",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "lipforcing", "Dockerfile"),
+        "code:lipforcing-dockerfile",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "lipforcing", "container_runner.py"),
+        "code:lipforcing-container-runner",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "lipforcing", "patch_verified_runtime.py"),
+        "code:lipforcing-runtime-patch",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "lipforcing", "timeline.py"),
+        "code:lipforcing-timeline",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "lipforcing_14b.pth"),
+        "model:lipforcing-14b",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "Wan2.1_VAE.pth"),
+        "model:lipforcing-wan-vae",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "wav2vec2-base-960h", "model.safetensors"),
+        "model:lipforcing-wav2vec2",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "wav2vec2-base-960h", "config.json"),
+        "model:lipforcing-wav2vec2-config",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "wav2vec2-base-960h", "preprocessor_config.json"),
+        "model:lipforcing-wav2vec2-preprocessor",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "wav2vec2-base-960h", "feature_extractor_config.json"),
+        "model:lipforcing-wav2vec2-feature-extractor",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "mask.png"),
+        "model:lipforcing-mouth-mask",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "text_emb.pt"),
+        "model:lipforcing-text-embedding",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "text-embedding-provenance.json"),
+        "model:lipforcing-text-embedding-provenance",
+      ),
+      await captureProvenanceFile(
+        join(lipForcingModelRoot, "ltx-studio-model-manifest.json"),
+        "model:lipforcing-manifest",
+      ),
+      await captureProvenanceFile(
+        join(latentSyncInsightFaceRoot, "models", "buffalo_l", "det_10g.onnx"),
+        "model:lipforcing-face-detector",
+      ),
+      await captureProvenanceFile(
+        join(latentSyncInsightFaceRoot, "models", "buffalo_l", "2d106det.onnx"),
+        "model:lipforcing-106-landmarks",
+      ),
+    );
+    if (request.postprocess.lipForcing.decoder === "streaming-taehv") {
+      files.push(
+        await captureProvenanceFile(
+          join(lipForcingModelRoot, "taew2_1.pth"),
+          "model:lipforcing-taehv",
+        ),
+      );
+    }
+  }
   const codeRoots = request.postprocess.longcatLipsync.enabled
     ? [repoRoot, longcatProjectRoot]
     : [repoRoot];
   const code: ProvenanceCodeEvidence[] = [];
   for (const root of codeRoots) code.push(await captureCodeEvidence(root));
   const runtime = captureRuntimeEvidence(pythonExecutable);
+  const upstreamContracts = upstreamWorkflowContractsForRequest(request);
   const capturedAt = new Date().toISOString();
   const base = {
     schemaVersion: "ltx-studio-run-provenance.v1" as const,
@@ -419,6 +597,31 @@ export async function captureRunProvenance(
     files,
     code,
     runtime,
+    upstreamContracts,
+  };
+  return {
+    ...base,
+    verifiedAt: null,
+    fingerprint: provenanceFingerprint(base),
+  };
+}
+
+export async function bindRunProvenanceFile(
+  evidence: RunProvenance,
+  path: string,
+  role: string,
+): Promise<RunProvenance> {
+  const file = await captureProvenanceFile(path, role);
+  const base = {
+    schemaVersion: evidence.schemaVersion,
+    capturedAt: evidence.capturedAt,
+    files: [
+      ...evidence.files.filter((candidate) => candidate.role !== role),
+      file,
+    ],
+    code: evidence.code,
+    runtime: evidence.runtime,
+    upstreamContracts: evidence.upstreamContracts ?? [],
   };
   return {
     ...base,
@@ -468,6 +671,15 @@ export async function verifyRunProvenance(
   request: GenerationRequest,
 ): Promise<{ evidence: RunProvenance; error: string | null }> {
   try {
+    if (evidence.upstreamContracts !== undefined) {
+      const expectedContracts = upstreamWorkflowContractsForRequest(request);
+      if (stableJson(evidence.upstreamContracts) !== stableJson(expectedContracts)) {
+        return {
+          evidence,
+          error: "Der gebundene offizielle Workflow-Vertrag stimmt nicht mehr mit dem Auftrag überein.",
+        };
+      }
+    }
     for (const file of evidence.files) {
       const error = verifyProvenanceFileEvidence(file);
       if (error) return { evidence, error };
@@ -588,6 +800,21 @@ function validRuntimeEvidence(value: unknown): value is ProvenanceRuntimeEvidenc
     && HASH_PATTERN.test(item.fingerprint);
 }
 
+function validUpstreamContract(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.role === "string"
+    && item.role.length > 0
+    && typeof item.repository === "string"
+    && /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(item.repository)
+    && typeof item.commit === "string"
+    && /^[0-9a-f]{40}$/i.test(item.commit)
+    && typeof item.path === "string"
+    && item.path.length > 0
+    && typeof item.sha256 === "string"
+    && HASH_PATTERN.test(item.sha256);
+}
+
 export function normalizeRunProvenance(value: unknown): RunProvenance | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Partial<RunProvenance>;
@@ -600,6 +827,8 @@ export function normalizeRunProvenance(value: unknown): RunProvenance | null {
     || !Array.isArray(item.code)
     || !item.code.every(validCodeEvidence)
     || !validRuntimeEvidence(item.runtime)
+    || (item.upstreamContracts !== undefined
+      && (!Array.isArray(item.upstreamContracts) || !item.upstreamContracts.every(validUpstreamContract)))
     || typeof item.fingerprint !== "string"
     || !HASH_PATTERN.test(item.fingerprint)) return null;
   return structuredClone(item as RunProvenance);

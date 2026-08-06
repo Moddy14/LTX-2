@@ -1,4 +1,4 @@
-import type { GenerationRequest } from "./pipelines.js";
+import { usesOfficialComfyLipDub, type GenerationRequest } from "./pipelines.js";
 import { videoDurationSeconds } from "./presets.js";
 
 export type ResourceEstimate = {
@@ -18,8 +18,11 @@ const MODEL_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
   "two-stage-hq": 58,
   "one-stage": 42,
   distilled: 46,
+  "text-to-audio": 30,
   "ic-lora": 48,
-  keyframes: 50,
+  "id-lora": 58,
+  keyframes: 46,
+  "image-audio-to-video": 50,
   "audio-to-video": 50,
   lipdub: 56,
   retake: 48,
@@ -30,8 +33,11 @@ const ACTIVATION_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
   "two-stage-hq": 22,
   "one-stage": 16,
   distilled: 16,
+  "text-to-audio": 6,
   "ic-lora": 18,
-  keyframes: 18,
+  "id-lora": 22,
+  keyframes: 16,
+  "image-audio-to-video": 18,
   "audio-to-video": 18,
   lipdub: 18,
   retake: 14,
@@ -42,7 +48,8 @@ const ACTIVATION_MEMORY_GIB: Record<GenerationRequest["mode"], number> = {
 const NATIVE_FP8_COLD_LOAD_FACTOR = 0.95;
 
 function selectedCheckpointPath(request: GenerationRequest): string {
-  if (request.mode === "distilled" || request.mode === "ic-lora" || request.mode === "lipdub") {
+  if (["distilled", "ic-lora", "keyframes"].includes(request.mode)
+    || (request.mode === "lipdub" && !usesOfficialComfyLipDub(request))) {
     return request.models.distilledCheckpointPath;
   }
   if (request.mode === "retake" && request.retake.distilled) {
@@ -61,10 +68,18 @@ export function requestComputeUnits(request: GenerationRequest): number {
   const frames = request.mode === "retake"
     ? Math.max(1, Math.round((request.retake.endTime - request.retake.startTime) * 24))
     : request.numFrames;
-  const steps = ["distilled", "ic-lora", "lipdub"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled)
+  const steps = ["distilled", "ic-lora", "keyframes", "lipdub", "text-to-audio"].includes(request.mode)
+    || (request.mode === "retake" && request.retake.distilled)
     ? 8
     : request.numInferenceSteps;
-  const stageFactor = ["two-stage", "two-stage-hq", "keyframes", "audio-to-video", "lipdub"].includes(request.mode)
+  const stageFactor = [
+    "two-stage",
+    "two-stage-hq",
+    "image-audio-to-video",
+    "audio-to-video",
+    "id-lora",
+    "lipdub",
+  ].includes(request.mode)
     ? 1.7
     : 1;
   return Math.max(1, request.width * request.height * frames * steps * stageFactor);
@@ -82,7 +97,11 @@ export function estimateResources(request: GenerationRequest): ResourceEstimate 
   const modelFactor = isNativeFp8Checkpoint(request) ? NATIVE_FP8_COLD_LOAD_FACTOR : 1;
   const rawMemory = MODEL_MEMORY_GIB[request.mode] * modelFactor
     + ACTIVATION_MEMORY_GIB[request.mode] * pixelFactor * frameFactor * tilingFactor;
-  const memoryGiB = Math.max(32, Math.ceil(rawMemory / 2) * 2);
+  // The released LipForcing 14B postprocessor peaks around 37 GiB on H200
+  // with precomputed text embeddings. Reserve 52 GiB on shared-memory GB10
+  // until a local peak measurement justifies a lower profile.
+  const postprocessFloorGiB = request.postprocess.lipForcing.enabled ? 52 : 32;
+  const memoryGiB = Math.max(postprocessFloorGiB, Math.ceil(rawMemory / 2) * 2);
 
   const duration = request.mode === "retake"
     ? Math.max(0.1, request.retake.endTime - request.retake.startTime)

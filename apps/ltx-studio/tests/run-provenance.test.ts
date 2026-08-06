@@ -6,11 +6,15 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  bindRunProvenanceFile,
   captureGemmaManifest,
   captureProvenanceFile,
   normalizeRunProvenance,
   verifyProvenanceFileEvidence,
 } from "../server/runProvenance.js";
+import { createDefaultRequest } from "../shared/pipelines.js";
+import type { RunProvenance } from "../shared/provenance.js";
+import { upstreamWorkflowContractsForRequest } from "../shared/upstreamWorkflowContracts.js";
 
 const roots: string[] = [];
 
@@ -44,6 +48,47 @@ describe("run provenance", () => {
 
     await writeFile(path, "changed-audio");
     expect(verifyProvenanceFileEvidence(evidence)).toContain("Dateirevision hat sich geändert");
+  });
+
+  it("adds a reused LTX base as a pinned input and invalidates the prior verification", async () => {
+    const root = await temporaryRoot("ltx-provenance-reused-base-");
+    const path = join(root, "ltx-base.mp4");
+    await writeFile(path, "immutable-base");
+    const original: RunProvenance = {
+      schemaVersion: "ltx-studio-run-provenance.v1",
+      capturedAt: "2026-07-30T00:00:00.000Z",
+      verifiedAt: "2026-07-30T00:01:00.000Z",
+      files: [],
+      code: [],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "test",
+        nodeVersion: "test",
+        pythonExecutable: "/python",
+        pythonVersion: "test",
+        packages: {},
+        ffmpegVersion: "test",
+        fingerprint: "a".repeat(64),
+      },
+      fingerprint: "b".repeat(64),
+    };
+
+    const bound = await bindRunProvenanceFile(
+      original,
+      path,
+      "input:reused-ltx-base:source-job",
+    );
+
+    expect(bound.verifiedAt).toBeNull();
+    expect(bound.fingerprint).not.toBe(original.fingerprint);
+    expect(bound.files).toHaveLength(1);
+    expect(bound.files[0]).toMatchObject({
+      role: "input:reused-ltx-base:source-job",
+      path,
+      sha256: createHash("sha256").update("immutable-base").digest("hex"),
+    });
+    expect(verifyProvenanceFileEvidence(bound.files[0])).toBeNull();
   });
 
   it("manifests only Gemma configuration and shards referenced by the HF index", async () => {
@@ -87,6 +132,99 @@ describe("run provenance", () => {
       code: [],
       runtime: null,
       fingerprint: "a".repeat(64),
+    })).toBeNull();
+  });
+
+  it("pins the exact upstream workflow used by official Comfy modes", () => {
+    const lipDub = createDefaultRequest("lipdub");
+    const [lipDubContract] = upstreamWorkflowContractsForRequest(lipDub);
+    expect(lipDubContract).toEqual({
+      role: "official-workflow:lipdub-two-stage",
+      repository: "https://github.com/Lightricks/ComfyUI-LTXVideo",
+      commit: "3b9c5cde4700917074823d45e25401d81049f8fc",
+      path: "example_workflows/2.3/LTX-2.3_ICLoRA_Lipdub_Two_Stage_Distilled.json",
+      sha256: "620c4fc838866c4fa0819b04db6aa199818ddcff73b7636e44138fed6f1e4a35",
+    });
+
+    const inpaint = createDefaultRequest("ic-lora");
+    inpaint.icLora.profile = "inpainting";
+    expect(upstreamWorkflowContractsForRequest(inpaint)[0]?.sha256).toBe(
+      "b4d002e2d15eb716654f234797b464daf8aa4f23261f30137ac16dfffdda42bd",
+    );
+
+    const nativeLipDub = createDefaultRequest("lipdub");
+    nativeLipDub.lipDub.pipelineProfile = "native-distilled";
+    expect(upstreamWorkflowContractsForRequest(nativeLipDub)).toEqual([]);
+
+    const hdr = createDefaultRequest("ic-lora");
+    hdr.icLora.profile = "hdr";
+    expect(upstreamWorkflowContractsForRequest(hdr)).toEqual([]);
+  });
+
+  it("pins the ComfyUI documentation templates for the native two-stage modes", () => {
+    expect(upstreamWorkflowContractsForRequest(createDefaultRequest("two-stage"))).toEqual([{
+      role: "official-template:t2v",
+      repository: "https://github.com/Comfy-Org/workflow_templates",
+      commit: "7653f1cdef1d92394b6ef9946018c0a8aa4136b8",
+      path: "templates/video_ltx2_3_t2v.json",
+      sha256: "75b10f3ee48c1fe00c7fb21b24c0c247b133e5ee34676144de4b652ac7dcbe7f",
+    }]);
+
+    const i2v = createDefaultRequest("two-stage");
+    i2v.images = [{ path: "/inputs/first.png", name: "first.png", frameIndex: 0, strength: 1, crf: 33 }];
+    expect(upstreamWorkflowContractsForRequest(i2v)[0]).toMatchObject({
+      role: "official-template:i2v",
+      path: "templates/video_ltx2_3_i2v.json",
+      sha256: "77a16503db8476dec5891de9de9e024c265b6e01b0cd79edac995faa0504ddc8",
+    });
+
+    expect(
+      upstreamWorkflowContractsForRequest(createDefaultRequest("image-audio-to-video"))[0],
+    ).toMatchObject({
+      role: "official-template:ia2v",
+      path: "templates/video_ltx2_3_ia2v.json",
+      sha256: "7823a703f472d9c5e6f82c462235ff89a0fa14752ec1fd947c4422cf53e47685",
+    });
+
+    expect(upstreamWorkflowContractsForRequest(createDefaultRequest("id-lora"))[0]).toMatchObject({
+      role: "official-template:id-lora",
+      path: "templates/video_ltx2_3_id_lora.json",
+      sha256: "fcffe421129bac16b4f0655e54130d633280cdaf6949e145221e7090be42151f",
+    });
+
+    expect(upstreamWorkflowContractsForRequest(createDefaultRequest("audio-to-video"))).toEqual([]);
+  });
+
+  it("accepts upstream contracts in new sidecars while preserving legacy v1 sidecars", () => {
+    const base = {
+      schemaVersion: "ltx-studio-run-provenance.v1" as const,
+      capturedAt: new Date().toISOString(),
+      verifiedAt: null,
+      files: [],
+      code: [],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "test",
+        nodeVersion: "test",
+        pythonExecutable: "/python",
+        pythonVersion: "test",
+        packages: {},
+        ffmpegVersion: "test",
+        fingerprint: "a".repeat(64),
+      },
+      fingerprint: "b".repeat(64),
+    } satisfies RunProvenance;
+    expect(normalizeRunProvenance(base)).not.toBeNull();
+
+    const withContract: RunProvenance = {
+      ...base,
+      upstreamContracts: upstreamWorkflowContractsForRequest(createDefaultRequest("lipdub")),
+    };
+    expect(normalizeRunProvenance(withContract)?.upstreamContracts).toHaveLength(1);
+    expect(normalizeRunProvenance({
+      ...withContract,
+      upstreamContracts: [{ ...withContract.upstreamContracts![0], sha256: "invalid" }],
     })).toBeNull();
   });
 });

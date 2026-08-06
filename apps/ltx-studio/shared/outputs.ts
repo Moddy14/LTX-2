@@ -21,3 +21,9 @@ export type StudioOutput = {
   experiment?: ExperimentRunBinding | null;
   experimentRequestVerified?: boolean;
 };
+
+export type DeletedStudioOutput = {
+  name: string;
+  sizeBytes: number;
+  deletedArtifacts: string[];
+};

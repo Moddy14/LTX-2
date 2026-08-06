@@ -9,6 +9,7 @@ import { uploadRoot } from "./config.js";
 import { probeVideoMetadata } from "./mediaProbe.js";
 import {
   chooseLipDubConstantFps,
+  OFFICIAL_COMFY_LIPDUB_OUTPUT_AREA,
   recommendedLipDubOutputSize,
   snapLipDubFrames,
 } from "./lipdubDiagnostics.js";
@@ -28,7 +29,7 @@ type PreparedLipDubReferenceFile = Omit<PreparedLipDubReference, "asset"> & {
 
 export type LipDubReferencePreparationInput = Pick<GenerationRequest, "width" | "height"> & {
   mode?: GenerationRequest["mode"];
-  lipDub: Pick<GenerationRequest["lipDub"], "referenceVideo">;
+  lipDub: Pick<GenerationRequest["lipDub"], "pipelineProfile" | "referenceVideo">;
   trim?: {
     startSeconds: number;
     durationSeconds: number;
@@ -49,7 +50,10 @@ function targetSize(
   request: LipDubReferencePreparationInput,
   metadata: NonNullable<ReturnType<typeof probeVideoMetadata>>,
 ): { width: number; height: number } {
-  return recommendedLipDubOutputSize(metadata) ?? { width: request.width, height: request.height };
+  return recommendedLipDubOutputSize(
+    metadata,
+    request.lipDub.pipelineProfile === "official-comfy-hq" ? OFFICIAL_COMFY_LIPDUB_OUTPUT_AREA : null,
+  ) ?? { width: request.width, height: request.height };
 }
 
 function metadataDurationSeconds(metadata: NonNullable<ReturnType<typeof probeVideoMetadata>>): number | null {

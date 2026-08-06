@@ -12,6 +12,27 @@ const input = {
 };
 
 describe("LipDub reference diagnostics", () => {
+  it("scales the official Comfy HQ target to published pixel area without changing aspect ratio", () => {
+    vi.spyOn(mediaProbe, "probeVideoMetadata").mockReturnValue({
+      width: 512,
+      height: 512,
+      frames: 97,
+      fps: 24,
+      durationSeconds: 4.04,
+      hasAudio: true,
+    });
+
+    const result = inspectLipDubReference({
+      ...input,
+      width: 1472,
+      height: 1472,
+      pipelineProfile: "official-comfy-hq",
+    });
+
+    expect(result.recommendedTarget).toMatchObject({ width: 1472, height: 1472, fps: 24 });
+    expect(result.findings.some((finding) => finding.code === "output-size-mismatch")).toBe(false);
+  });
+
   afterEach(() => vi.restoreAllMocks());
 
   it("marks an exact CFR 8k+1 reference with aligned audio as ready", () => {

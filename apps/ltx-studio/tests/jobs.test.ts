@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildRefinerAudioArgs,
+  describeLipForcingFailure,
   isActiveJobStatus,
   frameProcessLogChunk,
   JobConflictError,
@@ -20,7 +22,6 @@ import {
 } from "../server/jobs.js";
 import { hybridRoot, repoRoot } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
-import type { ResourceSnapshot } from "../server/system.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import {
   recommendedModelAsset,
@@ -112,12 +113,69 @@ function runProvenance(
 }
 
 describe("job persistence and reservations", () => {
+  it("builds one exact audio window contract for every optional lip refiner", () => {
+    const request = validRequest();
+    request.mode = "image-audio-to-video";
+    request.audio.path = "/inputs/clean.flac";
+    request.audio.startTime = 1.25;
+    request.audio.maxDuration = 3.5;
+    expect(buildRefinerAudioArgs(request)).toEqual([
+      "--audio", "/inputs/clean.flac",
+      "--audio-start", "1.25",
+      "--audio-duration", "3.5",
+    ]);
+    request.audio.maxDuration = null;
+    expect(buildRefinerAudioArgs(request)).toEqual([
+      "--audio", "/inputs/clean.flac",
+      "--audio-start", "1.25",
+    ]);
+    request.audio.path = "";
+    expect(buildRefinerAudioArgs(request)).toEqual([]);
+
+    // The ID-LoRA reference audio is a voice-cloning sample, never the spoken
+    // content: the native speech stack renders the dialogue into the base
+    // video, so the refiner must sync against the base video's own track.
+    request.mode = "id-lora";
+    request.idLora.referenceAudio = {
+      path: "/inputs/id-reference.flac",
+      name: "id-reference.flac",
+    };
+    expect(buildRefinerAudioArgs(request)).toEqual([]);
+
+    request.mode = "lipdub";
+    request.lipDub.referenceVideo = {
+      path: "/inputs/lipdub-reference.mp4",
+      name: "lipdub-reference.mp4",
+      strength: 1,
+    };
+    expect(buildRefinerAudioArgs(request)).toEqual([
+      "--audio", "/inputs/lipdub-reference.mp4",
+      "--audio-start", "0",
+    ]);
+
+    request.mode = "two-stage";
+    request.audio.path = "/inputs/stale-form-value.flac";
+    expect(buildRefinerAudioArgs(request)).toEqual([]);
+  });
+
+  it("explains a LipForcing unified-memory failure without a cryptic exit code", () => {
+    expect(describeLipForcingFailure(
+      [
+        "Loading SF checkpoint from /models/lipforcing/lipforcing_14b.pth ...",
+        "torch.AcceleratorError: CUDA error: out of memory",
+        "LipForcing: Fehler: LipForcing-Container endete mit Code 1.",
+      ],
+      { code: 1, signal: null, error: null },
+    )).toContain("gemeinsamen CPU-/GPU-Speicher");
+  });
+
   it("reuses an LTX base only when generation settings are otherwise identical", () => {
     const original = validRequest();
     const hybrid = structuredClone(original);
     hybrid.outputName = "hybrid.mp4";
     hybrid.postprocess.longcatLipsync.enabled = true;
     hybrid.postprocess.longcatLipsync.blend = 0.55;
+    hybrid.continuity.notes = "Refiner-Vergleich mit identischer LTX-Basis.";
 
     expect(requestsShareLtxBase(original, hybrid)).toBe(true);
     hybrid.audio.finalMix = { path: "/inputs/final-mix.wav", name: "final-mix.wav" };
@@ -128,16 +186,17 @@ describe("job persistence and reservations", () => {
     expect(requestsShareLtxBase(original, hybrid)).toBe(false);
   });
 
-  it("reuses a rendered LTX base only with matching verified model, code, and runtime provenance", () => {
+  it("reuses a rendered LTX base with matching verified model and runtime provenance", () => {
     const baseline = runProvenance();
     expect(runProvenanceSharesLtxBase(
       runProvenance({ includeFinalMix: true }),
       runProvenance({ includeLongCat: true }),
     )).toBe(true);
     expect(runProvenanceSharesLtxBase(baseline, runProvenance({ modelSha: "1".repeat(64) }))).toBe(false);
-    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ codeSha: "2".repeat(64) }))).toBe(false);
+    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ codeSha: "2".repeat(64) }))).toBe(true);
     expect(runProvenanceSharesLtxBase(baseline, runProvenance({ runtimeSha: "3".repeat(64) }))).toBe(false);
-    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ verified: false }))).toBe(false);
+    expect(runProvenanceSharesLtxBase(baseline, runProvenance({ verified: false }))).toBe(true);
+    expect(runProvenanceSharesLtxBase(runProvenance({ verified: false }), baseline)).toBe(false);
     expect(runProvenanceSharesLtxBase(null, baseline)).toBe(false);
   });
 
@@ -148,12 +207,26 @@ describe("job persistence and reservations", () => {
     expect(resolveRenderOutputPaths(finalOutput, stageRoot, false, true)).toEqual({
       ltxOutput: "/staging/job/ltx-base.mp4",
       compositeOutput: "/staging/job/longcat-composite.mp4",
+      refinedOutput: "/staging/job/latentsync-refined.mp4",
       remuxInput: "/staging/job/ltx-base.mp4",
     });
     expect(resolveRenderOutputPaths(finalOutput, stageRoot, true, true)).toEqual({
       ltxOutput: "/staging/job/ltx-base.mp4",
       compositeOutput: "/staging/job/longcat-composite.mp4",
+      refinedOutput: "/staging/job/latentsync-refined.mp4",
       remuxInput: "/staging/job/longcat-composite.mp4",
+    });
+    expect(resolveRenderOutputPaths(finalOutput, stageRoot, false, false, true)).toEqual({
+      ltxOutput: "/staging/job/ltx-base.mp4",
+      compositeOutput: "/staging/job/longcat-composite.mp4",
+      refinedOutput: finalOutput,
+      remuxInput: finalOutput,
+    });
+    expect(resolveRenderOutputPaths(finalOutput, stageRoot, false, true, false, true)).toEqual({
+      ltxOutput: "/staging/job/ltx-base.mp4",
+      compositeOutput: "/staging/job/longcat-composite.mp4",
+      refinedOutput: "/staging/job/musetalk-refined.mp4",
+      remuxInput: "/staging/job/musetalk-refined.mp4",
     });
     expect(resolveRenderOutputPaths(finalOutput, stageRoot, false, false).ltxOutput).toBe(finalOutput);
   });
@@ -343,6 +416,23 @@ describe("job persistence and reservations", () => {
     expect(cancelled.logs.at(-1)).toContain("Studio-Abbruchfunktion");
   });
 
+  it("removes only terminal jobs and persists the shortened history", async () => {
+    const path = await statePath();
+    const manager = new JobManager(path, false);
+    const created = manager.create(validRequest());
+
+    expect(() => manager.remove(created.id)).toThrow("noch aktiv");
+    expect(manager.get(created.id)).toBeDefined();
+
+    manager.cancel(created.id);
+    const deleted = manager.remove(created.id);
+
+    expect(deleted).toMatchObject({ id: created.id, status: "cancelled" });
+    expect(manager.get(created.id)).toBeUndefined();
+    expect(manager.list()).toEqual([]);
+    expect(new JobManager(path, false).list()).toEqual([]);
+  });
+
   it("stops the complete process group before releasing its lease during shutdown", async () => {
     const path = await statePath();
     const root = join(path, "..");
@@ -494,6 +584,9 @@ describe("job persistence and reservations", () => {
     Reflect.set(manager, "waitForDgxQueueStart", async () => true);
     Reflect.set(manager, "verifyJobIdentityEvidence", async () => true);
     Reflect.set(manager, "verifyJobRunProvenance", async () => true);
+    Reflect.set(manager, "modelInventoryOperations", {
+      read: async () => verifiedModelInventory(),
+    });
     Reflect.set(manager, "readThermalBaseline", async () => {
       runtimeJob.plan.executable = executable;
       baselineStartedResolve();
@@ -753,11 +846,11 @@ describe("job persistence and reservations", () => {
     expect(await waitForPreAdmission.call(manager, runtimeJob)).toBe(true);
     expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
       expect.stringContaining("Queue-Vorab-Gate erfüllt"),
-      expect.stringContaining("RAM und Swap werden nach Orchestrator-Acceptance erneut geprüft"),
+      expect.stringContaining("vom DGX-Orchestrator entschieden"),
     ]));
   });
 
-  it("submits a low-swap job and defers the complete gate until after acceptance", async () => {
+  it("submits a low-swap job so the orchestrator can make the start decision", async () => {
     let submits = 0;
     let submittedMemoryGiB: number | undefined;
     const manager = new JobManager(await statePath(), false, null, {
@@ -792,38 +885,27 @@ describe("job persistence and reservations", () => {
 
     expect(await waitForDgxQueueStart.call(manager, runtimeJob)).toBe(true);
     expect(submits).toBe(1);
-    expect(submittedMemoryGiB).toBe(64);
+    expect(submittedMemoryGiB).toBe(58);
     expect(manager.get(created.id)).toMatchObject({
       status: "queued",
       dgxJobId: "dgx-low-swap-visible",
     });
   });
 
-  it("waits after acceptance until all local resources pass before setting starting", async () => {
+  it("uses the orchestrator start fence immediately after acceptance", async () => {
     const manager = new JobManager(await statePath(), false);
     const created = manager.create(validRequest());
     const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
     const runtimeJob = internalJobs.get(created.id)!;
-    runtimeJob.dgxJobId = "dgx-job-local-start-gate";
+    runtimeJob.dgxJobId = "dgx-job-authoritative-start-fence";
     const transitions: string[] = [];
-    const snapshots: ResourceSnapshot[] = [{
-      availableMemoryGiB: 88,
+    Reflect.set(manager, "readStartResourceSnapshot", () => ({
+      availableMemoryGiB: 40,
       totalMemoryGiB: 121.69,
-      swapFreeGiB: 3.25,
+      swapFreeGiB: 0.25,
       swapTotalGiB: 16,
       outputFreeGiB: 100,
-    }, {
-      availableMemoryGiB: 88,
-      totalMemoryGiB: 121.69,
-      swapFreeGiB: 4.25,
-      swapTotalGiB: 16,
-      outputFreeGiB: 100,
-    }];
-    Reflect.set(manager, "readStartResourceSnapshot", () => snapshots.shift()!);
-    Reflect.set(manager, "waitForDelay", async () => {
-      expect(transitions).toEqual([]);
-      return true;
-    });
+    }));
     Reflect.set(manager, "transitionDgxJob", async (_job: unknown, state: string) => {
       transitions.push(state);
       return true;
@@ -834,155 +916,10 @@ describe("job persistence and reservations", () => {
     expect(await startAccepted.call(manager, runtimeJob)).toBe("started");
     expect(transitions).toEqual(["starting"]);
     expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
-      expect.stringContaining("akzeptiert; lokales Start-Gate wartet"),
-      expect.stringContaining("gemeinsame Sicherheitsreserve"),
+      expect.stringContaining("Start-Fence wird jetzt autoritativ beim Orchestrator geprüft"),
+      expect.stringContaining("40.00 GiB RAM"),
+      expect.stringContaining("0.25 GiB Swap"),
     ]));
-    expect(manager.get(created.id)?.logs.at(-1)).toContain("100.00 GiB Ausgabeplatz");
-  });
-
-  it("keeps an accepted lease fail-closed and delivers cancellation only after user cancellation", async () => {
-    let cancellationResolve!: () => void;
-    const cancellation = new Promise<void>((resolve) => {
-      cancellationResolve = resolve;
-    });
-    const transitions: string[] = [];
-    const manager = new JobManager(await statePath(), false, null, {
-      capture: async () => notApplicableIdentityEvidence(),
-      verify: async (evidence) => ({ evidence, error: null }),
-    }, {
-      read: async (jobId) => ({
-        schema_version: "dgx-job-read.v0",
-        job: { job_id: jobId, state: "accepted" },
-      }),
-      transition: async (jobId, state) => {
-        transitions.push(state);
-        if (state === "cancelled") cancellationResolve();
-        return {
-          schema_version: "dgx-job-transition.v0",
-          job: { job_id: jobId, state },
-        };
-      },
-    }, null);
-    const created = manager.create(validRequest());
-    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
-    const runtimeJob = internalJobs.get(created.id)!;
-    runtimeJob.dgxJobId = "dgx-job-failed-local-recheck";
-    Reflect.set(manager, "readStartResourceSnapshot", () => ({
-      availableMemoryGiB: 40,
-      totalMemoryGiB: 121.69,
-      swapFreeGiB: 8,
-      swapTotalGiB: 16,
-      outputFreeGiB: 100,
-    }));
-    Reflect.set(manager, "waitForDelay", async () => {
-      manager.cancel(created.id);
-      return false;
-    });
-
-    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<string>;
-
-    expect(await startAccepted.call(manager, runtimeJob)).toBe("stopped");
-    await cancellation;
-    expect(transitions).toEqual(["cancelled"]);
-    expect(manager.get(created.id)).toMatchObject({
-      status: "cancelled",
-      outputUrl: null,
-    });
-    expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
-      expect.stringContaining("akzeptiert; lokales Start-Gate wartet"),
-      expect.stringContaining("Manueller Abbruch"),
-    ]));
-  });
-
-  it("releases and resubmits an accepted lease before the remote 30-minute reaper", async () => {
-    let clockMs = 0;
-    vi.spyOn(Date, "now").mockImplementation(() => clockMs);
-    const transitions: string[] = [];
-    const manager = new JobManager(await statePath(), false, null, {
-      capture: async () => notApplicableIdentityEvidence(),
-      verify: async (evidence) => ({ evidence, error: null }),
-    }, {
-      read: async (jobId) => ({
-        schema_version: "dgx-job-read.v0",
-        job: { job_id: jobId, state: "accepted" },
-      }),
-      transition: async (jobId, state) => {
-        transitions.push(state);
-        return {
-          schema_version: "dgx-job-transition.v0",
-          job: { job_id: jobId, state },
-        };
-      },
-    }, null);
-    const created = manager.create(validRequest());
-    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
-    const runtimeJob = internalJobs.get(created.id)!;
-    runtimeJob.dgxJobId = "dgx-job-accepted-local-timeout";
-    Reflect.set(manager, "readStartResourceSnapshot", () => ({
-      availableMemoryGiB: 40,
-      totalMemoryGiB: 121.69,
-      swapFreeGiB: 8,
-      swapTotalGiB: 16,
-      outputFreeGiB: 100,
-    }));
-    Reflect.set(manager, "waitForDelay", async () => {
-      clockMs += 10 * 60_000;
-      return true;
-    });
-
-    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<string>;
-
-    expect(await startAccepted.call(manager, runtimeJob)).toBe("resubmit");
-    expect(transitions).toEqual(["cancelled"]);
-    expect(manager.get(created.id)).toMatchObject({
-      status: "queued",
-      dgxJobId: null,
-      error: null,
-    });
-    expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
-      expect.stringContaining("20 Minuten blockiert"),
-      expect.stringContaining("erneut beim Orchestrator eingereicht"),
-    ]));
-  });
-
-  it("reconciles a remotely reaped accepted job and requests resubmission", async () => {
-    let clockMs = 0;
-    vi.spyOn(Date, "now").mockImplementation(() => clockMs);
-    const manager = new JobManager(await statePath(), false, null, {
-      capture: async () => notApplicableIdentityEvidence(),
-      verify: async (evidence) => ({ evidence, error: null }),
-    }, {
-      read: async (jobId) => ({
-        schema_version: "dgx-job-read.v0",
-        job: { job_id: jobId, state: "cancelled", reason: "accepted_lease_timeout" },
-      }),
-      transition: async () => {
-        throw new Error("not expected");
-      },
-    }, null);
-    const created = manager.create(validRequest());
-    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
-    const runtimeJob = internalJobs.get(created.id)!;
-    runtimeJob.dgxJobId = "dgx-job-remotely-reaped";
-    Reflect.set(manager, "readStartResourceSnapshot", () => ({
-      availableMemoryGiB: 40,
-      totalMemoryGiB: 121.69,
-      swapFreeGiB: 8,
-      swapTotalGiB: 16,
-      outputFreeGiB: 100,
-    }));
-    Reflect.set(manager, "waitForDelay", async () => {
-      clockMs += 30_000;
-      return true;
-    });
-
-    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<string>;
-
-    expect(await startAccepted.call(manager, runtimeJob)).toBe("resubmit");
-    expect(manager.get(created.id)).toMatchObject({
-      status: "queued",
-      dgxJobId: null,
-    });
   });
 
   it("does not create a DGX lease after cancellation while waiting for pre-admission resources", async () => {
@@ -1452,6 +1389,98 @@ describe("job persistence and reservations", () => {
     expect(manager.get(created.id)?.logs.join("\n")).toContain("Queue-Job bleibt accepted");
   });
 
+  it("waits when the Orchestrator has not selected the accepted job as queue winner", async () => {
+    const path = await statePath();
+    let transitions = 0;
+    let remoteState: "accepted" | "starting" = "accepted";
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async (jobId, state) => {
+        transitions += 1;
+        if (transitions === 1) {
+          throw new RuntimeApiError("DGX start gate active: not_selected_queue_winner", 409, {
+            error: "start_gate_active",
+            reason: "not_selected_queue_winner",
+            retry_after_seconds: 5,
+          });
+        }
+        remoteState = "starting";
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    Reflect.set(manager, "waitForDelay", async () => true);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-waiting-for-winner";
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+      metadata?: object,
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(true);
+    expect(transitions).toBe(2);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "queued",
+      error: null,
+      dgxJobId: "dgx-job-waiting-for-winner",
+    });
+    expect(manager.get(created.id)?.logs.join("\n")).toContain("not_selected_queue_winner");
+  });
+
+  it("retries the start fence when a queued job is not yet the selected winner", async () => {
+    const path = await statePath();
+    let transitions = 0;
+    let remoteState: "queued" | "starting" = "queued";
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: remoteState },
+      }),
+      transition: async (jobId, state) => {
+        transitions += 1;
+        if (transitions === 1) {
+          throw new RuntimeApiError("DGX start gate active: not_selected_queue_winner", 409, {
+            error: "start_gate_active",
+            reason: "not_selected_queue_winner",
+            retry_after_seconds: 5,
+          });
+        }
+        remoteState = "starting";
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null);
+    Reflect.set(manager, "waitForDelay", async () => true);
+    const created = manager.create(validRequest());
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    runtimeJob.dgxJobId = "dgx-job-queued-winner";
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(true);
+    expect(transitions).toBe(2);
+    expect(manager.get(created.id)?.logs.join("\n")).toContain("auf seine Auswahl");
+  });
+
   it("reconciles a dropped starting response before retrying the transition", async () => {
     const path = await statePath();
     let transitions = 0;
@@ -1815,16 +1844,42 @@ describe("job persistence and reservations", () => {
     expect(restored.status).toBe("queued");
     expect(restored.request.enhancePrompt).toBe(false);
     expect(restored.request.models.checkpointPath).toBe(
-      recommendedModelAsset("ltx23-dev-checkpoint").localPath,
+      recommendedModelAsset("ltx23-dev-fp8-checkpoint").localPath,
     );
+    expect(restored.request.quantization.mode).toBe("fp8-scaled-mm");
     expect(restored.request.models.gemmaRoot).toBe(
       recommendedModelAsset("ltx23-gemma").localPath,
     );
     expect(restored.request.models.distilledLora.path).toBe(
-      recommendedModelAsset("ltx23-distilled-lora").localPath,
+      recommendedModelAsset("ltx23-comfy-distilled-lora").localPath,
     );
     expect(restored.request.models.spatialUpscalerPath).toBe(
       recommendedModelAsset("ltx23-spatial-upscaler").localPath,
+    );
+  });
+
+  it("does not rewrite model paths from a frozen experiment binding", async () => {
+    const request = validRequest("id-lora");
+    request.models.distilledLora.path = "/models/historical-distilled-lora.safetensors";
+    const binding = {
+      schemaVersion: "ltx-studio-experiment-run.v1" as const,
+      experimentId: "22222222-2222-4222-8222-222222222222",
+      protocolSha256: "a".repeat(64),
+      arm: "candidate" as const,
+      kind: "ablation" as const,
+      variableId: "lipforcing-enabled",
+      changedRequestPaths: ["postprocess.lipForcing.enabled"],
+      baselineRequestSha256: "b".repeat(64),
+      requestSha256: "c".repeat(64),
+      baselineJobId: "11111111-1111-4111-8111-111111111111",
+      baselineOutputName: "historical-baseline.mp4",
+    };
+    const manager = new JobManager(await statePath(), false);
+
+    const created = manager.create(request, { experiment: binding });
+
+    expect(created.request.models.distilledLora.path).toBe(
+      "/models/historical-distilled-lora.safetensors",
     );
   });
 

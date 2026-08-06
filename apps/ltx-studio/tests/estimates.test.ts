@@ -13,7 +13,7 @@ describe("resource and runtime estimates", () => {
 
   it("keeps the standard two-stage memory contract conservative", () => {
     const request = validRequest();
-    expect(estimateResources(request).memoryGiB).toBe(64);
+    expect(estimateResources(request).memoryGiB).toBe(60);
   });
 
   it("does not discount a BF16 checkpoint that is cast to FP8 at runtime", () => {
@@ -30,7 +30,7 @@ describe("resource and runtime estimates", () => {
     const request = validRequest();
     request.quantization.mode = "fp8-cast";
     request.models.checkpointPath = "/models/ltx-2.3-22b-dev-fp8.safetensors";
-    expect(estimateResources(request).memoryGiB).toBe(62);
+    expect(estimateResources(request).memoryGiB).toBe(58);
   });
 
   it("covers the measured native FP8 one-stage cold-load peak", () => {
@@ -47,6 +47,18 @@ describe("resource and runtime estimates", () => {
     const request = validRequest("lipdub");
     const estimate = estimateResources(request);
     expect(estimate.memoryGiB).toBeGreaterThanOrEqual(64);
+  });
+
+  it("never understates the LipForcing 14B shared-memory floor", () => {
+    const request = validRequest("one-stage");
+    request.width = 320;
+    request.height = 576;
+    request.numFrames = 25;
+    request.quantization.mode = "fp8-cast";
+    request.models.checkpointPath = "/models/ltx-2.3-22b-dev-fp8.safetensors";
+    request.postprocess.lipForcing.enabled = true;
+
+    expect(estimateResources(request).memoryGiB).toBe(52);
   });
 
   it("uses the most demanding experiment arm for the visible RAM gate", () => {

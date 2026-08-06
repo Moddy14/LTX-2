@@ -6,18 +6,33 @@ import {
   normalizeQueueJobs,
   retryAfterMs,
   shouldRetryQueueSubmit,
+  supportsCooperativeCheckpoint,
 } from "../server/admission.js";
 import { validRequest } from "./fixtures.js";
 
 describe("DGX admission contract", () => {
+  it("never promises cooperative checkpoints for CFG++ sampler modes", () => {
+    expect(supportsCooperativeCheckpoint(validRequest("text-to-audio"))).toBe(false);
+    expect(supportsCooperativeCheckpoint(validRequest("ic-lora"))).toBe(false);
+
+    const inpaint = validRequest("ic-lora");
+    inpaint.icLora.profile = "inpainting";
+    expect(supportsCooperativeCheckpoint(inpaint)).toBe(false);
+  });
+
+  it("keeps cooperative checkpoints for euler-loop modes", () => {
+    expect(supportsCooperativeCheckpoint(validRequest("two-stage"))).toBe(true);
+    expect(supportsCooperativeCheckpoint(validRequest("keyframes"))).toBe(true);
+  });
+
   it("uses only native LTX admission when Gemma enhancement is enabled", () => {
     const requests = buildAdmissionRequests(validRequest());
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       runtime: "ltx2_native",
       job_type: "ltx2_native_two_stage",
-      estimated_memory_gib: 64,
-      resource_profile: { gpu: true, exclusive_runtime: "ltx2_native", required_gib: 64 },
+      estimated_memory_gib: 60,
+      resource_profile: { gpu: true, exclusive_runtime: "ltx2_native", required_gib: 60 },
     });
   });
 
@@ -41,9 +56,9 @@ describe("DGX admission contract", () => {
         preemptible: true,
         yield_after_each_segment: true,
         expected_segment_seconds: 60,
-        qwen_pressure_reclaim: "required_before_start",
       },
     });
+    expect(admission.scheduling).not.toHaveProperty("qwen_pressure_reclaim");
     expect(admission.scheduling?.resume_checkpoint).toContain(`/checkpoints/${jobId}/manifest.json`);
   });
 
@@ -54,13 +69,46 @@ describe("DGX admission contract", () => {
     expect(admission.scheduling).toBeUndefined();
   });
 
+  it("keeps the full LTX plus LatentSync allocation non-preemptible", () => {
+    const request = validRequest("lipdub");
+    request.postprocess.latentSync.enabled = true;
+
+    const [admission] = buildAdmissionRequests(request, 24, "latentsync-job");
+
+    expect(admission.estimated_memory_gib).toBe(24);
+    expect(admission.resumability).toBeUndefined();
+    expect(admission.scheduling).toBeUndefined();
+  });
+
+  it("keeps the full LTX plus MuseTalk allocation non-preemptible", () => {
+    const request = validRequest("lipdub");
+    request.postprocess.museTalk.enabled = true;
+
+    const [admission] = buildAdmissionRequests(request, 16, "musetalk-job");
+
+    expect(admission.estimated_memory_gib).toBe(16);
+    expect(admission.resumability).toBeUndefined();
+    expect(admission.scheduling).toBeUndefined();
+  });
+
+  it("keeps the full LTX plus LipForcing allocation non-preemptible", () => {
+    const request = validRequest("lipdub");
+    request.postprocess.lipForcing.enabled = true;
+
+    const [admission] = buildAdmissionRequests(request, 52, "lipforcing-job");
+
+    expect(admission.estimated_memory_gib).toBe(52);
+    expect(admission.resumability).toBeUndefined();
+    expect(admission.scheduling).toBeUndefined();
+  });
+
   it("does not understate runtime FP8 casting of a BF16 checkpoint", () => {
     const request = validRequest();
     request.enhancePrompt = false;
     request.quantization.mode = "fp8-cast";
     const [admission] = buildAdmissionRequests(request);
-    expect(admission.estimated_memory_gib).toBe(64);
-    expect(admission.resource_profile.required_gib).toBe(64);
+    expect(admission.estimated_memory_gib).toBe(60);
+    expect(admission.resource_profile.required_gib).toBe(60);
   });
 
   it("uses the lower native FP8 estimate shown by the studio", () => {
@@ -69,8 +117,8 @@ describe("DGX admission contract", () => {
     request.quantization.mode = "fp8-cast";
     request.models.checkpointPath = "/models/ltx-2.3-22b-dev-fp8.safetensors";
     const [admission] = buildAdmissionRequests(request);
-    expect(admission.estimated_memory_gib).toBe(62);
-    expect(admission.resource_profile.required_gib).toBe(62);
+    expect(admission.estimated_memory_gib).toBe(58);
+    expect(admission.resource_profile.required_gib).toBe(58);
   });
 
   it("accepts a server-side media-aware estimate for native LipDub admission", () => {

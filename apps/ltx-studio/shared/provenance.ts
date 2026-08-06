@@ -42,6 +42,14 @@ export type ProvenanceRuntimeEvidence = {
   fingerprint: string;
 };
 
+export type ProvenanceUpstreamContract = {
+  role: string;
+  repository: string;
+  commit: string;
+  path: string;
+  sha256: string;
+};
+
 export type RunProvenance = {
   schemaVersion: "ltx-studio-run-provenance.v1";
   capturedAt: string;
@@ -49,5 +57,7 @@ export type RunProvenance = {
   files: ProvenanceFileEvidence[];
   code: ProvenanceCodeEvidence[];
   runtime: ProvenanceRuntimeEvidence;
+  /** Present on newly captured runs; omitted only by legacy v1 sidecars. */
+  upstreamContracts?: ProvenanceUpstreamContract[];
   fingerprint: string;
 };

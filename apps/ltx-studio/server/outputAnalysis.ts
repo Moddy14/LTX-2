@@ -565,11 +565,13 @@ export function buildObjectiveQualityAnalysis(
       message: `Der freigegebene Phonem-/Visem-Evaluator bestand Offset- und Inhaltsgate (${worker.phonemeViseme.manifestReleaseId}).`,
     });
   } else if (worker.phonemeViseme.status === "measurement-only") {
+    const bilabialClosure = worker.phonemeViseme.measurement?.bilabialClosureF1 ?? null;
     findings.push({
       code: "phoneme-viseme-measurement-only",
       level: "info",
-      message: worker.phonemeViseme.error
-        ?? "MFA/MediaPipe-Rohmetriken wurden erfasst; Product-GO und SOTA-Freigabe bleiben blockiert.",
+      message: bilabialClosure !== null && bilabialClosure < 0.5
+        ? "Laut-/Lippenprüfung: Bei P, B und M schließen sich die Lippen nicht passend zum gesprochenen Ton."
+        : "Laut-/Lippenprüfung abgeschlossen. Die verständliche Zusammenfassung steht über den Detailwerten.",
     });
   } else if (worker.phonemeViseme.status === "not-available") {
     findings.push({
@@ -743,6 +745,10 @@ export class OutputAnalysisManager {
   get(outputName: string): OutputAnalysisRecord | null {
     const target = this.library.resolveAnalysisTarget(outputName);
     return readOutputAnalysis(this.root, outputName, revisionOf(target));
+  }
+
+  isActive(outputName: string): boolean {
+    return this.activeByOutput.has(outputName);
   }
 
   start(outputName: string, force = false): OutputAnalysisRecord {
@@ -1199,6 +1205,8 @@ export class OutputAnalysisManager {
       "PATH=/usr/bin:/bin",
       "LANG=C.UTF-8",
       "LC_ALL=C.UTF-8",
+      "USER=ltx-pv-evaluator",
+      "LOGNAME=ltx-pv-evaluator",
       `HOME=${runnerWorkDir}`,
       `TMPDIR=${runnerWorkDir}`,
       "CUDA_VISIBLE_DEVICES=",

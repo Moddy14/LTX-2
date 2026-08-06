@@ -31,6 +31,39 @@ export const experimentRoot = join(dataRoot, "experiments");
 export const longcatProjectRoot = resolve(
   process.env.LTX_STUDIO_LONGCAT_ROOT ?? "/home/moddy/projects/longcat-video-avatar-dgx",
 );
+export const latentSyncImage =
+  process.env.LTX_STUDIO_LATENTSYNC_IMAGE ?? "ltx-studio-latentsync:1.6-cu131";
+export const latentSyncModelRoot = resolve(
+  process.env.LTX_STUDIO_LATENTSYNC_MODEL_ROOT ?? "/home/moddy/models/latentsync/LatentSync-1.6",
+);
+export const latentSyncCheckpointPath = resolve(
+  process.env.LTX_STUDIO_LATENTSYNC_CHECKPOINT
+    ?? join(latentSyncModelRoot, "latentsync_unet.pt"),
+);
+export const latentSyncWhisperPath = resolve(
+  process.env.LTX_STUDIO_LATENTSYNC_WHISPER
+    ?? join(latentSyncModelRoot, "whisper", "tiny.pt"),
+);
+export const latentSyncVaeRoot = resolve(
+  process.env.LTX_STUDIO_LATENTSYNC_VAE_ROOT
+    ?? "/home/moddy/models/latentsync/sd-vae-ft-mse",
+);
+export const latentSyncInsightFaceRoot = resolve(
+  process.env.LTX_STUDIO_LATENTSYNC_INSIGHTFACE_ROOT
+    ?? "/home/moddy/models/latentsync/insightface",
+);
+export const museTalkImage =
+  process.env.LTX_STUDIO_MUSETALK_IMAGE ?? "ltx-studio-musetalk:1.5-cu131";
+export const museTalkModelRoot = resolve(
+  process.env.LTX_STUDIO_MUSETALK_MODEL_ROOT
+    ?? "/home/moddy/models/musetalk-1.5",
+);
+export const lipForcingImage =
+  process.env.LTX_STUDIO_LIPFORCING_IMAGE ?? "ltx-studio-lipforcing:14b-cu131";
+export const lipForcingModelRoot = resolve(
+  process.env.LTX_STUDIO_LIPFORCING_MODEL_ROOT
+    ?? "/home/moddy/models/lipforcing-14b",
+);
 export const statePath = join(dataRoot, "jobs.json");
 export const assetsStatePath = join(dataRoot, "assets.json");
 export const provenanceCachePath = join(dataRoot, "provenance-cache.json");
