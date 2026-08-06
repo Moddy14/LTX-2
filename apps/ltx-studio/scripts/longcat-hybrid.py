@@ -124,6 +124,39 @@ def copy_atomic(source: Path, target: Path) -> None:
     temporary.replace(target)
 
 
+def has_durable_checkpoint(jobs_dir: Path, job_id: str) -> bool:
+    root = jobs_dir / "checkpoints" / job_id
+    manifest_path = root / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict):
+        return False
+    completed = manifest.get("completed_segments")
+    total = manifest.get("total_segments")
+    segment_files = manifest.get("segment_files")
+    state_file = manifest.get("state_file")
+    if (
+        manifest.get("schema_version") != "longcat-segment-checkpoint.v1"
+        or manifest.get("job_id") != job_id
+        or type(completed) is not int
+        or type(total) is not int
+        or not 1 <= completed < total
+        or segment_files != [f"segment-{index:03d}.npz" for index in range(completed)]
+        or not isinstance(state_file, str)
+        or Path(state_file).name != state_file
+    ):
+        return False
+    for path in [*(root / name for name in segment_files), root / state_file]:
+        try:
+            if not path.is_file() or path.is_symlink() or path.stat().st_size <= 0:
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def stream_process(process: subprocess.Popen[str]) -> threading.Thread:
     def forward() -> None:
         assert process.stdout is not None
@@ -353,11 +386,19 @@ def generate(args: argparse.Namespace) -> int:
             try:
                 stop_owned_supervisor(supervisor, jobs_dir, cancelled=cancelled)
             finally:
-                if job_id is not None:
+                preserve_for_resume = (
+                    job_id is not None
+                    and (jobs_dir / "work" / f"{job_id}.json").is_file()
+                    and has_durable_checkpoint(jobs_dir, job_id)
+                )
+                if preserve_for_resume:
+                    log(f"Fortsetzbarer Segment-Checkpoint für {job_id} bleibt vollständig erhalten.")
+                elif job_id is not None:
                     queue_file = jobs_dir / "queue" / f"{job_id}.json"
-                    if queue_file.exists():
-                        queue_file.unlink()
-                if assets is not None:
+                    work_file = jobs_dir / "work" / f"{job_id}.json"
+                    queue_file.unlink(missing_ok=True)
+                    work_file.unlink(missing_ok=True)
+                if assets is not None and not preserve_for_resume:
                     shutil.rmtree(assets, ignore_errors=True)
                 for signum, handler in old_handlers.items():
                     signal.signal(signum, handler)

@@ -28,4 +28,12 @@ describe("LongCat hybrid compositor contract", () => {
     expect(script).toContain("alpha *= nose_gate");
     expect(script).toContain("class TemporalColorMatcher");
   });
+
+  it("preserves only complete resumable LongCat checkpoints after interruption", () => {
+    expect(script).toContain("def has_durable_checkpoint");
+    expect(script).toContain('manifest.get("schema_version") != "longcat-segment-checkpoint.v1"');
+    expect(script).toContain("preserve_for_resume");
+    expect(script).toContain("work_file.unlink(missing_ok=True)");
+    expect(script).toContain("if assets is not None and not preserve_for_resume");
+  });
 });
