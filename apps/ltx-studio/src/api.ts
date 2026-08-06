@@ -1,6 +1,8 @@
+import type { AdmissionPreflightReport } from "../shared/admissionPreflight";
 import type { GenerationRequest } from "../shared/pipelines";
 import type { QualityReviewInput } from "../shared/quality";
 import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
+import type { DeletedStudioOutput } from "../shared/outputs";
 import type {
   ControlledExperiment,
   ExperimentCreateInput,
@@ -48,9 +50,18 @@ export async function getOutputs(): Promise<StudioOutput[]> {
   return body.outputs;
 }
 
-export async function getExperiments(): Promise<ControlledExperiment[]> {
-  const body = await decode<{ experiments: ControlledExperiment[] }>(await fetch("/api/experiments"));
-  return body.experiments;
+export async function deleteOutput(outputName: string): Promise<DeletedStudioOutput> {
+  const body = await decode<{ deleted: DeletedStudioOutput }>(
+    await fetch(`/api/outputs/${encodeURIComponent(outputName)}`, { method: "DELETE" }),
+  );
+  return body.deleted;
+}
+
+export async function getExperiments(): Promise<{
+  experiments: ControlledExperiment[];
+  warnings: string[];
+}> {
+  return decode<{ experiments: ControlledExperiment[]; warnings: string[] }>(await fetch("/api/experiments"));
 }
 
 export async function createExperiment(input: ExperimentCreateInput): Promise<ControlledExperiment> {
@@ -109,6 +120,16 @@ export async function getEstimate(request: GenerationRequest): Promise<ResourceE
   );
 }
 
+export async function preflightAdmission(request: GenerationRequest): Promise<AdmissionPreflightReport> {
+  return decode<AdmissionPreflightReport>(
+    await fetch("/api/admission/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
 export async function createJob(request: GenerationRequest): Promise<StudioJob> {
   const body = await decode<{ job: StudioJob }>(
     await fetch("/api/jobs", {
@@ -141,6 +162,13 @@ export async function planJob(
 export async function cancelJob(id: string): Promise<StudioJob> {
   const body = await decode<{ job: StudioJob }>(await fetch(`/api/jobs/${id}/cancel`, { method: "POST" }));
   return body.job;
+}
+
+export async function deleteJob(id: string): Promise<StudioJob> {
+  const body = await decode<{ deleted: StudioJob }>(
+    await fetch(`/api/jobs/${id}`, { method: "DELETE" }),
+  );
+  return body.deleted;
 }
 
 export async function rerunJob(id: string, mode: "exact" | "random-seed"): Promise<StudioJob> {
@@ -235,6 +263,7 @@ export async function inspectLipDubReference(input: {
   height: number;
   dialogue: string;
   prompt: string;
+  pipelineProfile: GenerationRequest["lipDub"]["pipelineProfile"];
 }): Promise<LipDubReferenceDiagnostics> {
   return decode<LipDubReferenceDiagnostics>(
     await fetch("/api/lipdub/reference/inspect", {

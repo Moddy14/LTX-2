@@ -1,4 +1,4 @@
-import { CircleStop, LoaderCircle, RefreshCw, ScanFace } from "lucide-react";
+import { CircleStop, LoaderCircle, RefreshCw, ScanFace, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 
 import { fieldHelp } from "../fieldHelp";
@@ -33,13 +33,16 @@ export function ObjectiveAnalysisPanel({
   output,
   onStart,
   onCancel,
+  onPrepareLipSyncRetry,
 }: {
   output: StudioOutput;
   onStart: (output: StudioOutput, force?: boolean) => Promise<void>;
   onCancel: (output: StudioOutput) => Promise<void>;
+  onPrepareLipSyncRetry: (output: StudioOutput, referenceStrength: number) => void;
 }) {
   const [pending, setPending] = useState<"start" | "cancel" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [preparedStrength, setPreparedStrength] = useState<number | null>(null);
   const analysis = output.analysis;
   const active = analysis ? ["queued", "running"].includes(analysis.status) : false;
   const result = analysis?.status === "completed" ? analysis.result : null;
@@ -83,8 +86,54 @@ export function ObjectiveAnalysisPanel({
   const dirtyCodeCount = provenance?.code.filter((repository) => repository.dirty).length ?? 0;
   const showIdentityMetrics = identity && ["measured", "insufficient"].includes(identity.status);
   const statusLabel = analysis?.status === "completed"
-    ? result?.status === "measured" ? "Rohwerte erfasst" : "Messung unzureichend"
+    ? phonemeVisemeMeasurement ? "Lip-Sync geprüft" : "Prüfung unvollständig"
     : analysis ? statusLabels[analysis.status] : "Nicht gemessen";
+  const dialogueVerdict = dialogue?.wordErrorRate !== null && dialogue?.wordErrorRate !== undefined
+    ? `${dialogue.recognizedWordCount} von ${dialogue.expectedWordCount} Wörtern erkannt, `
+      + `${(dialogue.wordErrorRate * 100).toFixed(0)} % Wortfehler`
+    : "Wortlaut nicht belastbar gemessen";
+  const avVerdict = avSync?.status === "insufficient"
+    ? "Ein genauer Zeitversatz konnte nicht sicher bestimmt werden"
+    : avSync?.status === "measured"
+      ? "Mundbewegung und Ton konnten zeitlich verglichen werden"
+      : "Zeitliche Abstimmung konnte nicht geprüft werden";
+  const bilabialClosureF1 = phonemeVisemeMeasurement?.bilabialClosureF1 ?? null;
+  const currentReferenceStrength = output.request?.mode === "lipdub"
+    ? output.request.lipDub.referenceVideo.strength
+    : null;
+  const recommendedReferenceStrength = currentReferenceStrength === null
+    ? null
+    : currentReferenceStrength > 0.85
+      ? 0.8
+      : currentReferenceStrength > 0.7
+        ? 0.65
+        : currentReferenceStrength > 0.6
+          ? 0.6
+          : null;
+  const showLipSyncRetry = bilabialClosureF1 !== null
+    && bilabialClosureF1 < 0.8
+    && recommendedReferenceStrength !== null;
+  const lipSyncHeadline = !phonemeVisemeMeasurement
+    ? "Lip-Sync konnte nicht vollständig geprüft werden"
+    : bilabialClosureF1 === null
+      ? "Lip-Sync geprüft, aber nicht eindeutig"
+      : bilabialClosureF1 < 0.5
+        ? "Lip-Sync nicht ausreichend"
+        : bilabialClosureF1 < 0.8
+          ? "Lip-Sync hat erkennbare Schwächen"
+          : "Keine groben Lippenschlussfehler erkannt";
+  const lipSyncExplanation = !phonemeVisemeMeasurement
+    ? "Die App konnte Ton und sichtbare Lippenbewegung nicht vollständig miteinander vergleichen."
+    : bilabialClosureF1 === null
+      ? "Im gesprochenen Text waren nicht genügend klar messbare P-, B- oder M-Laute vorhanden."
+      : bilabialClosureF1 < 0.5
+        ? "Bei P, B und M schließen sich die Lippen nicht passend zum gesprochenen Ton."
+        : bilabialClosureF1 < 0.8
+          ? "Bei P, B und M schließen sich die Lippen nur teilweise passend zum gesprochenen Ton."
+          : "Die sichtbaren Lippenschlüsse bei P, B und M passen in diesem Video überwiegend zum Ton.";
+  const phonemeVisemeVerdict = phonemeVisemeMeasurement
+    ? lipSyncExplanation
+    : "Laut- und Lippenbewegung konnten nicht vollständig verglichen werden";
 
   const start = async (force: boolean) => {
     setPending("start");
@@ -135,7 +184,49 @@ export function ObjectiveAnalysisPanel({
 
       {result ? (
         <>
-          <div className="objective-analysis__metrics" aria-label="Objektive Messwerte">
+          {result.status === "insufficient" ? (
+            <div className="objective-analysis__verdict" role="note" aria-label="Einordnung der Lip-Sync-Messung">
+              <strong>{lipSyncHeadline}</strong>
+              <p>{lipSyncExplanation}</p>
+              <div>
+                <span><b>Gesprochener Text</b>{dialogueVerdict}</span>
+                <span><b>Zeitliche Abstimmung</b>{avVerdict}</span>
+                <span><b>Lippenformen</b>{phonemeVisemeVerdict}</span>
+              </div>
+            </div>
+          ) : null}
+          {showLipSyncRetry ? (
+            <div className="objective-analysis__recommendation" role="note" aria-label="Empfohlene Lip-Sync-Korrektur">
+              <div>
+                <strong>Nächsten Lip-Sync-Versuch verbessern</strong>
+                <p>
+                  Referenzbindung von {currentReferenceStrength?.toFixed(2).replace(".", ",")} auf{" "}
+                  {recommendedReferenceStrength.toFixed(2).replace(".", ",")} senken. Damit bekommt der
+                  Mund mehr Bewegungsfreiheit; Ziel sind vollständige Lippenschlüsse bei P, B und M.
+                </p>
+                <span>Dialog, Seed, Modelle und alle übrigen Einstellungen bleiben unverändert.</span>
+              </div>
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  onPrepareLipSyncRetry(output, recommendedReferenceStrength);
+                  setPreparedStrength(recommendedReferenceStrength);
+                }}
+              >
+                <SlidersHorizontal size={15} /> Verbesserten Versuch vorbereiten
+              </button>
+              {preparedStrength !== null ? (
+                <p className="objective-analysis__prepared" role="status">
+                  Vorbereitet mit Referenzbindung {preparedStrength.toFixed(2).replace(".", ",")}. Jetzt links prüfen
+                  und auf „Generieren“ klicken.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <details className="objective-analysis__technical">
+            <summary>Technische Messwerte anzeigen</summary>
+            <div className="objective-analysis__metrics" aria-label="Objektive Messwerte">
             <MetricRow label="Gesicht erkannt" value={percent(result.face?.detectionCoverage ?? 0)} help={fieldHelp.objectiveFaceDetection} />
             <MetricRow label="Landmarks verwertbar" value={percent(result.face?.geometryCoverage ?? 0)} help={fieldHelp.objectiveGeometryCoverage} />
             <MetricRow label="Nasenbewegung p95" value={metricWithUnit(result.face?.noseVelocityP95PerSecond ?? null, " EA/s")} help={fieldHelp.objectiveNoseVelocity} />
@@ -311,25 +402,23 @@ export function ObjectiveAnalysisPanel({
             ) : null}
             {phonemeVisemeMeasurement ? (
               <>
-                <MetricRow label="MFA/MediaPipe AV-Versatz" value={metricWithUnit(
+                <MetricRow label="Gemessener Zeitversatz" value={metricWithUnit(
                   phonemeVisemeMeasurement.globalAvLagMilliseconds,
                   " ms",
                   0,
                 )} help={fieldHelp.objectivePvRawLag} />
-                <MetricRow label="Roh-Lag-Eindeutigkeit" value={phonemeVisemeMeasurement.lagConfidence === null
+                <MetricRow label="Sicherheit des Zeitversatzes" value={phonemeVisemeMeasurement.lagConfidence === null
                   ? "Nicht messbar"
                   : percent(phonemeVisemeMeasurement.lagConfidence)} help={fieldHelp.objectivePvRawLagConfidence} />
-                <MetricRow label="Bilabialer Schluss F1" value={metricWithUnit(
-                  phonemeVisemeMeasurement.bilabialClosureF1,
-                  "",
-                  3,
-                )} help={fieldHelp.objectivePvBilabialF1} />
-                <MetricRow label="Mundöffnungskorrelation" value={metricWithUnit(
+                <MetricRow label="P/B/M-Lippenschluss" value={phonemeVisemeMeasurement.bilabialClosureF1 === null
+                  ? "Nicht messbar"
+                  : percent(phonemeVisemeMeasurement.bilabialClosureF1)} help={fieldHelp.objectivePvBilabialF1} />
+                <MetricRow label="Mundöffnung passt zum Ton" value={metricWithUnit(
                   phonemeVisemeMeasurement.openingCorrelation,
                   "",
                   3,
                 )} help={fieldHelp.objectivePvOpeningCorrelation} />
-                <MetricRow label="Lippenrundungskorrelation" value={metricWithUnit(
+                <MetricRow label="Lippenrundung passt zum Ton" value={metricWithUnit(
                   phonemeVisemeMeasurement.roundingCorrelation,
                   "",
                   3,
@@ -340,10 +429,10 @@ export function ObjectiveAnalysisPanel({
                 <MetricRow label="Bewegung in Phonempausen" value={phonemeVisemeMeasurement.pauseLeakRatio === null
                   ? "Nicht messbar"
                   : percent(phonemeVisemeMeasurement.pauseLeakRatio)} help={fieldHelp.objectivePvPauseLeak} />
-                <MetricRow label="Phone-Abdeckung" value={percent(
+                <MetricRow label="Abgedeckte Sprachlaute" value={percent(
                   phonemeVisemeMeasurement.phoneCoverage,
                 )} help={fieldHelp.objectivePvPhoneCoverage} />
-                <MetricRow label="Unbekannte Phones" value={phonemeVisemeMeasurement.unknownPhones.length > 0
+                <MetricRow label="Nicht erkannte Sprachlaute" value={phonemeVisemeMeasurement.unknownPhones.length > 0
                   ? phonemeVisemeMeasurement.unknownPhones.join(", ")
                   : "Keine"} help={fieldHelp.objectivePvUnknownPhones} />
                 <MetricRow label="Gesichtstrack-Abdeckung" value={percent(
@@ -375,13 +464,13 @@ export function ObjectiveAnalysisPanel({
                   " s",
                   2,
                 )} help={fieldHelp.objectivePvUsableDuration} />
-                <MetricRow label="MFA/MediaPipe Frames" value={String(
+                <MetricRow label="Ausgewertete Video-Frames" value={String(
                   phonemeVisemeMeasurement.sampledFrames,
                 )} help={fieldHelp.objectivePvSampledFrames} />
               </>
             ) : null}
-          </div>
-          <div className="objective-analysis__capabilities">
+            </div>
+            <div className="objective-analysis__capabilities">
             <span>Konditionierungs-AV <strong>{conditioningAvSync?.status === "measured"
               ? "Rohproxy, Phonem offen"
               : conditioningAvSync?.status === "failed"
@@ -398,24 +487,24 @@ export function ObjectiveAnalysisPanel({
                   : avSync?.status === "not-applicable"
                     ? "Nicht anwendbar"
                     : "Phonem-Evaluator fehlt"}</strong></span>
-            <span>Phonem/Visem <InfoTooltip text={fieldHelp.objectivePvCapability} /> <strong>{
+            <span>Laut-/Lippenprüfung <InfoTooltip text={fieldHelp.objectivePvCapability} /> <strong>{
               phonemeViseme?.status === "measured"
-                ? "Product-GO gemessen"
+                ? "Bestanden"
                 : phonemeViseme?.status === "measurement-only"
-                  ? "Rohmessung, Product-GO blockiert"
+                  ? "Prüfung aktiv"
                 : phonemeViseme?.status === "failed"
-                  ? "Manifest-/Evaluatorfehler"
+                  ? "Prüfung fehlgeschlagen"
                   : phonemeViseme?.status === "insufficient"
-                    ? "Nicht ausreichend"
+                    ? "Nicht eindeutig"
                     : phonemeViseme?.status === "not-applicable"
-                      ? "Nicht anwendbar"
+                      ? "Nicht nötig"
                       : phonemeViseme?.blockerCode === "runner-unavailable"
-                        ? "Runner fehlt"
+                        ? "Prüfung nicht verfügbar"
                         : phonemeViseme?.blockerCode === "legal-hold"
-                          ? "Legal Hold"
+                          ? "Nicht freigegeben"
                           : phonemeViseme?.blockerCode === "manifest-missing"
-                            ? "Modell fehlt"
-                            : "Technischer Hold"
+                            ? "Nicht eingerichtet"
+                            : "Vorübergehend nicht verfügbar"
             }</strong></span>
             <span>Identität <strong>{identity?.status === "measured"
               ? "SFace Rohwerte"
@@ -443,17 +532,18 @@ export function ObjectiveAnalysisPanel({
                         ? "Kein exakter Dialog"
                         : "Whisper nicht ausgeführt"
             }</strong></span>
-          </div>
-          {result.findings.length > 0 ? (
-            <div className="objective-analysis__findings">
-              {result.findings.map((finding) => (
-                <span key={finding.code} className={`is-${finding.level}`}>{finding.message}</span>
-              ))}
             </div>
-          ) : null}
-          <details className="objective-analysis__limitations">
-            <summary>Messgrenzen</summary>
-            {result.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
+            {result.findings.length > 0 ? (
+              <div className="objective-analysis__findings">
+                {result.findings.map((finding) => (
+                  <span key={finding.code} className={`is-${finding.level}`}>{finding.message}</span>
+                ))}
+              </div>
+            ) : null}
+            <details className="objective-analysis__limitations">
+              <summary>Messgrenzen</summary>
+              {result.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
+            </details>
           </details>
         </>
       ) : null}

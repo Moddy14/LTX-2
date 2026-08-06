@@ -14,10 +14,11 @@ type UploadButtonProps = {
   label: string;
   hint: string;
   icon?: ReactNode;
+  disabled?: boolean;
   onUploaded: (file: UploadedFile) => void;
 };
 
-export function UploadButton({ kind, accept, label, hint, icon, onUploaded }: UploadButtonProps) {
+export function UploadButton({ kind, accept, label, hint, icon, disabled = false, onUploaded }: UploadButtonProps) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -41,7 +42,7 @@ export function UploadButton({ kind, accept, label, hint, icon, onUploaded }: Up
   return (
     <span className="upload-control">
       <input ref={input} id={id} type="file" accept={accept} onChange={handleFile} hidden />
-      <button type="button" className="button button--secondary" onClick={() => input.current?.click()} disabled={busy}>
+      <button type="button" className="button button--secondary" onClick={() => input.current?.click()} disabled={busy || disabled}>
         {busy ? <LoaderCircle className="spin" size={16} /> : (icon ?? <Upload size={16} />)}
         {label}
       </button>
@@ -53,12 +54,14 @@ export function UploadButton({ kind, accept, label, hint, icon, onUploaded }: Up
 
 type ImageRowsProps = {
   images: GenerationRequest["images"];
+  mode: GenerationRequest["mode"];
+  numFrames: number;
   onChange: (images: GenerationRequest["images"]) => void;
   onPreview: (path: string, url: string) => void;
   previews: Record<string, string>;
 };
 
-export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsProps) {
+export function ImageRows({ images, mode, numFrames, onChange, onPreview, previews }: ImageRowsProps) {
   const imagesRef = useRef(images);
   imagesRef.current = images;
   const mountedRef = useRef(true);
@@ -79,9 +82,16 @@ export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsPr
   const [cropResult, setCropResult] = useState<string | null>(null);
   const add = (file: UploadedFile) => {
     onPreview(file.path, file.url);
+    const isFlf2v = mode === "keyframes";
     onChange([
       ...images,
-      { path: file.path, name: file.name, frameIndex: images.length === 0 ? 0 : images.length * 40, strength: 1, crf: 33 },
+      {
+        path: file.path,
+        name: file.name,
+        frameIndex: images.length === 0 ? 0 : isFlf2v ? numFrames - 1 : images.length * 40,
+        strength: isFlf2v ? 0.7 : 1,
+        crf: 33,
+      },
     ]);
   };
   const openCrop = (index: number) => {
@@ -136,13 +146,20 @@ export function ImageRows({ images, onChange, onPreview, previews }: ImageRowsPr
   return (
     <div className="asset-list">
       <div className="asset-list__toolbar">
-        <UploadButton kind="image" accept="image/png,image/jpeg,image/webp" label="Bild hinzufügen" hint={fieldHelp.imageUpload} icon={<ImagePlus size={16} />} onUploaded={add} />
+        <UploadButton kind="image" accept="image/png,image/jpeg,image/webp" label="Bild hinzufügen" hint={fieldHelp.imageUpload} icon={<ImagePlus size={16} />} disabled={mode === "keyframes" && images.length >= 2} onUploaded={add} />
         <button
           type="button"
           className="button button--secondary"
+          disabled={mode === "keyframes" && images.length >= 2}
           onClick={() => onChange([
             ...images,
-            { path: "", name: `Bild ${images.length + 1}`, frameIndex: images.length * 40, strength: 1, crf: 33 },
+            {
+              path: "",
+              name: `Bild ${images.length + 1}`,
+              frameIndex: images.length === 0 ? 0 : mode === "keyframes" ? numFrames - 1 : images.length * 40,
+              strength: mode === "keyframes" ? 0.7 : 1,
+              crf: 33,
+            },
           ])}
         >
           <Plus size={16} /> DGX-Pfad

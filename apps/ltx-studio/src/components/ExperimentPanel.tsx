@@ -11,15 +11,23 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import type { AdmissionPreflightReport } from "../../shared/admissionPreflight";
 import {
   experimentVariableLabels,
+  generationRequestDiffPaths,
   type ControlledExperiment,
   type ExperimentCandidate,
   type ExperimentCreateInput,
   type ExperimentVariableId,
 } from "../../shared/experiments";
-import type { GenerationRequest } from "../../shared/pipelines";
-import { requiredStartMemoryForRequests } from "../../shared/estimates";
+import {
+  hasDialogueIntent,
+  isAudioConditionedMode,
+  type GenerationRequest,
+} from "../../shared/pipelines";
+import { preflightAdmission } from "../api";
+import { armRetryable } from "../experimentArms";
+import { outputForArm } from "../experimentOutputs";
 import { fieldHelp } from "../fieldHelp";
 import type { Health, StudioJob, StudioOutput } from "../types";
 import { InfoTooltip, NumberField, SelectField, TextField } from "./Controls";
@@ -31,11 +39,6 @@ type ExperimentPanelProps = {
   jobs: StudioJob[];
   outputs: StudioOutput[];
   health: Health | null;
-  runtimeGate: {
-    minAvailableGiB: number;
-    minResidualMemoryGiB: number;
-    minSwapFreeGiB: number;
-  } | null;
   onCreate: (input: ExperimentCreateInput) => Promise<void>;
   onFreeze: (id: string) => Promise<void>;
   onLaunch: (id: string, arm: "baseline" | "candidate") => Promise<void>;
@@ -45,9 +48,22 @@ type ExperimentPanelProps = {
 
 function availableVariables(request: GenerationRequest): ExperimentVariableId[] {
   const variables: ExperimentVariableId[] = ["replicate-seed", "resolution"];
-  if (request.mode === "audio-to-video") variables.unshift("a2v-guidance");
+  if (isAudioConditionedMode(request.mode)) variables.unshift("a2v-guidance");
   if (request.images[0]) variables.push("reference-image-strength", "reference-image-crf");
   if (request.mode === "lipdub") variables.unshift("lipdub-reference-strength");
+  if (
+    (
+      hasDialogueIntent(request)
+      || isAudioConditionedMode(request.mode)
+      || request.mode === "id-lora"
+    )
+    && !request.postprocess.longcatLipsync.enabled
+    && !request.postprocess.latentSync.enabled
+    && !request.postprocess.museTalk.enabled
+    && !request.postprocess.lipForcing.enabled
+  ) {
+    variables.push("lipforcing-enabled");
+  }
   return variables;
 }
 
@@ -61,6 +77,8 @@ function initialValue(request: GenerationRequest, variable: ExperimentVariableId
       return request.images[0]?.crf === 0 ? 33 : 0;
     case "lipdub-reference-strength":
       return request.lipDub.referenceVideo.strength === 0.9 ? 1 : 0.9;
+    case "lipforcing-enabled":
+      return 1;
     case "replicate-seed":
       return request.seed === 23_072_026 ? 23_072_027 : 23_072_026;
     case "resolution":
@@ -82,6 +100,8 @@ function candidateFromState(
     case "reference-image-crf":
     case "replicate-seed":
       return { variable, value: Math.round(value) };
+    case "lipforcing-enabled":
+      return { variable };
     case "resolution":
       return { variable, width: Math.round(width), height: Math.round(height) };
   }
@@ -124,29 +144,15 @@ function experimentValue(
       return String(request.images[0]?.crf ?? 0);
     case "lipdub-reference-strength":
       return request.lipDub.referenceVideo.strength.toFixed(2).replace(/\.?0+$/, "");
+    case "lipforcing-enabled":
+      return request.postprocess.lipForcing.enabled
+        ? `an (${request.postprocess.lipForcing.decoder === "wan-vae" ? "Wan-VAE" : "TAEHV"})`
+        : "aus";
     case "replicate-seed":
       return String(request.seed);
     case "resolution":
       return `${request.width} x ${request.height}`;
   }
-}
-
-function outputForArm(
-  experiment: ControlledExperiment,
-  arm: 0 | 1,
-  outputs: StudioOutput[],
-): StudioOutput | undefined {
-  const selected = experiment.arms[arm];
-  return outputs.find((output) =>
-    output.name === selected.request.outputName
-    && output.jobId === selected.jobId
-    && output.experiment?.experimentId === experiment.id
-    && output.experiment.protocolSha256 === experiment.protocolSha256
-    && output.experiment.arm === selected.arm
-    && output.experiment.requestSha256 === selected.requestSha256
-    && output.experimentRequestVerified === true
-    && Boolean(output.provenance?.verifiedAt),
-  );
 }
 
 function currentAnalysisCompleted(output: StudioOutput | undefined): boolean {
@@ -158,16 +164,16 @@ function currentAnalysisCompleted(output: StudioOutput | undefined): boolean {
 function evaluatorStatusLabel(health: Health | null): string {
   const evaluator = health?.evaluators.phonemeViseme;
   if (!evaluator) return "Status fehlt";
-  if (evaluator.status === "measured") return "bereit";
-  if (evaluator.status === "measurement-only") return "Rohmessung";
-  if (evaluator.measurementReady) return "Rohmessung bereit, Product-GO blockiert";
-  if (evaluator.status === "insufficient") return "Messung unzureichend";
-  if (evaluator.status === "failed") return "Messung fehlgeschlagen";
-  if (evaluator.status === "not-applicable") return "nicht anwendbar";
+  if (evaluator.status === "measured") return "Prüfung bestanden";
+  if (evaluator.status === "measurement-only") return "Prüfung abgeschlossen";
+  if (evaluator.measurementReady) return "Prüfung aktiv";
+  if (evaluator.status === "insufficient") return "Ergebnis nicht eindeutig";
+  if (evaluator.status === "failed") return "Prüfung fehlgeschlagen";
+  if (evaluator.status === "not-applicable") return "nicht nötig";
   const blockerLabels: Record<string, string> = {
-    "legal-hold": "rechtlich gesperrt",
-    "manifest-missing": "Modellfreigabe fehlt",
-    "runner-unavailable": "Evaluator fehlt",
+    "legal-hold": "nicht freigegeben",
+    "manifest-missing": "nicht eingerichtet",
+    "runner-unavailable": "nicht verfügbar",
   };
   return blockerLabels[evaluator.blockerCode] ?? "nicht verfügbar";
 }
@@ -179,7 +185,6 @@ export function ExperimentPanel({
   jobs,
   outputs,
   health,
-  runtimeGate,
   onCreate,
   onFreeze,
   onLaunch,
@@ -187,6 +192,13 @@ export function ExperimentPanel({
   onCompare,
 }: ExperimentPanelProps) {
   const variables = useMemo(() => availableVariables(request), [request]);
+  const reusableBaseline = useMemo(() => outputs.find((output) =>
+    output.settingsAvailable
+    && output.request
+    && output.jobId
+    && output.provenance?.verifiedAt
+    && generationRequestDiffPaths(output.request, request).every((path) => path === "outputName")
+  ), [outputs, request]);
   const [title, setTitle] = useState("");
   const [variable, setVariable] = useState<ExperimentVariableId>(variables[0]);
   const [value, setValue] = useState(() => initialValue(request, variables[0]));
@@ -194,6 +206,7 @@ export function ExperimentPanel({
   const [height, setHeight] = useState(request.height);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preflights, setPreflights] = useState<Record<string, AdmissionPreflightReport>>({});
 
   useEffect(() => {
     if (variables.includes(variable)) return;
@@ -228,6 +241,7 @@ export function ExperimentPanel({
     await onCreate({
       title,
       baselineRequest: request,
+      ...(reusableBaseline ? { baselineOutputName: reusableBaseline.name } : {}),
       candidate: candidateFromState(variable, value, width, height),
     });
     setTitle("");
@@ -257,6 +271,11 @@ export function ExperimentPanel({
           options={variables.map((item) => ({ value: item, label: experimentVariableLabels[item] }))}
           onChange={selectVariable}
         />
+        {reusableBaseline ? (
+          <p className="experiment-fixed-value">
+            Verifizierte Baseline wird ohne neuen LTX-Render übernommen: {reusableBaseline.name}
+          </p>
+        ) : null}
         {variable === "resolution" ? (
           <div className="field-grid field-grid--2">
             <NumberField
@@ -278,6 +297,12 @@ export function ExperimentPanel({
               onChange={(next) => setHeight(next ?? request.height)}
             />
           </div>
+        ) : variable === "lipforcing-enabled" ? (
+          <p className="experiment-fixed-value">
+            Kandidat: LipForcing mit {request.postprocess.lipForcing.decoder === "wan-vae"
+              ? "qualitativem Wan-VAE-Decoder"
+              : "schnellem TAEHV-Decoder"}
+          </p>
         ) : (
           <NumberField
             label="Kandidatenwert"
@@ -315,48 +340,31 @@ export function ExperimentPanel({
             const candidate = experiment.arms[1];
             const baselineJob = jobs.find((job) => job.id === baseline.jobId);
             const candidateJob = jobs.find((job) => job.id === candidate.jobId);
-            const baselineRetryable = Boolean(
-              baselineJob && ["failed", "cancelled", "interrupted"].includes(baselineJob.status),
-            );
-            const candidateRetryable = Boolean(
-              candidateJob && ["failed", "cancelled", "interrupted"].includes(candidateJob.status),
-            );
             const baselineOutput = outputForArm(experiment, 0, outputs);
             const candidateOutput = outputForArm(experiment, 1, outputs);
+            const baselineRetryable = armRetryable(baseline, baselineJob, baselineOutput);
+            const candidateRetryable = armRetryable(candidate, candidateJob, candidateOutput);
             const candidateEnabled = (
               baselineJob?.status === "completed"
               && Boolean(baselineJob.runProvenance?.verifiedAt)
             ) || Boolean(baselineOutput);
-            const requiredMemoryGiB = requiredStartMemoryForRequests(
-              experiment.arms.map((arm) => arm.request),
-              {
-                minAvailableGiB: runtimeGate?.minAvailableGiB ?? 48,
-                minResidualMemoryGiB: runtimeGate?.minResidualMemoryGiB ?? 24,
-              },
-            );
-            const gateUnknownMessages = requiredMemoryGiB === null
-              ? ["LipDub-RAM wird beim Armstart aus dem Referenzvideo geprüft"]
-              : [];
             const gateMessages = health === null
-              ? ["Live-Ressourcenstatus fehlt"]
-              : [
-                  health.resources.swapFreeGiB === null
-                    ? "Swap nicht messbar"
-                    : health.resources.swapFreeGiB < (runtimeGate?.minSwapFreeGiB ?? 4)
-                      ? `Swap ${health.resources.swapFreeGiB.toFixed(2)} / ${(runtimeGate?.minSwapFreeGiB ?? 4).toFixed(2)} GiB`
-                      : null,
-                  health.resources.availableMemoryGiB === null
-                    ? "RAM nicht messbar"
-                    : requiredMemoryGiB !== null
-                      && health.resources.availableMemoryGiB < requiredMemoryGiB
-                      ? `RAM ${health.resources.availableMemoryGiB.toFixed(1)} / ${requiredMemoryGiB.toFixed(1)} GiB`
-                      : null,
-                  health.orchestrator === "missing" ? "Orchestrator nicht erreichbar" : null,
-                ].filter((message): message is string => Boolean(message));
+              ? ["Live-Systemstatus fehlt"]
+              : health.orchestrator === "missing"
+                ? ["DGX-Orchestrator nicht erreichbar"]
+                : [];
             const phonemeViseme = health?.evaluators.phonemeViseme;
             const analysesCompleted = currentAnalysisCompleted(baselineOutput)
               && currentAnalysisCompleted(candidateOutput);
             const outputsReady = Boolean(baselineOutput && candidateOutput);
+            const startableArmRequest = experiment.status !== "frozen"
+              ? null
+              : (!baseline.jobId || baselineRetryable)
+                ? baseline.request
+                : (!candidate.jobId || candidateRetryable)
+                  ? candidate.request
+                  : null;
+            const preflight = preflights[experiment.id];
             return (
               <article className="experiment-item" key={experiment.id}>
                 <div className="experiment-item__heading">
@@ -410,27 +418,61 @@ export function ExperimentPanel({
                 <div className="experiment-gates">
                   {gateMessages.length > 0 ? (
                     <span className="is-waiting">
-                      <TriangleAlert size={14} /> Start wartet: {gateMessages.join(" · ")}
-                    </span>
-                  ) : gateUnknownMessages.length > 0 ? (
-                    <span className="is-waiting">
-                      <TriangleAlert size={14} /> Startprüfung offen: {gateUnknownMessages.join(" · ")}
+                      <TriangleAlert size={14} /> Queue nicht bereit: {gateMessages.join(" · ")}
                     </span>
                   ) : (
-                    <span className="is-ready"><CircleCheck size={14} /> Lokale Startgates bereit</span>
+                    <span className="is-ready"><CircleCheck size={14} /> DGX-Queue entscheidet den Start automatisch</span>
                   )}
-                  <span className={phonemeViseme?.status === "measured" ? "is-ready" : "is-waiting"}>
-                    {phonemeViseme?.status === "measured"
+                  <span className={phonemeViseme?.measurementReady ? "is-ready" : "is-waiting"}>
+                    {phonemeViseme?.measurementReady
                       ? <CircleCheck size={14} />
                       : <TriangleAlert size={14} />}
-                    Phonem/Visem: {evaluatorStatusLabel(health)}
+                    Laut-/Lippenprüfung: {evaluatorStatusLabel(health)}
                     <InfoTooltip
                       text={phonemeViseme?.message
-                        ?? "Der Phonem-/Visem-Evaluator prüft zeitliche Zuordnung und Mundformen. Ohne freigegebenen Evaluator bleibt der SOTA-Nachweis blockiert."}
+                        ?? "Die App vergleicht gesprochene Laute mit der sichtbaren Lippenbewegung und prüft besonders den Lippenschluss bei P, B und M."}
                     />
                   </span>
                 </div>
+                {preflight ? (
+                  <div className="experiment-gates">
+                    <span className={preflight.verdict === "start-frei" ? "is-ready" : "is-waiting"}>
+                      {preflight.verdict === "start-frei"
+                        ? <CircleCheck size={14} />
+                        : <TriangleAlert size={14} />}
+                      Startprüfung: {preflight.verdict === "start-frei"
+                        ? "Der Orchestrator würde den Lauf jetzt zulassen."
+                        : preflight.verdict === "wartet"
+                          ? "Der Orchestrator würde den Lauf jetzt warten lassen."
+                          : "Die Orchestrator-Entscheidung ist gerade nicht prüfbar."}
+                      <InfoTooltip text={preflight.notes.join(" ")} />
+                    </span>
+                    {preflight.steps.map((step) => (
+                      <span key={step.label} className={step.accepted ? "is-ready" : "is-waiting"}>
+                        {step.accepted ? <CircleCheck size={14} /> : <TriangleAlert size={14} />}
+                        {step.label} · {step.estimatedMemoryGiB} GiB: {step.message}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="experiment-actions">
+                  {startableArmRequest ? (
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      disabled={busyAction !== null}
+                      title="Read-only beim DGX-Orchestrator prüfen, ob jeder Ressourcenschritt des Laufs jetzt zugelassen würde"
+                      onClick={() => void action(`preflight-${experiment.id}`, async () => {
+                        const report = await preflightAdmission(startableArmRequest);
+                        setPreflights((current) => ({ ...current, [experiment.id]: report }));
+                      })}
+                    >
+                      {busyAction === `preflight-${experiment.id}`
+                        ? <LoaderCircle className="spin" size={16} />
+                        : <ScanSearch size={16} />}
+                      Startprüfung
+                    </button>
+                  ) : null}
                   {experiment.status === "draft" ? (
                     <button
                       type="button"

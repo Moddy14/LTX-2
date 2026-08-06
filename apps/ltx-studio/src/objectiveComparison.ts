@@ -75,6 +75,11 @@ const settingLabels: Record<string, string> = {
   "postprocess.longcatLipsync.enabled": "LongCat-Nachbearbeitung",
   "postprocess.longcatLipsync.resolution": "LongCat-Auflösung",
   "postprocess.longcatLipsync.blend": "LongCat-Blend",
+  "postprocess.latentSync.enabled": "LatentSync-Nachbearbeitung",
+  "postprocess.latentSync.steps": "LatentSync-Schritte",
+  "postprocess.latentSync.guidance": "LatentSync-Audioführung",
+  "postprocess.lipForcing.enabled": "LipForcing-14B-Nachbearbeitung",
+  "postprocess.lipForcing.decoder": "LipForcing-Decoder",
 };
 
 type FlatSetting = {

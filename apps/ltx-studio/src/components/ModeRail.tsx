@@ -6,7 +6,9 @@ import {
   Gauge,
   Images,
   Mic2,
+  Music2,
   ScanLine,
+  UserRoundCog,
   WandSparkles,
 } from "lucide-react";
 
@@ -17,8 +19,11 @@ const icons = {
   "two-stage-hq": WandSparkles,
   "one-stage": Gauge,
   distilled: Film,
+  "text-to-audio": Music2,
   "ic-lora": ScanLine,
+  "id-lora": UserRoundCog,
   keyframes: Images,
+  "image-audio-to-video": AudioLines,
   "audio-to-video": AudioLines,
   lipdub: Mic2,
   retake: Blend,
@@ -45,6 +50,7 @@ export function ModeRail({ active, onChange }: { active: PipelineMode; onChange:
                 className={`mode-button ${active === pipeline.id ? "is-active" : ""}`}
                 onClick={() => onChange(pipeline.id)}
                 aria-current={active === pipeline.id ? "page" : undefined}
+                aria-label={`${pipeline.shortLabel} ${pipeline.quality}`}
               >
                 <Icon size={19} strokeWidth={1.8} />
                 <span>{pipeline.shortLabel}</span>

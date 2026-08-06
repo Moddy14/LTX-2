@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createDefaultRequest } from "../../shared/pipelines.js";
+import { createDefaultRequest, pipelineModes } from "../../shared/pipelines.js";
 import { applyExperimentCandidate } from "../../shared/experiments.js";
 
 test.beforeEach(async ({ page }) => {
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 test("desktop exposes every production mode and contextual controls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop-only density assertions");
   const modes = page.locator(".mode-button");
-  await expect(modes).toHaveCount(9);
+  await expect(modes).toHaveCount(pipelineModes.length);
   await expect(page.locator(".run-button")).toBeVisible();
   await expect(page.getByText("Steuern", { exact: true })).toBeVisible();
   await expect(page.getByText("Bearbeiten", { exact: true })).toBeVisible();
@@ -20,19 +20,46 @@ test("desktop exposes every production mode and contextual controls", async ({ p
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("HQ Zwei-Stufen");
   await expect(page.getByLabel("LoRA Stufe 1")).toBeVisible();
 
-  await page.getByRole("button", { name: /Audio Audio-synchron/ }).click();
+  await page.getByRole("button", { name: /Audio Experimentell/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
   await expect(page.getByRole("button", { name: "Sprachspur hochladen" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Finale Tonspur hochladen" })).toBeVisible();
   const guidanceSection = page.locator(".editor-section").filter({ has: page.getByRole("heading", { name: "Guidance" }) });
   await expect(guidanceSection.locator(".advanced-block")).toHaveCount(1);
 
-  await page.getByRole("button", { name: /LipDub Redubbing/ }).click();
+  await page.locator(".mode-button").filter({ hasText: "LipDub" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("LipDub / Text-Redubbing");
   await expect(page.getByRole("heading", { name: "LipDub Referenz" })).toBeVisible();
   await expect(page.getByLabel("Zielsprache")).toBeVisible();
   await expect(page.getByLabel("Genau ein Sprecher bestätigt")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Offiziell Comfy HQ" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Checkpoint Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-22b-dev.safetensors",
+  );
+  await expect(
+    page.locator(".paired-field").filter({ has: page.getByLabel("Distilled LoRA Pfad") }).getByLabel("Stärke"),
+  ).toHaveValue("0.5");
   await expect(page.getByLabel("LipDub IC-LoRA Pfad")).toBeVisible();
+  await expect(page.getByLabel("Spatial Upscaler Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+  );
+  const museTalk = page.getByLabel("MuseTalk 1.5 Lippen-Inpainting");
+  const latentSync = page.getByLabel("LatentSync 1.6 Qualitätsrefiner");
+  const lipForcing = page.getByLabel("LipForcing 14B Lippenrefiner");
+  await expect(museTalk).not.toBeChecked();
+  await expect(lipForcing).not.toBeChecked();
+  await lipForcing.check();
+  await expect(page.getByRole("button", { name: "Maximale Qualität", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await museTalk.check();
+  await expect(lipForcing).not.toBeChecked();
+  await expect(page.getByRole("spinbutton", { name: "Kinn-Zugabe" })).toHaveValue("10");
+  await expect(page.getByRole("spinbutton", { name: "Wangen-Schutzbreite" })).toHaveValue("90");
+  await latentSync.check();
+  await expect(museTalk).not.toBeChecked();
+  await expect(latentSync).toBeChecked();
 
   await page.getByRole("button", { name: /Retake Nicht-destruktiv/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Retake / Bereich ersetzen");
@@ -50,7 +77,7 @@ test("desktop exposes every production mode and contextual controls", async ({ p
 });
 
 test("audio mode separates clean speech conditioning from the optional final mix", async ({ page }, testInfo) => {
-  const audioMode = page.locator(".mode-button").filter({ hasText: "Audio" });
+  const audioMode = page.getByRole("button", { name: /Audio Experimentell/ });
   await audioMode.scrollIntoViewIfNeeded();
   await audioMode.click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
@@ -69,27 +96,167 @@ test("audio mode separates clean speech conditioning from the optional final mix
   await page.screenshot({ path: testInfo.outputPath("audio-conditioning-and-final-mix.png"), fullPage: true });
 });
 
-test("prompt validation stays in context", async ({ page }) => {
+test("IC-LoRA switches between every published LTX-2.3 profile", async ({ page }, testInfo) => {
+  await page.locator(".mode-button").filter({ hasText: "IC-LoRA" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Offiziell IC-LoRA Kontrolle");
+  await expect(page.getByRole("button", { name: "Union Control" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Kontrollvideo" })).toBeVisible();
+  await expect(page.getByLabel("Union-Control IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Union-Control/"
+    + "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+  );
+  await expect(page.getByLabel("Checkpoint Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-fp8/ltx-2.3-22b-distilled-fp8.safetensors",
+  );
+  await expect(page.getByLabel("Gemma Abliterated LoRA Pfad")).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "FPS" })).toHaveValue("25");
+  await page.screenshot({ path: testInfo.outputPath("ic-lora-union-control.png"), fullPage: true });
+
+  await page.getByRole("button", { name: "Ingredients" }).click();
+
+  await expect(page.getByRole("button", { name: "Ingredients" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Zutaten-Referenzbild" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kontrollvideo" })).toHaveCount(0);
+  await expect(page.getByLabel("Ingredients IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Ingredients/"
+    + "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+  );
+  await expect(page.getByLabel("Checkpoint Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-22b-dev.safetensors",
+  );
+  await expect(
+    page.locator(".paired-field").filter({ has: page.getByLabel("Distilled LoRA Pfad") }).getByLabel("Stärke"),
+  ).toHaveValue("0.5");
+  await expect(page.getByRole("spinbutton", { name: "Breite" })).toHaveValue("960");
+  await expect(page.getByRole("spinbutton", { name: "Höhe" })).toHaveValue("544");
+  await expect(page.getByRole("spinbutton", { name: "FPS" })).toHaveValue("24");
+
+  await page.getByRole("button", { name: "Motion Track" }).click();
+  await expect(page.getByRole("heading", { name: "Bewegungs-Referenzbild" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Track-Video" })).toBeVisible();
+  await expect(page.getByLabel("Motion-Track IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Motion-Track-Control/"
+    + "ltx-2.3-22b-ic-lora-motion-track-control-ref0.5.safetensors",
+  );
+
+  await page.getByRole("button", { name: "Pixel x4" }).click();
+  await expect(page.getByRole("heading", { name: "Bewegungs-Referenzbild" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Quellvideo" })).toBeVisible();
+  await expect(page.getByLabel("Pixel Spatial Upscaler x4 IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Pixel-Spatial-Upscaler/"
+    + "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x4-0.9.safetensors",
+  );
+
+  await page.getByRole("button", { name: "V2V Rasur" }).click();
+  await expect(page.getByLabel("Instant-Shave V2V IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Instant-Shave/"
+    + "ltx-2.3-22b-ic-lora-instant-shave-0.9.safetensors",
+  );
+
+  await page.getByRole("button", { name: "Inpainting" }).click();
+  await expect(page.getByRole("button", { name: "Video zum Ausbessern" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inpainting-Maskenvideo" })).toBeVisible();
+  await expect(page.getByLabel("In-/Outpainting IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-In-Outpainting/"
+    + "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
+  );
+  await expect(page.getByRole("spinbutton", { name: "Breite" })).toHaveValue("1920");
+  await expect(page.getByRole("spinbutton", { name: "Höhe" })).toHaveValue("1088");
+
+  await page.getByRole("button", { name: "Outpainting" }).click();
+  await expect(page.getByRole("button", { name: "Video zum Erweitern" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inpainting-Maskenvideo" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "HDR", exact: true }).click();
+  await expect(page.getByLabel("HDR IC-LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-HDR/"
+    + "ltx-2.3-22b-ic-lora-hdr-0.9.safetensors",
+  );
+  await expect(page.getByLabel("HDR-Szenen-Embeddings Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-HDR/"
+    + "ltx-2.3-22b-ic-lora-hdr-scene-emb.safetensors",
+  );
+  await expect(page.getByLabel("Gemma Root Pfad")).toHaveCount(0);
+  await expect(page.getByLabel("Distilled Checkpoint Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors",
+  );
+  await expect(page.getByLabel("Spatial Upscaler Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+  );
+  await expect(page.getByLabel("HDR hohe Zeitqualität")).not.toBeChecked();
+});
+
+test("official text-to-audio exposes a WAV workflow without video-only controls", async ({ page }, testInfo) => {
+  await page.locator(".mode-button").filter({ hasText: "T2A" }).click();
+
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Offiziell Text zu Audio");
+  await expect(page.getByLabel("Audio-Beschreibung")).toBeVisible();
+  await expect(page.getByLabel("Ausgabedatei")).toHaveValue("ltx-text-to-audio.wav");
+  await expect(page.getByLabel("Checkpoint Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-22b-dev.safetensors",
+  );
+  await expect(page.getByLabel("Distilled LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+  );
+  await expect(
+    page.locator(".paired-field").filter({ has: page.getByLabel("Distilled LoRA Pfad") }).getByLabel("Stärke"),
+  ).toHaveValue("0.5");
+  await expect(page.getByRole("button", { name: "FP8 Cast" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Format-Preset")).toHaveCount(0);
+  await expect(page.getByLabel("Breite", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Lippen-Synchronität" })).toHaveCount(0);
+  const guidanceSection = page.locator(".editor-section").filter({ has: page.getByRole("heading", { name: "Guidance" }) });
+  await expect(guidanceSection.locator(".advanced-block")).toHaveCount(1);
+  await expect(guidanceSection.getByText("Audio", { exact: true })).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+  await page.screenshot({ path: testInfo.outputPath("official-text-to-audio.png"), fullPage: true });
+});
+
+test("official model binding and prompt validation stay in context", async ({ page }) => {
   const prompt = page.getByLabel("Positive Beschreibung");
   const checkpoint = page.getByLabel("Checkpoint Pfad");
   const gemmaRoot = page.getByLabel("Gemma Root Pfad");
+  const outputName = page.getByLabel("Ausgabedatei");
   await prompt.fill("A deliberate camera move through a detailed workshop.");
-  await expect(checkpoint).toHaveValue(/ltx-e2e-checkpoint\.safetensors$/);
-  await expect(gemmaRoot).toHaveValue(/model-inventory\/gemma$/);
+  await expect(checkpoint).toHaveValue(/ltx-2\.3-22b-dev-fp8\.safetensors$/);
+  await expect(gemmaRoot).toHaveValue(/google__gemma-3-12b-it-qat-q4_0-unquantized$/);
   await checkpoint.fill("");
   await gemmaRoot.fill("");
-  await expect(checkpoint).toHaveValue("");
-  await expect(gemmaRoot).toHaveValue("");
+  await expect(checkpoint).toHaveValue(/ltx-2\.3-22b-dev-fp8\.safetensors$/);
+  await expect(gemmaRoot).toHaveValue(/google__gemma-3-12b-it-qat-q4_0-unquantized$/);
   await expect(page.getByText("53 / 16.000", { exact: true })).toBeVisible();
+  await outputName.fill("");
   await page.locator(".run-button").click();
-  await expect(page.getByRole("alert")).toContainText("Checkpoint fehlt.");
-  await expect(page.getByRole("alert")).toContainText("Gemma Root fehlt.");
+  await expect(page.getByRole("alert")).toContainText(
+    "Ausgabedatei muss mit einer Zahl oder einem Buchstaben beginnen",
+  );
+});
+
+test("an unavailable experiment archive does not hide live DGX status or model inventory", async ({ page }) => {
+  await page.route("**/api/experiments", async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Historisches Experiment verwendet ein veraltetes Schema." }),
+    });
+  });
+  await page.goto("/");
+
+  await expect(page.getByRole("alert")).toContainText("Historisches Experiment verwendet ein veraltetes Schema.");
+  await expect(page.getByTitle("Python Engine")).toHaveClass(/health-item--ok/);
+  await expect(page.getByTitle("Verfügbarer Arbeitsspeicher; Startfreigabe erfolgt über die DGX-Queue"))
+    .not.toContainText("Unbekannt");
+  await expect(page.getByRole("textbox", { name: "Checkpoint Pfad", exact: true })).toBeVisible();
 });
 
 test("structured prompt, continuity, dialogue warning and presets are usable", async ({ page }) => {
-  await page.getByText("Prompt-Bausteine", { exact: true }).click();
+  await page.getByText("Weitere Prompt-Bausteine", { exact: true }).click();
   await page.getByRole("textbox", { name: "Motiv", exact: true }).fill("Eine Restauratorin in einer Werkstatt");
-  await page.getByRole("textbox", { name: "Dialog", exact: true }).fill('Sie sagt: "Das Original bleibt erhalten."');
+  await page.getByRole("textbox", { name: "Gesprochener Text", exact: true }).fill(
+    'Sie sagt: "Das Original bleibt erhalten."',
+  );
   await expect(page.getByText("Dialog erkannt:")).toBeVisible();
 
   await page.getByText("Projekt und Kontinuität", { exact: true }).click();
@@ -100,7 +267,24 @@ test("structured prompt, continuity, dialogue warning and presets are usable", a
   await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("1024");
   await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("1536");
   await page.getByLabel("Dauer-Preset").selectOption("10");
-  await expect(page.getByRole("spinbutton", { name: "Frames", exact: true })).toHaveValue("241");
+  await expect(page.getByRole("spinbutton", { name: "Frames", exact: true })).toHaveValue("249");
+});
+
+test("adding native dialogue immediately selects the complete official speech stack", async ({ page }) => {
+  await page.getByLabel("Gesprochener Text", { exact: true }).fill(
+    "Dieser Satz aktiviert den offiziellen Sprachpfad.",
+  );
+
+  await expect(page.getByLabel("Distilled LoRA Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Comfy-Org__ltx-2.3/split_files/loras/"
+    + "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors",
+  );
+  await expect(page.getByLabel("Spatial Upscaler Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+  );
+  await expect(page.getByLabel("Gemma Root Pfad")).toHaveValue(
+    "/home/moddy/LTX-2.3-max/google__gemma-3-12b-it-qat-q4_0-unquantized",
+  );
 });
 
 test("prepared draft link fills the editor without starting a job", async ({ page }) => {
@@ -154,6 +338,7 @@ test("controlled experiments freeze one variable before either arm can run", asy
   request.outputName = "controlled-guidance.mp4";
   request.models.checkpointPath = "/models/checkpoint.safetensors";
   request.models.gemmaRoot = "/models/gemma";
+  request.models.gemmaLora = { path: "/models/gemma-lora.safetensors", strength: 1 };
   request.models.spatialUpscalerPath = "/models/upscaler.safetensors";
   request.models.distilledLora = { path: "/models/distilled-lora.safetensors", strength: 1 };
   request.audio.path = "/inputs/speech.wav";
@@ -259,6 +444,10 @@ test("controlled experiments freeze one variable before either arm can run", asy
   const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
   await page.getByText("Experiment vorregistrieren", { exact: true }).click();
+  await page.getByLabel("Kontrollierte Variable").selectOption("lipforcing-enabled");
+  await expect(page.getByText("Kandidat: LipForcing mit qualitativem Wan-VAE-Decoder")).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "Kandidatenwert", exact: true })).toHaveCount(0);
+  await page.getByLabel("Kontrollierte Variable").selectOption("a2v-guidance");
   await page.getByLabel("Experimentname").fill("A2V Guidance 5 gegen 3");
   await expect(page.getByLabel("Kontrollierte Variable")).toHaveValue("a2v-guidance");
   await expect(page.getByRole("spinbutton", { name: "Kandidatenwert", exact: true })).toHaveValue("3");
@@ -271,8 +460,8 @@ test("controlled experiments freeze one variable before either arm can run", asy
   await expect(page.locator(".experiment-arms")).toContainText("B · 3");
   await expect(page.locator(".experiment-item__facts")).toContainText(`Seed ${request.seed}`);
   await expect(page.locator(".experiment-item__facts")).toContainText("LongCat aus");
-  await expect(page.locator(".experiment-gates")).toContainText("Phonem/Visem: Modellfreigabe fehlt");
-  await expect(page.locator(".experiment-gates")).toContainText(/Lokale Startgates bereit|Start wartet/);
+  await expect(page.locator(".experiment-gates")).toContainText("Laut-/Lippenprüfung: nicht eingerichtet");
+  await expect(page.locator(".experiment-gates")).toContainText("DGX-Queue entscheidet den Start automatisch");
   await expect(page.getByRole("button", { name: "Baseline starten" })).toBeVisible();
   await expect(page.getByText(/SOTA-Evidence bleibt bis zu allen Product-Gates blockiert/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -465,7 +654,9 @@ test("stale LipDub reference preparation does not overwrite a changed editor mod
   await page.getByRole("button", { name: "Kalibrierclip erstellen" }).click();
   await expect.poll(() => typeof releasePreparation === "function").toBe(true);
   expect(capturedTrimDuration).toBeCloseTo(3.0416667, 6);
-  await page.locator(".mode-button").filter({ hasText: "Distilled" }).click();
+  await page.locator(".mode-button").filter({
+    has: page.getByText("Distilled", { exact: true }),
+  }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Distilled");
   const release = releasePreparation;
   if (!release) throw new Error("LipDub reference preparation request was not captured.");
@@ -548,10 +739,15 @@ test("speech quality scorecard persists six ratings and remains usable on narrow
   await page.screenshot({ path: testInfo.outputPath("speech-quality-scorecard.png"), fullPage: true });
 });
 
-test("objective speech analysis exposes raw measurements and honest capability gaps", async ({ page }, testInfo) => {
-  const request = createDefaultRequest("audio-to-video");
+test("objective speech analysis explains defects and prepares a targeted LipDub retry", async ({ page }, testInfo) => {
+  const request = createDefaultRequest("lipdub");
   request.outputName = "speech-objective-analysis.mp4";
   request.promptParts.dialogue = "Bitte prüfe meine Lippen. Der Ton passt jetzt.";
+  request.lipDub.referenceVideo = {
+    path: "/inputs/reference.mp4",
+    name: "reference.mp4",
+    strength: 1,
+  };
   const modifiedAt = "2026-07-24T18:00:00.000Z";
   const output = {
     name: request.outputName,
@@ -798,7 +994,12 @@ test("objective speech analysis exposes raw measurements and honest capability g
 
   await page.getByRole("button", { name: "Objektiv analysieren" }).click();
   await expect(page.getByRole("heading", { name: "Objektive Ausgabeanalyse" })).toBeVisible();
-  await expect(page.locator(".objective-analysis__status")).toHaveText("Messung unzureichend");
+  await expect(page.locator(".objective-analysis__status")).toHaveText("Lip-Sync geprüft");
+  await expect(page.locator(".objective-analysis__verdict")).toContainText(
+    "Lip-Sync hat erkennbare Schwächen",
+  );
+  await expect(page.locator(".objective-analysis__technical")).not.toHaveAttribute("open", "");
+  await page.getByText("Technische Messwerte anzeigen", { exact: true }).click();
   const metricValue = (label: string) => page.locator(
     `.objective-analysis__metric[data-metric-label="${label}"] > strong`,
   );
@@ -812,9 +1013,9 @@ test("objective speech analysis exposes raw measurements and honest capability g
   await expect(metricValue("Mundhaut-Pixelabdeckung p10")).toHaveText("91 %");
   await expect(metricValue("Dialog-Wortfehlerrate")).toHaveText("13 %");
   await expect(metricValue("Wörter mit Mundbewegung")).toHaveText("100 %");
-  await expect(metricValue("MFA/MediaPipe AV-Versatz")).toHaveText("42 ms");
-  await expect(metricValue("Bilabialer Schluss F1")).toHaveText("0.750");
-  await expect(metricValue("Unbekannte Phones")).toHaveText("Keine");
+  await expect(metricValue("Gemessener Zeitversatz")).toHaveText("42 ms");
+  await expect(metricValue("P/B/M-Lippenschluss")).toHaveText("75 %");
+  await expect(metricValue("Nicht erkannte Sprachlaute")).toHaveText("Keine");
   await expect(page.locator(".objective-analysis__metric .tooltip")).toHaveCount(54);
   const analysisPanelBox = await page.locator(".objective-analysis").boundingBox();
   expect(analysisPanelBox).not.toBeNull();
@@ -834,10 +1035,20 @@ test("objective speech analysis exposes raw measurements and honest capability g
     );
   }
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Rohproxy, Phonem offen");
-  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Phonem/Visem");
-  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Rohmessung, Product-GO blockiert");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Laut-/Lippenprüfung");
+  await expect(page.locator(".objective-analysis__capabilities")).toContainText("Prüfung aktiv");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("SFace Rohwerte");
   await expect(page.locator(".objective-analysis__capabilities")).toContainText("Whisper-Wortmessung");
+  await expect(page.locator(".objective-analysis__recommendation")).toContainText(
+    "Referenzbindung von 1,00 auf 0,80 senken",
+  );
+  await page.getByRole("button", { name: "Verbesserten Versuch vorbereiten" }).click();
+  await expect(page.getByRole("spinbutton", { name: "Referenzstärke", exact: true })).toHaveValue("0.8");
+  await expect(page.getByLabel("Gesprochener Text", { exact: true })).toHaveValue(request.promptParts.dialogue);
+  await expect(page.getByLabel("Ausgabedatei")).toHaveValue("speech-objective-analysis-edit01.mp4");
+  await expect(page.locator(".objective-analysis__prepared")).toContainText(
+    "Vorbereitet mit Referenzbindung 0,80",
+  );
   await expect(page.locator(".objective-analysis__actions")).toContainText("keine DGX-Modellbelegung");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("speech-objective-analysis.png"), fullPage: true });
@@ -938,8 +1149,8 @@ test("objective speech analysis exposes raw measurements and honest capability g
     },
   };
   await page.reload();
-  await expect(page.locator(".objective-analysis__status")).toHaveText("Messung unzureichend");
-  await expect(page.locator(".output-library__details")).toContainText("Objektive Messung unzureichend");
+  await expect(page.locator(".objective-analysis__status")).toHaveText("Prüfung unvollständig");
+  await expect(page.locator(".output-library__details")).toContainText("Video geprüft, Lip-Sync nicht eindeutig");
   await expect(page.locator(".objective-analysis__metric").filter({ hasText: "AV-Dauerdifferenz" }).locator("strong")).toHaveText("Nicht messbar");
 });
 
@@ -1175,9 +1386,9 @@ test("durable outputs provide a gated objective comparison after job history is 
   }));
   await page.reload();
 
-  await page.getByLabel("Erzeugtes Video").selectOption("comparison-b.mp4");
+  await page.getByLabel("Erzeugte Ausgabe").selectOption("comparison-b.mp4");
   await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
-  await page.getByLabel("Erzeugtes Video").selectOption("comparison-a.mp4");
+  await page.getByLabel("Erzeugte Ausgabe").selectOption("comparison-a.mp4");
   await page.getByTitle("Ausgabe zum Vergleich hinzufügen").click();
 
   await expect(page.getByRole("heading", { name: "Objektiver A/B-Vergleich" })).toBeVisible();
@@ -1279,7 +1490,7 @@ test("an in-flight image crop cannot overwrite an editor that has moved on", asy
 
   await expect(page.getByLabel("portrait.png")).toBeDisabled();
   await expect(page.getByTitle("Bild entfernen")).toBeDisabled();
-  const audioMode = page.locator(".mode-button").filter({ hasText: "Audio" });
+  const audioMode = page.getByRole("button", { name: /Audio Experimentell/ });
   await audioMode.scrollIntoViewIfNeeded();
   await audioMode.click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Audio zu Video");
@@ -1304,9 +1515,10 @@ test("field help explains purpose and recommended input", async ({ page }) => {
   expect(await page.locator(".segmented-field:visible:not(:has(.tooltip))").count()).toBe(0);
 });
 
-test("generated video picker restores every stored setting", async ({ page }) => {
+test("generated video picker exposes dialogue, restores settings, and deletes the output", async ({ page }) => {
   const stored = createDefaultRequest("audio-to-video");
   stored.outputName = "picker-source.mp4";
+  stored.promptParts.dialogue = "Dieser Satz muss in der Ausgabebibliothek sichtbar sein.";
   stored.seed = 987654;
   stored.width = 320;
   stored.height = 576;
@@ -1314,10 +1526,11 @@ test("generated video picker restores every stored setting", async ({ page }) =>
   stored.numInferenceSteps = 8;
   stored.quantization.mode = "fp8-cast";
   stored.postprocess.longcatLipsync.enabled = true;
+  let deleted = false;
   await page.route("**/api/outputs", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
-      outputs: [{
+      outputs: deleted ? [] : [{
         name: stored.outputName,
         url: "/api/outputs/picker-source.mp4",
         sizeBytes: 123456,
@@ -1329,23 +1542,105 @@ test("generated video picker restores every stored setting", async ({ page }) =>
       }],
     }),
   }));
+  await page.route("**/api/outputs/picker-source.mp4", (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: "" });
+    }
+    expect(route.request().method()).toBe("DELETE");
+    deleted = true;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        deleted: {
+          name: stored.outputName,
+          sizeBytes: 123456,
+          deletedArtifacts: [stored.outputName, `${stored.outputName}.ltx-settings.json`],
+        },
+      }),
+    });
+  });
   await page.reload();
 
-  await expect(page.getByLabel("Erzeugtes Video")).toHaveValue("picker-source.mp4");
+  await expect(page.getByLabel("Erzeugte Ausgabe")).toHaveValue("picker-source.mp4");
+  await expect(page.getByLabel("Gesprochener Text", { exact: true })).toBeVisible();
   await expect(page.locator(".output-settings-summary")).toContainText("Seed");
   await expect(page.locator(".output-settings-summary")).toContainText("987654");
   await page.getByRole("button", { name: "Alle Einstellungen übernehmen" }).click();
+  await expect(page.getByLabel("Gesprochener Text", { exact: true })).toHaveValue(
+    "Dieser Satz muss in der Ausgabebibliothek sichtbar sein.",
+  );
   await expect(page.getByLabel("Ausgabedatei")).toHaveValue("picker-source-edit01.mp4");
   await expect(page.getByRole("spinbutton", { name: "Frames", exact: true })).toHaveValue("25");
   await expect(page.getByLabel("Breite", { exact: true })).toHaveValue("320");
   await expect(page.getByLabel("Höhe", { exact: true })).toHaveValue("576");
   await expect(page.getByRole("button", { name: "FP8 Cast" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("LongCat-Lippenpass")).toBeChecked();
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("picker-source.mp4");
+    await dialog.accept();
+  });
+  await page.getByTitle("Ausgabe und zugehörige Daten löschen").click();
+  await expect(page.getByText("Noch keine MP4- oder WAV-Ausgabe im Studio-Ordner")).toBeVisible();
+});
+
+test("terminal jobs can be removed from persistent history", async ({ page }) => {
+  const request = createDefaultRequest("two-stage");
+  request.outputName = "obsolete-job.mp4";
+  const job = {
+    id: "44444444-4444-4444-8444-444444444444",
+    status: "failed" as const,
+    mode: request.mode,
+    prompt: request.prompt,
+    outputName: request.outputName,
+    outputUrl: null,
+    createdAt: "2026-07-24T07:00:00.000Z",
+    startedAt: "2026-07-24T07:00:01.000Z",
+    finishedAt: "2026-07-24T07:00:02.000Z",
+    progress: 5,
+    error: "Veralteter Testlauf.",
+    logs: [],
+    command: "python -m ltx_pipelines",
+    request,
+    favorite: false,
+    variantOf: null,
+    experiment: null,
+    runtimeMs: 1_000,
+    cancelledBy: null,
+    thermalProfile: null,
+    dgxJobId: null,
+    identityEvidence: null,
+    runProvenance: null,
+  };
+  let deleted = false;
+  await page.route("**/api/events", (route) => route.abort());
+  await page.route("**/api/jobs", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ jobs: deleted ? [] : [job] }),
+  }));
+  await page.route(`**/api/jobs/${job.id}`, (route) => {
+    expect(route.request().method()).toBe("DELETE");
+    deleted = true;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ deleted: job }),
+    });
+  });
+  await page.reload();
+
+  await expect(page.locator(".job-row")).toContainText("obsolete-job.mp4");
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Die erzeugte Ausgabe bleibt");
+    await dialog.accept();
+  });
+  await page.getByTitle("Job aus Verlauf löschen").click();
+  await expect(page.getByText("Noch keine Jobs")).toBeVisible();
+  expect(deleted).toBe(true);
 });
 
 test("mobile keeps all modes reachable without page overflow", async ({ page }, testInfo) => {
   const modes = page.locator(".mode-button");
-  await expect(modes).toHaveCount(9);
+  await expect(modes).toHaveCount(pipelineModes.length);
   await modes.last().scrollIntoViewIfNeeded();
   await modes.last().click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Retake / Bereich ersetzen");
@@ -1402,6 +1697,7 @@ test("API persists and freezes a controlled experiment before any render can sta
   baselineRequest.outputName = "api-controlled-guidance.mp4";
   baselineRequest.models.checkpointPath = "/models/checkpoint.safetensors";
   baselineRequest.models.gemmaRoot = "/models/gemma";
+  baselineRequest.models.gemmaLora = { path: "/models/gemma-lora.safetensors", strength: 1 };
   baselineRequest.models.spatialUpscalerPath = "/models/upscaler.safetensors";
   baselineRequest.models.distilledLora = { path: "/models/distilled-lora.safetensors", strength: 1 };
   baselineRequest.audio.path = "/inputs/speech.wav";

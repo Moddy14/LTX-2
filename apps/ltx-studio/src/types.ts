@@ -1,10 +1,10 @@
-import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines";
-import type { StudioAsset } from "../shared/assets";
-import type { RunProvenance } from "../shared/provenance";
-import type { ExperimentRunBinding } from "../shared/experiments";
-export type { StudioOutput } from "../shared/outputs";
-export type { ResourceEstimate } from "../shared/estimates";
-export type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models";
+import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines.js";
+import type { StudioAsset } from "../shared/assets.js";
+import type { RunProvenance } from "../shared/provenance.js";
+import type { ExperimentRunBinding } from "../shared/experiments.js";
+export type { StudioOutput } from "../shared/outputs.js";
+export type { ResourceEstimate } from "../shared/estimates.js";
+export type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models.js";
 
 export type Health = {
   state: "ready" | "blocked";
@@ -87,7 +87,7 @@ export type StudioConfig = {
 };
 
 export type UploadedFile = StudioAsset;
-export type { AssetKind, StudioAsset } from "../shared/assets";
+export type { AssetKind, StudioAsset } from "../shared/assets.js";
 
 export type ApiIssue = { path: string; message: string };
 

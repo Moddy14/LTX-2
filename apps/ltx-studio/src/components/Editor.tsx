@@ -18,7 +18,18 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { hasDialogueIntent, PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import {
+  hasDialogueIntent,
+  isAudioConditionedMode,
+  needsGemmaAbliteratedLoraForRequest,
+  PIPELINES,
+  usesOfficialComfyLipDub,
+  type GenerationRequest,
+} from "../../shared/pipelines";
+import {
+  documentedLtx23DistilledLoraAssetId,
+  withOfficialSpeechModelPaths,
+} from "../../shared/models";
 import type { LipDubReferenceDiagnostics, PreparedLipDubReference } from "../../shared/plan";
 import {
   DURATION_PRESETS,
@@ -33,6 +44,7 @@ import {
   inspectLipDubReference as inspectLipDubReferenceAsset,
   prepareLipDubReference as prepareLipDubReferenceAsset,
 } from "../api";
+import { showsLipSyncControls } from "../editorSections";
 import { fieldHelp } from "../fieldHelp";
 import type { ModelInventory, ModelInventoryItem, UploadedFile } from "../types";
 import { ImageRows, LoraRows, SingleMediaInput, UploadButton } from "./AssetRows";
@@ -77,7 +89,6 @@ const PROMPT_PART_FIELDS: ReadonlyArray<{
   { key: "environment", label: "Umgebung", hint: fieldHelp.promptEnvironment, placeholder: "Ort, Zeit, Wetter und Hintergrund..." },
   { key: "camera", label: "Kamera", hint: fieldHelp.promptCamera, placeholder: "Einstellung, Objektiv und Kamerabewegung..." },
   { key: "lighting", label: "Licht und Look", hint: fieldHelp.promptLighting, placeholder: "Lichtquelle, Kontrast, Farben und Material..." },
-  { key: "dialogue", label: "Dialog", hint: fieldHelp.promptDialogue, placeholder: "Wörtliche Rede mit Sprecher, möglichst in Anführungszeichen..." },
   { key: "ambience", label: "Geräusche", hint: fieldHelp.promptAmbience, placeholder: "Raumklang und konkrete Umgebungsgeräusche..." },
   { key: "music", label: "Musik", hint: fieldHelp.promptMusic, placeholder: "Stil, Tempo, Instrumente oder ausdrücklich keine Musik..." },
 ];
@@ -89,6 +100,232 @@ function updateGuidance(
   value: number | number[],
 ): GenerationRequest {
   return { ...request, [key]: { ...request[key], [field]: value } };
+}
+
+function LatentSyncControls({
+  request,
+  onChange,
+  errors,
+}: Pick<EditorProps, "request" | "onChange" | "errors">) {
+  return (
+    <>
+      <Toggle
+        label="LatentSync 1.6 Qualitätsrefiner"
+        hint={fieldHelp.latentSync}
+        checked={request.postprocess.latentSync.enabled}
+        onChange={(enabled) => onChange({
+          ...request,
+          postprocess: {
+            ...request.postprocess,
+            latentSync: { ...request.postprocess.latentSync, enabled },
+            longcatLipsync: {
+              ...request.postprocess.longcatLipsync,
+              enabled: enabled ? false : request.postprocess.longcatLipsync.enabled,
+            },
+            museTalk: {
+              ...request.postprocess.museTalk,
+              enabled: enabled ? false : request.postprocess.museTalk.enabled,
+            },
+            lipForcing: {
+              ...request.postprocess.lipForcing,
+              enabled: enabled ? false : request.postprocess.lipForcing.enabled,
+            },
+          },
+        })}
+      />
+      {request.postprocess.latentSync.enabled ? (
+        <div className="field-grid field-grid--2">
+          <NumberField
+            label="LatentSync-Schritte"
+            hint={fieldHelp.latentSyncSteps}
+            min={20}
+            max={50}
+            step={1}
+            value={request.postprocess.latentSync.steps}
+            error={errors["postprocess.latentSync.steps"]}
+            onChange={(steps) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                latentSync: { ...request.postprocess.latentSync, steps: steps ?? 30 },
+              },
+            })}
+          />
+          <NumberField
+            label="LatentSync-Audioführung"
+            hint={fieldHelp.latentSyncGuidance}
+            min={1}
+            max={3}
+            step={0.1}
+            value={request.postprocess.latentSync.guidance}
+            error={errors["postprocess.latentSync.guidance"]}
+            onChange={(guidance) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                latentSync: { ...request.postprocess.latentSync, guidance: guidance ?? 2 },
+              },
+            })}
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function MuseTalkControls({
+  request,
+  onChange,
+  errors,
+}: Pick<EditorProps, "request" | "onChange" | "errors">) {
+  return (
+    <>
+      <Toggle
+        label="MuseTalk 1.5 Lippen-Inpainting"
+        hint={fieldHelp.museTalk}
+        checked={request.postprocess.museTalk.enabled}
+        onChange={(enabled) => onChange({
+          ...request,
+          postprocess: {
+            ...request.postprocess,
+            museTalk: { ...request.postprocess.museTalk, enabled },
+            longcatLipsync: {
+              ...request.postprocess.longcatLipsync,
+              enabled: enabled ? false : request.postprocess.longcatLipsync.enabled,
+            },
+            latentSync: {
+              ...request.postprocess.latentSync,
+              enabled: enabled ? false : request.postprocess.latentSync.enabled,
+            },
+            lipForcing: {
+              ...request.postprocess.lipForcing,
+              enabled: enabled ? false : request.postprocess.lipForcing.enabled,
+            },
+          },
+        })}
+      />
+      {request.postprocess.museTalk.enabled ? (
+        <div className="field-grid field-grid--2">
+          <NumberField
+            label="Kinn-Zugabe"
+            hint={fieldHelp.museTalkExtraMargin}
+            min={0}
+            max={80}
+            step={1}
+            value={request.postprocess.museTalk.extraMargin}
+            error={errors["postprocess.museTalk.extraMargin"]}
+            onChange={(extraMargin) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                museTalk: { ...request.postprocess.museTalk, extraMargin: extraMargin ?? 10 },
+              },
+            })}
+          />
+          <NumberField
+            label="Wangen-Schutzbreite"
+            hint={fieldHelp.museTalkCheekWidth}
+            min={20}
+            max={200}
+            step={1}
+            value={request.postprocess.museTalk.cheekWidth}
+            error={errors["postprocess.museTalk.cheekWidth"]}
+            onChange={(cheekWidth) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                museTalk: { ...request.postprocess.museTalk, cheekWidth: cheekWidth ?? 90 },
+              },
+            })}
+          />
+          <NumberField
+            label="Audio-Kontext davor"
+            hint={fieldHelp.museTalkAudioPaddingLeft}
+            min={0}
+            max={12}
+            step={1}
+            value={request.postprocess.museTalk.audioPaddingLeft}
+            error={errors["postprocess.museTalk.audioPaddingLeft"]}
+            onChange={(audioPaddingLeft) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                museTalk: { ...request.postprocess.museTalk, audioPaddingLeft: audioPaddingLeft ?? 2 },
+              },
+            })}
+          />
+          <NumberField
+            label="Audio-Kontext danach"
+            hint={fieldHelp.museTalkAudioPaddingRight}
+            min={0}
+            max={12}
+            step={1}
+            value={request.postprocess.museTalk.audioPaddingRight}
+            error={errors["postprocess.museTalk.audioPaddingRight"]}
+            onChange={(audioPaddingRight) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                museTalk: { ...request.postprocess.museTalk, audioPaddingRight: audioPaddingRight ?? 2 },
+              },
+            })}
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function LipForcingControls({
+  request,
+  onChange,
+}: Pick<EditorProps, "request" | "onChange">) {
+  return (
+    <>
+      <Toggle
+        label="LipForcing 14B Lippenrefiner"
+        hint={fieldHelp.lipForcing}
+        checked={request.postprocess.lipForcing.enabled}
+        onChange={(enabled) => onChange({
+          ...request,
+          postprocess: {
+            ...request.postprocess,
+            lipForcing: { ...request.postprocess.lipForcing, enabled },
+            longcatLipsync: {
+              ...request.postprocess.longcatLipsync,
+              enabled: enabled ? false : request.postprocess.longcatLipsync.enabled,
+            },
+            latentSync: {
+              ...request.postprocess.latentSync,
+              enabled: enabled ? false : request.postprocess.latentSync.enabled,
+            },
+            museTalk: {
+              ...request.postprocess.museTalk,
+              enabled: enabled ? false : request.postprocess.museTalk.enabled,
+            },
+          },
+        })}
+      />
+      {request.postprocess.lipForcing.enabled ? (
+        <Segmented
+          label="LipForcing-Decoder"
+          hint={fieldHelp.lipForcingDecoder}
+          value={request.postprocess.lipForcing.decoder}
+          options={[
+            { value: "wan-vae", label: "Maximale Qualität" },
+            { value: "streaming-taehv", label: "Schneller Test" },
+          ]}
+          onChange={(decoder) => onChange({
+            ...request,
+            postprocess: {
+              ...request.postprocess,
+              lipForcing: { ...request.postprocess.lipForcing, decoder },
+            },
+          })}
+        />
+      ) : null}
+    </>
+  );
 }
 
 export function Editor({
@@ -115,14 +352,37 @@ export function Editor({
   const [lipDubTrimDuration, setLipDubTrimDuration] = useState(4.2);
   const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
   const isLipDub = request.mode === "lipdub";
-  const isAudioToVideo = request.mode === "audio-to-video";
-  const guided = ["two-stage", "two-stage-hq", "one-stage", "keyframes", "audio-to-video", "retake"].includes(
+  const officialComfyLipDub = usesOfficialComfyLipDub(request);
+  const isIdLora = request.mode === "id-lora";
+  const isAudioToVideo = isAudioConditionedMode(request.mode);
+  const isTextToAudio = request.mode === "text-to-audio";
+  const guided = [
+    "two-stage-hq",
+    "one-stage",
+    "audio-to-video",
+    "text-to-audio",
+    "retake",
+  ].includes(
     request.mode,
   ) && !(request.mode === "retake" && request.retake.distilled);
-  const supportsSteps = !["distilled", "ic-lora", "lipdub"].includes(request.mode)
+  const supportsSteps = ![
+    "two-stage",
+    "distilled",
+    "ic-lora",
+    "id-lora",
+    "keyframes",
+    "image-audio-to-video",
+    "lipdub",
+    "text-to-audio",
+  ].includes(request.mode)
     && !(request.mode === "retake" && request.retake.distilled);
   const sourceSelectable = ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(request.mode);
-  const imageEnabled = request.mode !== "retake" && !isLipDub && (!sourceSelectable || request.sourceMode === "image");
+  const imageEnabled = request.mode !== "retake"
+    && !isLipDub
+    && !isTextToAudio
+    && !(request.mode === "ic-lora"
+      && ["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(request.icLora.profile))
+    && (!sourceSelectable || request.sourceMode === "image");
   const visibleTextIntent = /\b(text|schrift|logo|label|etikett|titel|wort|zeichen)\b/i.test(request.prompt);
   const dialogueIntent = hasDialogueIntent(request);
   const resolutionPreset = matchingResolutionPreset(request.width, request.height);
@@ -134,17 +394,111 @@ export function Editor({
   const gemmaOptions = modelOptions(discoveredModels, "gemma");
   const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
   const loraOptions = modelOptions(discoveredModels, "lora");
+  const geometryOptions = modelOptions(discoveredModels, "geometry");
   const lipDubRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-lora");
   const lipDubDistilledRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint");
   const lipDubUpscalerRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-spatial-upscaler");
   const ltx23DevRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-dev-checkpoint");
   const ltx23GemmaRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-gemma");
   const ltx23DistilledLoraRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-distilled-lora");
+  const documentedDistilledLoraRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === documentedLtx23DistilledLoraAssetId(request),
+  );
   const ltx23UpscalerRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-spatial-upscaler");
+  const unionControlRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-union-control-lora",
+  );
+  const ingredientsRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-ingredients-lora",
+  );
+  const motionTrackRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-motion-track-lora",
+  );
+  const pixelUpscalerRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-pixel-upscaler-x4-lora",
+  );
+  const instantShaveRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-instant-shave-lora",
+  );
+  const inOutpaintRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-inoutpaint-lora",
+  );
+  const hdrRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-hdr-lora",
+  );
+  const hdrEmbeddingsRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-hdr-scene-embeddings",
+  );
+  const icLoraUi = request.icLora.profile === "ingredients"
+    ? {
+        label: "Ingredients IC-LoRA",
+        strengthLabel: "Ingredients-Stärke",
+        hint: fieldHelp.ingredientsLora,
+        strengthHint: fieldHelp.ingredientsStrength,
+        recommendation: ingredientsRecommendation,
+        placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+      }
+    : request.icLora.profile === "hdr"
+      ? {
+          label: "HDR IC-LoRA",
+          strengthLabel: "HDR-Stärke",
+          hint: fieldHelp.hdrLora,
+          strengthHint: fieldHelp.hdrStrength,
+          recommendation: hdrRecommendation,
+          placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-hdr-0.9.safetensors",
+        }
+      : request.icLora.profile === "motion-track"
+      ? {
+          label: "Motion-Track IC-LoRA",
+          strengthLabel: "Motion-Track-Stärke",
+          hint: fieldHelp.motionTrackLora,
+          strengthHint: fieldHelp.motionTrackStrength,
+          recommendation: motionTrackRecommendation,
+          placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-motion-track-control-ref0.5.safetensors",
+        }
+      : request.icLora.profile === "pixel-upscaler"
+        ? {
+            label: "Pixel Spatial Upscaler x4 IC-LoRA",
+            strengthLabel: "Upscaler-Stärke",
+            hint: fieldHelp.pixelUpscalerLora,
+            strengthHint: fieldHelp.pixelUpscalerStrength,
+            recommendation: pixelUpscalerRecommendation,
+            placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x4-0.9.safetensors",
+          }
+        : request.icLora.profile === "v2v-instant-shave"
+          ? {
+              label: "Instant-Shave V2V IC-LoRA",
+              strengthLabel: "V2V-Stärke",
+              hint: fieldHelp.instantShaveLora,
+              strengthHint: fieldHelp.instantShaveStrength,
+              recommendation: instantShaveRecommendation,
+              placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-instant-shave-0.9.safetensors",
+            }
+          : ["inpainting", "outpainting"].includes(request.icLora.profile)
+            ? {
+                label: "In-/Outpainting IC-LoRA",
+                strengthLabel: "In-/Outpainting-Stärke",
+                hint: fieldHelp.inOutpaintLora,
+                strengthHint: fieldHelp.inOutpaintStrength,
+                recommendation: inOutpaintRecommendation,
+                placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
+              }
+          : {
+              label: "Union-Control IC-LoRA",
+              strengthLabel: "Union-Control-Stärke",
+              hint: fieldHelp.unionControlLora,
+              strengthHint: fieldHelp.unionControlStrength,
+              recommendation: unionControlRecommendation,
+              placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+            };
+  const idLoraRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-id-lora-talkvid",
+  );
+  const mogeRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-moge");
   const a2vRecommendations = [
     ltx23DevRecommendation,
     ltx23GemmaRecommendation,
-    ltx23DistilledLoraRecommendation,
+    documentedDistilledLoraRecommendation,
     ltx23UpscalerRecommendation,
   ];
   const a2vMissingAssets = isAudioToVideo && modelInventory
@@ -160,9 +514,9 @@ export function Editor({
         ltx23GemmaRecommendation?.present && request.models.gemmaRoot !== ltx23GemmaRecommendation.localPath
           ? ltx23GemmaRecommendation.label
           : null,
-        ltx23DistilledLoraRecommendation?.present
-          && request.models.distilledLora.path !== ltx23DistilledLoraRecommendation.localPath
-          ? ltx23DistilledLoraRecommendation.label
+        documentedDistilledLoraRecommendation?.present
+          && request.models.distilledLora.path !== documentedDistilledLoraRecommendation.localPath
+          ? documentedDistilledLoraRecommendation.label
           : null,
         ltx23UpscalerRecommendation?.present
           && request.models.spatialUpscalerPath !== ltx23UpscalerRecommendation.localPath
@@ -187,10 +541,12 @@ export function Editor({
     && request.models.spatialUpscalerPath
     && request.models.spatialUpscalerPath !== lipDubUpscalerRecommendation.localPath;
   const recommendedLipDubDistilledMissing = isLipDub
+    && !officialComfyLipDub
     && lipDubDistilledRecommendation
     && !lipDubDistilledRecommendation.present
     && (!request.models.distilledCheckpointPath || request.models.distilledCheckpointPath !== lipDubDistilledRecommendation.localPath);
   const recommendedLipDubDistilledMismatch = isLipDub
+    && !officialComfyLipDub
     && lipDubDistilledRecommendation?.present
     && request.models.distilledCheckpointPath
     && request.models.distilledCheckpointPath !== lipDubDistilledRecommendation.localPath;
@@ -219,6 +575,7 @@ export function Editor({
         height: request.height,
         dialogue: request.promptParts.dialogue,
         prompt: request.prompt,
+        pipelineProfile: request.lipDub.pipelineProfile,
       }).then((diagnostics) => {
         if (cancelled) return;
         setLipDubDiagnostics(diagnostics);
@@ -245,6 +602,7 @@ export function Editor({
     isLipDub,
     request.height,
     request.lipDub.referenceVideo.path,
+    request.lipDub.pipelineProfile,
     request.prompt,
     request.promptParts.dialogue,
     request.width,
@@ -263,7 +621,7 @@ export function Editor({
 
   const applyUpload = (
     file: UploadedFile,
-    target: "audio" | "audio-final" | "retake" | "mask" | "lipdub",
+    target: "audio" | "audio-final" | "retake" | "mask" | "lipdub" | "id-audio",
   ) => {
     onPreview(file.path, file.url);
     if (target === "audio") {
@@ -282,6 +640,14 @@ export function Editor({
         lipDub: {
           ...request.lipDub,
           referenceVideo: { ...request.lipDub.referenceVideo, path: file.path, name: file.name },
+        },
+      });
+    } else if (target === "id-audio") {
+      onChange({
+        ...request,
+        idLora: {
+          ...request.idLora,
+          referenceAudio: { path: file.path, name: file.name },
         },
       });
     } else {
@@ -329,8 +695,11 @@ export function Editor({
       setLipDubPrepBusy(false);
     }
   };
-  const guidanceKeys: Array<"videoGuidance" | "audioGuidance"> =
-    request.mode === "audio-to-video" ? ["videoGuidance"] : ["videoGuidance", "audioGuidance"];
+  const guidanceKeys: Array<"videoGuidance" | "audioGuidance"> = isTextToAudio
+    ? ["audioGuidance"]
+    : isAudioConditionedMode(request.mode)
+      ? ["videoGuidance"]
+      : ["videoGuidance", "audioGuidance"];
 
   return (
     <main className="editor">
@@ -358,6 +727,7 @@ export function Editor({
                 ...request,
                 sourceMode,
                 images: sourceMode === "text" ? [] : request.images,
+                enhancePrompt: sourceMode === "text" && !hasDialogueIntent(request),
               })}
             />
             <p className="source-mode-note">
@@ -367,9 +737,46 @@ export function Editor({
             </p>
           </>
         ) : null}
+        <Field
+          label={isTextToAudio ? "Audio-Beschreibung" : "Positive Beschreibung"}
+          hint={fieldHelp.prompt}
+          error={errors.prompt}
+        >
+          <textarea
+            className="prompt-input"
+            aria-label={isTextToAudio ? "Audio-Beschreibung" : "Positive Beschreibung"}
+            value={request.prompt}
+            maxLength={16_000}
+            placeholder={isTextToAudio
+              ? "Stimme, Sprechweise, Geräusche, Musik und Atmosphäre..."
+              : "Szene, Bewegung, Kamera und Ton..."}
+            onChange={(event) => onChange({ ...request, prompt: event.target.value })}
+          />
+          <span className="character-count">{request.prompt.length.toLocaleString("de-AT")} / 16.000</span>
+        </Field>
+        <Field
+          label="Gesprochener Text"
+          hint={fieldHelp.promptDialogue}
+          error={errors["promptParts.dialogue"]}
+        >
+          <textarea
+            className="dialogue-input"
+            aria-label="Gesprochener Text"
+            value={request.promptParts.dialogue}
+            maxLength={2_000}
+            placeholder="Exakter Wortlaut, den die Person sprechen soll..."
+            onChange={(event) => onChange({
+              ...request,
+              promptParts: { ...request.promptParts, dialogue: event.target.value },
+            })}
+          />
+          <span className="character-count">
+            {request.promptParts.dialogue.length.toLocaleString("de-AT")} / 2.000
+          </span>
+        </Field>
         <details className="structured-prompt">
           <summary>
-            Prompt-Bausteine <ChevronDown size={15} />
+            Weitere Prompt-Bausteine <ChevronDown size={15} />
           </summary>
           <div className="structured-prompt__grid">
             {PROMPT_PART_FIELDS.map((field) => (
@@ -410,17 +817,6 @@ export function Editor({
           </div>
           {promptComposeError ? <p className="section-error" role="alert">{promptComposeError}</p> : null}
         </details>
-        <Field label="Positive Beschreibung" hint={fieldHelp.prompt} error={errors.prompt}>
-          <textarea
-            className="prompt-input"
-            aria-label="Positive Beschreibung"
-            value={request.prompt}
-            maxLength={16_000}
-            placeholder="Szene, Bewegung, Kamera und Ton..."
-            onChange={(event) => onChange({ ...request, prompt: event.target.value })}
-          />
-          <span className="character-count">{request.prompt.length.toLocaleString("de-AT")} / 16.000</span>
-        </Field>
         {sourceSelectable && request.sourceMode === "text" && visibleTextIntent ? (
           <p className="advisory advisory--warning">
             Der Prompt verlangt sichtbare Schrift. Bild-zu-Video mit einer sauberen Textvorlage ist dafür stabiler.
@@ -486,11 +882,23 @@ export function Editor({
       {imageEnabled ? (
         <section className="editor-section">
           <SectionHeader
-            title={request.mode === "keyframes" ? "Keyframes" : sourceSelectable ? "Referenzbild" : "Bildkonditionierung"}
+            title={
+              request.mode === "keyframes"
+                ? "Start- und Endbild"
+                : request.mode === "ic-lora" && request.icLora.profile === "ingredients"
+                  ? "Zutaten-Referenzbild"
+                : request.mode === "ic-lora" && request.icLora.profile === "motion-track"
+                  ? "Bewegungs-Referenzbild"
+                : sourceSelectable || ["image-audio-to-video", "id-lora"].includes(request.mode)
+                  ? "Referenzbild"
+                  : "Bildkonditionierung"
+            }
             action={<ImageIcon size={18} />}
           />
           <ImageRows
             images={request.images}
+            mode={request.mode}
+            numFrames={request.numFrames}
             previews={previews}
             onPreview={onPreview}
             onChange={(images) => onChange({ ...request, images })}
@@ -499,7 +907,7 @@ export function Editor({
         </section>
       ) : null}
 
-      {request.mode === "audio-to-video" ? (
+      {isAudioToVideo ? (
         <section className="editor-section">
           <SectionHeader title="Audiospur" />
           <SingleMediaInput
@@ -563,6 +971,18 @@ export function Editor({
               postprocess: {
                 ...request.postprocess,
                 longcatLipsync: { ...request.postprocess.longcatLipsync, enabled },
+                latentSync: {
+                  ...request.postprocess.latentSync,
+                  enabled: enabled ? false : request.postprocess.latentSync.enabled,
+                },
+                museTalk: {
+                  ...request.postprocess.museTalk,
+                  enabled: enabled ? false : request.postprocess.museTalk.enabled,
+                },
+                lipForcing: {
+                  ...request.postprocess.lipForcing,
+                  enabled: enabled ? false : request.postprocess.lipForcing.enabled,
+                },
               },
             })}
           />
@@ -602,6 +1022,137 @@ export function Editor({
               />
             </div>
           ) : null}
+          <LatentSyncControls request={request} onChange={onChange} errors={errors} />
+          <MuseTalkControls request={request} onChange={onChange} errors={errors} />
+          <LipForcingControls request={request} onChange={onChange} />
+        </section>
+      ) : null}
+
+      {showsLipSyncControls(request) ? (
+        <section className="editor-section">
+          <SectionHeader title="Lippen-Synchronität" />
+          <LatentSyncControls request={request} onChange={onChange} errors={errors} />
+          <MuseTalkControls request={request} onChange={onChange} errors={errors} />
+          <LipForcingControls request={request} onChange={onChange} />
+        </section>
+      ) : null}
+
+      {isIdLora ? (
+        <section className="editor-section">
+          <SectionHeader title="ID-LoRA Identität" />
+          <p className="advisory">
+            Das Bild steuert die sichtbare Person. Ein kurzer Referenzton überträgt die Stimme; der Text im Feld
+            „Gesprochener Text“ bestimmt den neu erzeugten Wortlaut.
+          </p>
+          <SingleMediaInput
+            kind="audio"
+            label="Stimmreferenz hochladen"
+            hint={fieldHelp.idLoraReferenceAudio}
+            value={request.idLora.referenceAudio}
+            previewUrl={previews[request.idLora.referenceAudio.path]}
+            onChange={(file) => applyUpload(file, "id-audio")}
+            onClear={() => onChange({
+              ...request,
+              idLora: { ...request.idLora, referenceAudio: { path: "", name: "" } },
+            })}
+            onPathChange={(path) => onChange({
+              ...request,
+              idLora: {
+                ...request.idLora,
+                referenceAudio: { path, name: path.split("/").at(-1) ?? path },
+              },
+            })}
+          />
+          {errors["idLora.referenceAudio.path"] ? (
+            <p className="section-error">{errors["idLora.referenceAudio.path"]}</p>
+          ) : null}
+          <div className="field-grid field-grid--2">
+            <PathPicker
+              label="ID-LoRA TalkVid"
+              hint={fieldHelp.idLoraModel}
+              value={request.idLora.lora.path}
+              options={loraOptions.filter((option) => option.path === idLoraRecommendation?.localPath)}
+              error={errors["idLora.lora.path"]}
+              placeholder="/absoluter/pfad/ltx-2.3-id-lora-talkvid-3k.safetensors"
+              onChange={(path) => onChange({
+                ...request,
+                idLora: { ...request.idLora, lora: { ...request.idLora.lora, path } },
+              })}
+            />
+            <NumberField
+              label="ID-LoRA-Stärke"
+              hint={fieldHelp.idLoraStrength}
+              min={0}
+              max={2}
+              step={0.05}
+              value={request.idLora.lora.strength}
+              onChange={(strength) => onChange({
+                ...request,
+                idLora: {
+                  ...request.idLora,
+                  lora: { ...request.idLora.lora, strength: strength ?? 1 },
+                },
+              })}
+            />
+          </div>
+          <div className="field-grid field-grid--2">
+            <NumberField
+              label="Identitätsführung"
+              hint={fieldHelp.idLoraGuidance}
+              min={0}
+              max={20}
+              step={0.1}
+              value={request.idLora.identityGuidanceScale}
+              onChange={(identityGuidanceScale) => onChange({
+                ...request,
+                idLora: { ...request.idLora, identityGuidanceScale: identityGuidanceScale ?? 3 },
+              })}
+            />
+            <NumberField
+              label="Bildstärke Stufe 1"
+              hint={fieldHelp.idLoraStage1ImageStrength}
+              min={0}
+              max={1}
+              step={0.05}
+              value={request.idLora.stage1ImageStrength}
+              onChange={(stage1ImageStrength) => onChange({
+                ...request,
+                idLora: { ...request.idLora, stage1ImageStrength: stage1ImageStrength ?? 0.7 },
+              })}
+            />
+          </div>
+          <details className="inline-details">
+            <summary>
+              Erweiterte Identitätsführung <ChevronDown size={15} />
+            </summary>
+            <div className="field-grid field-grid--2">
+              <NumberField
+                label="Start"
+                hint={fieldHelp.idLoraGuidanceWindow}
+                min={0}
+                max={1}
+                step={0.01}
+                value={request.idLora.identityGuidanceStart}
+                onChange={(identityGuidanceStart) => onChange({
+                  ...request,
+                  idLora: { ...request.idLora, identityGuidanceStart: identityGuidanceStart ?? 0 },
+                })}
+              />
+              <NumberField
+                label="Ende"
+                hint={fieldHelp.idLoraGuidanceWindow}
+                min={0}
+                max={1}
+                step={0.01}
+                value={request.idLora.identityGuidanceEnd}
+                error={errors["idLora.identityGuidanceEnd"]}
+                onChange={(identityGuidanceEnd) => onChange({
+                  ...request,
+                  idLora: { ...request.idLora, identityGuidanceEnd: identityGuidanceEnd ?? 1 },
+                })}
+              />
+            </div>
+          </details>
         </section>
       ) : null}
 
@@ -611,6 +1162,46 @@ export function Editor({
           <p className="advisory">
             Der offizielle LipDub-Modus erzeugt Video und Ton gemeinsam aus dem Referenzclip und dem neuen
             Zieltext. Er übernimmt keine separate Ziel-Audiodatei.
+          </p>
+          <Segmented
+            label="LipDub Qualitätsweg"
+            hint={fieldHelp.lipDubPipelineProfile}
+            value={request.lipDub.pipelineProfile}
+            options={[
+              { value: "official-comfy-hq", label: "Offiziell Comfy HQ" },
+              { value: "native-distilled", label: "Native Distilled (Legacy)" },
+            ]}
+            onChange={(pipelineProfile) => {
+              const useOfficial = pipelineProfile === "official-comfy-hq";
+              onChange({
+                ...request,
+                height: useOfficial ? 1920 : request.height,
+                width: useOfficial ? 1088 : request.width,
+                models: {
+                  ...request.models,
+                  checkpointPath: useOfficial
+                    ? ltx23DevRecommendation?.localPath ?? request.models.checkpointPath
+                    : request.models.checkpointPath,
+                  distilledCheckpointPath: useOfficial
+                    ? request.models.distilledCheckpointPath
+                    : lipDubDistilledRecommendation?.localPath ?? request.models.distilledCheckpointPath,
+                  distilledLora: useOfficial
+                    ? {
+                        path: ltx23DistilledLoraRecommendation?.localPath ?? request.models.distilledLora.path,
+                        strength: 0.5,
+                      }
+                    : request.models.distilledLora,
+                  spatialUpscalerPath: lipDubUpscalerRecommendation?.localPath
+                    ?? request.models.spatialUpscalerPath,
+                },
+                lipDub: { ...request.lipDub, pipelineProfile },
+              });
+            }}
+          />
+          <p className="advisory">
+            {officialComfyLipDub
+              ? "Verwendet den veröffentlichten Dev-Checkpoint mit Distilled-LoRA 1.1 bei Stärke 0,5, LipDub-IC-LoRA und getrennten Seeds für beide Stufen."
+              : "Legacy-Profil für die unveränderte Wiedergabe älterer Studio-Jobs mit dem Distilled-Checkpoint."}
           </p>
           <TextField
             label="Zielsprache"
@@ -889,12 +1480,20 @@ export function Editor({
         <section className="editor-section">
           <SectionHeader
             title="IC-LoRA Kontrolle"
-            action={
+            action={request.icLora.profile !== "ingredients" ? (
               <div className="section-header__actions">
                 <UploadButton
                   kind="video"
                   accept="video/*"
-                  label="Kontrollvideo"
+                  label={request.icLora.profile === "union-control"
+                    ? "Kontrollvideo"
+                    : request.icLora.profile === "motion-track"
+                      ? "Track-Video"
+                      : request.icLora.profile === "inpainting"
+                        ? "Video zum Ausbessern"
+                        : request.icLora.profile === "outpainting"
+                          ? "Video zum Erweitern"
+                          : "Quellvideo"}
                   hint={fieldHelp.videoUpload}
                   onUploaded={addControlVideo}
                 />
@@ -907,7 +1506,12 @@ export function Editor({
                       ...request.icLora,
                       videoConditioning: [
                         ...request.icLora.videoConditioning,
-                        { path: "", name: `Kontrollvideo ${request.icLora.videoConditioning.length + 1}`, strength: 1 },
+                        {
+                          path: "",
+                          name: `${request.icLora.profile === "motion-track" ? "Track" : "Quellvideo"} `
+                            + `${request.icLora.videoConditioning.length + 1}`,
+                          strength: 1,
+                        },
                       ],
                     },
                   })}
@@ -915,10 +1519,159 @@ export function Editor({
                   <Plus size={16} /> DGX-Pfad
                 </button>
               </div>
-            }
+            ) : undefined}
           />
-          <AssetLibrary kind="video" label="Kontrollmediathek" onSelect={addControlVideo} />
-          {request.icLora.videoConditioning.map((video, index) => (
+          <Segmented
+            label="IC-LoRA Aufgabe"
+            hint={fieldHelp.icLoraProfile}
+            value={request.icLora.profile}
+            options={[
+              { value: "union-control", label: "Union Control" },
+              { value: "ingredients", label: "Ingredients" },
+              { value: "motion-track", label: "Motion Track" },
+              { value: "pixel-upscaler", label: "Pixel x4" },
+              { value: "v2v-instant-shave", label: "V2V Rasur" },
+              { value: "inpainting", label: "Inpainting" },
+              { value: "outpainting", label: "Outpainting" },
+              { value: "hdr", label: "HDR" },
+            ]}
+            onChange={(profile) => {
+              const frameRate = profile === "union-control" ? 25 : profile === "hdr" ? 30 : 24;
+              onChange(withOfficialSpeechModelPaths({
+                ...request,
+                width: profile === "pixel-upscaler"
+                  ? request.width
+                  : ["inpainting", "outpainting"].includes(profile)
+                    ? 1920
+                    : profile === "union-control"
+                      ? 1280
+                      : 960,
+                height: profile === "pixel-upscaler"
+                  ? request.height
+                  : ["inpainting", "outpainting"].includes(profile)
+                    ? 1088
+                    : profile === "union-control"
+                      ? 704
+                      : 544,
+                numFrames: framesForDuration(
+                  videoDurationSeconds(request.numFrames, request.frameRate),
+                  frameRate,
+                ),
+                frameRate,
+                images: ["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(profile)
+                  ? []
+                  : request.images,
+                quantization: { ...request.quantization, mode: "none" },
+                models: {
+                  ...request.models,
+                  distilledLora: { ...request.models.distilledLora, strength: 0.5 },
+                },
+                icLora: {
+                  ...request.icLora,
+                  profile,
+                  controlType: profile === "union-control" ? request.icLora.controlType : "prepared",
+                  lora: { ...request.icLora.lora, strength: 1 },
+                },
+              }));
+            }}
+          />
+          {request.icLora.profile === "union-control" ? (
+            <>
+              <SelectField
+                label="Kontrollaufbereitung"
+                hint={fieldHelp.controlType}
+                value={request.icLora.controlType}
+                options={[
+                  { value: "depth", label: "MoGe-Tiefe · offizielle Vorlage" },
+                  { value: "canny", label: "Canny-Kanten · automatisch" },
+                  { value: "prepared", label: "Fertige Kontrollmap" },
+                  { value: "pose", label: "Fertiges Pose-Skelett" },
+                ]}
+                onChange={(controlType) => onChange({
+                  ...request,
+                  icLora: { ...request.icLora, controlType },
+                })}
+              />
+              {request.icLora.controlType === "depth" ? (
+                <PathPicker
+                  label="MoGe-Geometriemodell"
+                  hint={fieldHelp.mogeModel}
+                  value={request.icLora.mogeModelPath}
+                  options={geometryOptions.filter((option) => option.path === mogeRecommendation?.localPath)}
+                  error={errors["icLora.mogeModelPath"]}
+                  placeholder="/absoluter/pfad/moge_2_vitl_normal_fp16.safetensors"
+                  onChange={(mogeModelPath) => onChange({
+                    ...request,
+                    icLora: { ...request.icLora, mogeModelPath },
+                  })}
+                />
+              ) : null}
+            </>
+          ) : null}
+          <div className="field-grid field-grid--2">
+            <PathPicker
+              label={icLoraUi.label}
+              hint={icLoraUi.hint}
+              value={request.icLora.lora.path}
+              options={loraOptions.filter((option) => option.path === icLoraUi.recommendation?.localPath)}
+              error={errors["icLora.lora.path"]}
+              placeholder={icLoraUi.placeholder}
+              onChange={(path) => onChange({
+                ...request,
+                icLora: { ...request.icLora, lora: { ...request.icLora.lora, path } },
+              })}
+            />
+            <NumberField
+              label={icLoraUi.strengthLabel}
+              hint={icLoraUi.strengthHint}
+              min={0}
+              max={2}
+              step={0.05}
+              value={request.icLora.lora.strength}
+              onChange={(strength) => onChange({
+                ...request,
+                icLora: {
+                  ...request.icLora,
+                  lora: { ...request.icLora.lora, strength: strength ?? 1 },
+                },
+              })}
+            />
+          </div>
+          {request.icLora.profile === "hdr" ? (
+            <div className="field-grid field-grid--2">
+              <PathPicker
+                label="HDR-Szenen-Embeddings"
+                hint={fieldHelp.hdrEmbeddings}
+                value={request.icLora.hdrTextEmbeddingsPath}
+                options={loraOptions.filter((option) =>
+                  option.path === hdrEmbeddingsRecommendation?.localPath
+                )}
+                error={errors["icLora.hdrTextEmbeddingsPath"]}
+                placeholder="/absoluter/pfad/ltx-2.3-22b-ic-lora-hdr-scene-emb.safetensors"
+                onChange={(hdrTextEmbeddingsPath) => onChange({
+                  ...request,
+                  icLora: { ...request.icLora, hdrTextEmbeddingsPath },
+                })}
+              />
+              <Toggle
+                label="HDR hohe Zeitqualität"
+                hint={fieldHelp.hdrHighQuality}
+                checked={request.icLora.hdrHighQuality}
+                onChange={(hdrHighQuality) => onChange({
+                  ...request,
+                  icLora: { ...request.icLora, hdrHighQuality },
+                })}
+              />
+            </div>
+          ) : null}
+          {request.icLora.profile !== "ingredients" ? (
+            <>
+              <AssetLibrary
+                kind="video"
+                label={request.icLora.profile === "motion-track" ? "Track-Mediathek" : "Quellmediathek"}
+                onSelect={addControlVideo}
+              />
+              {request.icLora.videoConditioning.map((video, index) => (
             <div className="conditioning-row" key={`${video.path}-${index}`}>
               <video src={previews[video.path]} muted />
               <TextField
@@ -936,23 +1689,25 @@ export function Editor({
                   },
                 })}
               />
-              <NumberField
-                label="Stärke"
-                hint={fieldHelp.controlStrength}
-                min={0}
-                max={2}
-                step={0.05}
-                value={video.strength}
-                onChange={(strength) => onChange({
-                  ...request,
-                  icLora: {
-                    ...request.icLora,
-                    videoConditioning: request.icLora.videoConditioning.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, strength: strength ?? 1 } : item,
-                    ),
-                  },
-                })}
-              />
+              {!["inpainting", "outpainting"].includes(request.icLora.profile) ? (
+                <NumberField
+                  label="Stärke"
+                  hint={fieldHelp.controlStrength}
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={video.strength}
+                  onChange={(strength) => onChange({
+                    ...request,
+                    icLora: {
+                      ...request.icLora,
+                      videoConditioning: request.icLora.videoConditioning.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, strength: strength ?? 1 } : item,
+                      ),
+                    },
+                  })}
+                />
+              ) : null}
               <button
                 type="button"
                 className="icon-button icon-button--danger"
@@ -970,44 +1725,57 @@ export function Editor({
                 <Trash2 size={17} />
               </button>
             </div>
-          ))}
-          {errors["icLora.videoConditioning"] ? <p className="section-error">{errors["icLora.videoConditioning"]}</p> : null}
-          <div className="mask-row">
-            <SingleMediaInput
-              kind="mask"
-              label="Kontrollmaske"
-              value={{ path: request.icLora.attentionMaskPath, name: request.icLora.attentionMaskPath.split("/").at(-1) ?? "" }}
-              previewUrl={previews[request.icLora.attentionMaskPath]}
-              onChange={(file) => applyUpload(file, "mask")}
-              onClear={() => onChange({ ...request, icLora: { ...request.icLora, attentionMaskPath: "" } })}
-              onPathChange={(attentionMaskPath) => onChange({
-                ...request,
-                icLora: { ...request.icLora, attentionMaskPath },
-              })}
-            />
-            <NumberField
-              label="Maskenstärke"
-              hint={fieldHelp.maskStrength}
-              min={0}
-              max={1}
-              step={0.05}
-              value={request.icLora.attentionStrength}
-              onChange={(attentionStrength) => onChange({ ...request, icLora: { ...request.icLora, attentionStrength: attentionStrength ?? 1 } })}
-            />
-          </div>
-          <Toggle
-            label="Stufe 2 überspringen"
-            hint={fieldHelp.skipStage2}
-            checked={request.icLora.skipStage2}
-            onChange={(skipStage2) => onChange({ ...request, icLora: { ...request.icLora, skipStage2 } })}
-          />
+              ))}
+              {errors["icLora.videoConditioning"] ? (
+                <p className="section-error">{errors["icLora.videoConditioning"]}</p>
+              ) : null}
+              {["union-control", "inpainting"].includes(request.icLora.profile) ? (
+                <div className="mask-row">
+                <SingleMediaInput
+                  kind="mask"
+                  label={request.icLora.profile === "inpainting"
+                    ? "Inpainting-Maskenvideo"
+                    : "Kontrollmaske"}
+                  hint={request.icLora.profile === "inpainting"
+                    ? fieldHelp.inpaintMask
+                    : fieldHelp.controlMask}
+                  value={{ path: request.icLora.attentionMaskPath, name: request.icLora.attentionMaskPath.split("/").at(-1) ?? "" }}
+                  previewUrl={previews[request.icLora.attentionMaskPath]}
+                  onChange={(file) => applyUpload(file, "mask")}
+                  onClear={() => onChange({ ...request, icLora: { ...request.icLora, attentionMaskPath: "" } })}
+                  onPathChange={(attentionMaskPath) => onChange({
+                    ...request,
+                    icLora: { ...request.icLora, attentionMaskPath },
+                  })}
+                />
+                {request.icLora.profile === "union-control" ? (
+                  <NumberField
+                    label="Maskenstärke"
+                    hint={fieldHelp.maskStrength}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={request.icLora.attentionStrength}
+                    onChange={(attentionStrength) => onChange({
+                      ...request,
+                      icLora: { ...request.icLora, attentionStrength: attentionStrength ?? 1 },
+                    })}
+                  />
+                ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </section>
       ) : null}
 
       <section className="editor-section">
         <SectionHeader title="Modelle" action={<Cpu size={18} />} />
         <div className="field-grid field-grid--2">
-          {["distilled", "ic-lora", "lipdub"].includes(request.mode) || (request.mode === "retake" && request.retake.distilled) ? (
+          {["distilled", "keyframes"].includes(request.mode)
+            || (request.mode === "ic-lora" && request.icLora.profile === "hdr")
+            || (isLipDub && !officialComfyLipDub)
+            || (request.mode === "retake" && request.retake.distilled) ? (
             <PathPicker
               label="Distilled Checkpoint"
               hint={fieldHelp.distilledCheckpoint}
@@ -1028,16 +1796,50 @@ export function Editor({
               onChange={(checkpointPath) => onChange({ ...request, models: { ...request.models, checkpointPath } })}
             />
           )}
-          <PathPicker
-            label="Gemma Root"
-            hint={fieldHelp.gemmaRoot}
-            value={request.models.gemmaRoot}
-            options={gemmaOptions}
-            error={errors["models.gemmaRoot"]}
-            placeholder="/absoluter/pfad/gemma"
-            onChange={(gemmaRoot) => onChange({ ...request, models: { ...request.models, gemmaRoot } })}
-          />
-          {definition.needsSpatialUpscaler ? (
+          {request.mode !== "ic-lora" || request.icLora.profile !== "hdr" ? (
+            <PathPicker
+              label="Gemma Root"
+              hint={fieldHelp.gemmaRoot}
+              value={request.models.gemmaRoot}
+              options={gemmaOptions}
+              error={errors["models.gemmaRoot"]}
+              placeholder="/absoluter/pfad/gemma"
+              onChange={(gemmaRoot) => onChange({ ...request, models: { ...request.models, gemmaRoot } })}
+            />
+          ) : null}
+          {needsGemmaAbliteratedLoraForRequest(request) ? (
+            <div className="paired-field">
+              <PathPicker
+                label="Gemma Abliterated LoRA"
+                hint={fieldHelp.gemmaLora}
+                value={request.models.gemmaLora.path}
+                options={loraOptions.filter((option) => option.label.toLowerCase().includes("gemma"))}
+                error={errors["models.gemmaLora.path"]}
+                placeholder="/absoluter/pfad/gemma-lora.safetensors"
+                onChange={(path) => onChange({
+                  ...request,
+                  models: { ...request.models, gemmaLora: { ...request.models.gemmaLora, path } },
+                })}
+              />
+              <NumberField
+                label="Stärke"
+                hint={fieldHelp.gemmaLoraStrength}
+                min={0}
+                max={2}
+                step={0.05}
+                value={request.models.gemmaLora.strength}
+                onChange={(strength) => onChange({
+                  ...request,
+                  models: {
+                    ...request.models,
+                    gemmaLora: { ...request.models.gemmaLora, strength: strength ?? 1 },
+                  },
+                })}
+              />
+            </div>
+          ) : null}
+          {definition.needsSpatialUpscaler
+            || (request.mode === "ic-lora" && request.icLora.profile === "hdr") ? (
             <PathPicker
               label="Spatial Upscaler"
               hint={fieldHelp.spatialUpscaler}
@@ -1048,7 +1850,9 @@ export function Editor({
               onChange={(spatialUpscalerPath) => onChange({ ...request, models: { ...request.models, spatialUpscalerPath } })}
             />
           ) : null}
-          {definition.needsDistilledLora ? (
+          {(definition.needsDistilledLora
+            && !(request.mode === "ic-lora" && request.icLora.profile === "hdr"))
+            || officialComfyLipDub ? (
             <div className="paired-field">
               <PathPicker
                 label="Distilled LoRA"
@@ -1060,13 +1864,19 @@ export function Editor({
                 onChange={(path) => onChange({ ...request, models: { ...request.models, distilledLora: { ...request.models.distilledLora, path } } })}
               />
               <NumberField
-                label="Stärke"
-                hint={fieldHelp.distilledLoraStrength}
+                label={isIdLora ? "Stärke in beiden ID-Stufen" : "Stärke"}
+                hint={isIdLora
+                  ? fieldHelp.idLoraDistilledStrength
+                  : officialComfyLipDub
+                    ? fieldHelp.lipDubDistilledLoraStrength
+                    : fieldHelp.distilledLoraStrength}
                 min={-4}
                 max={4}
                 step={0.05}
-                value={request.models.distilledLora.strength}
-                onChange={(strength) => onChange({ ...request, models: { ...request.models, distilledLora: { ...request.models.distilledLora, strength: strength ?? 1 } } })}
+                value={isIdLora ? request.idLora.distilledLoraStrength : request.models.distilledLora.strength}
+                onChange={(strength) => onChange(isIdLora
+                  ? { ...request, idLora: { ...request.idLora, distilledLoraStrength: strength ?? 0.5 } }
+                  : { ...request, models: { ...request.models, distilledLora: { ...request.models.distilledLora, strength: strength ?? 1 } } })}
               />
             </div>
           ) : null}
@@ -1166,20 +1976,22 @@ export function Editor({
       {request.mode !== "retake" ? (
         <section className="editor-section">
           <SectionHeader title="Ausgabe" action={<SlidersHorizontal size={18} />} />
-          <div className={`field-grid ${isLipDub ? "field-grid--1" : "field-grid--2"} output-presets`}>
-            <SelectField
-              label="Format-Preset"
-              hint={fieldHelp.resolutionPreset}
-              value={resolutionPreset?.id ?? "custom"}
-              options={[
-                ...RESOLUTION_PRESETS.map((preset) => ({ value: preset.id, label: `${preset.label} · ${preset.width} × ${preset.height}` })),
-                { value: "custom", label: "Benutzerdefiniert" },
-              ]}
-              onChange={(id) => {
-                const preset = RESOLUTION_PRESETS.find((item) => item.id === id);
-                if (preset) onChange({ ...request, width: preset.width, height: preset.height });
-              }}
-            />
+          <div className={`field-grid ${isLipDub || isTextToAudio ? "field-grid--1" : "field-grid--2"} output-presets`}>
+            {!isTextToAudio ? (
+              <SelectField
+                label="Format-Preset"
+                hint={fieldHelp.resolutionPreset}
+                value={resolutionPreset?.id ?? "custom"}
+                options={[
+                  ...RESOLUTION_PRESETS.map((preset) => ({ value: preset.id, label: `${preset.label} · ${preset.width} × ${preset.height}` })),
+                  { value: "custom", label: "Benutzerdefiniert" },
+                ]}
+                onChange={(id) => {
+                  const preset = RESOLUTION_PRESETS.find((item) => item.id === id);
+                  if (preset) onChange({ ...request, width: preset.width, height: preset.height });
+                }}
+              />
+            ) : null}
             {!isLipDub ? (
               <SelectField
                 label="Dauer-Preset"
@@ -1201,9 +2013,13 @@ export function Editor({
               />
             ) : null}
           </div>
-          <div className={isLipDub ? "field-grid field-grid--2" : "field-grid field-grid--4"}>
-            <NumberField label="Breite" hint={fieldHelp.width} min={64} max={4096} step={32} value={request.width} error={errors.width} onChange={(width) => onChange({ ...request, width: width ?? 64 })} />
-            <NumberField label="Höhe" hint={fieldHelp.height} min={64} max={4096} step={32} value={request.height} onChange={(height) => onChange({ ...request, height: height ?? 64 })} />
+          <div className={isLipDub || isTextToAudio ? "field-grid field-grid--2" : "field-grid field-grid--4"}>
+            {!isTextToAudio ? (
+              <>
+                <NumberField label="Breite" hint={fieldHelp.width} min={64} max={4096} step={32} value={request.width} error={errors.width} onChange={(width) => onChange({ ...request, width: width ?? 64 })} />
+                <NumberField label="Höhe" hint={fieldHelp.height} min={64} max={4096} step={32} value={request.height} onChange={(height) => onChange({ ...request, height: height ?? 64 })} />
+              </>
+            ) : null}
             {!isLipDub ? (
               <>
                 <NumberField label="Frames" hint={fieldHelp.frames} min={1} max={2049} step={8} value={request.numFrames} error={errors.numFrames} onChange={(numFrames) => {
@@ -1230,10 +2046,12 @@ export function Editor({
             ) : null}
           </div>
           <div className={`output-summary ${duration > 20 ? "output-summary--warn" : ""}`}>
-            <strong>{isLipDub ? "Referenzclip" : formatDuration(duration)}</strong>
+            <strong>{isLipDub ? "Referenzclip" : isTextToAudio ? `Audio · ${formatDuration(duration)}` : formatDuration(duration)}</strong>
             <span>
               {isLipDub
                 ? `${request.width} × ${request.height} · Dauer und FPS aus dem Referenzvideo`
+                : isTextToAudio
+                  ? "WAV · PCM 16 Bit"
                 : `${request.width} × ${request.height} · ${request.numFrames} Frames · ${request.frameRate} FPS`}
             </span>
           </div>
@@ -1272,7 +2090,7 @@ export function Editor({
           ) : null}
           <TextField label="Ausgabedatei" hint={fieldHelp.outputName} value={request.outputName} error={errors.outputName} onChange={(outputName) => onChange({ ...request, outputName })} />
         </div>
-        {request.mode !== "one-stage" && !isLipDub ? (
+        {request.mode !== "one-stage" && !isLipDub && !isTextToAudio ? (
           <div className="toggle-grid">
             <Toggle label="VAE Tiling" hint={fieldHelp.tiling} checked={request.tiling} onChange={(tiling) => onChange({ ...request, tiling })} />
           </div>
@@ -1288,9 +2106,6 @@ export function Editor({
           ]}
           onChange={(mode) => onChange({ ...request, quantization: { ...request.quantization, mode } })}
         />
-        {request.quantization.mode === "fp8-scaled-mm" ? (
-          <TextField label="AMAX-Datei" hint={fieldHelp.amaxPath} value={request.quantization.amaxPath} error={errors["quantization.amaxPath"]} onChange={(amaxPath) => onChange({ ...request, quantization: { ...request.quantization, amaxPath } })} />
-        ) : null}
         {request.mode === "two-stage-hq" ? (
           <div className="field-grid field-grid--2">
             <NumberField label="LoRA Stufe 1" hint={fieldHelp.hqLoraStage1} min={0} max={2} step={0.05} value={request.hq.distilledLoraStrengthStage1} onChange={(distilledLoraStrengthStage1) => onChange({ ...request, hq: { ...request.hq, distilledLoraStrengthStage1: distilledLoraStrengthStage1 ?? 0.25 } })} />

@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  AudioLines,
   Check,
   CircleStop,
   Clock3,
@@ -18,6 +19,7 @@ import {
   Terminal,
   Thermometer,
   Star,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -28,7 +30,6 @@ import { isVideoPreviewUrl } from "../../shared/media";
 import type {
   Health,
   ResourceEstimate,
-  StudioConfig,
   StudioJob,
   StudioOutput,
 } from "../types";
@@ -80,6 +81,15 @@ function formatFileSize(bytes: number): string {
     : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
 }
 
+function hasLipSyncMeasurement(output: StudioOutput): boolean {
+  const result = output.analysis?.status === "completed" ? output.analysis.result : null;
+  return Boolean(result && "phonemeViseme" in result && result.phonemeViseme?.measurement);
+}
+
+function isAudioOutputName(name: string): boolean {
+  return name.toLowerCase().endsWith(".wav");
+}
+
 type RunPanelProps = {
   request: GenerationRequest;
   requestValid: boolean;
@@ -92,6 +102,8 @@ type RunPanelProps = {
   onSelectOutput: (output: StudioOutput) => void;
   onRun: () => void;
   onCancel: (id: string) => void;
+  onDeleteJob: (job: StudioJob) => Promise<void>;
+  deletingJobId: string | null;
   submitting: boolean;
   errors: string[];
   warnings: string[];
@@ -108,6 +120,9 @@ type RunPanelProps = {
   onSaveQualityReview: (output: StudioOutput, input: QualityReviewInput) => Promise<void>;
   onStartAnalysis: (output: StudioOutput, force?: boolean) => Promise<void>;
   onCancelAnalysis: (output: StudioOutput) => Promise<void>;
+  onPrepareLipSyncRetry: (output: StudioOutput, referenceStrength: number) => void;
+  onDeleteOutput: (output: StudioOutput) => Promise<void>;
+  deletingOutputName: string | null;
   onLoadSettings: (job: StudioJob) => void;
   onLoadOutputSettings: (output: StudioOutput) => void;
   experiments: ControlledExperiment[];
@@ -116,7 +131,6 @@ type RunPanelProps = {
   onLaunchExperiment: (id: string, arm: "baseline" | "candidate") => Promise<void>;
   estimate: ResourceEstimate;
   requiredStartMemoryGiB: number;
-  runtimeGate: StudioConfig["runtime"] | null;
 };
 
 export function RunPanel({
@@ -131,6 +145,8 @@ export function RunPanel({
   onSelectOutput,
   onRun,
   onCancel,
+  onDeleteJob,
+  deletingJobId,
   submitting,
   errors,
   warnings,
@@ -147,6 +163,9 @@ export function RunPanel({
   onSaveQualityReview,
   onStartAnalysis,
   onCancelAnalysis,
+  onPrepareLipSyncRetry,
+  onDeleteOutput,
+  deletingOutputName,
   onLoadSettings,
   onLoadOutputSettings,
   experiments,
@@ -155,7 +174,6 @@ export function RunPanel({
   onLaunchExperiment,
   estimate,
   requiredStartMemoryGiB,
-  runtimeGate,
 }: RunPanelProps) {
   const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
   const duration = request.mode === "retake"
@@ -166,6 +184,8 @@ export function RunPanel({
       ? request.retake.videoPath
       : request.mode === "lipdub"
         ? request.lipDub.referenceVideo.path
+      : request.mode === "id-lora"
+        ? request.images[0]?.path || request.idLora.referenceAudio.path
       : request.images[0]?.path || request.icLora.videoConditioning[0]?.path || request.audio.path;
   const sourcePreview = sourcePath ? previews[sourcePath] : null;
   const runBlocked = submitting;
@@ -210,9 +230,13 @@ export function RunPanel({
               ]}
             />
           ) : selectedOutput ? (
-            <video key={selectedOutput.url} src={selectedOutput.url} controls muted playsInline />
-          ) : selectedJob?.outputUrl ? (
-            <video key={selectedJob.outputUrl} src={selectedJob.outputUrl} controls autoPlay muted playsInline />
+            isAudioOutputName(selectedOutput.name)
+              ? <audio key={selectedOutput.url} src={selectedOutput.url} controls preload="metadata" />
+              : <video key={selectedOutput.url} src={selectedOutput.url} controls muted playsInline />
+          ) : selectedJob?.outputUrl && outputForJob(selectedJob) ? (
+            isAudioOutputName(selectedJob.outputName)
+              ? <audio key={selectedJob.outputUrl} src={selectedJob.outputUrl} controls autoPlay />
+              : <video key={selectedJob.outputUrl} src={selectedJob.outputUrl} controls autoPlay muted playsInline />
           ) : sourcePreview && request.mode !== "audio-to-video" ? (
             isVideoPreviewUrl(sourcePreview) ? (
               <video src={sourcePreview} controls muted playsInline />
@@ -221,12 +245,20 @@ export function RunPanel({
             )
           ) : (
             <div className="preview-empty">
-              <Film size={38} strokeWidth={1.3} />
+              {request.mode === "text-to-audio"
+                ? <AudioLines size={38} strokeWidth={1.3} />
+                : <Film size={38} strokeWidth={1.3} />}
               <span>{pipeline.shortLabel}</span>
             </div>
           )}
           <div className="preview-stage__meta">
-            <span>{request.mode === "retake" ? "Quelle" : `${request.width} x ${request.height}`}</span>
+            <span>
+              {request.mode === "retake"
+                ? "Quelle"
+                : request.mode === "text-to-audio"
+                  ? "WAV · PCM 16 Bit"
+                  : `${request.width} x ${request.height}`}
+            </span>
             <span>{request.mode === "lipdub" ? "Referenzdauer" : `${duration.toFixed(1)} s`}</span>
           </div>
         </div>
@@ -236,17 +268,17 @@ export function RunPanel({
         <ObjectiveComparisonPanel outputs={[comparisonOutputs[0], comparisonOutputs[1]]} />
       ) : null}
 
-      <section className="output-library" aria-label="Erzeugte Videos und Einstellungen">
+      <section className="output-library" aria-label="Erzeugte Medien und Einstellungen">
         <div className="run-panel__heading">
-          <h2><ListVideo size={16} /> Erzeugte Videos</h2>
+          <h2><ListVideo size={16} /> Erzeugte Medien</h2>
           <span>{outputs.length}</span>
         </div>
         {outputs.length > 0 ? (
           <>
             <label className="output-library__select">
-              <span>Video auswählen</span>
+              <span>Ausgabe auswählen</span>
               <select
-                aria-label="Erzeugtes Video"
+                aria-label="Erzeugte Ausgabe"
                 value={selectedOutput?.name ?? ""}
                 onChange={(event) => {
                   const output = outputs.find((candidate) => candidate.name === event.target.value);
@@ -269,9 +301,9 @@ export function RunPanel({
                   <span>Bewertung {qualityReviewAverage(selectedOutput.qualityReview).toFixed(1)} / 10</span>
                 ) : null}
                 {selectedOutput.analysis?.status === "completed" ? (
-                  <span>{selectedOutput.analysis.result?.status === "measured"
-                    ? "Objektive Rohwerte erfasst"
-                    : "Objektive Messung unzureichend"}</span>
+                  <span>{hasLipSyncMeasurement(selectedOutput)
+                    ? "Lip-Sync geprüft"
+                    : "Video geprüft, Lip-Sync nicht eindeutig"}</span>
                 ) : null}
               </div>
             ) : null}
@@ -279,54 +311,84 @@ export function RunPanel({
               <div className="output-settings-summary" aria-label="Gespeicherte Videoeinstellungen">
                 <span>Pipeline <strong>{PIPELINES.find((item) => item.id === outputRequest.mode)?.shortLabel}</strong></span>
                 <span>Seed <strong>{outputRequest.seed}</strong></span>
-                <span>Format <strong>{outputRequest.width} x {outputRequest.height}</strong></span>
-                <span>Frames <strong>{outputRequest.mode === "lipdub" ? "aus Referenzvideo" : `${outputRequest.numFrames} @ ${outputRequest.frameRate} fps`}</strong></span>
-                <span>Schritte <strong>{outputRequest.numInferenceSteps}</strong></span>
+                <span>Format <strong>{outputRequest.mode === "text-to-audio"
+                  ? "WAV · PCM 16 Bit"
+                  : `${outputRequest.width} x ${outputRequest.height}`}</strong></span>
+                <span>{outputRequest.mode === "text-to-audio" ? "Dauerbasis" : "Frames"} <strong>{
+                  outputRequest.mode === "lipdub"
+                    ? "aus Referenzvideo"
+                    : `${outputRequest.numFrames} @ ${outputRequest.frameRate} fps`
+                }</strong></span>
+                <span>Schritte <strong>{
+                  outputRequest.mode === "lipdub"
+                    ? "fest (8 + 4)"
+                    : ["id-lora", "two-stage", "image-audio-to-video"].includes(outputRequest.mode)
+                      ? "fest (8 + 3)"
+                      : ["distilled", "ic-lora", "keyframes", "text-to-audio"].includes(outputRequest.mode)
+                        ? "fest (8)"
+                      : outputRequest.numInferenceSteps
+                }</strong></span>
                 <span>Quantisierung <strong>{outputRequest.quantization.mode}</strong></span>
               </div>
             ) : null}
-            <button
-              type="button"
-              className="button output-library__load"
-              disabled={!selectedOutput?.settingsAvailable}
-              onClick={() => {
-                if (selectedOutput) onLoadOutputSettings(selectedOutput);
-              }}
-            >
-              <SlidersHorizontal size={16} /> Alle Einstellungen übernehmen
-            </button>
-            <button
-              type="button"
-              className={`icon-button ${selectedOutput && comparisonNames.includes(selectedOutput.name) ? "is-active" : ""}`}
-              title="Ausgabe zum Vergleich hinzufügen"
-              aria-pressed={Boolean(selectedOutput && comparisonNames.includes(selectedOutput.name))}
-              disabled={!selectedOutput}
-              onClick={() => {
-                if (selectedOutput) onToggleCompare(selectedOutput);
-              }}
-            >
-              <Columns2 size={17} />
-            </button>
+            <div className="output-library__actions">
+              <button
+                type="button"
+                className="button output-library__load"
+                disabled={!selectedOutput?.settingsAvailable}
+                onClick={() => {
+                  if (selectedOutput) onLoadOutputSettings(selectedOutput);
+                }}
+              >
+                <SlidersHorizontal size={16} /> Alle Einstellungen übernehmen
+              </button>
+              <button
+                type="button"
+                className={`icon-button ${selectedOutput && comparisonNames.includes(selectedOutput.name) ? "is-active" : ""}`}
+                title="Ausgabe zum Vergleich hinzufügen"
+                aria-pressed={Boolean(selectedOutput && comparisonNames.includes(selectedOutput.name))}
+                disabled={!selectedOutput || isAudioOutputName(selectedOutput.name)}
+                onClick={() => {
+                  if (selectedOutput) onToggleCompare(selectedOutput);
+                }}
+              >
+                <Columns2 size={17} />
+              </button>
+              <button
+                type="button"
+                className="icon-button icon-button--danger"
+                title="Ausgabe und zugehörige Daten löschen"
+                disabled={!selectedOutput || deletingOutputName === selectedOutput.name}
+                onClick={() => {
+                  if (selectedOutput) void onDeleteOutput(selectedOutput);
+                }}
+              >
+                {deletingOutputName === selectedOutput?.name
+                  ? <LoaderCircle className="spin" size={17} />
+                  : <Trash2 size={17} />}
+              </button>
+            </div>
           </>
         ) : (
-          <div className="compact-empty">Noch keine MP4-Ausgabe im Studio-Ordner</div>
+          <div className="compact-empty">Noch keine MP4- oder WAV-Ausgabe im Studio-Ordner</div>
         )}
       </section>
 
-      <ExperimentPanel
-        request={request}
-        requestValid={requestValid}
-        experiments={experiments}
-        jobs={jobs}
-        outputs={outputs}
-        health={health}
-        runtimeGate={runtimeGate}
-        onCreate={onCreateExperiment}
-        onFreeze={onFreezeExperiment}
-        onLaunch={onLaunchExperiment}
-        onAnalyze={(output) => onStartAnalysis(output)}
-        onCompare={onCompareExperiment}
-      />
+      {request.mode !== "text-to-audio" ? (
+        <ExperimentPanel
+          request={request}
+          requestValid={requestValid}
+          experiments={experiments}
+          jobs={jobs}
+          outputs={outputs}
+          health={health}
+          onCreate={onCreateExperiment}
+          onFreeze={onFreezeExperiment}
+          onLaunch={onLaunchExperiment}
+          onAnalyze={(output) => onStartAnalysis(output)}
+          onCompare={onCompareExperiment}
+        />
+      ) : null}
 
       <section className={`run-monitor ${activeJob ? "is-live" : ""}`} aria-label="Laufmonitor">
         <div className="run-panel__heading">
@@ -393,7 +455,8 @@ export function RunPanel({
 
       {memoryShortfall ? (
         <p className="resource-warning">
-          Prognose plus Restpuffer erfordern {requiredStartMemoryGiB} GiB freien RAM. Der DGX-Orchestrator entscheidet über Warten, Reservierung oder zulässigen Reclaim.
+          Der aktuelle RAM liegt unter dem konservativen Planwert von {requiredStartMemoryGiB} GiB.
+          Der Auftrag wird trotzdem eingereiht; der DGX-Orchestrator entscheidet den tatsächlichen Start.
         </p>
       ) : null}
 
@@ -410,7 +473,7 @@ export function RunPanel({
         </section>
       ) : null}
 
-      {selectedJob?.outputUrl ? (
+      {selectedJob?.outputUrl && outputForJob(selectedJob) ? (
         <a className="output-download" href={selectedJob.outputUrl} download={selectedJob.outputName}>
           <Download size={16} /> Ausgabe herunterladen
         </a>
@@ -470,6 +533,7 @@ export function RunPanel({
             output={selectedOutput}
             onStart={onStartAnalysis}
             onCancel={onCancelAnalysis}
+            onPrepareLipSyncRetry={onPrepareLipSyncRetry}
           />
         </>
       ) : null}
@@ -541,7 +605,19 @@ export function RunPanel({
                 >
                   <CircleStop size={15} />
                 </button>
-              ) : null}
+              ) : (
+                <button
+                  type="button"
+                  className="job-row__delete"
+                  title="Job aus Verlauf löschen"
+                  disabled={deletingJobId === job.id}
+                  onClick={() => void onDeleteJob(job)}
+                >
+                  {deletingJobId === job.id
+                    ? <LoaderCircle className="spin" size={15} />
+                    : <Trash2 size={15} />}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -551,6 +627,9 @@ export function RunPanel({
         <details className="run-details" open>
           <summary><ScrollText size={16} /> Jobdetails</summary>
           {selectedJob.error ? <p className="job-error">{selectedJob.error}</p> : null}
+          {selectedJob.status === "completed" && !outputForJob(selectedJob) ? (
+            <p className="job-cancelled">Die Ausgabedatei wurde gelöscht; der Jobverlauf bleibt erhalten.</p>
+          ) : null}
           {selectedJob.cancelledBy === "studio" ? (
             <p className="job-cancelled">Manuell über die Studio-Abbruchfunktion beendet.</p>
           ) : null}

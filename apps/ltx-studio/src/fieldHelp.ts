@@ -37,6 +37,8 @@ export const fieldHelp = {
     "Wofür: Optionale fertige Tonspur, die nach dem LTX-Render anstelle der reinen Sprachspur eingesetzt wird. Gute Eingabe: derselbe zeitlich ausgerichtete Sprachtext mit gewünschter Musik und Atmosphäre; Anfang und Dauer folgen den Feldern darunter.",
   lipDubTargetLanguage:
     "Wofür: Nennt die Sprache, in der das offizielle LipDub-Modell den neuen Dialog erzeugen soll. Gute Eingabe: ein eindeutiger Sprachname wie Deutsch, Englisch oder Japanisch; den Dialog im üblichen Schriftsystem dieser Sprache eingeben.",
+  lipDubPipelineProfile:
+    "Wofür: Wählt den Modellaufbau für LipDub. „Offiziell Comfy HQ“ bildet den veröffentlichten Lightricks-Workflow mit Dev-Checkpoint, Distilled-LoRA 1.1 bei Stärke 0,5, LipDub-IC-LoRA und zwei hochauflösenden Stufen nach. „Native Distilled (Legacy)“ ist ausschließlich für reproduzierbare Wiederholungen alter Jobs gedacht.",
   lipDubSingleSpeaker:
     "Wofür: Bestätigt die Modellvoraussetzung, dass im Referenzclip genau eine sichtbare Person spricht. Einschalten nur bei einem einzelnen Sprecher; mehrere Sprecher, Stimmen aus dem Off oder überlappende Sprache sind für diesen Modus ungeeignet.",
   videoUpload:
@@ -48,7 +50,7 @@ export const fieldHelp = {
   audioDuration:
     "Wofür: Begrenzt den verwendeten Audioausschnitt. Empfehlung: leer für automatische Dauer oder eine positive Sekundenangabe passend zur gewünschten Szene.",
   lipDubReferenceStrength:
-    "Wofür: Gewichtet die eingefrorenen Video- und Audio-Referenztokens des offiziellen LipDub-Modells. Das bindet den Referenzclip insgesamt, steuert aber weder Mundform noch Zeitversatz unabhängig oder garantiert deren Übernahme. Empfehlung: mit 1,0 starten und Änderungen nur mit demselben Kalibrierclip objektiv vergleichen.",
+    "Wofür: Regelt, wie stark LipDub das Bild des Referenzvideos festhält. Empfehlung: 1,0 wie im offiziellen Workflow. Der gemessene Vergleich mit 0,8 verschlechterte bei dieser Referenz Identität, Mundform und Pausenruhe; daher nur nach einem gezielten A/B-Test ändern.",
   lipDubCalibrationClip:
     "Wofür: Schneidet zuerst einen kurzen, reproduzierbaren Testausschnitt und normalisiert Video und Audio gemeinsam. Empfehlung: eingeschaltet lassen, bis LipSync, Identität und Referenzstärke mit einem 2- bis 5-Sekunden-Clip stimmen.",
   lipDubCalibrationStart:
@@ -56,11 +58,31 @@ export const fieldHelp = {
   lipDubCalibrationDuration:
     "Wofür: Gewünschte Länge des Kalibrierclips. Empfehlung: 4,2 Sekunden; die Vorbereitung kürzt geringfügig auf die nächste kleinere 8k+1-Framezahl, damit LTX später keine weiteren Frames verwirft.",
   longcatLipsync:
-    "Wofür: Rendert zusätzlich mit LongCat eine präziser audiogeführte Mundbewegung und überträgt sie per dynamischem Gesichts- und Mundwinkel-Tracking auf das LTX-Video. Position und Größe folgen dem Mund, die Rotation der stabileren Augen- und Kopfachse. Bei unsicherer Erkennung bleibt der jeweilige LTX-Frame unverändert. Das ist deutlich langsamer, bleibt deshalb optional und wird bei identischem Bild und Audio zwischengespeichert.",
+    "Wofür: Erzeugt mit LongCat Video Avatar 1.5 eine separate Sprechbewegung und überträgt daraus nur den Mundbereich in das LTX-Video. Der aktuelle Mund-Composite ist experimentell und kann bei Kopfbewegung sichtbare Übergänge, einen schiefen Mund oder unnatürliche Hautbewegung erzeugen. Empfehlung: ausgeschaltet lassen; LongCat, LatentSync und MuseTalk nur in kontrollierten Vergleichen einzeln testen, da keiner dieser Zusatzpfade bisher eine Produktionsfreigabe erreicht hat.",
   longcatResolution:
     "Wofür: Auflösung des zusätzlichen LongCat-Renders. Empfehlung: 480p für Tests und die meisten Mundbereiche; 720p nur für große Nahaufnahmen, da es wesentlich mehr Zeit und Speicher benötigt.",
   longcatBlend:
     "Wofür: Breite der weichen Übergangszone um den vollständig ersetzten Mundkern. Empfehlung: 0,9; bei zu viel Bewegung der umgebenden Haut auf 0,6 bis 0,8 senken. Die Zone endet unterhalb der Nase und überträgt außerhalb des Mundkerns keine vollflächige LongCat-Haut.",
+  latentSync:
+    "Wofür: Verfeinert nach dem LTX-Render das vorhandene Gesicht mit LatentSync 1.6 passend zur bereits erzeugten Tonspur. Der offizielle InsightFace-106-Punkt-Pfad richtet das Gesicht aus; Kopf, Körper und Hintergrund bleiben aus dem LTX-Video. Empfehlung: nur für lokale, nicht-kommerzielle Qualitätsvergleiche einschalten. Der zusätzliche GPU-Pass ist deutlich langsamer.",
+  latentSyncSteps:
+    "Wofür: Anzahl der offiziellen LatentSync-Diffusionsschritte. Empfehlung: 30 als Qualitätsstandard; 20 für einen schnelleren Test, 40 bis 50 nur nach einem sichtbaren Vergleich, da mehr Schritte nicht automatisch bessere Synchronität liefern.",
+  latentSyncGuidance:
+    "Wofür: Stärke der Audiosteuerung im LatentSync-Gesichtsrefiner. Empfehlung: 2,0. Werte näher an 3 können Mundformen stärker erzwingen, erhöhen aber das Risiko sichtbarer Gesichtsänderungen; Werte näher an 1 bewahren das Ausgangsbild stärker.",
+  museTalk:
+    "Wofür: Ersetzt nach dem LTX-Render den unteren Gesichtsbereich bildweise mit MuseTalk 1.5 und der vorhandenen Tonspur. Kopfbewegung, Körper und Hintergrund bleiben aus LTX; eine semantische Gesichtsmaske blendet das Ergebnis ein. Empfehlung: für Qualitätsvergleiche einschalten, standardmäßig AUS lassen, bis die objektive P/B/M- und Identitätsmessung für die konkrete Aufnahme besser als der native Lauf ist.",
+  museTalkExtraMargin:
+    "Wofür: Erweitert den bearbeiteten Gesichtsausschnitt unter dem erkannten Kinn. Empfehlung: 10 wie in MuseTalk 1.5. Erhöhen, wenn der Unterlippen- oder Kinnbereich abgeschnitten wirkt; senken, wenn Hals oder Kleidung sichtbar mitverändert werden.",
+  museTalkCheekWidth:
+    "Wofür: Schützt die äußeren Wangen vor unnötiger Veränderung durch die semantische Einblendmaske. Empfehlung: 90 wie im offiziellen MuseTalk-1.5-Pfad. Größer bewahrt mehr Originalhaut, kleiner erlaubt eine breitere Anpassung um den Mund.",
+  museTalkAudioPaddingLeft:
+    "Wofür: Anzahl zusätzlicher Audio-Kontextfenster vor jedem Videobild. Empfehlung: 2. Ein größerer Wert kann frühe Mundbewegungen glätten, kann den sichtbaren Einsatz aber zeitlich nach vorne ziehen.",
+  museTalkAudioPaddingRight:
+    "Wofür: Anzahl zusätzlicher Audio-Kontextfenster nach jedem Videobild. Empfehlung: 2. Ein größerer Wert kann Übergänge zwischen Lauten glätten, kann den sichtbaren Einsatz aber zeitlich verzögern.",
+  lipForcing:
+    "Wofür: Regeneriert den Mundbereich mit dem offiziellen LipForcing-14B-Modell. Eine vorhandene saubere Konditionierungs-Sprachspur wird mit derselben Startzeit und Maximaldauer zugeschnitten, steuert die Lippen und bleibt bis zum optionalen späteren Musik-Endmix die hörbare Spur. Ohne separate Führung wird der LTX-Ton verwendet. Die Person wird pro Bild mit InsightFace ausgerichtet; Kopfbewegung, Körper, Hintergrund, Bildzahl und Bildrate bleiben erhalten. Empfehlung: nur für kontrollierte Qualitätsvergleiche einschalten und standardmäßig AUS lassen, bis das konkrete Ergebnis die native Version bei P/B/M-Verschluss, Identität und Pausenruhe messbar übertrifft.",
+  lipForcingDecoder:
+    "Wofür: Wählt die Bilddekodierung des LipForcing-Ergebnisses. „Maximale Qualität“ verwendet die offizielle vollständige Wan-VAE und ist langsamer; „Schneller Test“ verwendet den kleinen Streaming-TAEHV-Decoder und kann sichtbar weichere oder unruhigere Munddetails erzeugen. Empfehlung: für die Endbeurteilung maximale Qualität.",
   retakeStart:
     "Wofür: Beginn des zu regenerierenden Bereichs im Quellvideo. Gute Eingabe: Zeit in Sekunden ab Videostart; für saubere Übergänge etwas vor der problematischen Stelle beginnen.",
   retakeEnd:
@@ -71,8 +93,64 @@ export const fieldHelp = {
     "Wofür: Erzeugt die Audiospur im gewählten Retake-Bereich neu. Empfehlung: einschalten, wenn Sprache, Geräusche oder Synchronität angepasst werden sollen.",
   distilledSchedule:
     "Wofür: Nutzt den schnellen Distilled-Ablauf und den Distilled Checkpoint. Empfehlung: für schnelle Retakes einschalten; für maximale Steuerbarkeit ausschalten.",
+  icLoraProfile:
+    "Wofür: Wählt einen veröffentlichten LTX-2.3-IC-LoRA-Ablauf. Union Control überträgt Tiefe, Kanten oder Pose. Ingredients kombiniert ein Referenzblatt. Motion Track folgt Bewegungsbahnen. Pixel x4 vergrößert generativ. V2V Rasur entfernt Bart. Inpainting ersetzt maskierte Bildteile, Outpainting erweitert die Leinwand, HDR erzeugt ein lineares Master.",
   controlVideoPath:
     "Wofür: Absoluter DGX-Pfad zu einem IC-LoRA-Kontrollvideo, das Bewegung oder Struktur vorgibt. Gute Eingabe: ein lesbares Video mit passender Dauer und klarer Bewegung.",
+  unionControlLora:
+    "Wofür: Offizielle LTX-2.3 Union-Control IC-LoRA für framegenaue Tiefen-, Posen- oder Kantenführung. Gute Eingabe: die verifizierte ref0.5-Datei; andere LoRAs gehören in „Weitere LoRAs“.",
+  unionControlStrength:
+    "Wofür: Bestimmt, wie stark das offizielle Union-Control-Modell die Struktur des Kontrollvideos übernimmt. Empfehlung: mit 1,0 starten und erst nach einem Vergleichslauf in Schritten von 0,1 ändern.",
+  ingredientsLora:
+    "Wofür: Offizielle LTX-2.3 Ingredients IC-LoRA, die mehrere sichtbare Bestandteile eines Referenzblatts in der beschriebenen Zielszene kombiniert. Gute Eingabe: die vollständig SHA-256-verifizierte Datei ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors.",
+  ingredientsStrength:
+    "Wofür: Gewichtet die offizielle Ingredients IC-LoRA. Empfehlung: 1,0 wie in der veröffentlichten Vorlage; zuerst Prompt und Referenzblatt verbessern, bevor dieser Wert verändert wird.",
+  motionTrackLora:
+    "Wofür: Offizielle Motion-Track IC-LoRA, die im Referenzbild markierte Motive entlang einer vorbereiteten farbigen Track-Sequenz bewegt. Gute Eingabe: die vollständig SHA-256-verifizierte ref0.5-Datei.",
+  motionTrackStrength:
+    "Wofür: Gewichtet die Motion-Track-Führung. Empfehlung: 1,0 wie in der offiziellen Vorlage; Bewegungsbahnen zuerst im Track-Video korrigieren, statt die Stärke zu erhöhen.",
+  pixelUpscalerLora:
+    "Wofür: Offizielle generative Pixel-Spatial-Upscaler-IC-LoRA x4. Sie erhält Bewegung und Bildaufbau des Quellvideos, erzeugt Details aber neu. Ausgabe-Breite und -Höhe müssen jeweils dem Vierfachen der Quelle entsprechen.",
+  pixelUpscalerStrength:
+    "Wofür: Gewichtet die x4-Pixelreferenz. Empfehlung: 1,0 wie in der offiziellen Vorlage; für stärkere Quelltreue eher den Denoise-Schedule verkürzen als diesen Wert willkürlich abzusenken.",
+  instantShaveLora:
+    "Wofür: Offizielle V2V-Demonstrations-IC-LoRA „Instant Shave“. Sie ist ausschließlich auf das Entfernen von Bart und Stoppeln spezialisiert; das Studio setzt das benötigte Triggerwort REMOVEBEARD automatisch vor den Prompt.",
+  instantShaveStrength:
+    "Wofür: Gewichtet das spezialisierte Instant-Shave-Modell. Empfehlung: 1,0 wie in der offiziellen Vorlage; ein klar sichtbares Gesicht und eine genaue Beschreibung glatter, bartloser Haut sind wichtiger als höhere Werte.",
+  inOutpaintLora:
+    "Wofür: Offizielle LTX-2.3 In-/Outpainting IC-LoRA für zeitlich konsistentes Ersetzen maskierter Videobereiche oder Erweitern des Bildrands. Gute Eingabe: die SHA-256-verifizierte Datei ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors.",
+  inOutpaintStrength:
+    "Wofür: Gewichtet die In-/Outpainting IC-LoRA in beiden Diffusionsstufen. Empfehlung: exakt 1,0 wie in den veröffentlichten Vorlagen; die Form der Maske und der Szenenprompt sind die wirksameren Stellschrauben.",
+  inpaintMask:
+    "Wofür: Weiß markiert in jedem Frame den neu zu erzeugenden Bereich, Schwarz bewahrt das Quellvideo. Gute Eingabe: verlustarm gespeichertes, framegenaues Graustufen-Video mit derselben Dauer wie das Quellvideo; Maskenkanten nicht unnötig knapp um das Objekt legen.",
+  controlMask:
+    "Wofür: Begrenzt Union-Control räumlich. Helle Bereiche erhalten stärkere Kontrollführung, dunkle Bereiche weniger. Gute Eingabe: framegenaues Graustufen-Video passend zum Kontrollvideo; leer lassen, wenn die Führung im ganzen Bild gelten soll.",
+  hdrLora:
+    "Wofür: Offizielle LTX-2.3 HDR IC-LoRA. Sie führt ein Quellvideo in einem linearen HDR-Arbeitsfarbraum weiter und erzeugt neben der sichtbaren MP4-Vorschau eine EXR-Bildsequenz für Farbkorrektur und echtes HDR-Mastering.",
+  hdrStrength:
+    "Wofür: Gewichtet die HDR IC-LoRA. Der native veröffentlichte Ablauf verwendet fest 1,0; diesen Wert für vergleichbare Resultate beibehalten.",
+  hdrEmbeddings:
+    "Wofür: Offizielle vorab berechnete Szenen-Embeddings für den nativen HDR-Pfad. Gute Eingabe: die vollständig SHA-256-verifizierte Datei ltx-2.3-22b-ic-lora-hdr-scene-emb.safetensors aus demselben gated Repository.",
+  hdrHighQuality:
+    "Wofür: Erzeugt intern die doppelte zeitliche Dichte und behält danach jeden zweiten Frame. Das reduziert HDR-Zeitflimmern, benötigt aber ungefähr die doppelte Rechenzeit. Für einen ersten Test ausschalten, für das Master nach sichtbarem Vergleich einschalten.",
+  controlType:
+    "Wofür: Legt fest, wie das hochgeladene Fahrvideo in eine Union-Control-Eingabe umgewandelt wird. MoGe-Tiefe ist die offizielle Vorlage; Canny betont Konturen. Fertige Map und Pose erwarten bereits aufbereitete, framegenaue Kontrollbilder.",
+  mogeModel:
+    "Wofür: Offizielles MoGe-2-Geometriemodell für automatische Tiefenschätzung. Gute Eingabe: die vollständig SHA-256-verifizierte FP16-Datei aus Comfy-Org/MoGe.",
+  idLoraReferenceAudio:
+    "Wofür: Überträgt die Sprecheridentität auf die neu erzeugte Stimme. Gute Eingabe: etwa fünf Sekunden saubere Einzelsprache ohne Musik, Hall, Rauschen oder zweite Stimme; der Wortlaut der Referenz wird nicht übernommen.",
+  idLoraModel:
+    "Wofür: Offizielle LTX-2.3 TalkVid-ID-LoRA für gemeinsame Personen- und Stimmidentität. Gute Eingabe: die vollständig SHA-256-verifizierte Datei ltx-2.3-id-lora-talkvid-3k.safetensors.",
+  idLoraStrength:
+    "Wofür: Gewichtet die TalkVid-ID-LoRA. Empfehlung: 1,0 als offizieller Ausgangswert; nur nach einem reproduzierbaren Vergleich in kleinen Schritten ändern.",
+  idLoraGuidance:
+    "Wofür: Verstärkt die aus dem Referenzton gelernte Stimme durch einen zusätzlichen Modelllauf ohne Referenz. Empfehlung: 3,0 wie in der offiziellen Vorlage; höhere Werte können Klang und Artikulation verschlechtern.",
+  idLoraGuidanceWindow:
+    "Wofür: Legt fest, in welchem Anteil des Entrauschungsverlaufs die zusätzliche Stimmidentitätsführung aktiv ist. Empfehlung: Start 0 und Ende 1 für den vollständigen offiziellen Ablauf.",
+  idLoraStage1ImageStrength:
+    "Wofür: Bindet das Referenzbild während der ersten, niedrig aufgelösten Stufe. Empfehlung: 0,7 wie in der offiziellen ID-LoRA-Vorlage. Die zweite Stufe verwendet danach Stärke 1,0, damit Identitätsdetails beim Hochskalieren erhalten bleiben.",
+  idLoraDistilledStrength:
+    "Wofür: Gewichtet die offizielle dynamische Distilled-LoRA in beiden ID-LoRA-Stufen. Empfehlung: 0,5 wie in der offiziellen Vorlage; dieser Wert ist bewusst niedriger als bei der normalen Zwei-Stufen-Pipeline.",
   controlStrength:
     "Wofür: Gewichtet den Einfluss des IC-LoRA-Kontrollvideos. Empfehlung: mit 1,0 starten; für mehr Freiheit absenken, für stärkere Kontrolle vorsichtig erhöhen.",
   maskPath:
@@ -97,6 +175,8 @@ export const fieldHelp = {
     "Wofür: Spezialisierte IC-LoRA für die native LipDub-Pipeline. Gute Eingabe: das offizielle lokale Lightricks-LipDub-LoRA-Modell, nicht eine normale Stil- oder Charakter-LoRA. Das Modell ist gated und muss im Hugging-Face-Account freigegeben sein.",
   lipDubLoraStrength:
     "Wofür: Regelt den Einfluss der LipDub-IC-LoRA auf Mundbewegung und Referenzbindung. Empfehlung: mit 1,0 starten; nur in kleinen Schritten ändern, wenn der Mund zu schwach oder zu dominant folgt.",
+  lipDubDistilledLoraStrength:
+    "Wofür: Gewichtet die Distilled-LoRA innerhalb des offiziellen Comfy-HQ-LipDub-Aufbaus. Empfehlung: exakt 0,5 wie in der veröffentlichten Lightricks-Vorlage; erst nach einem reproduzierbaren Vergleich verändern.",
   loraPath:
     "Wofür: Lädt eine zusätzliche Stil-, Charakter- oder Kontroll-LoRA. Gute Eingabe: absoluter Pfad zu einer mit dem LTX-Checkpoint kompatiblen .safetensors-Datei.",
   loraStrength:
@@ -106,7 +186,7 @@ export const fieldHelp = {
   height:
     "Wofür: Höhe der Ausgabe in Pixeln. Empfehlung: Pipeline-Vorgabe verwenden; bei Zwei-Stufen durch 64, bei Eine-Stufe durch 32 teilbare Werte wählen.",
   frames:
-    "Wofür: Anzahl der erzeugten Videoframes und damit zusammen mit FPS die Dauer. Gültige Werte folgen 8k+1, zum Beispiel 121; das sind bei 24 FPS etwa 5 Sekunden.",
+    "Wofür: Bestimmt zusammen mit FPS die Dauer. Bei Video ist es die Bildanzahl; bei Text zu Audio dient derselbe Wert nur als Zeitraster. Gültige Werte folgen 8k+1, zum Beispiel 121 für etwa 5 Sekunden bei 24 FPS.",
   fps:
     "Wofür: Wiedergabegeschwindigkeit in Frames pro Sekunde. Empfehlung: 24 für filmische Bewegung, 25 oder 30 für gängige Videoformate; beeinflusst die Dauer, nicht die Framezahl.",
   seed:
@@ -114,13 +194,15 @@ export const fieldHelp = {
   steps:
     "Wofür: Anzahl der Entrauschungsschritte. Empfehlung: Pipeline-Vorgabe nutzen; mehr Schritte kosten Zeit und bringen nach einem gewissen Punkt kaum sichtbare Verbesserung.",
   outputName:
-    "Wofür: Dateiname der fertigen Ausgabe im konfigurierten Ausgabeordner. Gute Eingabe: Buchstaben, Zahlen, Punkt, Bindestrich oder Unterstrich und zwingend die Endung .mp4.",
+    "Wofür: Dateiname der fertigen Ausgabe im konfigurierten Ausgabeordner. Gute Eingabe: Buchstaben, Zahlen, Punkt, Bindestrich oder Unterstrich; Video endet auf .mp4, Text zu Audio auf .wav.",
   tiling:
     "Wofür: Verarbeitet die VAE in Kacheln und senkt damit den Speicherbedarf. Empfehlung: auf dem DGX eingeschaltet lassen; nur bei sichtbaren Kachelnaht-Artefakten testweise ausschalten.",
   quantization:
-    "Wofür: Reduziert Speicherbedarf und kann die Inferenz beschleunigen. Empfehlung: FP8 Cast für weniger RAM; Aus für maximale Genauigkeit; FP8 Scaled nur mit passender AMAX-Datei.",
-  amaxPath:
-    "Wofür: Liefert Kalibrierungs-Maxima für FP8 Scaled MM. Gute Eingabe: absoluter Pfad zur exakt zum verwendeten Checkpoint passenden AMAX-Datei.",
+    "Wofür: Reduziert Speicherbedarf und kann die Inferenz beschleunigen. Empfehlung: FP8 Cast ausschließlich mit BF16-Checkpoint; FP8 Scaled ausschließlich mit einem vorquantisierten FP8-Checkpoint, dessen Skalen bereits in der Datei liegen.",
+  gemmaLora:
+    "Wofür: Offizielle Gemma-Abliterated-LoRA der Comfy-LTX-2.3-Vorlagen. Sie wird nur in den Textencoder geladen und verbessert die uneingeschränkte Promptausführung. Gute Eingabe: die SHA-256-verifizierte Datei gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors.",
+  gemmaLoraStrength:
+    "Wofür: Gewicht der Gemma-LoRA im Textencoder. Empfehlung: 1,0 wie in den offiziellen Comfy-LTX-2.3-Vorlagen.",
   hqLoraStage1:
     "Wofür: Distilled-LoRA-Gewicht in der ersten HQ-Stufe. Empfehlung: 0,25 als Ausgangspunkt; nur in kleinen Schritten ändern.",
   hqLoraStage2:
@@ -244,7 +326,7 @@ export const fieldHelp = {
   objectiveAvNullP95:
     "Wofür: 95. Perzentil der besten Scheinkorrelationen nach kontrolliertem zyklischem Verschieben des Audios. Der echte Peak muss diesen Nullmodellwert klar übertreffen, sonst bleibt die Messung unzureichend.",
   objectivePvCapability:
-    "Wofür: Zeigt den belastbaren Freigabestand des Phonem-/Visem-Evaluators. Modell fehlt, Legal Hold, Runner fehlt oder technischer Hold bedeutet: keine Inhaltsfreigabe und keine 10/10-/SOTA-Aussage. Gut ist ausschließlich Product-GO gemessen nach unabhängig geprüften Artefakten sowie bestandener Offset- und Inhaltsstufe.",
+    "Wofür: Prüft, ob die sichtbare Lippenbewegung zu den gesprochenen Lauten passt. Besonders wichtig: Bei p, b und m müssen sich die Lippen im richtigen Moment schließen. Prüfung aktiv bedeutet, dass diese Kontrolle automatisch ausgeführt wird.",
   objectivePvOffset:
     "Wofür: Zeitversatz des gelernten Audio-/Mundinhaltevaluators. Positiv bedeutet, dass der sichtbare Mund dem Audio folgt. Gut: Medianfehler höchstens 20 ms und p95 höchstens 40 ms auf dem unabhängigen Holdout; ein Einzelclipwert allein ist kein Release-Gate.",
   objectivePvOffsetConfidence:
@@ -266,11 +348,11 @@ export const fieldHelp = {
   objectivePvTransitionF1:
     "Wofür: Übereinstimmung sichtbarer Visemwechsel mit einer Toleranz von einem Videoframe. Product-GO verlangt mindestens 0,90 insgesamt, 0,80 je kritischem Stratum und bestandene Bootstrap-Grenzen.",
   objectivePvRawLag:
-    "Wofür: Rohversatz zwischen dem von MFA am exakten Dialog ausgerichteten Phone-Verlauf und der MediaPipe-Mundöffnung. Positiv bedeutet: Der sichtbare Mund folgt dem Audio. Die Auflösung ist durch die Bildrate begrenzt; ohne Holdout-Kalibrierung ist das kein Product-GO.",
+    "Wofür: Geschätzter zeitlicher Abstand zwischen Ton und Lippenbewegung. Ein positiver Wert bedeutet, dass der Mund dem Ton hinterherläuft; ein negativer Wert bedeutet, dass sich der Mund zu früh bewegt. Eine niedrige Sicherheit macht den Wert unzuverlässig.",
   objectivePvRawLagConfidence:
     "Wofür: Eindeutigkeit des besten Roh-Lag-Peaks gegenüber dem zweitbesten Peak. Höher bedeutet nur, dass dieser Clip einen klareren Versatz liefert. Der Wert ist keine kalibrierte Wahrscheinlichkeit und keine Qualitätsnote.",
   objectivePvBilabialF1:
-    "Wofür: Roh-F1 für sichtbaren Lippenschluss bei p, b und m. 1,000 bedeutet perfekte Übereinstimmung der erkannten Schlussframes in diesem Clip. MediaPipe ist dabei kein unabhängiger 15-Klassen-Visemklassifikator; deshalb bleibt Product-GO blockiert.",
+    "Wofür: Prüft den sichtbaren Lippenschluss bei p, b und m. 100 % bedeutet, dass sich die Lippen bei diesen Lauten passend schließen. 0 % bedeutet, dass kein passender Lippenschluss erkannt wurde.",
   objectivePvOpeningCorrelation:
     "Wofür: Pearson-Korrelation zwischen grob erwarteter Phone-Mundöffnung und der normalisierten sichtbaren Öffnung. Höher bedeutet ähnlichere zeitliche Öffnungsdynamik. Anatomie, Betonung und Kopfpose beeinflussen den unkalibrierten Rohwert.",
   objectivePvRoundingCorrelation:

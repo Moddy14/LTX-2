@@ -9,13 +9,18 @@ import {
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines";
-import { withDiscoveredModelDefaults } from "../shared/models";
+import {
+  withDiscoveredModelDefaults,
+  withOfficialSpeechModelPaths,
+} from "../shared/models";
 import type { PlanSuggestion, PreparedLipDubReference } from "../shared/plan";
 import { estimateResources } from "../shared/estimates";
 import { decodeDraftParameter } from "../shared/drafts";
 import { composePromptFromParts, composePromptRequestSchema } from "../shared/prompts";
 import {
   cancelJob,
+  deleteJob,
+  deleteOutput,
   createJob,
   getConfig,
   getHealth,
@@ -66,9 +71,11 @@ function restoreRequest(): GenerationRequest {
       const currentUrl = new URL(window.location.href);
       currentUrl.searchParams.delete("draft");
       window.history.replaceState(null, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-      return mergeGenerationRequest(draft);
+      return withOfficialSpeechModelPaths(mergeGenerationRequest(draft));
     }
-    return mergeGenerationRequest(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null"));
+    return withOfficialSpeechModelPaths(
+      mergeGenerationRequest(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")),
+    );
   } catch {
     return createDefaultRequest();
   }
@@ -79,13 +86,14 @@ function nextEditableOutputName(
   jobs: readonly StudioJob[],
   outputs: readonly StudioOutput[],
 ): string {
-  const base = outputName.replace(/\.mp4$/i, "").replace(/-(?:v|edit)\d+$/i, "");
+  const extension = outputName.toLowerCase().endsWith(".wav") ? ".wav" : ".mp4";
+  const base = outputName.replace(/\.(?:mp4|wav)$/i, "").replace(/-(?:v|edit)\d+$/i, "");
   const used = new Set([...jobs.map((job) => job.outputName), ...outputs.map((output) => output.name)]);
   for (let index = 1; index <= 999; index += 1) {
-    const candidate = `${base}-edit${String(index).padStart(2, "0")}.mp4`;
+    const candidate = `${base}-edit${String(index).padStart(2, "0")}${extension}`;
     if (!used.has(candidate)) return candidate;
   }
-  return `${base}-edit-${Date.now()}.mp4`;
+  return `${base}-edit-${Date.now()}${extension}`;
 }
 
 function uniqueMessages(messages: readonly string[]): string[] {
@@ -109,6 +117,8 @@ export function App() {
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+  const [deletingOutputName, setDeletingOutputName] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [serverWarnings, setServerWarnings] = useState<string[]>([]);
   const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
@@ -150,38 +160,49 @@ export function App() {
     let mounted = true;
     const refresh = async () => {
       const experimentSnapshot = experimentRefreshFence.current.snapshot();
-      try {
-        const [
-          nextConfig,
-          nextHealth,
-          nextJobs,
-          nextModels,
-          nextAssets,
-          nextOutputs,
-          nextExperiments,
-        ] = await Promise.all([
+      const [coreResult, experimentResult] = await Promise.allSettled([
+        Promise.all([
           getConfig(),
           getHealth(),
           getJobs(),
           getModels(),
           getAssets(),
           getOutputs(),
-          getExperiments(),
-        ]);
-        if (!mounted) return;
-        setConfig(nextConfig);
-        setHealth(nextHealth);
-        setJobs(nextJobs);
-        setOutputs((current) => mergeOutputRefresh(current, nextOutputs));
-        if (experimentRefreshFence.current.accepts(experimentSnapshot)) {
-          setExperiments(nextExperiments);
-        }
-        setModelInventory(nextModels);
-        setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
-        setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
+        ]),
+        getExperiments(),
+      ]);
+      if (!mounted) return;
+      if (coreResult.status === "rejected") {
+        const error = coreResult.reason;
+        setStartupError(error instanceof Error ? error.message : "Studio API nicht erreichbar");
+        return;
+      }
+      const [
+        nextConfig,
+        nextHealth,
+        nextJobs,
+        nextModels,
+        nextAssets,
+        nextOutputs,
+      ] = coreResult.value;
+      setConfig(nextConfig);
+      setHealth(nextHealth);
+      setJobs(nextJobs);
+      setOutputs((current) => mergeOutputRefresh(current, nextOutputs));
+      setModelInventory(nextModels);
+      setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
+      setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
+      if (
+        experimentResult.status === "fulfilled"
+        && experimentRefreshFence.current.accepts(experimentSnapshot)
+      ) {
+        setExperiments(experimentResult.value.experiments);
+      }
+      if (experimentResult.status === "rejected") {
+        const error = experimentResult.reason;
+        setStartupError(error instanceof Error ? error.message : "Experimentdaten sind nicht verfügbar");
+      } else {
         setStartupError(null);
-      } catch (error) {
-        if (mounted) setStartupError(error instanceof Error ? error.message : "Studio API nicht erreichbar");
       }
     };
     void refresh();
@@ -197,7 +218,7 @@ export function App() {
         const snapshot = experimentRefreshFence.current.snapshot();
         void getExperiments()
           .then((next) => {
-            if (experimentRefreshFence.current.accepts(snapshot)) setExperiments(next);
+            if (experimentRefreshFence.current.accepts(snapshot)) setExperiments(next.experiments);
           })
           .catch(() => undefined);
       },
@@ -273,21 +294,28 @@ export function App() {
 
   const changeMode = (mode: PipelineMode) => {
     const modeDefaults = createDefaultRequest(mode);
-    setRequest((current) => ({
+    setRequest((current) => withOfficialSpeechModelPaths({
       ...modeDefaults,
       prompt: current.prompt,
       promptParts: current.promptParts,
       negativePrompt: current.negativePrompt,
-      enhancePrompt: mode === "lipdub" ? false : current.enhancePrompt,
-      sourceMode: current.sourceMode,
+      enhancePrompt: ["lipdub", "id-lora", "keyframes", "ic-lora", "text-to-audio"].includes(mode)
+        ? false
+        : current.enhancePrompt,
+      sourceMode: ["keyframes", "ic-lora", "id-lora", "image-audio-to-video"].includes(mode)
+        ? "image"
+        : current.sourceMode,
       seed: current.seed,
       models: mode === "lipdub" ? { ...current.models, loras: [] } : current.models,
-      images: mode === "lipdub" ? [] : current.images,
+      images: ["lipdub", "text-to-audio"].includes(mode) ? [] : current.images,
       quantization: current.quantization,
       icLora: current.icLora,
+      idLora: current.idLora,
       audio: current.audio,
       lipDub: current.lipDub,
-      postprocess: current.postprocess,
+      postprocess: mode === "text-to-audio"
+        ? modeDefaults.postprocess
+        : current.postprocess,
       retake: current.retake,
       continuity: current.continuity,
     }));
@@ -302,7 +330,7 @@ export function App() {
 
   const updateRequest = (nextRequest: GenerationRequest) => {
     if (nextRequest.prompt !== request.prompt) setPromptUndo(null);
-    setRequest(nextRequest);
+    setRequest(withOfficialSpeechModelPaths(nextRequest));
   };
 
   const run = async () => {
@@ -360,6 +388,24 @@ export function App() {
       setJobs((current) => current.map((job) => job.id === id ? cancelled : job));
     } catch (error) {
       setServerErrors([error instanceof Error ? error.message : "Job konnte nicht abgebrochen werden."]);
+    }
+  };
+
+  const handleDeleteJob = async (job: StudioJob) => {
+    if (!window.confirm(
+      `Job "${job.outputName}" wirklich aus dem Verlauf löschen?\n\n`
+      + "Die erzeugte Ausgabe bleibt in „Erzeugte Medien“ erhalten und kann dort separat gelöscht werden.",
+    )) return;
+    setServerErrors([]);
+    setDeletingJobId(job.id);
+    try {
+      await deleteJob(job.id);
+      setJobs((current) => current.filter((candidate) => candidate.id !== job.id));
+      if (selectedJobId === job.id) setSelectedJobId(null);
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Job konnte nicht gelöscht werden."]);
+    } finally {
+      setDeletingJobId(null);
     }
   };
 
@@ -466,6 +512,31 @@ export function App() {
     }
   };
 
+  const handleDeleteOutput = async (output: StudioOutput) => {
+    if (!window.confirm(
+      `Video "${output.name}" wirklich löschen?\n\n`
+      + "Die MP4 sowie gespeicherte Einstellungen, Analyse und Report werden dauerhaft entfernt. "
+      + "Der Jobverlauf bleibt erhalten.",
+    )) return;
+    setServerErrors([]);
+    setDeletingOutputName(output.name);
+    try {
+      await deleteOutput(output.name);
+      const nextOutputs = await getOutputs();
+      setOutputs(nextOutputs);
+      setComparisonNames((current) => current.filter((name) => name !== output.name));
+      if (selectedOutputName === output.name) {
+        const next = nextOutputs[0] ?? null;
+        setSelectedOutputName(next?.name ?? null);
+        setSelectedJobId(next?.jobId ?? null);
+      }
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Video konnte nicht gelöscht werden."]);
+    } finally {
+      setDeletingOutputName(null);
+    }
+  };
+
   const toggleComparison = (output: StudioOutput) => {
     setComparisonNames((current) => {
       if (current.includes(output.name)) return current.filter((name) => name !== output.name);
@@ -493,7 +564,9 @@ export function App() {
 
   const loadJobSettings = (job: StudioJob) => {
     const merged = mergeGenerationRequest(job.request, job.mode);
-    const loaded = modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged;
+    const loaded = withOfficialSpeechModelPaths(
+      modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
+    );
     setRequest({ ...loaded, outputName: nextEditableOutputName(loaded.outputName, jobs, outputs) });
     const matchingOutput = outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
     if (matchingOutput) setSelectedOutputName(matchingOutput.name);
@@ -516,8 +589,42 @@ export function App() {
       return;
     }
     const merged = mergeGenerationRequest(output.request, output.request.mode);
-    const loaded = modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged;
+    const loaded = withOfficialSpeechModelPaths(
+      modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
+    );
     setRequest({ ...loaded, outputName: nextEditableOutputName(output.name, jobs, outputs) });
+    setSelectedOutputName(output.name);
+    if (output.jobId) setSelectedJobId(output.jobId);
+    setPromptUndo(null);
+    setAttempted(false);
+    setServerErrors([]);
+    setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
+    setPreflightSuggestions([]);
+    setCommand(null);
+  };
+
+  const prepareLipSyncRetry = (output: StudioOutput, referenceStrength: number) => {
+    if (!output.request || output.request.mode !== "lipdub") {
+      setServerErrors(["Für dieses Video können keine LipDub-Einstellungen vorbereitet werden."]);
+      return;
+    }
+    const merged = mergeGenerationRequest(output.request, "lipdub");
+    const loaded = withOfficialSpeechModelPaths(
+      modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
+    );
+    setRequest({
+      ...loaded,
+      outputName: nextEditableOutputName(output.name, jobs, outputs),
+      lipDub: {
+        ...loaded.lipDub,
+        referenceVideo: {
+          ...loaded.lipDub.referenceVideo,
+          strength: referenceStrength,
+        },
+      },
+    });
     setSelectedOutputName(output.name);
     if (output.jobId) setSelectedJobId(output.jobId);
     setPromptUndo(null);
@@ -654,6 +761,8 @@ export function App() {
           }}
           onRun={() => void run()}
           onCancel={(id) => void handleCancel(id)}
+          onDeleteJob={handleDeleteJob}
+          deletingJobId={deletingJobId}
           submitting={submitting}
           errors={attempted
             ? uniqueMessages([...validationMessages, ...serverErrors])
@@ -667,7 +776,6 @@ export function App() {
           comparisonNames={comparisonNames}
           estimate={resourceEstimate}
           requiredStartMemoryGiB={requiredStartMemoryGiB}
-          runtimeGate={config?.runtime ?? null}
           onToggleCompare={toggleComparison}
           onCompareExperiment={(experimentOutputs) => {
             setComparisonNames(experimentOutputs.map((output) => output.name));
@@ -678,6 +786,9 @@ export function App() {
           onSaveQualityReview={handleQualityReview}
           onStartAnalysis={handleStartAnalysis}
           onCancelAnalysis={handleCancelAnalysis}
+          onPrepareLipSyncRetry={prepareLipSyncRetry}
+          onDeleteOutput={handleDeleteOutput}
+          deletingOutputName={deletingOutputName}
           onLoadSettings={loadJobSettings}
           onLoadOutputSettings={loadOutputSettings}
           experiments={experiments}
