@@ -10,6 +10,7 @@ weder aus dem Code noch aus der Git-Historie ablesen kann.
 | Frage | Dokument |
 | --- | --- |
 | Auditstand, Releaseplan, 10/10-Kriterien, offene Befunde | `apps/ltx-studio/docs/QUALITY_AUDIT_2026-08-03.md` (fortgeschrieben; jüngster Nachtrag zuletzt lesen) |
+| Was bis SOTA 10/10 fehlt, in welcher Reihenfolge | `apps/ltx-studio/docs/SOTA_EXECUTION_PLAN.md` |
 | LipDub-Claims, Evaluator- und Experimentspezifikation | `apps/ltx-studio/docs/LIPDUB_SOTA_PLAN.md` |
 | Gepinnte Upstream-Workflowquellen | `apps/ltx-studio/shared/upstreamWorkflowContracts.ts` |
 | Rohdaten der Canary-Läufe | `apps/ltx-studio/docs/evidence/` |
