@@ -84,3 +84,8 @@ playwright-report/
 !apps/ltx-studio/*.json
 !apps/ltx-studio/evaluators/phoneme-viseme/*.json
 !packages/ltx-trainer/configs/av_eval/*.json
+
+# LTX Studio machine-local evaluator bindings and operator evidence
+apps/ltx-studio/evaluators/phoneme-viseme/*.env
+apps/ltx-studio/evaluators/phoneme-viseme/*.local.json
+apps/ltx-studio/evaluators/phoneme-viseme/private-local-*.md

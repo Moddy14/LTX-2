@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU-only MFA/MediaPipe lip-sync measurement.
+"""CPU-only forced-alignment/MediaPipe lip-sync measurement.
 
 This runner deliberately emits measurement-only evidence. It cannot grant
 Product-GO; release gates and independent visual viseme classification remain
@@ -132,15 +132,33 @@ def load_and_verify_manifest(path: Path) -> tuple[dict[str, Any], dict[str, Path
     manifest = read_strict_json(path)
     if not isinstance(manifest, dict):
         raise ValueError("manifest must be an object")
-    if manifest.get("schemaVersion") != "ltx-studio-phoneme-viseme-manifest.v2":
+    schema_version = manifest.get("schemaVersion")
+    if schema_version not in {
+        "ltx-studio-phoneme-viseme-manifest.v2",
+        "ltx-studio-phoneme-viseme-manifest.v3",
+    }:
         raise ValueError("unsupported measurement manifest")
-    if manifest.get("method") != "mfa-mediapipe-de.v1":
+    expected_method = (
+        "mfa-mediapipe-de.v1"
+        if schema_version == "ltx-studio-phoneme-viseme-manifest.v2"
+        else "ctc-espeak-mediapipe-de.v1"
+    )
+    if manifest.get("method") != expected_method:
         raise ValueError("unsupported measurement method")
     root = path.parent.resolve()
     evidence = manifest.get("legalEvidence")
     if not isinstance(evidence, list) or not evidence:
         raise ValueError("legal evidence is missing")
     evidence_ids: set[str] = set()
+    approval = manifest.get("legalApproval")
+    if not isinstance(approval, dict):
+        raise ValueError("measurement approval is missing")
+    commercial_scope = approval.get("scope") == "commercial-biometric-measurement-only"
+    if approval.get("scope") not in {
+        "commercial-biometric-measurement-only",
+        "private-local-biometric-measurement-only",
+    }:
+        raise ValueError("unsupported measurement approval scope")
     for entry in evidence:
         if not isinstance(entry, dict) or not isinstance(entry.get("evidenceId"), str):
             raise ValueError("invalid legal evidence")
@@ -148,7 +166,9 @@ def load_and_verify_manifest(path: Path) -> tuple[dict[str, Any], dict[str, Path
         if evidence_id in evidence_ids:
             raise ValueError(f"duplicate legal evidence: {evidence_id}")
         evidence_ids.add(evidence_id)
-        if entry.get("commercialUseReviewed") is not True or entry.get("biometricProcessingReviewed") is not True:
+        if entry.get("biometricProcessingReviewed") is not True or (
+            commercial_scope and entry.get("commercialUseReviewed") is not True
+        ):
             raise ValueError(f"legal scope not approved: {evidence_id}")
         evidence_path = safe_relative(root, entry.get("path", ""))
         size, actual_sha = file_sha256(evidence_path, 16 * 1024 * 1024)
@@ -175,13 +195,24 @@ def load_and_verify_manifest(path: Path) -> tuple[dict[str, Any], dict[str, Path
         if not isinstance(licenses, list) or not licenses or any(item not in evidence_ids for item in licenses):
             raise ValueError(f"component license evidence mismatch: {name}")
         resolved[name] = component_path
-    required = {
-        "mfaExecutable",
-        "acousticModel",
-        "dictionary",
-        "faceLandmarker",
-        "visemeMapping",
-    }
+    required = (
+        {
+            "mfaExecutable",
+            "acousticModel",
+            "dictionary",
+            "faceLandmarker",
+            "visemeMapping",
+        }
+        if schema_version == "ltx-studio-phoneme-viseme-manifest.v2"
+        else {
+            "phonemeModelWeights",
+            "phonemeModelConfig",
+            "phonemeVocabulary",
+            "espeakExecutable",
+            "faceLandmarker",
+            "visemeMapping",
+        }
+    )
     if not required.issubset(resolved):
         raise ValueError(f"missing components: {sorted(required - set(resolved))}")
     return manifest, resolved, manifest_sha
@@ -251,13 +282,27 @@ def verify_runtime(manifest: dict[str, Any], components: dict[str, Path]) -> Non
         raise ValueError(f"OpenCV version mismatch: {cv2.__version__}")
     if np.__version__ != runtime["numpyVersion"]:
         raise ValueError(f"NumPy version mismatch: {np.__version__}")
-    mfa = str(components["mfaExecutable"])
-    try:
-        actual_mfa = command_output([mfa, "version"])
-    except (subprocess.SubprocessError, OSError):
-        actual_mfa = command_output([mfa, "--version"])
-    if runtime["mfaVersion"] not in actual_mfa:
-        raise ValueError(f"MFA version mismatch: {actual_mfa[:100]}")
+    if manifest["method"] == "mfa-mediapipe-de.v1":
+        mfa = str(components["mfaExecutable"])
+        try:
+            actual_mfa = command_output([mfa, "version"])
+        except (subprocess.SubprocessError, OSError):
+            actual_mfa = command_output([mfa, "--version"])
+        if runtime["mfaVersion"] not in actual_mfa:
+            raise ValueError(f"MFA version mismatch: {actual_mfa[:100]}")
+    else:
+        actual_torch = importlib.metadata.version("torch")
+        actual_transformers = importlib.metadata.version("transformers")
+        actual_phonemizer = importlib.metadata.version("phonemizer")
+        if actual_torch != runtime["torchVersion"]:
+            raise ValueError(f"Torch version mismatch: {actual_torch}")
+        if actual_transformers != runtime["transformersVersion"]:
+            raise ValueError(f"Transformers version mismatch: {actual_transformers}")
+        if actual_phonemizer != runtime["phonemizerVersion"]:
+            raise ValueError(f"Phonemizer version mismatch: {actual_phonemizer}")
+        actual_espeak = command_output([str(components["espeakExecutable"]), "--version"])
+        if runtime["espeakVersion"] not in actual_espeak:
+            raise ValueError(f"eSpeak version mismatch: {actual_espeak[:100]}")
     ffmpeg_size, ffmpeg_sha = file_sha256(FFMPEG_PATH, 64 * 1024 * 1024)
     ffprobe_size, ffprobe_sha = file_sha256(FFPROBE_PATH, 64 * 1024 * 1024)
     if ffmpeg_size <= 0 or ffmpeg_sha != runtime["ffmpegSha256"]:
@@ -343,6 +388,203 @@ def run_mfa(
         raise InsufficientEvidence("MFA produced no alignment")
 
 
+def ctc_viterbi_path(
+    log_probabilities: np.ndarray,
+    target_ids: list[int],
+    blank_id: int,
+) -> list[int]:
+    if log_probabilities.ndim != 2 or not target_ids:
+        raise InsufficientEvidence("CTC alignment input is empty")
+    frame_count, class_count = log_probabilities.shape
+    if blank_id < 0 or blank_id >= class_count:
+        raise ValueError("CTC blank token is invalid")
+    extended: list[int] = [blank_id]
+    for target_id in target_ids:
+        if target_id < 0 or target_id >= class_count:
+            raise ValueError("CTC target token is invalid")
+        extended.extend([target_id, blank_id])
+    state_count = len(extended)
+    repeated = sum(
+        left == right for left, right in zip(target_ids, target_ids[1:])
+    )
+    if frame_count < len(target_ids) + repeated:
+        raise InsufficientEvidence("audio is too short for the expected phone sequence")
+    negative_infinity = -np.inf
+    previous = np.full(state_count, negative_infinity, dtype=np.float64)
+    backpointers = np.full((frame_count, state_count), -1, dtype=np.int8)
+    previous[0] = float(log_probabilities[0, blank_id])
+    if state_count > 1:
+        previous[1] = float(log_probabilities[0, extended[1]])
+    for frame_index in range(1, frame_count):
+        current = np.full(state_count, negative_infinity, dtype=np.float64)
+        for state_index, token_id in enumerate(extended):
+            best_source = state_index
+            best_score = previous[state_index]
+            if state_index >= 1 and previous[state_index - 1] > best_score:
+                best_source = state_index - 1
+                best_score = previous[state_index - 1]
+            if (
+                state_index >= 2
+                and token_id != blank_id
+                and token_id != extended[state_index - 2]
+                and previous[state_index - 2] > best_score
+            ):
+                best_source = state_index - 2
+                best_score = previous[state_index - 2]
+            if math.isfinite(float(best_score)):
+                current[state_index] = (
+                    float(best_score)
+                    + float(log_probabilities[frame_index, token_id])
+                )
+                backpointers[frame_index, state_index] = state_index - best_source
+        previous = current
+    end_candidates = [state_count - 1]
+    if state_count > 1:
+        end_candidates.append(state_count - 2)
+    final_state = max(end_candidates, key=lambda index: previous[index])
+    if not math.isfinite(float(previous[final_state])):
+        raise InsufficientEvidence("CTC forced alignment found no valid path")
+    states = [0] * frame_count
+    state = final_state
+    for frame_index in range(frame_count - 1, -1, -1):
+        states[frame_index] = state
+        if frame_index == 0:
+            break
+        step = int(backpointers[frame_index, state])
+        if step < 0:
+            raise InsufficientEvidence("CTC forced alignment path is incomplete")
+        state -= step
+    return states
+
+
+def ctc_phone_intervals(
+    states: list[int],
+    phones: list[str],
+    duration: float,
+) -> list[tuple[float, float, str]]:
+    if not states or not phones or not math.isfinite(duration) or duration <= 0:
+        raise InsufficientEvidence("CTC phone timing input is empty")
+    frame_count = len(states)
+    frame_seconds = duration / frame_count
+    margin_frames = max(1, int(round(0.04 / frame_seconds)))
+    spans: list[list[int]] = []
+    for phone_index in range(len(phones)):
+        target_state = phone_index * 2 + 1
+        frames = [
+            frame_index
+            for frame_index, state_index in enumerate(states)
+            if state_index == target_state
+        ]
+        if not frames:
+            raise InsufficientEvidence(f"CTC alignment omitted phone {phone_index}")
+        spans.append([frames[0], frames[-1] + 1])
+
+    expanded = [span.copy() for span in spans]
+    expanded[0][0] = max(0, expanded[0][0] - margin_frames)
+    expanded[-1][1] = min(frame_count, expanded[-1][1] + margin_frames)
+    for index in range(len(expanded) - 1):
+        left_end = spans[index][1]
+        right_start = spans[index + 1][0]
+        gap = max(0, right_start - left_end)
+        if gap <= margin_frames * 2:
+            boundary = left_end + gap // 2
+            expanded[index][1] = boundary
+            expanded[index + 1][0] = boundary
+        else:
+            expanded[index][1] = min(right_start, left_end + margin_frames)
+            expanded[index + 1][0] = max(left_end, right_start - margin_frames)
+
+    return [
+        (
+            start * frame_seconds,
+            end * frame_seconds,
+            phone,
+        )
+        for (start, end), phone in zip(expanded, phones)
+    ]
+
+
+def espeak_phonemes(executable: Path, dialogue: str) -> list[str]:
+    phone_text = command_output([
+        str(executable),
+        "-q",
+        "-v",
+        "de",
+        "--ipa=1",
+        "--sep=|",
+        "--",
+        dialogue,
+    ])
+    phones = [
+        normalize_phone(value)
+        for value in phone_text.replace("|", " ").split()
+        if normalize_phone(value)
+    ]
+    if not phones:
+        raise InsufficientEvidence("dialogue produced no German phonemes")
+    return phones
+
+
+def run_ctc_alignment(
+    audio: Path,
+    dialogue: str,
+    components: dict[str, Path],
+) -> list[tuple[float, float, str]]:
+    import soundfile as sf
+    import torch
+    from transformers import Wav2Vec2Config, Wav2Vec2ForCTC
+
+    vocabulary = read_strict_json(components["phonemeVocabulary"])
+    if (
+        not isinstance(vocabulary, dict)
+        or not vocabulary
+        or any(not isinstance(key, str) or not isinstance(value, int)
+               for key, value in vocabulary.items())
+    ):
+        raise ValueError("CTC phoneme vocabulary is invalid")
+    blank_id = vocabulary.get("<pad>")
+    unknown_id = vocabulary.get("<unk>")
+    if not isinstance(blank_id, int) or not isinstance(unknown_id, int):
+        raise ValueError("CTC vocabulary lacks blank or unknown token")
+    phones = espeak_phonemes(components["espeakExecutable"], dialogue)
+    def vocabulary_id(phone: str) -> int:
+        if phone in vocabulary:
+            return vocabulary[phone]
+        return vocabulary.get(phone.replace("ː", "").replace("ˑ", ""), unknown_id)
+
+    target_ids = [vocabulary_id(phone) for phone in phones]
+    waveform, sample_rate = sf.read(str(audio), dtype="float32", always_2d=False)
+    if sample_rate != 16_000 or waveform.ndim != 1 or waveform.size < 1_600:
+        raise InsufficientEvidence("CTC audio must be mono 16 kHz with at least 100 ms")
+    if waveform.size > int(MAX_SECONDS * sample_rate):
+        waveform = waveform[: int(MAX_SECONDS * sample_rate)]
+    normalized = waveform.astype(np.float32, copy=False)
+    variance = float(np.var(normalized))
+    if not math.isfinite(variance) or variance <= 1e-10:
+        raise InsufficientEvidence("CTC audio has no usable signal variance")
+    normalized = (normalized - float(np.mean(normalized))) / math.sqrt(variance + 1e-7)
+    config = Wav2Vec2Config.from_json_file(str(components["phonemeModelConfig"]))
+    if config.vocab_size != len(vocabulary) or config.pad_token_id != blank_id:
+        raise ValueError("CTC model config and vocabulary do not match")
+    model = Wav2Vec2ForCTC(config)
+    state = torch.load(
+        str(components["phonemeModelWeights"]),
+        map_location="cpu",
+        weights_only=True,
+    )
+    if not isinstance(state, dict):
+        raise ValueError("CTC model weights are not a state dictionary")
+    model.load_state_dict(state, strict=True)
+    model.eval()
+    torch.set_num_threads(max(1, min(2, os.cpu_count() or 1)))
+    with torch.inference_mode():
+        logits = model(torch.from_numpy(normalized).unsqueeze(0)).logits[0]
+        log_probabilities = torch.log_softmax(logits, dim=-1).cpu().numpy()
+    states = ctc_viterbi_path(log_probabilities, target_ids, blank_id)
+    duration = float(waveform.size / sample_rate)
+    return ctc_phone_intervals(states, phones, duration)
+
+
 def parse_textgrid_intervals(source: str, tier_name: str = "phones") -> list[tuple[float, float, str]]:
     item_pattern = re.compile(
         r"item\s*\[\d+\]\s*:(.*?)(?=\n\s*item\s*\[\d+\]\s*:|\Z)",
@@ -378,11 +620,18 @@ def parse_textgrid_intervals(source: str, tier_name: str = "phones") -> list[tup
 
 
 def normalize_phone(value: str) -> str:
+    # Vowel length is kept: CTC vocabularies may carry e.g. "i" and "iː" as
+    # distinct tokens, and collapsing them aligns speech to the wrong logits.
     normalized = unicodedata.normalize("NFC", value.strip())
     normalized = re.sub(r"[ˈˌ']", "", normalized)
     normalized = re.sub(r"(?<=[A-Za-z])[012]$", "", normalized)
-    normalized = normalized.replace("ː", "").replace("ˑ", "")
     return normalized
+
+
+def viseme_phone(value: str) -> str:
+    # Mouth shape does not depend on vowel length, so viseme classes stay
+    # length-agnostic.
+    return normalize_phone(value).replace("ː", "").replace("ˑ", "")
 
 
 def load_viseme_mapping(path: Path) -> tuple[dict[str, int], dict[int, str]]:
@@ -406,7 +655,7 @@ def load_viseme_mapping(path: Path) -> tuple[dict[str, int], dict[int, str]]:
             raise ValueError("duplicate viseme class")
         codes[class_id] = code
         for phone in phones:
-            normalized = normalize_phone(str(phone))
+            normalized = viseme_phone(str(phone))
             if normalized in owner:
                 raise ValueError(f"duplicate mapped phone: {normalized}")
             owner[normalized] = class_id
@@ -707,7 +956,7 @@ def phone_targets(
     mapped_seconds = 0.0
     phone_seconds = 0.0
     for start, end, raw_phone in intervals:
-        phone = normalize_phone(raw_phone)
+        phone = viseme_phone(raw_phone)
         if phone in SILENCE_PHONES:
             class_id = 0
         else:
@@ -814,6 +1063,7 @@ def measurement(
     runner_fingerprint: str,
     dialogue_sha256: str,
     evidence_policy: dict[str, Any],
+    method: str = "mfa-mediapipe-de.v1",
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, bool]:
     times = tracks["times"]
     opening = tracks["opening"]
@@ -830,18 +1080,24 @@ def measurement(
         if high > low + 1e-8:
             normalized_opening = (normalized_opening - low) / (high - low)
     lag_ms, lag_confidence = lag_measurement(targets["opening"], normalized_opening, times)
-    finite_closure = closure[content_valid & np.isfinite(closure)]
-    if finite_closure.size >= 8:
+    bilabial_valid = content_valid & targets["speech"]
+    finite_closure = closure[bilabial_valid & np.isfinite(closure)]
+    closure_signal_is_usable = (
+        finite_closure.size >= 8
+        and float(np.percentile(finite_closure, 95)) >= 0.35
+        and float(np.percentile(finite_closure, 95) - np.percentile(finite_closure, 5)) >= 0.1
+    )
+    if closure_signal_is_usable:
         closure_threshold = max(0.35, float(np.percentile(finite_closure, 75)))
         observed_closure = closure >= closure_threshold
     else:
-        closure_threshold = finite_percentile(opening[content_valid], 25)
+        closure_threshold = finite_percentile(opening[bilabial_valid], 25)
         observed_closure = (
             opening <= closure_threshold
             if closure_threshold is not None
             else np.zeros(opening.shape, dtype=bool)
         )
-    bilabial_f1 = f1_score(targets["bilabial"], observed_closure, content_valid)
+    bilabial_f1 = f1_score(targets["bilabial"], observed_closure, bilabial_valid)
     opening_correlation = safe_correlation(
         targets["opening"][content_valid],
         normalized_opening[content_valid],
@@ -872,7 +1128,7 @@ def measurement(
     frame_interval = float(np.median(np.diff(times)))
     duration = min(MAX_SECONDS, float(np.count_nonzero(mouth_tracked)) * frame_interval)
     raw = {
-        "method": "mfa-mediapipe-de.v1",
+        "method": method,
         "runnerFingerprint": runner_fingerprint,
         "expectedDialogueSha256": dialogue_sha256,
         "globalAvLagMilliseconds": lag_ms,
@@ -984,22 +1240,31 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="run-", dir=args.work_dir) as temporary:
             temp = Path(temporary)
             audio = temp / "audio.wav"
-            dialogue = temp / "dialogue.txt"
-            textgrid = temp / "alignment.TextGrid"
             extract_audio(video, audio)
-            dialogue_descriptor = os.open(
-                dialogue,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-            )
-            try:
-                os.write(dialogue_descriptor, args.expected_dialogue.encode("utf-8"))
-            finally:
-                os.close(dialogue_descriptor)
-            run_mfa(audio, dialogue, textgrid, temp / "mfa", components)
-            intervals = parse_textgrid_intervals(
-                verified_read(textgrid, 4 * 1024 * 1024).decode("utf-8", errors="strict")
-            )
+            if manifest["method"] == "mfa-mediapipe-de.v1":
+                dialogue = temp / "dialogue.txt"
+                textgrid = temp / "alignment.TextGrid"
+                dialogue_descriptor = os.open(
+                    dialogue,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                )
+                try:
+                    os.write(dialogue_descriptor, args.expected_dialogue.encode("utf-8"))
+                finally:
+                    os.close(dialogue_descriptor)
+                run_mfa(audio, dialogue, textgrid, temp / "mfa", components)
+                intervals = parse_textgrid_intervals(
+                    verified_read(textgrid, 4 * 1024 * 1024).decode(
+                        "utf-8", errors="strict"
+                    )
+                )
+            else:
+                intervals = run_ctc_alignment(
+                    audio,
+                    args.expected_dialogue,
+                    components,
+                )
             intervals = align_intervals_to_video_timeline(
                 intervals,
                 stream_start_offset_seconds(video),
@@ -1014,10 +1279,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 runner_sha,
                 actual_dialogue_sha,
                 manifest["evidencePolicy"],
+                manifest["method"],
             )
         verify_component_snapshot(components, snapshot)
+        method_label = (
+            "MFA/MediaPipe"
+            if manifest["method"] == "mfa-mediapipe-de.v1"
+            else "CTC/eSpeak/MediaPipe"
+        )
         reason = (
-            f"MFA/MediaPipe measurement-only: {detail}. "
+            f"{method_label} measurement-only: {detail}. "
             f"Product-GO remains blocked: {manifest['productGo']['reason']}"
         )
         result = base_result(
@@ -1030,15 +1301,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         result["offset"].pop("gatePassed", None)
         result["measurement"] = raw
     except InsufficientEvidence as error:
-        reason = f"MFA/MediaPipe evidence insufficient: {error}"
+        reason = f"Phoneme/viseme evidence insufficient: {error}"
         result = base_result(manifest, manifest_sha, "insufficient", reason)
     except Exception as error:
-        reason = f"MFA/MediaPipe evaluator failed: {type(error).__name__}: {error}"
+        reason = f"Phoneme/viseme evaluator failed: {type(error).__name__}: {error}"
         result = base_result(manifest, manifest_sha, "failed", reason)
     try:
         verify_component_snapshot(components, snapshot)
     except Exception as error:
-        reason = f"MFA/MediaPipe evaluator evidence changed: {type(error).__name__}: {error}"
+        reason = f"Phoneme/viseme evaluator evidence changed: {type(error).__name__}: {error}"
         result = base_result(manifest, manifest_sha, "failed", reason)
     return result
 

@@ -33,7 +33,7 @@ function verifiedState(fingerprint: string) {
 }
 
 describe("phoneme/viseme evaluator state provider", () => {
-  it("keeps health fail-closed while refreshing and reuses the bounded worker", () => {
+  it("keeps initial health fail-closed and preserves a verified state during background refresh", () => {
     let currentTime = 1_000;
     const worker = new FakeWorker();
     const provider = new PhonemeVisemeEvaluatorStateProvider({
@@ -50,10 +50,30 @@ describe("phoneme/viseme evaluator state provider", () => {
     expect(provider.get().fingerprint).toBe("verified:first");
 
     currentTime += 101;
-    expect(provider.get().fingerprint).toContain("verification-pending");
+    expect(provider.get().fingerprint).toBe("verified:first");
     expect(worker.messages).toEqual([{ type: "refresh" }, { type: "refresh" }]);
     worker.emit("message", { type: "state", state: verifiedState("verified:second") });
     expect(provider.get().fingerprint).toBe("verified:second");
+  });
+
+  it("fails closed when a background revalidation of a verified state fails", () => {
+    let currentTime = 1_000;
+    const worker = new FakeWorker();
+    const provider = new PhonemeVisemeEvaluatorStateProvider({
+      manifestConfigured: true,
+      now: () => currentTime,
+      refreshIntervalMs: 100,
+      workerFactory: () => worker,
+    });
+
+    worker.emit("message", { type: "state", state: verifiedState("verified:first") });
+    currentTime += 101;
+    expect(provider.get().fingerprint).toBe("verified:first");
+
+    worker.emit("error", new Error("background verification failed"));
+
+    expect(provider.get().fingerprint).toContain("verification-pending");
+    expect(provider.get().result.error).toContain("background verification failed");
   });
 
   it("retries a failed worker quickly instead of retaining a stale ready state", () => {

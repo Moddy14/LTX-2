@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { appRoot } from "../server/config.js";
 import { resolvePhonemeVisemeEvaluatorState } from "../server/evaluatorManifest.js";
-import { visemeMappingSchema } from "../shared/phonemeVisemeEvaluator.js";
+import {
+  phonemeVisemeEvaluatorManifestSchema,
+  visemeMappingSchema,
+} from "../shared/phonemeVisemeEvaluator.js";
 
 const roots: string[] = [];
 
@@ -88,11 +91,28 @@ describe("phoneme/viseme evaluator manifest gate", () => {
     expect(mapping.classes[0]).toMatchObject({ id: 0, code: "SIL" });
     expect(mapping.normalization.unknownPolicy).toBe("quarantine");
     expect(mapping.classes.find((entry) => entry.code === "W_UW_UH_OW_OY")?.phones)
-      .toEqual(expect.arrayContaining(["y", "ʏ", "ø", "œ", "UW"]));
+      .toEqual(expect.arrayContaining(["y", "ʏ", "ø", "œ", "ɔɪ", "UW"]));
+    expect(mapping.classes.find((entry) => entry.code === "AA_AH_AW_AY")?.phones)
+      .toEqual(expect.arrayContaining(["aɪ", "aʊ"]));
 
     const duplicate = structuredClone(body);
     duplicate.classes[2].phones.push("p");
     expect(visemeMappingSchema.safeParse(duplicate).success).toBe(false);
+  });
+
+  it("ships a schema-valid private-local ARM64 CTC measurement manifest", async () => {
+    const path = join(appRoot, "evaluators", "phoneme-viseme", "manifest.v3.local.json");
+    const body = JSON.parse(await readFile(path, "utf8"));
+
+    const manifest = phonemeVisemeEvaluatorManifestSchema.parse(body);
+
+    expect(manifest).toMatchObject({
+      schemaVersion: "ltx-studio-phoneme-viseme-manifest.v3",
+      method: "ctc-espeak-mediapipe-de.v1",
+      productGo: { status: "blocked" },
+      legalApproval: { scope: "private-local-biometric-measurement-only" },
+      runtime: { cpuOnly: true },
+    });
   });
 
   it("reports a missing manifest without inventing evaluator availability", () => {

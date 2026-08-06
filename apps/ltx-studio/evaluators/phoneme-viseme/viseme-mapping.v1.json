@@ -21,7 +21,7 @@
     {
       "id": 1,
       "code": "P_B_M",
-      "phones": ["p", "b", "m", "P", "B", "M"]
+      "phones": ["p", "pf", "b", "m", "m̩", "P", "B", "M"]
     },
     {
       "id": 2,
@@ -36,7 +36,7 @@
     {
       "id": 4,
       "code": "T_D_N_S_Z",
-      "phones": ["t", "d", "n", "s", "z", "T", "D", "N", "S", "Z"]
+      "phones": ["t", "d", "n", "n̩", "s", "z", "ts", "T", "D", "N", "S", "Z"]
     },
     {
       "id": 5,
@@ -46,27 +46,27 @@
     {
       "id": 6,
       "code": "K_G_NG",
-      "phones": ["k", "g", "ŋ", "K", "G", "NG"]
+      "phones": ["k", "g", "ɡ", "ŋ", "K", "G", "NG"]
     },
     {
       "id": 7,
       "code": "R",
-      "phones": ["r", "ʀ", "ʁ", "ɹ", "R"]
+      "phones": ["r", "ʀ", "ʁ", "ɹ", "ɾ", "R"]
     },
     {
       "id": 8,
       "code": "L",
-      "phones": ["l", "L"]
+      "phones": ["l", "l̩", "L"]
     },
     {
       "id": 9,
       "code": "W_UW_UH_OW_OY",
-      "phones": ["w", "u", "ʊ", "o", "ɔ", "y", "ʏ", "ø", "œ", "W", "UW", "UH", "OW", "OY"]
+      "phones": ["w", "u", "ʊ", "o", "ɔ", "y", "ʏ", "ø", "œ", "ɔɪ", "oɪ", "W", "UW", "UH", "OW", "OY"]
     },
     {
       "id": 10,
       "code": "Y_IY_IH_EY",
-      "phones": ["j", "i", "ɪ", "e", "Y", "IY", "IH", "EY"]
+      "phones": ["j", "i", "ɪ", "e", "eɪ", "Y", "IY", "IH", "EY"]
     },
     {
       "id": 11,
@@ -76,7 +76,7 @@
     {
       "id": 12,
       "code": "AA_AH_AW_AY",
-      "phones": ["a", "ɑ", "ɒ", "ʌ", "AA", "AH", "AW", "AY"]
+      "phones": ["a", "ɑ", "ɒ", "ʌ", "aɪ", "aʊ", "AA", "AH", "AW", "AY"]
     },
     {
       "id": 13,

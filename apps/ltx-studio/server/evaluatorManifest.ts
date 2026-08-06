@@ -53,7 +53,7 @@ type VerifiedRevision = {
 const artifactHashCache = new Map<string, VerifiedRevision>();
 
 export type PhonemeVisemeExecution = {
-  method: "mfa-mediapipe-de.v1";
+  method: "mfa-mediapipe-de.v1" | "ctc-espeak-mediapipe-de.v1";
   sandbox: "systemd-system-sandbox.v1";
   artifactRoot: string;
   readOnlyPaths: string[];
@@ -65,15 +65,23 @@ export type PhonemeVisemeExecution = {
   pythonExecutable: string;
   pythonRuntimeRoot: string;
   boundPathRevisions: PinnedPathRevision[];
-  mfaExecutablePath: string;
-  acousticModelPath: string;
-  dictionaryPath: string;
-  g2pModelPath: string | null;
+  mfaExecutablePath?: string | null;
+  acousticModelPath?: string | null;
+  dictionaryPath?: string | null;
+  g2pModelPath?: string | null;
+  phonemeModelWeightsPath?: string | null;
+  phonemeModelConfigPath?: string | null;
+  phonemeVocabularyPath?: string | null;
+  espeakExecutablePath?: string | null;
   faceLandmarkerPath: string;
   visemeMappingPath: string;
   runtime: {
     pythonVersion: string;
-    mfaVersion: "3.3.9";
+    mfaVersion?: "3.3.9";
+    torchVersion?: string;
+    transformersVersion?: string;
+    phonemizerVersion?: string;
+    espeakVersion?: string;
     mediaPipeVersion: string;
     openCvVersion: string;
     numpyVersion: string;
@@ -86,18 +94,28 @@ export type PhonemeVisemeExecution = {
 export function isPhonemeVisemeExecution(value: unknown): value is PhonemeVisemeExecution {
   if (!value || typeof value !== "object") return false;
   const execution = value as Record<string, unknown>;
-  const absolutePathFields = [
+  const commonAbsolutePathFields = [
     "artifactRoot",
     "manifestPath",
     "runnerPath",
     "pythonExecutable",
-    "mfaExecutablePath",
-    "acousticModelPath",
-    "dictionaryPath",
     "faceLandmarkerPath",
     "visemeMappingPath",
   ] as const;
-  if (execution.method !== "mfa-mediapipe-de.v1"
+  const methodAbsolutePathFields = execution.method === "mfa-mediapipe-de.v1"
+    ? ["mfaExecutablePath", "acousticModelPath", "dictionaryPath"] as const
+    : execution.method === "ctc-espeak-mediapipe-de.v1"
+      ? [
+          "phonemeModelWeightsPath",
+          "phonemeModelConfigPath",
+          "phonemeVocabularyPath",
+          "espeakExecutablePath",
+        ] as const
+      : null;
+  const absolutePathFields = methodAbsolutePathFields
+    ? [...commonAbsolutePathFields, ...methodAbsolutePathFields]
+    : [];
+  if (!methodAbsolutePathFields
     || execution.sandbox !== "systemd-system-sandbox.v1"
     || !absolutePathFields.every((field) =>
       typeof execution[field] === "string"
@@ -142,9 +160,8 @@ export function isPhonemeVisemeExecution(value: unknown): value is PhonemeViseme
   if (![...readOnlyPaths].every((path) => revisionPaths.has(path))
     || !revisionPaths.has(execution.pythonRuntimeRoot)) return false;
   const runtime = execution.runtime as Record<string, unknown>;
-  return typeof runtime.pythonVersion === "string"
+  const commonRuntimeValid = typeof runtime.pythonVersion === "string"
     && runtime.pythonVersion.length > 0
-    && runtime.mfaVersion === "3.3.9"
     && typeof runtime.mediaPipeVersion === "string"
     && runtime.mediaPipeVersion.length > 0
     && typeof runtime.openCvVersion === "string"
@@ -157,6 +174,18 @@ export function isPhonemeVisemeExecution(value: unknown): value is PhonemeViseme
     && sha256Pattern.test(runtime.ffmpegSha256)
     && typeof runtime.ffprobeSha256 === "string"
     && sha256Pattern.test(runtime.ffprobeSha256);
+  if (!commonRuntimeValid) return false;
+  if (execution.method === "mfa-mediapipe-de.v1") {
+    return runtime.mfaVersion === "3.3.9";
+  }
+  return typeof runtime.torchVersion === "string"
+    && runtime.torchVersion.length > 0
+    && typeof runtime.transformersVersion === "string"
+    && runtime.transformersVersion.length > 0
+    && typeof runtime.phonemizerVersion === "string"
+    && runtime.phonemizerVersion.length > 0
+    && typeof runtime.espeakVersion === "string"
+    && runtime.espeakVersion.length > 0;
 }
 
 export type PhonemeVisemeEvaluatorState = {
@@ -631,7 +660,7 @@ function verifySystemSandbox(
   runnerPath: string,
   readOnlyPaths: string[],
   boundPathRevisions: PinnedPathRevision[],
-  mfaExecutablePath: string,
+  alignmentExecutablePath: string,
 ): void {
   for (const path of ["/usr/bin/sudo", "/usr/bin/systemd-run", "/usr/bin/systemctl"]) {
     const details = lstatSync(path);
@@ -685,7 +714,7 @@ function verifySystemSandbox(
       hostNetNamespace,
       String(process.getuid?.() ?? 0),
       (process.getgroups?.() ?? []).join(","),
-      mfaExecutablePath,
+      alignmentExecutablePath,
       JSON.stringify(readOnlyPaths),
       JSON.stringify(protectedRuntimeSockets),
     ], {
@@ -734,8 +763,16 @@ function verifySystemSandbox(
 
 type MeasurementManifest = Extract<
   PhonemeVisemeEvaluatorManifest,
-  { schemaVersion: "ltx-studio-phoneme-viseme-manifest.v2" }
+  {
+    schemaVersion:
+      | "ltx-studio-phoneme-viseme-manifest.v2"
+      | "ltx-studio-phoneme-viseme-manifest.v3";
+  }
 >;
+type MeasurementArtifact = Extract<
+  MeasurementManifest,
+  { schemaVersion: "ltx-studio-phoneme-viseme-manifest.v2" }
+>["components"]["mfaExecutable"];
 
 function measurementManifestState(
   manifest: MeasurementManifest,
@@ -747,16 +784,19 @@ function measurementManifestState(
 ): PhonemeVisemeEvaluatorState {
   let manifestPath: string;
   let root: string;
-  const componentEntries = Object.entries(manifest.components).filter(
-    (entry): entry is [string, Exclude<(typeof manifest.components)[keyof typeof manifest.components], null>] =>
-      entry[1] !== null,
-  );
+  const componentEntries = Object.entries(manifest.components)
+    .filter((entry) => entry[1] !== null) as Array<[string, MeasurementArtifact]>;
   const legalById = new Map(manifest.legalEvidence.map((entry) => [entry.evidenceId, entry]));
+  const commercialScope =
+    manifest.legalApproval.scope === "commercial-biometric-measurement-only";
   const allLegalScopesReviewed = manifest.legalEvidence.every(
-    (entry) => entry.commercialUseReviewed && entry.biometricProcessingReviewed,
+    (entry) => entry.biometricProcessingReviewed
+      && (!commercialScope || entry.commercialUseReviewed),
   );
   if (!allLegalScopesReviewed) {
-    const reason = "Evaluator-Lizenzbelege enthalten keine vollständige kommerzielle und biometrische Freigabe.";
+    const reason = commercialScope
+      ? "Evaluator-Lizenzbelege enthalten keine vollständige kommerzielle und biometrische Freigabe."
+      : "Evaluator-Lizenzbelege enthalten keine vollständige Betreiberfreigabe für lokale biometrische Messung.";
     return {
       fingerprint: `manifest-v2-legal-hold:${manifestSha256}`,
       result: blankStageResult("not-available", reason, manifest, manifestSha256, "legal-hold"),
@@ -795,7 +835,11 @@ function measurementManifestState(
     }
     for (const [key, component] of componentEntries) {
       const path = resolveArtifactPath(root, component.path);
-      requireSealedDynamicUserFile(path, `Evaluator-Komponente ${key}`, key === "mfaExecutable");
+      requireSealedDynamicUserFile(
+        path,
+        `Evaluator-Komponente ${key}`,
+        key === "mfaExecutable" || key === "espeakExecutable",
+      );
       const verified = hashRegularFile(path, component.sizeBytes);
       if (verified.size !== component.sizeBytes) {
         throw new Error(`Komponentengröße stimmt nicht: ${key}`);
@@ -816,13 +860,13 @@ function measurementManifestState(
     }
     visemeMappingSchema.parse(parseStrictJson(mappingRaw));
     if (!isAbsolute(configuredRunner)) {
-      throw new Error("MFA/MediaPipe-Runner muss als absoluter administrativ kontrollierter Pfad konfiguriert sein.");
+      throw new Error("Phonem-/Visem-Runner muss als absoluter administrativ kontrollierter Pfad konfiguriert sein.");
     }
     const runnerPath = resolve(configuredRunner);
     requireRootOwnedPath(runnerPath, false);
     const runner = hashRegularFile(runnerPath, 2 * 1024 * 1024);
     if (runner.sha256 !== trustPins.runnerSha256) {
-      throw new Error("Appseitiger MFA/MediaPipe-Runner stimmt nicht mit dem Administrator-Pin überein.");
+      throw new Error("Appseitiger Phonem-/Visem-Runner stimmt nicht mit dem Administrator-Pin überein.");
     }
     readOnlyPaths.add(runnerPath);
     boundPathRevisions.set(runnerPath, runner.binding);
@@ -831,41 +875,65 @@ function measurementManifestState(
       ...boundPathRevisions.values(),
       trustedRuntime.runtimeRevision,
     ].sort((left, right) => left.path.localeCompare(right.path));
+    const alignmentExecutable = manifest.schemaVersion === "ltx-studio-phoneme-viseme-manifest.v2"
+      ? resolveArtifactPath(root, manifest.components.mfaExecutable.path)
+      : resolveArtifactPath(root, manifest.components.espeakExecutable.path);
     verifySystemSandbox(
       runnerPath,
       [...readOnlyPaths].sort(),
       allBoundRevisions,
-      resolveArtifactPath(root, manifest.components.mfaExecutable.path),
+      alignmentExecutable,
     );
     const pathFor = (path: string) => resolveArtifactPath(root, path);
-    const reason = `MFA/MediaPipe-Rohmessung ist bereit; Product-GO bleibt blockiert: ${manifest.productGo.reason}`;
+    const reason = "Die automatische Laut-/Lippenprüfung ist aktiv.";
     const bindingFingerprint = sha256(Buffer.from(JSON.stringify(allBoundRevisions)));
+    const commonExecution = {
+      method: manifest.method,
+      sandbox: "systemd-system-sandbox.v1" as const,
+      artifactRoot: root,
+      readOnlyPaths: [...readOnlyPaths].sort(),
+      manifestPath,
+      manifestSha256,
+      legalApprovalSha256: trustPins.legalApprovalSha256,
+      runnerPath,
+      runnerSha256: runner.sha256,
+      pythonExecutable: trustedRuntime.pythonExecutable,
+      pythonRuntimeRoot: trustedRuntime.pythonRuntimeRoot,
+      boundPathRevisions: allBoundRevisions,
+      faceLandmarkerPath: pathFor(manifest.components.faceLandmarker.path),
+      visemeMappingPath: pathFor(manifest.components.visemeMapping.path),
+      runtime: manifest.runtime,
+    };
+    const execution: PhonemeVisemeExecution =
+      manifest.schemaVersion === "ltx-studio-phoneme-viseme-manifest.v2"
+        ? {
+            ...commonExecution,
+            mfaExecutablePath: pathFor(manifest.components.mfaExecutable.path),
+            acousticModelPath: pathFor(manifest.components.acousticModel.path),
+            dictionaryPath: pathFor(manifest.components.dictionary.path),
+            g2pModelPath: manifest.components.g2pModel
+              ? pathFor(manifest.components.g2pModel.path)
+              : null,
+            phonemeModelWeightsPath: null,
+            phonemeModelConfigPath: null,
+            phonemeVocabularyPath: null,
+            espeakExecutablePath: null,
+          }
+        : {
+            ...commonExecution,
+            mfaExecutablePath: null,
+            acousticModelPath: null,
+            dictionaryPath: null,
+            g2pModelPath: null,
+            phonemeModelWeightsPath: pathFor(manifest.components.phonemeModelWeights.path),
+            phonemeModelConfigPath: pathFor(manifest.components.phonemeModelConfig.path),
+            phonemeVocabularyPath: pathFor(manifest.components.phonemeVocabulary.path),
+            espeakExecutablePath: pathFor(manifest.components.espeakExecutable.path),
+          };
     return {
-      fingerprint: `manifest-v2-measurement-ready:${manifestSha256}:${runner.sha256}:${bindingFingerprint}`,
+      fingerprint: `manifest-${manifest.schemaVersion.endsWith(".v3") ? "v3" : "v2"}-measurement-ready:${manifestSha256}:${runner.sha256}:${bindingFingerprint}`,
       result: blankStageResult("not-available", reason, manifest, manifestSha256, "product-go-pending"),
-      execution: {
-        method: manifest.method,
-        sandbox: "systemd-system-sandbox.v1",
-        artifactRoot: root,
-        readOnlyPaths: [...readOnlyPaths].sort(),
-        manifestPath,
-        manifestSha256,
-        legalApprovalSha256: trustPins.legalApprovalSha256,
-        runnerPath,
-        runnerSha256: runner.sha256,
-        pythonExecutable: trustedRuntime.pythonExecutable,
-        pythonRuntimeRoot: trustedRuntime.pythonRuntimeRoot,
-        boundPathRevisions: allBoundRevisions,
-        mfaExecutablePath: pathFor(manifest.components.mfaExecutable.path),
-        acousticModelPath: pathFor(manifest.components.acousticModel.path),
-        dictionaryPath: pathFor(manifest.components.dictionary.path),
-        g2pModelPath: manifest.components.g2pModel
-          ? pathFor(manifest.components.g2pModel.path)
-          : null,
-        faceLandmarkerPath: pathFor(manifest.components.faceLandmarker.path),
-        visemeMappingPath: pathFor(manifest.components.visemeMapping.path),
-        runtime: manifest.runtime,
-      },
+      execution,
     };
   } catch (error) {
     const reason = `Evaluator-Artefaktprüfung fehlgeschlagen: ${
@@ -930,7 +998,8 @@ export function resolvePhonemeVisemeEvaluatorState(
     };
   }
   const manifest = parsed.data;
-  if (manifest.schemaVersion === "ltx-studio-phoneme-viseme-manifest.v2") {
+  if (manifest.schemaVersion === "ltx-studio-phoneme-viseme-manifest.v2"
+    || manifest.schemaVersion === "ltx-studio-phoneme-viseme-manifest.v3") {
     if (!sha256Pattern.test(trustPins.manifestSha256)
       || !sha256Pattern.test(trustPins.legalApprovalSha256)
       || !sha256Pattern.test(trustPins.runnerSha256)

@@ -49,12 +49,13 @@ runnerIt("parses the MFA phone tier and applies the declared phone normalization
     "        text = \"AH0\"",
     "'''",
     "intervals=module.parse_textgrid_intervals(textgrid)",
-    "print(json.dumps({'intervals': intervals, 'normalized': [module.normalize_phone(v) for v in ('ˈaː','AH0','tʃ')]}))",
+    "print(json.dumps({'intervals': intervals, 'normalized': [module.normalize_phone(v) for v in ('ˈaː','AH0','tʃ')], 'viseme': [module.viseme_phone(v) for v in ('ˈaː','iː','tʃ')]}))",
   ]);
 
   expect(result).toEqual({
     intervals: [[0, 0.5, "ˈaː"], [0.5, 1, "AH0"]],
-    normalized: ["a", "AH", "tʃ"],
+    normalized: ["aː", "AH", "tʃ"],
+    viseme: ["a", "i", "tʃ"],
   });
 });
 
@@ -88,6 +89,37 @@ runnerIt("reports a positive lag when visible mouth motion follows the audio tar
 
   expect(result.lag).toBe(83);
   expect(result.confidence).toEqual(expect.any(Number));
+});
+
+runnerIt("forces repeated phoneme targets through an intervening CTC blank", () => {
+  const result = runProbe([
+    "prob=np.full((7,3),-12.0,dtype=np.float64)",
+    "prob[0,0]=0.0",
+    "prob[1,1]=0.0",
+    "prob[2,1]=0.0",
+    "prob[3,0]=0.0",
+    "prob[4,1]=0.0",
+    "prob[5,2]=0.0",
+    "prob[6,0]=0.0",
+    "states=module.ctc_viterbi_path(prob,[1,1,2],0)",
+    "print(json.dumps({'states':states}))",
+  ]);
+
+  expect(result.states).toEqual([0, 1, 1, 2, 3, 5, 6]);
+});
+
+runnerIt("expands CTC emissions into phone windows while preserving a long pause", () => {
+  const result = runProbe([
+    "states=[0,1,2,2,3,4,4,4,4,4,4,5,6]",
+    "intervals=module.ctc_phone_intervals(states,['m','a','p'],0.26)",
+    "print(json.dumps({'intervals':intervals}))",
+  ]);
+
+  expect(result.intervals).toEqual([
+    [0, 0.06, "m"],
+    [0.06, 0.14, "a"],
+    [0.18, 0.26, "p"],
+  ]);
 });
 
 runnerIt("normalizes negative or non-zero source PTS without dropping decoded frames", () => {
@@ -185,6 +217,23 @@ runnerIt("derives fallback closure thresholds only from known tracked phones", (
     "opening=np.asarray([0.01,0.02,0.8,0.8,0.8,0.8,0.0,0.0,0.0,0.0,0.0,0.0],dtype=np.float64)",
     "tracks={'times':times,'opening':opening,'rounding':np.zeros(count),'closure':np.full(count,np.nan),'blur':np.full(count,100.0),'yaw':np.zeros(count),'pitch':np.zeros(count),'tracked':np.ones(count,dtype=np.bool_),'mouthTracked':np.ones(count,dtype=np.bool_),'multi':np.zeros(count,dtype=np.bool_)}",
     "targets={'opening':np.where(known,opening,np.nan),'bilabial':np.asarray([True,True,False,False,False,False,False,False,False,False,False,False]),'rounded':np.zeros(count),'speech':known,'known':known,'coverage':1.0,'unknown':[]}",
+    "policy={'minimumSampledFrames':1,'minimumUsableDurationSeconds':0.1,'minimumFaceTrackCoverage':0.1,'minimumMouthTrackCoverage':0.1,'maximumMultiFaceFrameRatio':0.5,'minimumPhoneCoverage':0.5,'requireNoUnknownPhones':False,'minimumMedianBlurVariance':1.0,'maximumYawP95Degrees':35.0,'maximumPitchP95Degrees':25.0}",
+    "raw=module.measurement(tracks,targets,'a'*64,'b'*64,policy)[0]",
+    "print(json.dumps({'bilabialClosureF1':raw['bilabialClosureF1']}))",
+  ]);
+
+  expect(result.bilabialClosureF1).toBe(1);
+});
+
+runnerIt("falls back to lip aperture when mouthClose is uninformative and ignores silence closures", () => {
+  const result = runProbe([
+    "count=16",
+    "times=(np.arange(count,dtype=np.float64)+0.5)/24.0",
+    "speech=np.arange(count)<8",
+    "bilabial=np.asarray([True,True,False,False,False,False,False,False]+[False]*8)",
+    "opening=np.asarray([0.01,0.02,0.8,0.8,0.8,0.8,0.8,0.8]+[0.0]*8,dtype=np.float64)",
+    "tracks={'times':times,'opening':opening,'rounding':np.zeros(count),'closure':np.full(count,0.01),'blur':np.full(count,100.0),'yaw':np.zeros(count),'pitch':np.zeros(count),'tracked':np.ones(count,dtype=np.bool_),'mouthTracked':np.ones(count,dtype=np.bool_),'multi':np.zeros(count,dtype=np.bool_)}",
+    "targets={'opening':np.where(speech,opening,0.0),'bilabial':bilabial,'rounded':np.zeros(count),'speech':speech,'known':np.ones(count,dtype=np.bool_),'coverage':1.0,'unknown':[]}",
     "policy={'minimumSampledFrames':1,'minimumUsableDurationSeconds':0.1,'minimumFaceTrackCoverage':0.1,'minimumMouthTrackCoverage':0.1,'maximumMultiFaceFrameRatio':0.5,'minimumPhoneCoverage':0.5,'requireNoUnknownPhones':False,'minimumMedianBlurVariance':1.0,'maximumYawP95Degrees':35.0,'maximumPitchP95Degrees':25.0}",
     "raw=module.measurement(tracks,targets,'a'*64,'b'*64,policy)[0]",
     "print(json.dumps({'bilabialClosureF1':raw['bilabialClosureF1']}))",

@@ -153,6 +153,10 @@ const measurementArtifactSchema = z.object({
     "mfa-g2p-model",
     "mediapipe-face-landmarker",
     "viseme-mapping",
+    "ctc-phoneme-model-weights",
+    "ctc-phoneme-model-config",
+    "ctc-phoneme-vocabulary",
+    "espeak-executable",
   ]),
   upstreamUrl: z.string().url().max(1_000),
   revision: z.string().min(1).max(200),
@@ -174,6 +178,7 @@ const legalEvidenceSchema = z.object({
     "attribution",
     "training-data-provenance",
     "biometric-processing-approval",
+    "official-distribution-source",
   ]),
   commercialUseReviewed: z.boolean(),
   biometricProcessingReviewed: z.boolean(),
@@ -235,7 +240,10 @@ const measurementOnlyManifestSchema = z.object({
     reviewedBy: z.string().min(3).max(200),
     reviewedAt: z.string().datetime({ offset: true }),
     policyVersion: z.literal("ltx-studio-evaluator-legal.v1"),
-    scope: z.literal("commercial-biometric-measurement-only"),
+    scope: z.enum([
+      "commercial-biometric-measurement-only",
+      "private-local-biometric-measurement-only",
+    ]),
   }).strict(),
   legalEvidence: z.array(legalEvidenceSchema).min(1).max(100),
 }).strict().superRefine((value, context) => {
@@ -320,10 +328,172 @@ const measurementOnlyManifestSchema = z.object({
   }
 });
 
+const ctcMeasurementOnlyManifestSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-phoneme-viseme-manifest.v3"),
+  releaseId: releaseIdSchema,
+  method: z.literal("ctc-espeak-mediapipe-de.v1"),
+  productGo: z.object({
+    status: z.literal("blocked"),
+    reason: z.string().min(1).max(500),
+    candidateCreatedAt: z.string().datetime({ offset: true }),
+  }).strict(),
+  preprocessing: z.object({
+    version: z.literal("ctc-espeak-mediapipe-de-pts.v1"),
+    maxSeconds: z.literal(5),
+    frameRates: z.tuple([z.literal(24), z.literal(25), z.literal(30)]),
+  }).strict(),
+  evidencePolicy: z.object({
+    minimumSampledFrames: z.number().int().min(24).max(300),
+    minimumUsableDurationSeconds: z.number().finite().min(1).max(5),
+    minimumFaceTrackCoverage: z.number().finite().min(0.5).max(1),
+    minimumMouthTrackCoverage: z.number().finite().min(0.5).max(1),
+    maximumMultiFaceFrameRatio: z.number().finite().min(0).max(0.2),
+    minimumPhoneCoverage: z.number().finite().min(0.5).max(1),
+    requireNoUnknownPhones: z.literal(true),
+    minimumMedianBlurVariance: z.number().finite().min(0).max(10_000),
+    maximumYawP95Degrees: z.number().finite().min(0).max(90),
+    maximumPitchP95Degrees: z.number().finite().min(0).max(90),
+  }).strict(),
+  visemeMap: z.object({
+    version: z.literal("viseme15-en-de.v1"),
+    classCount: z.literal(15),
+    path: relativeArtifactPathSchema,
+    sha256: sha256Schema,
+  }).strict(),
+  runtime: z.object({
+    pythonVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    torchVersion: z.string().regex(/^\d+\.\d+\.\d+(?:\+[a-z0-9.]+)?$/),
+    transformersVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    phonemizerVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    mediaPipeVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    openCvVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    numpyVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    espeakVersion: z.string().min(1).max(100),
+    ffmpegVersion: z.string().min(1).max(100),
+    ffmpegSha256: sha256Schema,
+    ffprobeSha256: sha256Schema,
+    cpuOnly: z.literal(true),
+  }).strict(),
+  components: z.object({
+    phonemeModelWeights: measurementArtifactSchema,
+    phonemeModelConfig: measurementArtifactSchema,
+    phonemeVocabulary: measurementArtifactSchema,
+    espeakExecutable: measurementArtifactSchema,
+    faceLandmarker: measurementArtifactSchema,
+    visemeMapping: measurementArtifactSchema,
+  }).strict(),
+  legalApproval: z.object({
+    evidenceId: releaseIdSchema,
+    reviewedBy: z.string().min(3).max(200),
+    reviewedAt: z.string().datetime({ offset: true }),
+    policyVersion: z.literal("ltx-studio-evaluator-legal.v1"),
+    scope: z.enum([
+      "commercial-biometric-measurement-only",
+      "private-local-biometric-measurement-only",
+    ]),
+  }).strict(),
+  legalEvidence: z.array(legalEvidenceSchema).min(1).max(100),
+}).strict().superRefine((value, context) => {
+  const expectedKinds = {
+    phonemeModelWeights: "ctc-phoneme-model-weights",
+    phonemeModelConfig: "ctc-phoneme-model-config",
+    phonemeVocabulary: "ctc-phoneme-vocabulary",
+    espeakExecutable: "espeak-executable",
+    faceLandmarker: "mediapipe-face-landmarker",
+    visemeMapping: "viseme-mapping",
+  } as const;
+  for (const [key, expected] of Object.entries(expectedKinds)) {
+    const component = value.components[key as keyof typeof value.components];
+    if (component.kind !== expected) {
+      context.addIssue({
+        code: "custom",
+        path: ["components", key, "kind"],
+        message: `${key} muss als ${expected} deklariert sein.`,
+      });
+    }
+  }
+  if (value.components.visemeMapping.path !== value.visemeMap.path
+    || value.components.visemeMapping.sha256 !== value.visemeMap.sha256) {
+    context.addIssue({
+      code: "custom",
+      path: ["components", "visemeMapping"],
+      message: "Visem-Mapping muss mit dem manifestweiten Mapping identisch gebunden sein.",
+    });
+  }
+  const evidenceIds = value.legalEvidence.map((entry) => entry.evidenceId);
+  if (new Set(evidenceIds).size !== evidenceIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["legalEvidence"],
+      message: "Lizenzbeleg-IDs müssen eindeutig sein.",
+    });
+  }
+  const evidenceById = new Map(value.legalEvidence.map((entry) => [entry.evidenceId, entry]));
+  const approval = evidenceById.get(value.legalApproval.evidenceId);
+  if (!approval || approval.evidenceType !== "biometric-processing-approval") {
+    context.addIssue({
+      code: "custom",
+      path: ["legalApproval", "evidenceId"],
+      message: "Die lokale Messfreigabe muss auf einen biometrischen Betreiberbeleg zeigen.",
+    });
+  }
+  const commercialScope =
+    value.legalApproval.scope === "commercial-biometric-measurement-only";
+  value.legalEvidence.forEach((entry, index) => {
+    if (!entry.biometricProcessingReviewed
+      || (commercialScope && !entry.commercialUseReviewed)) {
+      context.addIssue({
+        code: "custom",
+        path: ["legalEvidence", index],
+        message: commercialScope
+          ? "Kommerzieller Messumfang benötigt kommerzielle und biometrische Prüfung."
+          : "Privater lokaler Messumfang benötigt eine biometrische Betreiberprüfung.",
+      });
+    }
+  });
+  for (const [key, component] of Object.entries(value.components)) {
+    const evidenceTypes = new Set(component.licenseEvidenceIds
+      .map((evidenceId) => evidenceById.get(evidenceId)?.evidenceType)
+      .filter((entry) => entry !== undefined));
+    const codeComponent = key === "espeakExecutable" || key === "visemeMapping";
+    const requiredTypes = codeComponent
+      ? ["code-license"]
+      : commercialScope
+        ? ["model-license", "model-card", "training-data-provenance"]
+        : ["model-card", "training-data-provenance", "official-distribution-source"];
+    for (const requiredType of requiredTypes) {
+      if (!evidenceTypes.has(requiredType as typeof value.legalEvidence[number]["evidenceType"])) {
+        context.addIssue({
+          code: "custom",
+          path: ["components", key, "licenseEvidenceIds"],
+          message: `${key} benötigt einen Beleg vom Typ ${requiredType}.`,
+        });
+      }
+    }
+    if (!component.licenseEvidenceIds.includes(value.legalApproval.evidenceId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["components", key, "licenseEvidenceIds"],
+        message: `${key} muss an die lokale Betreiberfreigabe gebunden sein.`,
+      });
+    }
+    for (const evidenceId of component.licenseEvidenceIds) {
+      if (!evidenceById.has(evidenceId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["components", key, "licenseEvidenceIds"],
+          message: `Unbekannter Lizenzbeleg ${evidenceId}.`,
+        });
+      }
+    }
+  }
+});
+
 export const phonemeVisemeEvaluatorManifestSchema = z.union([
   blockedManifestSchema,
   releaseCandidateManifestSchema,
   measurementOnlyManifestSchema,
+  ctcMeasurementOnlyManifestSchema,
 ]);
 
 export type PhonemeVisemeEvaluatorManifest = z.infer<typeof phonemeVisemeEvaluatorManifestSchema>;
@@ -347,7 +517,7 @@ export const phonemeVisemeBlockerCodeSchema = z.enum([
 ]);
 
 export const mfaMediaPipeMeasurementSchema = z.object({
-  method: z.literal("mfa-mediapipe-de.v1"),
+  method: z.enum(["mfa-mediapipe-de.v1", "ctc-espeak-mediapipe-de.v1"]),
   runnerFingerprint: sha256Schema,
   expectedDialogueSha256: sha256Schema,
   globalAvLagMilliseconds: z.number().int().min(-500).max(500).nullable(),
@@ -377,7 +547,10 @@ export const mfaMediaPipeRunnerOutputSchema = z.object({
   error: z.string().min(1).max(500),
   manifestReleaseId: releaseIdSchema,
   manifestSha256: sha256Schema,
-  preprocessingVersion: z.literal("mfa-mediapipe-de-pts.v1"),
+  preprocessingVersion: z.enum([
+    "mfa-mediapipe-de-pts.v1",
+    "ctc-espeak-mediapipe-de-pts.v1",
+  ]),
   visemeMapVersion: z.literal("viseme15-en-de.v1"),
   offset: z.object({
     status: z.enum(["measured", "insufficient", "not-run"]),
@@ -392,7 +565,7 @@ export const mfaMediaPipeRunnerOutputSchema = z.object({
     context.addIssue({
       code: "custom",
       path: ["offset"],
-      message: "Offsetstufe und MFA/MediaPipe-Rohmessung müssen dieselbe Lag-Messung ausweisen.",
+      message: "Offsetstufe und Phonem-/Visem-Rohmessung müssen dieselbe Lag-Messung ausweisen.",
     });
   }
   if (value.offset.status === "measured"
@@ -452,6 +625,7 @@ const phonemeVisemeResultBaseSchema = z.object({
   preprocessingVersion: z.enum([
     "mouth-npz-rgb96-audio-wav16k-cfr.v2",
     "mfa-mediapipe-de-pts.v1",
+    "ctc-espeak-mediapipe-de-pts.v1",
   ]).nullable(),
   visemeMapVersion: z.literal("viseme15-en-de.v1").nullable(),
   gateVersion: z.literal("ltx-pv-release-gates.v1").nullable(),
@@ -525,7 +699,7 @@ export const phonemeVisemeResultSchema = phonemeVisemeResultBaseSchema.superRefi
       context.addIssue({
         code: "custom",
         path: ["status"],
-        message: "Measurement-only benötigt echte MFA/MediaPipe-Rohmessung und einen explizit blockierten Product-GO.",
+        message: "Measurement-only benötigt eine echte Phonem-/Visem-Rohmessung und einen explizit blockierten Product-GO.",
       });
     }
     return;
@@ -544,7 +718,7 @@ export const phonemeVisemeResultSchema = phonemeVisemeResultBaseSchema.superRefi
       context.addIssue({
         code: "custom",
         path: ["status"],
-        message: "Unzureichende MFA/MediaPipe-Rohmessung muss Product-GO und alle Inhaltsgates blockieren.",
+        message: "Eine unzureichende Phonem-/Visem-Rohmessung muss Product-GO und alle Inhaltsgates blockieren.",
       });
     }
     return;
@@ -553,7 +727,7 @@ export const phonemeVisemeResultSchema = phonemeVisemeResultBaseSchema.superRefi
     context.addIssue({
       code: "custom",
       path: ["measurement"],
-      message: "MFA/MediaPipe-Rohmetriken sind nur bei measurement-only oder gemessen zulässig.",
+      message: "Phonem-/Visem-Rohmetriken sind nur bei measurement-only oder gemessen zulässig.",
     });
   }
   if (value.status !== "measured") {

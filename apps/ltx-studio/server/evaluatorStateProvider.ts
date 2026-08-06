@@ -108,7 +108,6 @@ export class PhonemeVisemeEvaluatorStateProvider {
       return this.state;
     }
     if (this.updatedAtMs === 0 || currentTime - this.updatedAtMs >= this.refreshIntervalMs) {
-      this.state = pendingState("Freigabe wird erneut verifiziert");
       this.refresh();
     }
     return this.state;
@@ -116,6 +115,8 @@ export class PhonemeVisemeEvaluatorStateProvider {
 
   refresh(): void {
     if (!this.manifestConfigured || this.verifying || this.now() < this.nextAttemptAtMs) return;
+    const keepVerifiedState = this.updatedAtMs > 0
+      && !this.state.fingerprint.startsWith("manifest-verification-pending:");
     let worker = this.worker;
     if (!worker) {
       try {
@@ -152,7 +153,9 @@ export class PhonemeVisemeEvaluatorStateProvider {
       worker.unref();
     }
     this.verifying = true;
-    this.state = pendingState("Artefakte und Sandbox werden geprüft");
+    if (!keepVerifiedState) {
+      this.state = pendingState("Artefakte und Sandbox werden geprüft");
+    }
     this.verificationTimer = setTimeout(() => {
       this.failVerification("Artefaktprüfung überschritt ihr Zeitlimit.");
     }, this.verificationTimeoutMs);
