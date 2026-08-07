@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   reusableLtxBaseFromSidecars,
+  runProvenanceSharesLtxBase,
   type ReusableLtxBaseCandidate,
   type StudioJob,
 } from "../server/jobs.js";
@@ -251,6 +252,50 @@ describe("reusableLtxBaseFromSidecars", () => {
 
   it("rejects candidates whose file is not ready on disk", () => {
     expect(reusableLtxBaseFromSidecars([sidecarCandidate()], refinerTarget(), () => false)).toBeUndefined();
+  });
+});
+
+describe("refiner-only provenance roles", () => {
+  const REFINER_ONLY_ROLES = [
+    "code:longcat-adapter",
+    "model:longcat-face-detector",
+    "code:latentsync-adapter",
+    "model:latentsync-unet",
+    "code:musetalk-adapter",
+    "model:musetalk-unet",
+    "code:lipforcing-adapter",
+    "model:lipforcing-checkpoint",
+    // Shared by every refiner arm; it never touches the LTX base. Leaving it
+    // unfiltered made the role lists differ for good, so no refiner run could
+    // adopt an existing base and every one re-rendered it.
+    "code:refiner-audio-window",
+    "input:final-audio-mix",
+  ] as const;
+
+  function withExtraRoles(roles: readonly string[]): RunProvenance {
+    const provenance = verifiedRunProvenance();
+    provenance.files = [
+      ...provenance.files,
+      ...roles.map((role, index) => ({
+        ...provenance.files[0],
+        role,
+        path: `/refiner/${index}`,
+        sha256: String(index % 10).repeat(64),
+      })),
+    ];
+    return provenance;
+  }
+
+  it.each(REFINER_ONLY_ROLES)("ignores %s when comparing the LTX base", (role) => {
+    expect(runProvenanceSharesLtxBase(verifiedRunProvenance(), withExtraRoles([role]))).toBe(true);
+  });
+
+  it("ignores a full refiner role set at once", () => {
+    expect(runProvenanceSharesLtxBase(verifiedRunProvenance(), withExtraRoles(REFINER_ONLY_ROLES))).toBe(true);
+  });
+
+  it("still rejects a differing LTX model role", () => {
+    expect(runProvenanceSharesLtxBase(verifiedRunProvenance(), withExtraRoles(["model:checkpoint:1"]))).toBe(false);
   });
 });
 

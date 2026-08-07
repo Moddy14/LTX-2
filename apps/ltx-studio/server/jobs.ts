@@ -369,6 +369,10 @@ export function runProvenanceSharesLtxBase(
       && !file.role.startsWith("model:musetalk-")
       && !file.role.startsWith("code:lipforcing-")
       && !file.role.startsWith("model:lipforcing-")
+      // The shared refiner audio window helper is captured by every refiner
+      // arm but never touches the LTX base. Leaving it in made the role lists
+      // differ for good, so no refiner run could ever adopt an existing base.
+      && file.role !== "code:refiner-audio-window"
       && !file.role.startsWith("input:reused-ltx-base:")
       && file.role !== "input:final-audio-mix")
     .map((file) => ({ role: file.role, sha256: file.sha256 }))
