@@ -41,9 +41,25 @@ export type PreparedImageCrop = {
     width: number;
     height: number;
   };
+  /**
+   * "stretch" zieht den Ausschnitt auf die Zielmaße - richtig, wenn beide
+   * Seitenverhältnisse passen. "bokeh" passt ihn stattdessen proportional ein
+   * und füllt den Rest mit einer weichgezeichneten Fassung desselben
+   * Ausschnitts, mit weich auslaufender Kante. Das ist der Weg, ein Porträt in
+   * einen Breitbildrahmen zu setzen, ohne es zu quetschen und ohne harte
+   * Balken: Ein Erstframe mit Balken ist für die Bildkonditionierung ein
+   * Fremdkörper und schlägt als sichtbarer Sprung in den Clip durch.
+   */
+  fit: ImageCropFit;
+  /** Nur bei "bokeh": Anteil der Zielhöhe, den der Ausschnitt einnimmt. */
+  coverage: number | null;
+  /** Nur bei "bokeh": Breite der weichen Kante in Pixeln. */
+  feather: number | null;
   scaleFilter: "lanczos";
   command: string;
 };
+
+export type ImageCropFit = "stretch" | "bokeh";
 
 export type LipDubReferenceFinding = {
   code: string;

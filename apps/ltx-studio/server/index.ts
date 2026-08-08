@@ -46,6 +46,7 @@ import { isActiveJobStatus, JobConflictError, JobManager, type StudioJob } from 
 import { inspectLipDubReference } from "./lipdubDiagnostics.js";
 import { ImageCropPreparationError, prepareImageCrop } from "./imageCrop.js";
 import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
+import { assembleSequence, SequenceAssembleError } from "./sequenceAssemble.js";
 import { estimateRequest } from "./estimates.js";
 import {
   ExperimentConflictError,
@@ -212,6 +213,15 @@ const imageCropPreparationRequestSchema = z.object({
   height: z.number().int().min(64).max(16_384),
   outputWidth: lipDubReferenceDimensionSchema,
   outputHeight: lipDubReferenceDimensionSchema,
+  // "bokeh" passt ein Porträt in einen Breitbildrahmen ein, statt es zu quetschen.
+  fit: z.enum(["stretch", "bokeh"]).optional(),
+  coverage: z.number().min(0.3).max(1).optional(),
+  feather: z.number().int().min(0).max(512).optional(),
+}).strict();
+
+const sequenceAssembleRequestSchema = z.object({
+  outputs: z.array(outputNameSchema).min(2).max(200),
+  name: z.string().trim().min(1).max(120).optional(),
 }).strict();
 
 const upload = multer({
@@ -351,6 +361,7 @@ app.post("/api/images/crop", async (request, response) => {
       schemaVersion: "ltx-studio-asset-derivation.v1",
       operation: "image-face-crop",
       source,
+      additionalSources: [],
       parameters: {
         sourceAssetId: sourceAsset.id,
         sourceWidth: prepared.source.width,
@@ -361,6 +372,9 @@ app.post("/api/images/crop", async (request, response) => {
         height: prepared.crop.height,
         outputWidth: prepared.target.width,
         outputHeight: prepared.target.height,
+        fit: prepared.fit,
+        coverage: prepared.coverage,
+        feather: prepared.feather,
         scaleFilter: prepared.scaleFilter,
       },
       command: prepared.command,
@@ -394,6 +408,46 @@ app.post("/api/jobs/plan", async (request, response) => {
     pathWarnings: warnRequestPlan(payload),
     suggestions: suggestRequestPlan(payload),
   });
+});
+
+app.post("/api/sequences/assemble", async (request, response) => {
+  const payload = sequenceAssembleRequestSchema.parse(request.body);
+  // Provenienz jedes Shots vor dem Schnitt binden. Verändert sich ein Shot
+  // während der Montage, wird das Ergebnis verworfen - dieselbe fail-closed
+  // Regel wie beim Bildzuschnitt und bei der LipDub-Vorbereitung.
+  const sources = await Promise.all(payload.outputs.map((outputName, index) =>
+    captureProvenanceFile(join(outputRoot, outputName), `sequence-shot:${index}:${outputName}`)));
+  const prepared = await assembleSequence(payload, outputRoot);
+  const changed = sources.map((source) => verifyProvenanceFileEvidence(source)).find(Boolean);
+  if (changed) {
+    unlinkSync(prepared.file.path);
+    throw new SequenceAssembleError(
+      "Ein Shot wurde während des Zusammenschnitts verändert. Das Ergebnis wurde verworfen.",
+      409,
+    );
+  }
+  let asset;
+  try {
+    asset = assets.add(prepared.file, "video", {
+      schemaVersion: "ltx-studio-asset-derivation.v1",
+      operation: "sequence-assemble",
+      source: sources[0],
+      additionalSources: sources.slice(1),
+      parameters: {
+        shotCount: prepared.shots.length,
+        shotOrder: prepared.shots.map((shot) => shot.outputName).join(","),
+        width: prepared.target.width,
+        height: prepared.target.height,
+        durationSeconds: prepared.target.durationSeconds,
+      },
+      command: prepared.command,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    unlinkSync(prepared.file.path);
+    throw error;
+  }
+  response.status(201).json({ asset, shots: prepared.shots, target: prepared.target });
 });
 
 app.post("/api/lipdub/reference/inspect", (request, response) => {
@@ -430,6 +484,7 @@ app.post("/api/lipdub/reference/prepare", async (request, response) => {
       schemaVersion: "ltx-studio-asset-derivation.v1",
       operation: "lipdub-reference-prepare",
       source,
+      additionalSources: [],
       parameters: {
         sourceAssetId: sourceAsset.id,
         width: prepared.target.width,
@@ -732,6 +787,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof LipDubReferencePreparationError) {
+    return response.status(error.statusCode).json({ error: error.message });
+  }
+  if (error instanceof SequenceAssembleError) {
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof OutputQualityError) {

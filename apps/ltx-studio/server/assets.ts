@@ -9,6 +9,7 @@ import {
 } from "../shared/assets.js";
 import { assetsStatePath, uploadRoot } from "./config.js";
 import { normalizeProvenanceFileEvidence } from "./runProvenance.js";
+import type { ProvenanceFileEvidence } from "../shared/provenance.js";
 
 export type AssetFile = Pick<Express.Multer.File, "filename" | "path" | "originalname" | "size">;
 
@@ -103,9 +104,18 @@ function normalizeAssetDerivation(value: unknown): AssetDerivation | null {
   const item = value as Partial<AssetDerivation>;
   const source = normalizeProvenanceFileEvidence(item.source);
   const operation = item.operation;
+  // Ältere Ableitungen kennen das Feld nicht; sie hatten genau eine Quelle.
+  const rawAdditional = item.additionalSources ?? [];
+  const additionalSources = Array.isArray(rawAdditional)
+    ? rawAdditional.map((entry) => normalizeProvenanceFileEvidence(entry))
+    : null;
   if (item.schemaVersion !== "ltx-studio-asset-derivation.v1"
-    || (operation !== "lipdub-reference-prepare" && operation !== "image-face-crop")
+    || (operation !== "lipdub-reference-prepare"
+      && operation !== "image-face-crop"
+      && operation !== "sequence-assemble")
     || !source
+    || !additionalSources
+    || additionalSources.some((entry) => !entry)
     || item.parameters === null
     || typeof item.parameters !== "object"
     || Array.isArray(item.parameters)
@@ -118,6 +128,7 @@ function normalizeAssetDerivation(value: unknown): AssetDerivation | null {
     schemaVersion: item.schemaVersion,
     operation,
     source,
+    additionalSources: additionalSources as ProvenanceFileEvidence[],
     parameters: structuredClone(item.parameters),
     command: item.command,
     createdAt: item.createdAt,

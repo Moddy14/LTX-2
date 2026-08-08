@@ -5,8 +5,14 @@ export type AssetKind = (typeof assetKinds)[number];
 
 export type AssetDerivation = {
   schemaVersion: "ltx-studio-asset-derivation.v1";
-  operation: "lipdub-reference-prepare" | "image-face-crop";
+  operation: "lipdub-reference-prepare" | "image-face-crop" | "sequence-assemble";
+  /** Die erste beziehungsweise einzige Quelle. */
   source: ProvenanceFileEvidence;
+  /**
+   * Die übrigen Quellen, wenn die Operation mehrere Dateien verbindet - beim
+   * Zusammenschnitt in Schnittreihenfolge. Bei Einzelquellen-Operationen leer.
+   */
+  additionalSources: ProvenanceFileEvidence[];
   parameters: Record<string, string | number | boolean | null>;
   command: string | null;
   createdAt: string;

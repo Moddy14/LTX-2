@@ -33,6 +33,7 @@ describe("asset library", () => {
     } as Express.Multer.File, "image", {
       schemaVersion: "ltx-studio-asset-derivation.v1",
       operation: "image-face-crop",
+      additionalSources: [],
       source: {
         role: "derived-source:image",
         path: join(imageDir, "source.png"),
