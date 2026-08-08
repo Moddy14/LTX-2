@@ -5,7 +5,7 @@ export type AssetKind = (typeof assetKinds)[number];
 
 export type AssetDerivation = {
   schemaVersion: "ltx-studio-asset-derivation.v1";
-  operation: "lipdub-reference-prepare" | "image-face-crop" | "sequence-assemble";
+  operation: "lipdub-reference-prepare" | "image-face-crop" | "sequence-assemble" | "output-frame";
   /** Die erste beziehungsweise einzige Quelle. */
   source: ProvenanceFileEvidence;
   /**

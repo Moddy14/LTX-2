@@ -112,7 +112,8 @@ function normalizeAssetDerivation(value: unknown): AssetDerivation | null {
   if (item.schemaVersion !== "ltx-studio-asset-derivation.v1"
     || (operation !== "lipdub-reference-prepare"
       && operation !== "image-face-crop"
-      && operation !== "sequence-assemble")
+      && operation !== "sequence-assemble"
+      && operation !== "output-frame")
     || !source
     || !additionalSources
     || additionalSources.some((entry) => !entry)

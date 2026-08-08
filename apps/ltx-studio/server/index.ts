@@ -47,6 +47,7 @@ import { inspectLipDubReference } from "./lipdubDiagnostics.js";
 import { ImageCropPreparationError, prepareImageCrop } from "./imageCrop.js";
 import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
 import { assembleSequence, SequenceAssembleError } from "./sequenceAssemble.js";
+import { extractOutputFrame, OutputFrameError } from "./outputFrame.js";
 import { estimateRequest } from "./estimates.js";
 import {
   ExperimentConflictError,
@@ -217,6 +218,11 @@ const imageCropPreparationRequestSchema = z.object({
   fit: z.enum(["stretch", "bokeh"]).optional(),
   coverage: z.number().min(0.3).max(1).optional(),
   feather: z.number().int().min(0).max(512).optional(),
+}).strict();
+
+const outputFrameRequestSchema = z.object({
+  output: outputNameSchema,
+  atSeconds: z.number().min(0).max(3600),
 }).strict();
 
 const sequenceAssembleRequestSchema = z.object({
@@ -416,6 +422,44 @@ app.post("/api/jobs/plan", async (request, response) => {
     pathWarnings: warnRequestPlan(payload),
     suggestions: suggestRequestPlan(payload),
   });
+});
+
+app.post("/api/images/from-output", async (request, response) => {
+  const payload = outputFrameRequestSchema.parse(request.body);
+  // Herkunft vor dem Griff binden und danach prüfen: Ändert sich die Ausgabe
+  // währenddessen, ist der Frame nicht mehr das, was er zu sein vorgibt.
+  const source = await captureProvenanceFile(
+    join(outputRoot, payload.output), `output-frame-source:${payload.output}`);
+  const extracted = await extractOutputFrame(payload, outputRoot);
+  if (verifyProvenanceFileEvidence(source)) {
+    unlinkSync(extracted.file.path);
+    throw new OutputFrameError(
+      "Die Ausgabe wurde während der Frame-Übernahme verändert. Das Ergebnis wurde verworfen.",
+      409,
+    );
+  }
+  let asset;
+  try {
+    asset = assets.add(extracted.file, "image", {
+      schemaVersion: "ltx-studio-asset-derivation.v1",
+      operation: "output-frame",
+      source,
+      additionalSources: [],
+      parameters: {
+        outputName: extracted.outputName,
+        atSeconds: extracted.atSeconds,
+        width: extracted.width,
+        height: extracted.height,
+        sourceDurationSeconds: extracted.sourceDurationSeconds,
+      },
+      command: extracted.command,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    unlinkSync(extracted.file.path);
+    throw error;
+  }
+  response.status(201).json({ asset, frame: extracted });
 });
 
 app.post("/api/sequences/assemble", async (request, response) => {
@@ -804,6 +848,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof SequenceAssembleError) {
+    return response.status(error.statusCode).json({ error: error.message });
+  }
+  if (error instanceof OutputFrameError) {
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof OutputQualityError) {
