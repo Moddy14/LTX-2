@@ -47,8 +47,13 @@ const OUT_DIR = `${SCRATCH}/szene-v2`;
 mkdirSync(OUT_DIR, { recursive: true });
 
 // Beide Referenzen als 1280×704 mit gesichtsfüllendem Ausschnitt.
-const REF_A = "/home/moddy/LTX-2/.ltx-studio/uploads/image/a7c41e02-5b93-4d17-9f26-3e8c1a0b4d55.png";
-const REF_B = "/home/moddy/LTX-2/.ltx-studio/uploads/image/b3d52f18-7a41-4c60-9e8b-2d70f4915cc3.png";
+// WICHTIG: Diese IDs stammen aus POST /api/uploads/image, nicht aus einem
+// Kopieren ins Upload-Verzeichnis. Eine bloß hineinkopierte Datei ist für das
+// Studio keine Mediathek-Referenz: die Identitätsevidenz fällt dann auf
+// "unavailable" ("stammt nicht aus der Studio-Mediathek") und mit ihr der
+// Basis-Reuse, weil der Reuse eine verifizierte Identitätsbindung verlangt.
+const REF_A = "/home/moddy/LTX-2/.ltx-studio/uploads/image/be4ce6f4-84e9-4eda-b0e0-7c4da0701bda.png";
+const REF_B = "/home/moddy/LTX-2/.ltx-studio/uploads/image/9839c93b-14bd-4852-a2b1-a9aeb988cc80.png";
 
 const A = "a woman in her late twenties with long dark wavy hair, green eyes, "
   + "high cheekbones and a small scar above her left eyebrow, wearing a worn olive field jacket";
