@@ -220,7 +220,15 @@ const imageCropPreparationRequestSchema = z.object({
 }).strict();
 
 const sequenceAssembleRequestSchema = z.object({
-  outputs: z.array(outputNameSchema).min(2).max(200),
+  // Entweder nur der Name oder ein Schnittplatz-Eintrag mit In- und Out-Punkt.
+  outputs: z.array(z.union([
+    outputNameSchema,
+    z.object({
+      output: outputNameSchema,
+      trimStartSeconds: z.number().min(0).max(3600).optional(),
+      trimEndSeconds: z.number().min(0).max(3600).optional(),
+    }).strict(),
+  ])).min(2).max(200),
   name: z.string().trim().min(1).max(120).optional(),
 }).strict();
 
@@ -415,7 +423,8 @@ app.post("/api/sequences/assemble", async (request, response) => {
   // Provenienz jedes Shots vor dem Schnitt binden. Verändert sich ein Shot
   // während der Montage, wird das Ergebnis verworfen - dieselbe fail-closed
   // Regel wie beim Bildzuschnitt und bei der LipDub-Vorbereitung.
-  const sources = await Promise.all(payload.outputs.map((outputName, index) =>
+  const sourceNames = payload.outputs.map((entry) => typeof entry === "string" ? entry : entry.output);
+  const sources = await Promise.all(sourceNames.map((outputName, index) =>
     captureProvenanceFile(join(outputRoot, outputName), `sequence-shot:${index}:${outputName}`)));
   const prepared = await assembleSequence(payload, outputRoot);
   const changed = sources.map((source) => verifyProvenanceFileEvidence(source)).find(Boolean);
@@ -435,7 +444,12 @@ app.post("/api/sequences/assemble", async (request, response) => {
       additionalSources: sources.slice(1),
       parameters: {
         shotCount: prepared.shots.length,
-        shotOrder: prepared.shots.map((shot) => shot.outputName).join(","),
+        // Jeder Shot mit seinen Schnittpunkten, damit die Montage nachvollziehbar
+        // bleibt: "name@start-ende" in Sekunden, ungeschnitten ohne Zusatz.
+        shotOrder: prepared.shots.map((shot) =>
+          shot.trimStartSeconds > 0 || shot.trimEndSeconds > 0
+            ? `${shot.outputName}@${shot.trimStartSeconds}-${shot.trimEndSeconds}`
+            : shot.outputName).join(","),
         width: prepared.target.width,
         height: prepared.target.height,
         durationSeconds: prepared.target.durationSeconds,

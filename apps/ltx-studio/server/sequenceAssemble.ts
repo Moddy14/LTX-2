@@ -15,9 +15,28 @@ export class SequenceAssembleError extends Error {
   }
 }
 
+export type SequenceCut = {
+  /** Name der Ausgabe. */
+  output: string;
+  /**
+   * Sekunden, die am Anfang des Shots wegfallen.
+   *
+   * Der Grund ist nicht Kosmetik: Die Bildkonditionierung setzt nur den ersten
+   * Frame, danach übernimmt der Prompt. Bei manchen Shots steht das
+   * Referenzbild deshalb noch einen Moment und kippt dann sichtbar um. Der
+   * Anlauf lässt sich nicht wegprompten, aber wegschneiden.
+   */
+  trimStartSeconds?: number;
+  /** Sekunden, die am Ende wegfallen. */
+  trimEndSeconds?: number;
+};
+
 export type SequenceAssembleInput = {
-  /** Ausgabenamen in Schnittreihenfolge. */
-  outputs: readonly string[];
+  /**
+   * Shots in Schnittreihenfolge - entweder nur der Ausgabename oder ein
+   * Schnittplatz-Eintrag mit In- und Out-Punkt.
+   */
+  outputs: readonly (string | SequenceCut)[];
   /** Anzeigename der Montage; ohne Angabe wird einer gebildet. */
   name?: string;
 };
@@ -28,7 +47,12 @@ export type SequenceShot = {
   width: number;
   height: number;
   frames: number | null;
+  /** Länge der Quelle. */
   durationSeconds: number | null;
+  trimStartSeconds: number;
+  trimEndSeconds: number;
+  /** Länge nach dem Schnitt, sofern die Quelldauer bekannt ist. */
+  usedSeconds: number | null;
 };
 
 export type PreparedSequence = {
@@ -88,7 +112,7 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
  * Shots gemeldet, statt FFmpeg mitten im Lauf scheitern zu lassen.
  */
 export function collectSequenceShots(
-  outputs: readonly string[],
+  outputs: readonly (string | SequenceCut)[],
   root: string,
   probe: (path: string) => VideoMetadata | null = probeVideoMetadata,
 ): SequenceShot[] {
@@ -96,9 +120,16 @@ export function collectSequenceShots(
     throw new SequenceAssembleError("Ein Zusammenschnitt braucht mindestens zwei Ausgaben.");
   }
   const shots: SequenceShot[] = [];
-  for (const outputName of outputs) {
+  for (const entry of outputs) {
+    const cut: SequenceCut = typeof entry === "string" ? { output: entry } : entry;
+    const outputName = cut.output;
+    const trimStartSeconds = cut.trimStartSeconds ?? 0;
+    const trimEndSeconds = cut.trimEndSeconds ?? 0;
     if (!outputNameSchema.safeParse(outputName).success) {
       throw new SequenceAssembleError(`Unzulässiger Ausgabename: ${outputName}`);
+    }
+    if (trimStartSeconds < 0 || trimEndSeconds < 0) {
+      throw new SequenceAssembleError(`Negative Schnittpunkte bei ${outputName}.`);
     }
     const path = join(root, outputName);
     if (!existsSync(path) || !statSync(path).isFile() || statSync(path).size <= 0) {
@@ -121,22 +152,59 @@ export function collectSequenceShots(
         + `${first.width}×${first.height}. Alle Shots einer Montage brauchen dieselben Bildmaße.`,
       );
     }
+    const durationSeconds = metadata.durationSeconds ?? null;
+    // Ein Schnitt, der den Shot vollständig auffrisst, ist fast immer ein
+    // Zahlendreher - er würde sonst als leerer Eintrag durchlaufen.
+    const usedSeconds = durationSeconds === null
+      ? null
+      : durationSeconds - trimStartSeconds - trimEndSeconds;
+    if (usedSeconds !== null && usedSeconds <= 0.04) {
+      throw new SequenceAssembleError(
+        `Die Schnittpunkte lassen von ${outputName} nichts übrig: ${durationSeconds?.toFixed(2)} s `
+        + `Quelle minus ${trimStartSeconds} s vorne und ${trimEndSeconds} s hinten.`,
+      );
+    }
     shots.push({
       outputName,
       path,
       width: metadata.width,
       height: metadata.height,
       frames: metadata.frames ?? null,
-      durationSeconds: metadata.durationSeconds ?? null,
+      durationSeconds,
+      trimStartSeconds,
+      trimEndSeconds,
+      usedSeconds,
     });
   }
   return shots;
 }
 
-/** Baut den concat-Filter für die geprüften Shots. */
-export function buildConcatFilter(count: number): string {
-  const streams = Array.from({ length: count }, (_, index) => `[${index}:v][${index}:a]`).join("");
-  return `${streams}concat=n=${count}:v=1:a=1[v][a]`;
+/**
+ * Baut den concat-Filter für die geprüften Shots.
+ *
+ * Geschnittene Shots werden vor dem Aneinanderreihen getrimmt: `trim` für Bild,
+ * `atrim` für Ton, jeweils gefolgt von einem PTS-Reset, damit jeder Abschnitt
+ * wieder bei null beginnt - ohne den Reset erzeugt concat Standbilder in Länge
+ * des weggeschnittenen Vorlaufs.
+ */
+export function buildConcatFilter(shots: readonly SequenceShot[]): string {
+  const stages: string[] = [];
+  const inputs: string[] = [];
+  shots.forEach((shot, index) => {
+    if (shot.trimStartSeconds <= 0 && shot.trimEndSeconds <= 0) {
+      inputs.push(`[${index}:v][${index}:a]`);
+      return;
+    }
+    const start = shot.trimStartSeconds;
+    const end = shot.durationSeconds !== null && shot.trimEndSeconds > 0
+      ? `:end=${(shot.durationSeconds - shot.trimEndSeconds).toFixed(3)}`
+      : "";
+    stages.push(`[${index}:v]trim=start=${start.toFixed(3)}${end},setpts=PTS-STARTPTS[v${index}]`);
+    stages.push(`[${index}:a]atrim=start=${start.toFixed(3)}${end},asetpts=PTS-STARTPTS[a${index}]`);
+    inputs.push(`[v${index}][a${index}]`);
+  });
+  const concat = `${inputs.join("")}concat=n=${shots.length}:v=1:a=1[v][a]`;
+  return [...stages, concat].join(";");
 }
 
 export async function assembleSequence(
@@ -159,7 +227,7 @@ export async function assembleSequence(
     "-y",
     ...shots.flatMap((shot) => ["-i", shot.path]),
     "-filter_complex",
-    buildConcatFilter(shots.length),
+    buildConcatFilter(shots),
     "-map",
     "[v]",
     "-map",
