@@ -1,0 +1,9 @@
+{"result": "vergleich-start", "latentsync_job": "0fe93b10-9e9f-4ebc-84e9-acedde7e679f", "at": "2026-08-07T22:58:35"}
+{"status": "completed", "runtimeMs": 986952, "error": null, "provenanceVerified": true, "arm": "LatentSync", "jobId": "0fe93b10-9e9f-4ebc-84e9-acedde7e679f", "result": "terminal", "at": "2026-08-07T23:13:56"}
+{"arm": "MuseTalk", "result": "eingereiht", "jobId": "92aea745-3cc0-46ed-bc39-726644b5d79e", "at": "2026-08-07T23:13:56"}
+{"status": "completed", "runtimeMs": 53284, "error": null, "provenanceVerified": true, "arm": "MuseTalk", "jobId": "92aea745-3cc0-46ed-bc39-726644b5d79e", "result": "terminal", "at": "2026-08-07T23:16:16"}
+{"result": "mundstreifen", "arm": "LTX pur", "ok": true, "datei": "/tmp/claude-1000/-home-moddy-LTX-2/9dd5dabc-5f25-4618-b983-4cbc7db4c60a/scratchpad/streifen-ltx-pur.png", "at": "2026-08-07T23:16:16"}
+{"result": "mundstreifen", "arm": "LatentSync", "ok": true, "datei": "/tmp/claude-1000/-home-moddy-LTX-2/9dd5dabc-5f25-4618-b983-4cbc7db4c60a/scratchpad/streifen-latentsync.png", "at": "2026-08-07T23:16:16"}
+{"result": "mundstreifen", "arm": "MuseTalk", "ok": true, "datei": "/tmp/claude-1000/-home-moddy-LTX-2/9dd5dabc-5f25-4618-b983-4cbc7db4c60a/scratchpad/streifen-musetalk.png", "at": "2026-08-07T23:16:17"}
+{"result": "vergleichsvideo", "ok": true, "arme": "LTX pur|LatentSync|MuseTalk", "datei": "/home/moddy/LTX-2/.ltx-studio/outputs/vergleich-shot04-refiner.mp4", "url": "http://127.0.0.1:4318/api/outputs/vergleich-shot04-refiner.mp4", "detail": "", "at": "2026-08-07T23:16:18"}
+{"result": "vergleich-fertig", "arme_vorhanden": ["LTX pur", "LatentSync", "MuseTalk"], "at": "2026-08-07T23:16:18"}

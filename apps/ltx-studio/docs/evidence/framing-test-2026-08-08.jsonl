@@ -1,0 +1,32 @@
+{"result": "framing-test-start", "referenz": "/home/moddy/LTX-2/.ltx-studio/uploads/image/a7c41e02-5b93-4d17-9f26-3e8c1a0b4d55.png", "at": "2026-08-07T23:23:44"}
+{"arm": "render-closeup", "result": "eingereiht", "jobId": "852d7525-ff22-4933-a33a-6b6cca2082be", "at": "2026-08-07T23:23:44"}
+{"result": "fortschritt", "arm": "render", "status": "queued", "progress": null, "at": "2026-08-07T23:23:44"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 1.9000000000000001, "at": "2026-08-07T23:26:14"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 7.6000000000000005, "at": "2026-08-07T23:29:30"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 19, "at": "2026-08-07T23:32:00"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 47.5, "at": "2026-08-07T23:32:15"}
+{"result": "fortschritt", "arm": "render", "status": "paused", "progress": 47.5, "at": "2026-08-07T23:35:15"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 47.5, "at": "2026-08-08T01:56:59"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 76, "at": "2026-08-08T02:02:45"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 85.5, "at": "2026-08-08T02:03:00"}
+{"result": "fortschritt", "arm": "render", "status": "running", "progress": 95, "at": "2026-08-08T02:06:30"}
+{"result": "fortschritt", "arm": "render", "status": "completed", "progress": 100, "at": "2026-08-08T02:06:45"}
+{"status": "completed", "runtimeMs": 9628221, "error": null, "provenanceVerified": true, "arm": "render-closeup", "jobId": "852d7525-ff22-4933-a33a-6b6cca2082be", "result": "terminal", "at": "2026-08-08T02:06:45"}
+{"result": "latentsync-weiter-start", "at": "2026-08-08T02:09:50"}
+{"result": "kennzahlen", "arm": "v2 Closeup pur", "bilabialClosureF1": 0.2857142857142857, "openingCorrelation": 0.3124019957639714, "pauseLeakRatio": 0.24050632911392406, "speechMotionRecall": 0.6444444444444445, "faceTrackCoverage": 1, "medianBlurVariance": 25.78573417770838, "yunetCoverage": 0, "identityCosineMedian": null, "at": "2026-08-08T02:09:50"}
+{"arm": "latentsync", "result": "eingereiht", "jobId": "21c92dbc-1363-4a8d-8fb3-8b514b36dc1f", "at": "2026-08-08T02:09:50"}
+{"result": "fortschritt", "arm": "latentsync", "status": "queued", "progress": null, "at": "2026-08-08T02:09:50"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 1.7, "at": "2026-08-08T02:11:50"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 6.8, "at": "2026-08-08T02:15:05"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 8.5, "at": "2026-08-08T02:17:36"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 25.500000000000004, "at": "2026-08-08T02:17:51"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 42.5, "at": "2026-08-08T02:18:06"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 53.72, "at": "2026-08-08T02:21:06"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 76.5, "at": "2026-08-08T02:21:21"}
+{"result": "fortschritt", "arm": "latentsync", "status": "running", "progress": 85, "at": "2026-08-08T02:21:36"}
+{"result": "fortschritt", "arm": "latentsync", "status": "completed", "progress": 100, "at": "2026-08-08T02:28:07"}
+{"status": "completed", "runtimeMs": 980417, "error": null, "provenanceVerified": true, "arm": "latentsync", "jobId": "21c92dbc-1363-4a8d-8fb3-8b514b36dc1f", "result": "terminal", "at": "2026-08-08T02:28:07"}
+{"result": "reuse-nachweis", "zeile": "Thermal-Basiswert: 59.7 °C Host-Maximum. LTX-spezifischer Lastanstieg wird für diesen Lauf protokolliert.", "at": "2026-08-08T02:28:07"}
+{"result": "kennzahlen", "arm": "v2 + LatentSync", "bilabialClosureF1": 0.2857142857142857, "openingCorrelation": 0.4637364009919777, "pauseLeakRatio": 0.31645569620253167, "speechMotionRecall": 0.6, "faceTrackCoverage": 1, "medianBlurVariance": 21.587615411931818, "yunetCoverage": 0, "identityCosineMedian": null, "at": "2026-08-08T02:28:52"}
+{"result": "vergleichsvideo", "ok": true, "datei": "/home/moddy/LTX-2/.ltx-studio/outputs/vergleich-framing.mp4", "url": "http://127.0.0.1:4318/api/outputs/vergleich-framing.mp4", "detail": "", "at": "2026-08-08T02:28:53"}
+{"result": "framing-test-fertig", "at": "2026-08-08T02:28:53"}
