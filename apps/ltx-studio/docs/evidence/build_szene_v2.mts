@@ -46,14 +46,16 @@ const SCRATCH = "/tmp/claude-1000/-home-moddy-LTX-2/ac2cebad-2dbf-46a0-bc9a-155e
 const OUT_DIR = `${SCRATCH}/szene-v2`;
 mkdirSync(OUT_DIR, { recursive: true });
 
-// Beide Referenzen als 1280×704 mit gesichtsfüllendem Ausschnitt.
-// WICHTIG: Diese IDs stammen aus POST /api/uploads/image, nicht aus einem
-// Kopieren ins Upload-Verzeichnis. Eine bloß hineinkopierte Datei ist für das
-// Studio keine Mediathek-Referenz: die Identitätsevidenz fällt dann auf
-// "unavailable" ("stammt nicht aus der Studio-Mediathek") und mit ihr der
-// Basis-Reuse, weil der Reuse eine verifizierte Identitätsbindung verlangt.
-const REF_A = "/home/moddy/LTX-2/.ltx-studio/uploads/image/be4ce6f4-84e9-4eda-b0e0-7c4da0701bda.png";
-const REF_B = "/home/moddy/LTX-2/.ltx-studio/uploads/image/9839c93b-14bd-4852-a2b1-a9aeb988cc80.png";
+// Beide Referenzen hat das Studio selbst erzeugt: Original hochladen über
+// POST /api/uploads/image, dann POST /api/images/crop mit fit "bokeh" auf
+// 1280×704. Das Ergebnis ist ein abgeleitetes Asset mit gebundener Herkunft.
+//
+// Nie eine Datei ins Upload-Verzeichnis kopieren: Für das Studio ist sie dann
+// keine Mediathek-Referenz, die Identitätsevidenz fällt auf "unavailable"
+// ("stammt nicht aus der Studio-Mediathek"), und mit ihr entfällt der
+// Basis-Reuse, der eine verifizierte Identitätsbindung voraussetzt.
+const REF_A = "/home/moddy/LTX-2/.ltx-studio/uploads/image/a329650d-c427-42f0-85bf-128f8ba5e716.png";
+const REF_B = "/home/moddy/LTX-2/.ltx-studio/uploads/image/807530c8-c986-4c2d-b0c4-76f8b72e0f3d.png";
 
 const A = "a woman in her late twenties with long dark wavy hair, green eyes, "
   + "high cheekbones and a small scar above her left eyebrow, wearing a worn olive field jacket";
