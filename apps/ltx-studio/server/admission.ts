@@ -24,6 +24,25 @@ export type AdmissionRequest = {
   runtime: string;
   priority: "normal";
   estimated_memory_gib: number;
+  /**
+   * Der Weg zur Runtime-API ist auf Loopback festgenagelt (runtimeApi.ts prüft
+   * den Host), deshalb ist der Wert konstant. Der Orchestrator braucht ihn
+   * trotzdem ausgesprochen, um Waiter-Bedingungen nicht raten zu müssen.
+   */
+  caller_network: "dgx_local";
+  /**
+   * Großzügig: Wir pollen selbst weiter, solange es dauert - der längste
+   * berechtigte Wartefall waren gut fünf Stunden. Ein knappes TTL würde einen
+   * korrekt wartenden Job verfallen lassen.
+   */
+  queue_ttl_seconds: number;
+  /**
+   * Stabil über alle Segmente eines Laufs. Ohne diesen Schlüssel legte jedes
+   * Resume nach einem kooperativen Yield einen neuen Queue-Record an: Ein
+   * einziger Studio-Job erzeugte so vier Records, und Wechselkosten ließen sich
+   * keinem Lauf mehr zuordnen.
+   */
+  idempotency_key: string;
   resumability?: "required";
   scheduling?: CooperativeScheduling;
   resource_profile: {
@@ -140,6 +159,23 @@ export function supportsCooperativeCheckpoint(request: GenerationRequest): boole
     && !request.postprocess.lipForcing.enabled;
 }
 
+/** Längster gemessener Abstand zwischen zwei Checkpoint-Grenzen (Stage 2, 1280×704). */
+export const EXPECTED_SEGMENT_SECONDS = 9;
+
+/** Reichlich bemessen; wir erneuern selbst weiter, statt zu verfallen. */
+export const QUEUE_TTL_SECONDS = 3600;
+
+/**
+ * Ein Schlüssel je Studio-Job, unverändert über alle Segmente.
+ *
+ * Ohne ihn erzeugte jedes Resume nach einem kooperativen Yield einen eigenen
+ * Queue-Record - für einen einzigen Lauf wurden so vier Records angelegt, die in
+ * der Queue wie unabhängige Jobs aussahen.
+ */
+export function admissionIdempotencyKey(callerJobId?: string): string {
+  return callerJobId ? `ltx-studio:${callerJobId}` : "ltx-studio";
+}
+
 export function cooperativeCheckpointPath(callerJobId: string): string {
   return join(dataRoot, "checkpoints", callerJobId, "manifest.json");
 }
@@ -158,7 +194,11 @@ export function buildAdmissionRequests(
           mode: "segmented" as const,
           preemptible: true as const,
           yield_after_each_segment: true as const,
-          expected_segment_seconds: 60,
+          // Gemessen, nicht geschätzt: Die Prüfung sitzt nach jedem Euler-Schritt.
+          // Ein Schritt dauert 2,07 s in Stage 1 (640x352) und 8,67 s in Stage 2
+          // (1280x704). Der bisherige Wert 60 stammte aus der Zeit davor und
+          // hätte den Orchestrator eine haltbare Zusage verwerfen lassen.
+          expected_segment_seconds: EXPECTED_SEGMENT_SECONDS,
           resume_checkpoint: cooperativeCheckpointPath(callerJobId),
         },
       }
@@ -170,6 +210,9 @@ export function buildAdmissionRequests(
     runtime: "ltx2_native",
     priority: "normal",
     estimated_memory_gib: requestMemoryGiB,
+    caller_network: "dgx_local",
+    queue_ttl_seconds: QUEUE_TTL_SECONDS,
+    idempotency_key: admissionIdempotencyKey(callerJobId),
     ...cooperativeScheduling,
     resource_profile: {
       gpu: true,

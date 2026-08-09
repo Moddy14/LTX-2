@@ -44,6 +44,37 @@ describe("DGX admission contract", () => {
     expect(requests[0].job_type).toBe("ltx2_native_distilled");
   });
 
+  it("names the caller network, a generous ttl and a segment-stable idempotency key", () => {
+    const jobId = "22222222-2222-4222-8222-222222222222";
+    const [admission] = buildAdmissionRequests(validRequest(), undefined, jobId);
+
+    // Der Weg ist auf Loopback festgenagelt; der Orchestrator soll ihn nicht raten.
+    expect(admission.caller_network).toBe("dgx_local");
+    // Ein knappes TTL liesse einen korrekt wartenden Job verfallen - der laengste
+    // berechtigte Wartefall dauerte gut fuenf Stunden.
+    expect(admission.queue_ttl_seconds).toBeGreaterThanOrEqual(3600);
+    // Derselbe Schluessel ueber alle Segmente: Ohne ihn legte jedes Resume nach
+    // einem Yield einen eigenen Queue-Record an.
+    expect(admission.idempotency_key).toBe(`ltx-studio:${jobId}`);
+  });
+
+  it("keeps the idempotency key stable across every segment of one job", () => {
+    const jobId = "33333333-3333-4333-8333-333333333333";
+    const ersteEinreichung = buildAdmissionRequests(validRequest(), undefined, jobId);
+    const nachDemYield = buildAdmissionRequests(validRequest(), undefined, jobId);
+
+    expect(nachDemYield[0].idempotency_key).toBe(ersteEinreichung[0].idempotency_key);
+  });
+
+  it("still submits without a job id, then without a per-job key", () => {
+    const [admission] = buildAdmissionRequests(validRequest());
+
+    expect(admission.idempotency_key).toBe("ltx-studio");
+    expect(admission.caller_network).toBe("dgx_local");
+    // Ohne Job-Id gibt es keinen Checkpoint-Pfad, also auch keine Yield-Zusage.
+    expect(admission.scheduling).toBeUndefined();
+  });
+
   it("uses a stable per-job requester key for crash reconciliation", () => {
     const jobId = "11111111-1111-4111-8111-111111111111";
     const [admission] = buildAdmissionRequests(validRequest(), undefined, jobId);
@@ -55,7 +86,7 @@ describe("DGX admission contract", () => {
         mode: "segmented",
         preemptible: true,
         yield_after_each_segment: true,
-        expected_segment_seconds: 60,
+        expected_segment_seconds: 9,
       },
     });
     expect(admission.scheduling).not.toHaveProperty("qwen_pressure_reclaim");
