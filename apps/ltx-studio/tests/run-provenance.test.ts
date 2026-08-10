@@ -192,6 +192,14 @@ describe("run provenance", () => {
       sha256: "fcffe421129bac16b4f0655e54130d633280cdaf6949e145221e7090be42151f",
     });
 
+    const unionControl = createDefaultRequest("ic-lora");
+    expect(upstreamWorkflowContractsForRequest(unionControl)[0]).toMatchObject({
+      role: "official-template:ic-lora-union-control",
+      repository: "https://github.com/Comfy-Org/workflow_templates",
+      path: "templates/video_ltx2_3_ic_lora.json",
+      sha256: "48650e2f459391173e33686f0f27e4eafdc4fb79ce3be9b19a77a5d235666f04",
+    });
+
     expect(upstreamWorkflowContractsForRequest(createDefaultRequest("audio-to-video"))).toEqual([]);
   });
 

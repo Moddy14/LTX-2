@@ -533,7 +533,7 @@ export const generationRequestSchema = z
     }
     if (
       definition.needsDistilledLora
-      && !(value.mode === "ic-lora" && value.icLora.profile === "hdr")
+      && !(value.mode === "ic-lora" && ["hdr", "union-control"].includes(value.icLora.profile))
     ) {
       requirePath(value.models.distilledLora.path, ["models", "distilledLora", "path"], "Distilled LoRA");
     }

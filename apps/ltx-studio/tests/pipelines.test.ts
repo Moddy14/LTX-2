@@ -158,6 +158,18 @@ describe("generationRequestSchema", () => {
     expect(mergeGenerationRequest(legacy).icLora.profile).toBe("union-control");
   });
 
+  it("does not require the separate distilled LoRA for native Union Control", () => {
+    const union = validRequest("ic-lora");
+    union.icLora.profile = "union-control";
+    union.models.distilledLora.path = "";
+    expect(generationRequestSchema.safeParse(union).success).toBe(true);
+
+    const ingredients = structuredClone(union);
+    ingredients.icLora.profile = "ingredients";
+    ingredients.icLora.videoConditioning = [];
+    expect(generationRequestSchema.safeParse(ingredients).success).toBe(false);
+  });
+
   it("requires exactly one image but no control video for Ingredients", () => {
     const request = validRequest("ic-lora");
     request.icLora.profile = "ingredients";

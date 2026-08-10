@@ -485,7 +485,9 @@ export function documentedLtx23CheckpointAssetId(
     return "ltx23-distilled-fp8-checkpoint";
   }
   if (request.mode === "ic-lora") {
-    return "ltx23-dev-checkpoint";
+    return request.icLora.profile === "union-control"
+      ? "ltx23-distilled-fp8-checkpoint"
+      : "ltx23-dev-checkpoint";
   }
   if (request.mode === "text-to-audio") {
     return "ltx23-dev-checkpoint";
@@ -551,7 +553,9 @@ export function requiredOfficialSpeechAssetIds(
     return [...gemmaLoraAssets, ...controlAssets];
   }
   const officialComfyLipDub = usesOfficialComfyLipDub(request);
+  const nativeUnionControl = request.mode === "ic-lora" && request.icLora.profile === "union-control";
   const usesDistilledCheckpoint = ["distilled", "keyframes"].includes(request.mode)
+    || nativeUnionControl
     || (request.mode === "lipdub" && !officialComfyLipDub)
     || (request.mode === "retake" && request.retake.distilled);
   const documentedCheckpoint = documentedLtx23CheckpointAssetId(request);
@@ -577,8 +581,10 @@ export function withOfficialSpeechModelPaths(request: GenerationRequest): Genera
   if (!usesOfficialSpeechStack(request) && !usesDocumentedLtx23Workflow(request)) return request;
   const officialComfyLipDub = usesOfficialComfyLipDub(request);
   const hdrICLora = request.mode === "ic-lora" && request.icLora.profile === "hdr";
+  const nativeUnionControl = request.mode === "ic-lora" && request.icLora.profile === "union-control";
   const usesDistilledCheckpoint = ["distilled", "keyframes"].includes(request.mode)
     || hdrICLora
+    || nativeUnionControl
     || (request.mode === "lipdub" && !officialComfyLipDub)
     || (request.mode === "retake" && request.retake.distilled);
   const documentedCheckpoint = hdrICLora
@@ -618,17 +624,17 @@ export function withOfficialSpeechModelPaths(request: GenerationRequest): Genera
       distilledLora: {
         ...request.models.distilledLora,
         path: ((["two-stage", "two-stage-hq", "image-audio-to-video", "audio-to-video", "id-lora", "text-to-audio"].includes(request.mode)
-          || request.mode === "ic-lora")
+          || (request.mode === "ic-lora" && !nativeUnionControl))
           && !hdrICLora) || officialComfyLipDub
           ? recommendedModelAsset(documentedLtx23DistilledLoraAssetId(request)).localPath
           : request.models.distilledLora.path,
         strength: (["two-stage", "image-audio-to-video", "text-to-audio"].includes(request.mode)
-          || (request.mode === "ic-lora" && !hdrICLora)) || officialComfyLipDub
+          || (request.mode === "ic-lora" && !hdrICLora && !nativeUnionControl)) || officialComfyLipDub
           ? 0.5
           : request.models.distilledLora.strength,
       },
     },
-    quantization: request.mode === "ic-lora" && !hdrICLora
+    quantization: request.mode === "ic-lora" && !hdrICLora && !nativeUnionControl
       ? { ...request.quantization, mode: "none" }
       : documentedCheckpoint?.includes("fp8")
       ? { ...request.quantization, mode: "fp8-scaled-mm" }
@@ -682,13 +688,16 @@ export function withDiscoveredModelDefaults(
   }
   if (usesDocumentedLtx23Workflow(request)) {
     const official = withOfficialSpeechModelPaths(request);
+    const nativeUnionControl = request.mode === "ic-lora" && request.icLora.profile === "union-control";
     return {
       ...official,
       models: {
         ...official.models,
         checkpointPath: request.models.checkpointPath || official.models.checkpointPath,
         distilledCheckpointPath:
-          request.models.distilledCheckpointPath || official.models.distilledCheckpointPath,
+          nativeUnionControl
+            ? official.models.distilledCheckpointPath
+            : request.models.distilledCheckpointPath || official.models.distilledCheckpointPath,
         gemmaRoot: request.models.gemmaRoot || official.models.gemmaRoot,
         gemmaLora: {
           ...official.models.gemmaLora,

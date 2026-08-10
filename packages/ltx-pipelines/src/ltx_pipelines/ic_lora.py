@@ -533,8 +533,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=("euler-ancestral-rf", "euler-ancestral-cfg-pp", "euler-cfg-pp"),
         default="euler-ancestral-rf",
         help=(
-            "Sampler used by the selected official example. Union Control, Ingredients, "
-            "Motion Track and V2V use euler-ancestral-cfg-pp; "
+            "Sampler used by the selected official example. Native Union Control uses "
+            "euler-ancestral-rf; Ingredients, Motion Track and V2V use euler-ancestral-cfg-pp; "
             "Pixel Spatial Upscaler uses euler-cfg-pp."
         ),
     )

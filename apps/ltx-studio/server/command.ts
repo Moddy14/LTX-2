@@ -134,7 +134,7 @@ function appendCommonGenerationArgs(request: GenerationRequest, args: string[]):
   }
   const loras = request.mode === "ic-lora"
     ? [
-        request.models.distilledLora,
+        ...(request.icLora.profile === "union-control" ? [] : [request.models.distilledLora]),
         request.icLora.lora,
         ...request.models.loras,
       ]
@@ -259,7 +259,9 @@ function validateOfficialSpeechAssets(request: GenerationRequest): string[] {
   if (!usesOfficialSpeechStack(request) && !documentedCheckpoint) return errors;
 
   const officialComfyLipDub = usesOfficialComfyLipDub(request);
+  const nativeUnionControl = request.mode === "ic-lora" && request.icLora.profile === "union-control";
   const usesDistilledCheckpoint = ["distilled", "keyframes"].includes(request.mode)
+    || nativeUnionControl
     || (request.mode === "lipdub" && !officialComfyLipDub)
     || (request.mode === "retake" && request.retake.distilled);
 
@@ -286,7 +288,7 @@ function validateOfficialSpeechAssets(request: GenerationRequest): string[] {
     );
   }
   if (["two-stage", "two-stage-hq", "image-audio-to-video", "audio-to-video", "id-lora", "text-to-audio"].includes(request.mode)
-    || request.mode === "ic-lora"
+    || (request.mode === "ic-lora" && request.icLora.profile !== "union-control")
     || officialComfyLipDub) {
     requireAsset(
       documentedLtx23DistilledLoraAssetId(request),
@@ -594,7 +596,8 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       { path: request.retake.videoPath, label: "Quellvideo", kind: "file" },
     );
   } else {
-    const distilled = ["distilled", "keyframes"].includes(request.mode);
+    const nativeUnionControl = request.mode === "ic-lora" && request.icLora.profile === "union-control";
+    const distilled = ["distilled", "keyframes"].includes(request.mode) || nativeUnionControl;
     const checkpointPath = distilled ? request.models.distilledCheckpointPath : request.models.checkpointPath;
     appendFlag(args, distilled ? "--distilled-checkpoint-path" : "--checkpoint-path", checkpointPath);
     appendCommonGenerationArgs(request, args);
@@ -634,15 +637,19 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
         label: recommendedModelAsset(icLoraModelAssetId(request)).label,
         kind: "file",
       });
-      requiredPaths.push({
-        path: request.models.distilledLora.path,
-        label: "Distilled LoRA",
-        kind: "file",
-      });
+      if (!unionControl) {
+        requiredPaths.push({
+          path: request.models.distilledLora.path,
+          label: "Distilled LoRA",
+          kind: "file",
+        });
+      }
       appendFlag(
         args,
         "--official-comfy-sampler",
-        pixelUpscaler ? "euler-cfg-pp" : "euler-ancestral-cfg-pp",
+        unionControl
+          ? "euler-ancestral-rf"
+          : pixelUpscaler ? "euler-cfg-pp" : "euler-ancestral-cfg-pp",
       );
       appendFlag(args, "--negative-prompt", request.negativePrompt);
       appendFlag(args, "--control-preprocessor", unionControl ? request.icLora.controlType : "prepared");

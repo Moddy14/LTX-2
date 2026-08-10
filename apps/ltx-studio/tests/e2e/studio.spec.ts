@@ -105,9 +105,10 @@ test("IC-LoRA switches between every published LTX-2.3 profile", async ({ page }
     "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Union-Control/"
     + "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
   );
-  await expect(page.getByLabel("Checkpoint Pfad")).toHaveValue(
+  await expect(page.getByLabel("Distilled Checkpoint Pfad")).toHaveValue(
     "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-fp8/ltx-2.3-22b-distilled-fp8.safetensors",
   );
+  await expect(page.getByLabel("Distilled LoRA Pfad")).toHaveCount(0);
   await expect(page.getByLabel("Gemma Abliterated LoRA Pfad")).toBeVisible();
   await expect(page.getByRole("spinbutton", { name: "FPS" })).toHaveValue("25");
   await page.screenshot({ path: testInfo.outputPath("ic-lora-union-control.png"), fullPage: true });

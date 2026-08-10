@@ -1773,7 +1773,7 @@ export function Editor({
         <SectionHeader title="Modelle" action={<Cpu size={18} />} />
         <div className="field-grid field-grid--2">
           {["distilled", "keyframes"].includes(request.mode)
-            || (request.mode === "ic-lora" && request.icLora.profile === "hdr")
+            || (request.mode === "ic-lora" && ["hdr", "union-control"].includes(request.icLora.profile))
             || (isLipDub && !officialComfyLipDub)
             || (request.mode === "retake" && request.retake.distilled) ? (
             <PathPicker
@@ -1851,7 +1851,7 @@ export function Editor({
             />
           ) : null}
           {(definition.needsDistilledLora
-            && !(request.mode === "ic-lora" && request.icLora.profile === "hdr"))
+            && !(request.mode === "ic-lora" && ["hdr", "union-control"].includes(request.icLora.profile)))
             || officialComfyLipDub ? (
             <div className="paired-field">
               <PathPicker

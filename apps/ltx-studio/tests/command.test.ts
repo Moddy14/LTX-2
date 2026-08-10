@@ -263,24 +263,29 @@ describe("buildCommand", () => {
     });
     expect(plan.args).toContain("--official-comfy-workflow");
     expect(plan.args).toEqual(expect.arrayContaining([
-      "--checkpoint-path",
-      request.models.checkpointPath,
+      "--distilled-checkpoint-path",
+      request.models.distilledCheckpointPath,
       "--official-comfy-sampler",
-      "euler-ancestral-cfg-pp",
+      "euler-ancestral-rf",
       "--negative-prompt",
       request.negativePrompt,
       "--gemma-lora",
       request.models.gemmaLora.path,
       "1",
     ]));
-    expect(loraPaths).toContain(request.models.distilledLora.path);
-    expect(plan.requiredPaths).toContainEqual({
-      path: request.models.distilledLora.path,
-      label: "Distilled LoRA",
-      kind: "file",
-    });
-    expect(plan.args).not.toContain("--distilled-checkpoint-path");
+    expect(loraPaths).not.toContain(request.models.distilledLora.path);
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
+    expect(plan.args).not.toContain("--checkpoint-path");
     expect(plan.args).not.toContain("--spatial-upsampler-path");
+  });
+
+  it("does not preflight the obsolete distilled LoRA for official Union Control", () => {
+    const request = validRequest("ic-lora");
+    request.models.distilledLora.path = "";
+
+    const errors = validateRequestPlan(request, buildCommand(request));
+
+    expect(errors.some((message) => message.startsWith("Distilled LoRA:"))).toBe(false);
   });
 
   it("builds Ingredients with one image repeated as the full-sequence IC-LoRA guide", () => {

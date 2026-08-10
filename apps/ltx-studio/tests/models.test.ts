@@ -215,17 +215,13 @@ describe("model discovery", () => {
     expect(resolved.icLora.lora.path).toBe(
       recommendedModelAssets.find((asset) => asset.id === "ltx23-union-control-lora")?.localPath,
     );
-    expect(resolved.models.checkpointPath).toBe(
-      recommendedModelAssets.find((asset) => asset.id === "ltx23-dev-checkpoint")?.localPath,
+    expect(resolved.models.distilledCheckpointPath).toBe(
+      recommendedModelAssets.find((asset) => asset.id === "ltx23-distilled-fp8-checkpoint")?.localPath,
     );
-    expect(resolved.models.distilledLora.path).toBe(
-      recommendedModelAssets.find((asset) => asset.id === "ltx23-distilled-lora")?.localPath,
-    );
-    expect(resolved.models.distilledLora.strength).toBe(0.5);
     expect(resolved.models.gemmaLora.path).toBe(
       recommendedModelAssets.find((asset) => asset.id === "ltx23-gemma-abliterated-lora")?.localPath,
     );
-    expect(resolved.quantization.mode).toBe("none");
+    expect(resolved.quantization.mode).toBe("fp8-scaled-mm");
   });
 
   it("pins Ingredients to its gated official IC-LoRA asset", () => {
