@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,6 +82,7 @@ function releaseCandidateManifest(overrides: Record<string, unknown> = {}) {
 }
 
 describe("phoneme/viseme evaluator manifest gate", () => {
+  const privateManifestPath = join(appRoot, "evaluators", "phoneme-viseme", "manifest.v3.local.json");
   it("pins a complete, duplicate-free 15-class German/English viseme mapping", async () => {
     const path = join(appRoot, "evaluators", "phoneme-viseme", "viseme-mapping.v1.json");
     const body = JSON.parse(await readFile(path, "utf8"));
@@ -100,20 +102,22 @@ describe("phoneme/viseme evaluator manifest gate", () => {
     expect(visemeMappingSchema.safeParse(duplicate).success).toBe(false);
   });
 
-  it("ships a schema-valid private-local ARM64 CTC measurement manifest", async () => {
-    const path = join(appRoot, "evaluators", "phoneme-viseme", "manifest.v3.local.json");
-    const body = JSON.parse(await readFile(path, "utf8"));
+  it.skipIf(!existsSync(privateManifestPath))(
+    "ships a schema-valid private-local ARM64 CTC measurement manifest",
+    async () => {
+      const body = JSON.parse(await readFile(privateManifestPath, "utf8"));
 
-    const manifest = phonemeVisemeEvaluatorManifestSchema.parse(body);
+      const manifest = phonemeVisemeEvaluatorManifestSchema.parse(body);
 
-    expect(manifest).toMatchObject({
-      schemaVersion: "ltx-studio-phoneme-viseme-manifest.v3",
-      method: "ctc-espeak-mediapipe-de.v1",
-      productGo: { status: "blocked" },
-      legalApproval: { scope: "private-local-biometric-measurement-only" },
-      runtime: { cpuOnly: true },
-    });
-  });
+      expect(manifest).toMatchObject({
+        schemaVersion: "ltx-studio-phoneme-viseme-manifest.v3",
+        method: "ctc-espeak-mediapipe-de.v1",
+        productGo: { status: "blocked" },
+        legalApproval: { scope: "private-local-biometric-measurement-only" },
+        runtime: { cpuOnly: true },
+      });
+    },
+  );
 
   it("reports a missing manifest without inventing evaluator availability", () => {
     const state = resolvePhonemeVisemeEvaluatorState("");

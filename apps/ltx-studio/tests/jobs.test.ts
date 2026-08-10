@@ -112,6 +112,11 @@ function runProvenance(
   };
 }
 
+const testRunProvenanceOperations = {
+  capture: async () => runProvenance(),
+  verify: async (evidence: RunProvenance) => ({ evidence, error: null }),
+};
+
 describe("job persistence and reservations", () => {
   it("heartbeats an active DGX owner and claims progress only once per real Euler advance", async () => {
     vi.useFakeTimers();
@@ -1248,7 +1253,7 @@ describe("job persistence and reservations", () => {
           job: { job_id: jobId, state },
         };
       },
-    }, null);
+    }, null, undefined, testRunProvenanceOperations);
     Reflect.set(manager, "waitForDgxQueueStart", async (job: { dgxJobId: string | null }) => {
       job.dgxJobId = "dgx-job-cancel-verification";
       return true;
@@ -1318,7 +1323,7 @@ describe("job persistence and reservations", () => {
           job: { job_id: jobId, state },
         };
       },
-    });
+    }, null, undefined, testRunProvenanceOperations);
     Reflect.set(manager, "modelInventoryOperations", {
       read: async () => verifiedModelInventory(),
     });
@@ -1712,7 +1717,7 @@ describe("job persistence and reservations", () => {
           job: { job_id: jobId, state },
         };
       },
-    }, null);
+    }, null, undefined, testRunProvenanceOperations);
     const created = manager.create(request);
     const internalJobs = Reflect.get(manager, "jobs") as Map<string, {
       dgxJobId: string | null;

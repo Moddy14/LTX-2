@@ -5,13 +5,14 @@ import {
   createReadStream,
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { arch, platform, release } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { GenerationRequest } from "../shared/pipelines.js";
 import type {
@@ -153,6 +154,7 @@ function persistHashCache(): void {
     .slice(0, MAX_HASH_CACHE_RECORDS);
   cache.records = Object.fromEntries(trimmed);
   const temporaryPath = `${provenanceCachePath}.tmp`;
+  mkdirSync(dirname(provenanceCachePath), { recursive: true, mode: 0o700 });
   writeFileSync(temporaryPath, `${JSON.stringify(cache, null, 2)}\n`, { mode: 0o600 });
   chmodSync(temporaryPath, 0o600);
   renameSync(temporaryPath, provenanceCachePath);
