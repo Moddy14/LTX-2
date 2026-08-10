@@ -144,6 +144,17 @@ The queue start fence treats only the documented `qwen_gate_active` conflict and
 as retryable. After a failed `accepted -> starting` request, Studio reads the authoritative remote state before retrying:
 an already `starting` or `running` job proceeds without a duplicate transition, `accepted` waits, and unrelated conflicts
 remain terminal. This also contains the failure mode where the Runtime API closes a request without an HTTP response.
+While Studio owns an active queue job, it sends an authenticated
+`POST /dgx/jobs/<job-id>/heartbeat` at least every 60 seconds. Routine heartbeats update only
+`runner_last_seen_at` and a descriptive runtime phase. Studio sets `progressed: true` only after the native pipeline
+parser has observed a new Euler step; a durable checkpoint is reported by the following `pausing` transition with
+its artifact and a new `current_step`. Failed heartbeat attempts retain a pending Euler progress claim for the next retry. The heartbeat loop is drained before
+`paused` or a terminal transition so a late request cannot revive or mutate a released lease.
+
+Cooperatively checkpointable LTX runs are durable segment waiters. Their submitted
+`estimated_memory_gib` and `resource_profile.required_gib` are both floored at the measured 58 GiB waiter contract,
+even when a resolution-based UI estimate is lower. Non-resumable modes and isolated postprocessors retain their own
+measured estimates and do not inherit this floor.
 On cancellation or service shutdown, Studio confirms that the complete detached process group is gone before it
 releases the remote lease. The persisted proof records the Linux boot ID, process-group ID, and leader start ticks.
 After a Studio crash, the replacement process never signals that old ID; it scans `/proc` conservatively and unlocks
@@ -184,6 +195,7 @@ that cannot be proven from matching provenance.
 | `LTX_STUDIO_THERMAL_POLL_INTERVAL_MS` | `10000` | Runtime thermal polling interval |
 | `LTX_STUDIO_THERMAL_START_SAMPLES` | `5` | Samples used for the pre-launch host baseline |
 | `LTX_STUDIO_THERMAL_START_SAMPLE_INTERVAL_MS` | `1000` | Delay between baseline samples |
+| `LTX_STUDIO_DGX_HEARTBEAT_INTERVAL_MS` | `45000` (maximum `60000`) | Owner-liveness POST interval for active DGX queue jobs |
 | `LTX_STUDIO_DATA_DIR` | `<repository>/.ltx-studio` | Private runtime data directory |
 | `LTX_STUDIO_MODEL_ROOTS` | `/home/moddy/LTX-2.3-max` | Colon-separated, bounded model discovery roots |
 | `LTX_STUDIO_LIPFORCING_IMAGE` | `ltx-studio-lipforcing:14b-cu131` | Pinned offline LipForcing 14B runtime image |

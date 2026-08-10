@@ -113,6 +113,79 @@ function runProvenance(
 }
 
 describe("job persistence and reservations", () => {
+  it("heartbeats an active DGX owner and claims progress only once per real Euler advance", async () => {
+    vi.useFakeTimers();
+    try {
+      const heartbeats: Array<{ jobId: string; payload: Record<string, unknown> }> = [];
+      let failNextHeartbeat = false;
+      const manager = new JobManager(await statePath(), false, null, undefined, {
+        read: async (jobId) => ({
+          schema_version: "dgx-job-read.v0",
+          job: { job_id: jobId, state: "running" },
+        }),
+        transition: async (jobId, state) => ({
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        }),
+        heartbeat: async (jobId, payload) => {
+          heartbeats.push({ jobId, payload });
+          if (failNextHeartbeat) {
+            failNextHeartbeat = false;
+            throw new Error("synthetic heartbeat outage");
+          }
+          return {
+            schema_version: "dgx-job-heartbeat.v0",
+            job: { job_id: jobId, state: "running" },
+          };
+        },
+      }, null);
+      const created = manager.create(validRequest());
+      const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>).get(created.id)!;
+      active.status = "running";
+      active.dgxJobId = "dgx-job-heartbeat-test";
+
+      const startHeartbeat = Reflect.get(manager, "startDgxOwnerHeartbeat") as (
+        job: unknown,
+        phase: string,
+      ) => void;
+      const markProgress = Reflect.get(manager, "markDgxOwnerProgress") as (job: unknown) => void;
+      const stopHeartbeat = Reflect.get(manager, "stopDgxOwnerHeartbeat") as (job: unknown) => Promise<void>;
+
+      startHeartbeat.call(manager, active, "ltx_rendering");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(heartbeats).toEqual([{
+        jobId: "dgx-job-heartbeat-test",
+        payload: { runtime_status: { phase: "ltx_rendering" } },
+      }]);
+
+      markProgress.call(manager, active);
+      failNextHeartbeat = true;
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(heartbeats.at(-1)?.payload).toEqual({
+        runtime_status: { phase: "ltx_rendering" },
+        progressed: true,
+      });
+
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(heartbeats.at(-1)?.payload).toEqual({
+        runtime_status: { phase: "ltx_rendering" },
+        progressed: true,
+      });
+
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(heartbeats.at(-1)?.payload).toEqual({
+        runtime_status: { phase: "ltx_rendering" },
+      });
+
+      await stopHeartbeat.call(manager, active);
+      const stoppedAt = heartbeats.length;
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(heartbeats).toHaveLength(stoppedAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("builds one exact audio window contract for every optional lip refiner", () => {
     const request = validRequest();
     request.mode = "image-audio-to-video";

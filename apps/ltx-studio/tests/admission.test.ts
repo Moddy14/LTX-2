@@ -152,6 +152,27 @@ describe("DGX admission contract", () => {
     expect(admission.resource_profile.required_gib).toBe(58);
   });
 
+  it("never submits a durable LTX segment waiter below its measured 58 GiB floor", () => {
+    const request = validRequest("image-audio-to-video");
+    const [admission] = buildAdmissionRequests(request, 56, "durable-segment-job");
+
+    expect(admission).toMatchObject({
+      estimated_memory_gib: 58,
+      resource_profile: { required_gib: 58 },
+      resumability: "required",
+      scheduling: { mode: "segmented" },
+    });
+  });
+
+  it("does not apply the segment-waiter floor to non-resumable LTX work", () => {
+    const request = validRequest("two-stage-hq");
+    const [admission] = buildAdmissionRequests(request, 56, "non-resumable-job");
+
+    expect(admission.estimated_memory_gib).toBe(56);
+    expect(admission.resource_profile.required_gib).toBe(56);
+    expect(admission.scheduling).toBeUndefined();
+  });
+
   it("accepts a server-side media-aware estimate for native LipDub admission", () => {
     const request = validRequest("lipdub");
     const [admission] = buildAdmissionRequests(request, 82);

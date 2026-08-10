@@ -94,6 +94,8 @@ export type QueueJobSummary = {
   app_message?: string;
   current_step?: string;
   last_error?: string;
+  runner_last_seen_at?: string | null;
+  runtime_status?: Record<string, unknown> | null;
 };
 
 export type QueueListResponse = {
@@ -113,6 +115,17 @@ export type QueueJobReadResponse = {
 
 export type QueueTransitionResponse = {
   schema_version: "dgx-job-transition.v0";
+  job: QueueJobSummary;
+};
+
+export type QueueHeartbeatPayload = {
+  runtime_status: Record<string, unknown>;
+  progressed?: true;
+  current_step?: string;
+};
+
+export type QueueHeartbeatResponse = {
+  schema_version: "dgx-job-heartbeat.v0";
   job: QueueJobSummary;
 };
 
@@ -165,6 +178,9 @@ export const EXPECTED_SEGMENT_SECONDS = 9;
 /** Reichlich bemessen; wir erneuern selbst weiter, statt zu verfallen. */
 export const QUEUE_TTL_SECONDS = 3600;
 
+/** Gemessene Untergrenze des vom Orchestrator haltbar behandelten LTX-Waiters. */
+export const DURABLE_LTX_SEGMENT_WAITER_MIN_GIB = 58;
+
 /**
  * Ein Schlüssel je Studio-Job, unverändert über alle Segmente.
  *
@@ -180,14 +196,28 @@ export function cooperativeCheckpointPath(callerJobId: string): string {
   return join(dataRoot, "checkpoints", callerJobId, "manifest.json");
 }
 
+export function queueAdmissionMemoryGiB(
+  request: GenerationRequest,
+  estimatedMemoryGiB: number,
+  callerJobId?: string,
+): number {
+  return callerJobId && supportsCooperativeCheckpoint(request)
+    ? Math.max(DURABLE_LTX_SEGMENT_WAITER_MIN_GIB, estimatedMemoryGiB)
+    : estimatedMemoryGiB;
+}
+
 export function buildAdmissionRequests(
   request: GenerationRequest,
   estimatedMemoryGiB?: number,
   callerJobId?: string,
 ): AdmissionRequest[] {
-  const requestMemoryGiB = estimatedMemoryGiB ?? estimateResources(request).memoryGiB;
-  const cooperativeScheduling = callerJobId
-    && supportsCooperativeCheckpoint(request)
+  const cooperative = Boolean(callerJobId && supportsCooperativeCheckpoint(request));
+  const requestMemoryGiB = queueAdmissionMemoryGiB(
+    request,
+    estimatedMemoryGiB ?? estimateResources(request).memoryGiB,
+    callerJobId,
+  );
+  const cooperativeScheduling = cooperative
     ? {
         resumability: "required" as const,
         scheduling: {
@@ -199,7 +229,7 @@ export function buildAdmissionRequests(
           // (1280x704). Der bisherige Wert 60 stammte aus der Zeit davor und
           // hätte den Orchestrator eine haltbare Zusage verwerfen lassen.
           expected_segment_seconds: EXPECTED_SEGMENT_SECONDS,
-          resume_checkpoint: cooperativeCheckpointPath(callerJobId),
+          resume_checkpoint: cooperativeCheckpointPath(callerJobId!),
         },
       }
     : {};
@@ -385,4 +415,13 @@ export async function transitionQueueJob(
     state,
     ...metadata,
   }, { timeoutMs: 30_000 });
+}
+
+export async function heartbeatQueueJob(
+  jobId: string,
+  payload: QueueHeartbeatPayload,
+): Promise<QueueHeartbeatResponse> {
+  return runtimeApiJson("POST", `/dgx/jobs/${encodeURIComponent(jobId)}/heartbeat`, payload, {
+    timeoutMs: 30_000,
+  });
 }

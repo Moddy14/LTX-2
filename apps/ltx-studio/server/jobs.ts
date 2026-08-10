@@ -38,7 +38,9 @@ import {
 import {
   decisionMessage,
   cooperativeCheckpointPath,
+  heartbeatQueueJob,
   listQueueJobs,
+  queueAdmissionMemoryGiB,
   readQwenDemand,
   readQueueJob,
   retryAfterMs,
@@ -48,6 +50,7 @@ import {
   supportsCooperativeCheckpoint,
   transitionQueueJob,
   type QueueArtifact,
+  type QueueHeartbeatPayload,
   type QueueJobSummary,
   type QueueJobState,
   type QueueTransitionState,
@@ -147,6 +150,17 @@ export type StudioJob = {
   runProvenance: RunProvenance | null;
 };
 
+type DgxOwnerHeartbeatState = {
+  jobId: string;
+  phase: string;
+  progressEpoch: number;
+  acknowledgedProgressEpoch: number;
+  stopped: boolean;
+  timer?: NodeJS.Timeout;
+  inFlight?: Promise<void>;
+  lastError?: string;
+};
+
 type RuntimeJob = StudioJob & {
   plan: CommandPlan;
   process?: ChildProcess;
@@ -162,6 +176,7 @@ type RuntimeJob = StudioJob & {
   dgxTerminalDelivery?: DgxTerminalDelivery;
   dgxTerminalDeliveryInFlight?: Promise<boolean>;
   dgxTerminalRetry?: NodeJS.Timeout;
+  dgxOwnerHeartbeat?: DgxOwnerHeartbeatState;
 };
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
 
@@ -215,6 +230,7 @@ type PersistedStudioJob = StudioJob & {
 type DgxQueueOperations = {
   read: typeof readQueueJob;
   transition: typeof transitionQueueJob;
+  heartbeat?: typeof heartbeatQueueJob;
 };
 type DgxAdmissionOperations = {
   submit: typeof submitQueueAdmission;
@@ -245,6 +261,13 @@ const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
 const DGX_START_FENCE_RETRY_MS = 30_000;
 const DGX_SUBMIT_AMBIGUITY_MAX_MS = 125_000;
 const DGX_SUBMIT_RECONCILE_POLL_MS = 2_000;
+export const DGX_OWNER_HEARTBEAT_INTERVAL_MS = Math.min(
+  60_000,
+  Math.max(
+    1_000,
+    Number.parseInt(process.env.LTX_STUDIO_DGX_HEARTBEAT_INTERVAL_MS ?? "45000", 10) || 45_000,
+  ),
+);
 const LOCAL_PROCESS_GROUP_RECONCILE_MS = 2_000;
 const LTX_COOPERATIVE_YIELD_EXIT_CODE = 75;
 const QWEN_DEMAND_POLL_MS = Math.max(
@@ -672,6 +695,10 @@ export class PipelineProgressTracker {
     this.current = Math.max(this.current, Math.min(this.end, candidate));
     return this.current;
   }
+
+  isDenoising(): boolean {
+    return this.phase === "denoising";
+  }
 }
 
 function processIsAlive(child: ChildProcess): boolean {
@@ -810,6 +837,7 @@ function publicJob(job: RuntimeJob): StudioJob {
   delete value.dgxTerminalDelivery;
   delete value.dgxTerminalDeliveryInFlight;
   delete value.dgxTerminalRetry;
+  delete value.dgxOwnerHeartbeat;
   return value as StudioJob;
 }
 
@@ -888,6 +916,7 @@ export class JobManager extends EventEmitter {
     private readonly dgxQueueOperations: DgxQueueOperations = {
       read: readQueueJob,
       transition: transitionQueueJob,
+      heartbeat: heartbeatQueueJob,
     },
     private readonly dgxTerminalRetryBaseMs: number | null = DEFAULT_DGX_TERMINAL_RETRY_BASE_MS,
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
@@ -2013,6 +2042,7 @@ export class JobManager extends EventEmitter {
         this.failJob(job, "DGX-Queue-Running-State wurde für LatentSync nicht freigegeben.");
         return;
       }
+      this.setDgxOwnerHeartbeatPhase(job, "latentsync_refinement");
       this.consumeProcessLogs(job, child);
       const stopThermalWatcher = this.watchOwnedDockerThermals(
         job,
@@ -2112,6 +2142,7 @@ export class JobManager extends EventEmitter {
         this.failJob(job, "DGX-Queue-Running-State wurde für MuseTalk nicht freigegeben.");
         return;
       }
+      this.setDgxOwnerHeartbeatPhase(job, "musetalk_refinement");
       this.consumeProcessLogs(job, child);
       const stopThermalWatcher = this.watchOwnedDockerThermals(
         job,
@@ -2209,6 +2240,7 @@ export class JobManager extends EventEmitter {
         this.failJob(job, "DGX-Queue-Running-State wurde für LipForcing nicht freigegeben.");
         return;
       }
+      this.setDgxOwnerHeartbeatPhase(job, "lipforcing_refinement");
       this.consumeProcessLogs(job, child);
       const stopThermalWatcher = this.watchOwnedDockerThermals(
         job,
@@ -2238,6 +2270,7 @@ export class JobManager extends EventEmitter {
     }
 
     if (finalAudioMixEnabled) {
+      this.setDgxOwnerHeartbeatPhase(job, "final_audio_mix");
       const remuxPath = join(stageRoot, "final-audio-remux.tmp");
       rmSync(remuxPath, { force: true });
       this.appendLog(job, "Finale Tonspur wird zeitgleich an das vollständig gerenderte Video gebunden.");
@@ -2289,6 +2322,7 @@ export class JobManager extends EventEmitter {
       this.changed();
     }
 
+    this.setDgxOwnerHeartbeatPhase(job, "final_verification");
     if (!await this.verifyJobIdentityEvidence(job, "nach der vollständigen Ausgabe")) {
       if (!this.jobShouldStop(job)) {
         await this.transitionDgxJob(job, "failed", {
@@ -2527,7 +2561,11 @@ export class JobManager extends EventEmitter {
       try {
         this.appendLog(job, "DGX-Queue: Renderbedarf wird beim Orchestrator eingereicht; laufende Anwendungen werden nicht direkt beendet.");
         const estimate = estimateRequest(job.request, this.list());
-        const requestedMemoryGiB = estimatedMemoryGiBOverride ?? estimate.memoryGiB;
+        const requestedMemoryGiB = queueAdmissionMemoryGiB(
+          job.request,
+          estimatedMemoryGiBOverride ?? estimate.memoryGiB,
+          job.id,
+        );
         this.appendLog(
           job,
           `DGX-Queue: Modellbedarf ${requestedMemoryGiB} GiB RAM und `
@@ -2754,12 +2792,16 @@ export class JobManager extends EventEmitter {
       const delivered = await this.flushDgxTerminalDelivery(job);
       return delivered || Boolean(job.dgxTerminalDelivery);
     }
+    if (state === "paused") await this.stopDgxOwnerHeartbeat(job);
     if (job.dgxStateTransitionInFlight) return job.dgxStateTransitionInFlight;
     const transitionPromise = (async () => {
       while (!this.shuttingDown && isActiveJobStatus(job.status)) {
         try {
           const response = await this.dgxQueueOperations.transition(job.dgxJobId!, state, metadata);
           this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
+          if (state === "starting" || state === "running" || state === "pausing") {
+            this.startDgxOwnerHeartbeat(job, state === "running" ? "ltx_rendering" : state);
+          }
           this.changed();
           return true;
         } catch (error) {
@@ -2821,6 +2863,7 @@ export class JobManager extends EventEmitter {
           job,
           `DGX-Start-Fence per GET abgeglichen: ${remote.job_id} ist bereits ${remote.state}.`,
         );
+        this.startDgxOwnerHeartbeat(job, remote.state === "running" ? "ltx_rendering" : "starting");
         this.changed();
         return "applied";
       }
@@ -2884,6 +2927,7 @@ export class JobManager extends EventEmitter {
     if (job.localProcessGroupPending) return false;
     if (job.dgxTerminalDeliveryInFlight) return job.dgxTerminalDeliveryInFlight;
     if (job.dgxStateTransitionInFlight) await job.dgxStateTransitionInFlight;
+    await this.stopDgxOwnerHeartbeat(job);
     if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
     if (job.dgxTerminalRetry) {
       clearTimeout(job.dgxTerminalRetry);
@@ -3046,6 +3090,103 @@ export class JobManager extends EventEmitter {
     await this.flushDgxTerminalDelivery(job);
   }
 
+  private startDgxOwnerHeartbeat(job: RuntimeJob, phase: string): void {
+    if (!job.dgxJobId || job.dgxJobTerminal || !this.dgxQueueOperations.heartbeat) return;
+    const existing = job.dgxOwnerHeartbeat;
+    if (existing?.jobId === job.dgxJobId && !existing.stopped) {
+      existing.phase = phase;
+      return;
+    }
+    if (existing) {
+      existing.stopped = true;
+      if (existing.timer) clearInterval(existing.timer);
+    }
+
+    const state: DgxOwnerHeartbeatState = {
+      jobId: job.dgxJobId,
+      phase,
+      progressEpoch: 0,
+      acknowledgedProgressEpoch: 0,
+      stopped: false,
+    };
+    state.timer = setInterval(() => {
+      void this.sendDgxOwnerHeartbeat(job, state);
+    }, DGX_OWNER_HEARTBEAT_INTERVAL_MS);
+    state.timer.unref();
+    job.dgxOwnerHeartbeat = state;
+    void this.sendDgxOwnerHeartbeat(job, state);
+  }
+
+  private async sendDgxOwnerHeartbeat(
+    job: RuntimeJob,
+    state: DgxOwnerHeartbeatState,
+  ): Promise<void> {
+    if (
+      state.stopped
+      || job.dgxOwnerHeartbeat !== state
+      || job.dgxJobId !== state.jobId
+      || job.dgxJobTerminal
+      || state.inFlight
+      || !this.dgxQueueOperations.heartbeat
+    ) return;
+
+    const sentProgressEpoch = state.progressEpoch;
+    const payload: QueueHeartbeatPayload = {
+      runtime_status: { phase: state.phase },
+      ...(sentProgressEpoch > state.acknowledgedProgressEpoch ? { progressed: true as const } : {}),
+    };
+    const request = (async () => {
+      try {
+        await this.dgxQueueOperations.heartbeat!(state.jobId, payload);
+        if (state.stopped || job.dgxOwnerHeartbeat !== state) return;
+        state.acknowledgedProgressEpoch = Math.max(
+          state.acknowledgedProgressEpoch,
+          sentProgressEpoch,
+        );
+        if (state.lastError) {
+          this.appendLog(job, "DGX-Owner-Heartbeat ist wieder erreichbar.");
+          delete state.lastError;
+          this.changed();
+        }
+      } catch (error) {
+        if (state.stopped || job.dgxOwnerHeartbeat !== state) return;
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== state.lastError) {
+          state.lastError = message;
+          this.appendLog(job, `DGX-Owner-Heartbeat vorübergehend fehlgeschlagen: ${message}`);
+          this.changed();
+        }
+      }
+    })();
+    state.inFlight = request;
+    try {
+      await request;
+    } finally {
+      if (state.inFlight === request) delete state.inFlight;
+    }
+  }
+
+  private markDgxOwnerProgress(job: RuntimeJob): void {
+    if (job.dgxOwnerHeartbeat && !job.dgxOwnerHeartbeat.stopped) {
+      job.dgxOwnerHeartbeat.progressEpoch += 1;
+    }
+  }
+
+  private setDgxOwnerHeartbeatPhase(job: RuntimeJob, phase: string): void {
+    if (job.dgxOwnerHeartbeat && !job.dgxOwnerHeartbeat.stopped) {
+      job.dgxOwnerHeartbeat.phase = phase;
+    }
+  }
+
+  private async stopDgxOwnerHeartbeat(job: RuntimeJob): Promise<void> {
+    const state = job.dgxOwnerHeartbeat;
+    if (!state) return;
+    state.stopped = true;
+    if (state.timer) clearInterval(state.timer);
+    delete job.dgxOwnerHeartbeat;
+    await state.inFlight;
+  }
+
   private consumeProcessLogs(
     job: RuntimeJob,
     child: ChildProcess,
@@ -3058,8 +3199,14 @@ export class JobManager extends EventEmitter {
         const line = cleanLogLine(rawLine);
         if (!line) continue;
         this.appendLog(job, line);
+        const previousProgress = job.progress ?? 0;
+        const eulerStep = progressTracker?.isDenoising() === true
+          && progressFromPipelineLog(line) !== null;
         const progress = progressTracker?.update(line) ?? null;
-        if (progress !== null) job.progress = Math.max(job.progress ?? 0, progress);
+        if (progress !== null) {
+          job.progress = Math.max(previousProgress, progress);
+          if (eulerStep && progress > previousProgress) this.markDgxOwnerProgress(job);
+        }
         changed = true;
       }
       return changed;
@@ -3254,6 +3401,7 @@ export class JobManager extends EventEmitter {
       this.failJob(job, "LTX-Checkpoint wurde geschrieben, aber die zugehörige DGX-Zuteilung fehlt.");
       return false;
     }
+    this.setDgxOwnerHeartbeatPhase(job, "checkpoint_committed");
     if (!await this.transitionDgxJob(job, "pausing", {
       current_step: "LTX Euler checkpoint committed; process exited before resource release",
       artifact,
@@ -3385,6 +3533,7 @@ export class JobManager extends EventEmitter {
         if (action === "pause_hot" || action === "pause_unreadable") {
           if (!signalProcessGroup(child, "SIGSTOP")) return;
           job.status = "paused";
+          this.setDgxOwnerHeartbeatPhase(job, "thermal_pause");
           const reason = action === "pause_hot"
             ? `${temperatureC?.toFixed(1)} °C über ${thermalPausePolls} Messungen`
             : `${thermalUnreadablePolls} Temperaturmessungen ohne verwertbaren Sensorwert`;
@@ -3398,6 +3547,7 @@ export class JobManager extends EventEmitter {
         if (action === "resume") {
           if (!signalProcessGroup(child, "SIGCONT")) return;
           job.status = "running";
+          this.setDgxOwnerHeartbeatPhase(job, "ltx_rendering");
           this.appendLog(
             job,
             `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen unter dem Lauf-Basiswert ${baselineC.toFixed(1)} °C. LTX läuft ohne Neustart weiter.`,
@@ -3478,6 +3628,7 @@ export class JobManager extends EventEmitter {
         if (action === "pause_hot" || action === "pause_unreadable") {
           if (!dockerAction("pause")) return;
           job.status = "paused";
+          this.setDgxOwnerHeartbeatPhase(job, "thermal_pause");
           const reason = action === "pause_hot"
             ? `${temperatureC?.toFixed(1)} °C über ${thermalPausePolls} Messungen`
             : `${thermalUnreadablePolls} Temperaturmessungen ohne verwertbaren Sensorwert`;
@@ -3491,6 +3642,7 @@ export class JobManager extends EventEmitter {
         if (action === "resume") {
           if (!dockerAction("unpause")) return;
           job.status = "running";
+          this.setDgxOwnerHeartbeatPhase(job, "lip_refinement");
           this.appendLog(
             job,
             `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen unter dem Lauf-Basiswert ${baselineC.toFixed(1)} °C. LatentSync läuft ohne Neustart weiter.`,
