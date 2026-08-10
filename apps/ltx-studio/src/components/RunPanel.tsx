@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   AudioLines,
+  Camera,
   Check,
   CircleStop,
   Clock3,
@@ -13,6 +14,7 @@ import {
   Pause,
   Play,
   Repeat2,
+  ScanSearch,
   ScrollText,
   ShieldCheck,
   SlidersHorizontal,
@@ -22,6 +24,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useRef, useState } from "react";
 
 import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
 import type { PlanSuggestion } from "../../shared/plan";
@@ -39,11 +42,13 @@ import type {
   ExperimentCreateInput,
 } from "../../shared/experiments";
 import { isSpeechQualityCandidate } from "../qualityCandidates";
+import { supportsSceneReference } from "../sceneReference";
 import { QualityScorecard } from "./QualityScorecard";
 import { ObjectiveAnalysisPanel } from "./ObjectiveAnalysisPanel";
 import { ObjectiveComparisonPanel } from "./ObjectiveComparisonPanel";
 import { SynchronizedComparePreview } from "./SynchronizedComparePreview";
 import { ExperimentPanel } from "./ExperimentPanel";
+import { InfoTooltip } from "./Controls";
 
 const statusLabels: Record<StudioJob["status"], string> = {
   queued: "Wartet",
@@ -90,6 +95,15 @@ function isAudioOutputName(name: string): boolean {
   return name.toLowerCase().endsWith(".wav");
 }
 
+function seekToInitialReferenceFrame(video: HTMLVideoElement): number {
+  if (!Number.isFinite(video.duration) || video.duration <= 0 || video.currentTime > 0.001) {
+    return video.currentTime;
+  }
+  const midpoint = Math.min(video.duration / 2, Math.max(0, video.duration - 0.04));
+  video.currentTime = midpoint;
+  return midpoint;
+}
+
 type RunPanelProps = {
   request: GenerationRequest;
   requestValid: boolean;
@@ -125,6 +139,10 @@ type RunPanelProps = {
   deletingOutputName: string | null;
   onLoadSettings: (job: StudioJob) => void;
   onLoadOutputSettings: (output: StudioOutput) => void;
+  onUseFrameAsReference: (output: StudioOutput, atSeconds: number) => Promise<void>;
+  onUseBestFrameAsReference: (output: StudioOutput) => Promise<number | null>;
+  qualityGuidedSceneReferenceAvailable: boolean;
+  extractingReferenceFrom: string | null;
   experiments: ControlledExperiment[];
   onCreateExperiment: (input: ExperimentCreateInput) => Promise<void>;
   onFreezeExperiment: (id: string) => Promise<void>;
@@ -168,6 +186,10 @@ export function RunPanel({
   deletingOutputName,
   onLoadSettings,
   onLoadOutputSettings,
+  onUseFrameAsReference,
+  onUseBestFrameAsReference,
+  qualityGuidedSceneReferenceAvailable,
+  extractingReferenceFrom,
   experiments,
   onCreateExperiment,
   onFreezeExperiment,
@@ -175,6 +197,8 @@ export function RunPanel({
   estimate,
   requiredStartMemoryGiB,
 }: RunPanelProps) {
+  const selectedVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [selectedFrameSeconds, setSelectedFrameSeconds] = useState(0);
   const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
   const duration = request.mode === "retake"
     ? request.retake.endTime - request.retake.startTime
@@ -206,6 +230,9 @@ export function RunPanel({
     ? monitorJob.runtimeMs ?? Date.now() - Date.parse(monitorJob.startedAt)
     : null;
   const outputRequest = selectedOutput?.request ?? null;
+  const canUseSceneReference = selectedOutput !== null
+    && !isAudioOutputName(selectedOutput.name)
+    && supportsSceneReference(request.mode);
   const outputForJob = (job: StudioJob) =>
     outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
   const qualityAverageForJob = (job: StudioJob): number | null => {
@@ -232,7 +259,26 @@ export function RunPanel({
           ) : selectedOutput ? (
             isAudioOutputName(selectedOutput.name)
               ? <audio key={selectedOutput.url} src={selectedOutput.url} controls preload="metadata" />
-              : <video key={selectedOutput.url} src={selectedOutput.url} controls muted playsInline />
+              : <video
+                  key={selectedOutput.url}
+                  ref={selectedVideoRef}
+                  src={selectedOutput.url}
+                  controls
+                  muted
+                  playsInline
+                  onLoadStart={() => setSelectedFrameSeconds(0)}
+                  onLoadedMetadata={(event) => {
+                    setSelectedFrameSeconds(seekToInitialReferenceFrame(event.currentTarget));
+                  }}
+                  onDurationChange={(event) => {
+                    setSelectedFrameSeconds(seekToInitialReferenceFrame(event.currentTarget));
+                  }}
+                  onCanPlay={(event) => {
+                    setSelectedFrameSeconds(seekToInitialReferenceFrame(event.currentTarget));
+                  }}
+                  onSeeked={(event) => setSelectedFrameSeconds(event.currentTarget.currentTime)}
+                  onTimeUpdate={(event) => setSelectedFrameSeconds(event.currentTarget.currentTime)}
+                />
           ) : selectedJob?.outputUrl && outputForJob(selectedJob) ? (
             isAudioOutputName(selectedJob.outputName)
               ? <audio key={selectedJob.outputUrl} src={selectedJob.outputUrl} controls autoPlay />
@@ -366,6 +412,67 @@ export function RunPanel({
                 {deletingOutputName === selectedOutput?.name
                   ? <LoaderCircle className="spin" size={17} />
                   : <Trash2 size={17} />}
+              </button>
+            </div>
+            <div className="output-library__reference-action">
+              <label className="output-library__frame-time">
+                <span>
+                  Zeitpunkt
+                  <InfoTooltip text="Wofür: Legt fest, welcher sichtbare Frame als neue Szenenreferenz verwendet wird. Gut ist ein scharfes, ruhiges Bild nach dem Anlauf, mit gut erkennbarem Gesicht und passendem Licht." />
+                </span>
+                <input
+                  type="number"
+                  aria-label="Referenzzeitpunkt in Sekunden"
+                  min={0}
+                  step={0.04}
+                  value={selectedFrameSeconds.toFixed(2)}
+                  onChange={(event) => {
+                    const next = Math.max(0, Number(event.target.value) || 0);
+                    setSelectedFrameSeconds(next);
+                    const video = selectedVideoRef.current;
+                    if (video && Number.isFinite(video.duration) && next < video.duration) video.currentTime = next;
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="icon-button output-library__auto-reference"
+                title={qualityGuidedSceneReferenceAvailable
+                  ? "Schärfsten ruhigen Gesichtsframe automatisch auswählen"
+                  : "Automatische Frame-Auswahl wird nach dem Studio-Neustart verfügbar"}
+                aria-label="Besten Referenzframe automatisch auswählen"
+                disabled={!qualityGuidedSceneReferenceAvailable
+                  || !canUseSceneReference
+                  || extractingReferenceFrom === selectedOutput?.name}
+                onClick={async () => {
+                  if (!selectedOutput) return;
+                  const atSeconds = await onUseBestFrameAsReference(selectedOutput);
+                  if (atSeconds === null) return;
+                  setSelectedFrameSeconds(atSeconds);
+                  const video = selectedVideoRef.current;
+                  if (video && Number.isFinite(video.duration) && atSeconds < video.duration) {
+                    video.currentTime = atSeconds;
+                  }
+                }}
+              >
+                {extractingReferenceFrom === selectedOutput?.name
+                  ? <LoaderCircle className="spin" size={16} />
+                  : <ScanSearch size={17} />}
+              </button>
+              <button
+                type="button"
+                className="button output-library__reference"
+                title="Den gewählten Videoframe als gebundene Bildreferenz in den Editor einsetzen"
+                disabled={!canUseSceneReference || extractingReferenceFrom === selectedOutput?.name}
+                onClick={() => {
+                  if (!selectedOutput) return;
+                  void onUseFrameAsReference(selectedOutput, selectedFrameSeconds);
+                }}
+              >
+                {extractingReferenceFrom === selectedOutput?.name
+                  ? <LoaderCircle className="spin" size={16} />
+                  : <Camera size={16} />}
+                Frame als Referenz
               </button>
             </div>
           </>

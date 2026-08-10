@@ -48,6 +48,12 @@ import { ImageCropPreparationError, prepareImageCrop } from "./imageCrop.js";
 import { LipDubReferencePreparationError, prepareLipDubReference } from "./lipdubPrep.js";
 import { assembleSequence, SequenceAssembleError } from "./sequenceAssemble.js";
 import { extractOutputFrame, OutputFrameError } from "./outputFrame.js";
+import {
+  recommendSceneReferenceFrame,
+  SCENE_REFERENCE_YUNET_SHA256,
+  sceneReferenceFrameRecommendationSchema,
+  SceneReferenceFrameError,
+} from "./sceneReferenceFrame.js";
 import { estimateRequest } from "./estimates.js";
 import {
   ExperimentConflictError,
@@ -222,8 +228,12 @@ const imageCropPreparationRequestSchema = z.object({
 
 const outputFrameRequestSchema = z.object({
   output: outputNameSchema,
-  atSeconds: z.number().min(0).max(3600),
-}).strict();
+  atSeconds: z.number().min(0).max(3600).optional(),
+  strategy: z.literal("best-face").optional(),
+}).strict().refine(
+  (value) => (value.atSeconds === undefined) !== (value.strategy === undefined),
+  { message: "Entweder Zeitpunkt oder automatische Auswahl angeben." },
+);
 
 const sequenceAssembleRequestSchema = z.object({
   // Entweder nur der Name oder ein Schnittplatz-Eintrag mit In- und Out-Punkt.
@@ -260,6 +270,9 @@ const upload = multer({
 app.get("/api/config", (_request, response) => {
   response.json({
     pipelines: PIPELINES,
+    features: {
+      qualityGuidedSceneReference: true,
+    },
     runtime: {
       minAvailableGiB,
       minResidualMemoryGiB,
@@ -430,11 +443,42 @@ app.post("/api/images/from-output", async (request, response) => {
   // währenddessen, ist der Frame nicht mehr das, was er zu sein vorgibt.
   const source = await captureProvenanceFile(
     join(outputRoot, payload.output), `output-frame-source:${payload.output}`);
-  const extracted = await extractOutputFrame(payload, outputRoot);
-  if (verifyProvenanceFileEvidence(source)) {
+  const recommendationScriptPath = join(appRoot, "scripts", "select_scene_reference_frame.py");
+  const recommendationModelPath = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
+  const recommendationScript = payload.strategy
+    ? await captureProvenanceFile(recommendationScriptPath, "code:scene-reference-frame-selector")
+    : null;
+  const recommendationModel = payload.strategy
+    ? await captureProvenanceFile(recommendationModelPath, "model:scene-reference-frame-yunet")
+    : null;
+  if (recommendationModel && recommendationModel.sha256 !== SCENE_REFERENCE_YUNET_SHA256) {
+    throw new SceneReferenceFrameError(
+      `YuNet-Modell hat eine unerwartete Prüfsumme: ${recommendationModelPath}`,
+      500,
+    );
+  }
+  const recommendation = payload.strategy
+    ? await recommendSceneReferenceFrame(join(outputRoot, payload.output), {
+        script: recommendationScriptPath,
+        faceModel: recommendationModelPath,
+      })
+    : null;
+  const atSeconds = payload.atSeconds ?? recommendation?.atSeconds;
+  if (atSeconds === undefined) {
+    throw new OutputFrameError("Kein gültiger Referenzzeitpunkt ermittelt.", 500);
+  }
+  const extracted = await extractOutputFrame({ output: payload.output, atSeconds }, outputRoot);
+  const changedSource = verifyProvenanceFileEvidence(source);
+  const changedScript = recommendationScript ? verifyProvenanceFileEvidence(recommendationScript) : null;
+  const changedModel = recommendationModel ? verifyProvenanceFileEvidence(recommendationModel) : null;
+  if (changedSource || changedScript || changedModel) {
     unlinkSync(extracted.file.path);
     throw new OutputFrameError(
-      "Die Ausgabe wurde während der Frame-Übernahme verändert. Das Ergebnis wurde verworfen.",
+      changedSource
+        ? "Die Ausgabe wurde während der Frame-Übernahme verändert. Das Ergebnis wurde verworfen."
+        : changedScript
+          ? "Das Auswahlskript wurde während der automatischen Auswahl verändert. Das Ergebnis wurde verworfen."
+        : "Das Gesichtsmodell wurde während der automatischen Auswahl verändert. Das Ergebnis wurde verworfen.",
       409,
     );
   }
@@ -444,22 +488,50 @@ app.post("/api/images/from-output", async (request, response) => {
       schemaVersion: "ltx-studio-asset-derivation.v1",
       operation: "output-frame",
       source,
-      additionalSources: [],
+      additionalSources: recommendationScript && recommendationModel
+        ? [recommendationScript, recommendationModel]
+        : [],
       parameters: {
         outputName: extracted.outputName,
         atSeconds: extracted.atSeconds,
         width: extracted.width,
         height: extracted.height,
         sourceDurationSeconds: extracted.sourceDurationSeconds,
+        selectionStrategy: recommendation ? "best-face" : "manual",
+        recommendationScore: recommendation?.score ?? null,
+        sampledFrames: recommendation?.sampledFrames ?? null,
+        eligibleFrames: recommendation?.eligibleFrames ?? null,
+        faceSharpness: recommendation?.metrics.faceSharpness ?? null,
+        faceAreaRatio: recommendation?.metrics.faceAreaRatio ?? null,
+        faceConfidence: recommendation?.metrics.faceConfidence ?? null,
+        stability: recommendation?.metrics.stability ?? null,
+        exposure: recommendation?.metrics.exposure ?? null,
+        frontalness: recommendation?.metrics.frontalness ?? null,
+        topCandidates: recommendation ? JSON.stringify(recommendation.candidates) : null,
       },
-      command: extracted.command,
+      command: recommendation ? `${recommendation.command}\n${extracted.command}` : extracted.command,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
     unlinkSync(extracted.file.path);
     throw error;
   }
-  response.status(201).json({ asset, frame: extracted });
+  const publicRecommendation = recommendation ? {
+    schemaVersion: recommendation.schemaVersion,
+    atSeconds: recommendation.atSeconds,
+    score: recommendation.score,
+    sampledFrames: recommendation.sampledFrames,
+    eligibleFrames: recommendation.eligibleFrames,
+    metrics: recommendation.metrics,
+    candidates: recommendation.candidates,
+  } : null;
+  response.status(201).json({
+    asset,
+    frame: extracted,
+    recommendation: publicRecommendation
+      ? sceneReferenceFrameRecommendationSchema.parse(publicRecommendation)
+      : null,
+  });
 });
 
 app.post("/api/sequences/assemble", async (request, response) => {
@@ -851,6 +923,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof OutputFrameError) {
+    return response.status(error.statusCode).json({ error: error.message });
+  }
+  if (error instanceof SceneReferenceFrameError) {
     return response.status(error.statusCode).json({ error: error.message });
   }
   if (error instanceof OutputQualityError) {

@@ -76,6 +76,9 @@ export type StudioJob = {
 
 export type StudioConfig = {
   pipelines: PipelineDefinition[];
+  features?: {
+    qualityGuidedSceneReference?: boolean;
+  };
   runtime: {
     minAvailableGiB: number;
     minResidualMemoryGiB: number;

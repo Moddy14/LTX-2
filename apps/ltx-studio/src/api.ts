@@ -239,6 +239,46 @@ export async function getAssets(kind?: AssetKind): Promise<StudioAsset[]> {
   return body.assets;
 }
 
+export async function takeOutputFrame(output: string, atSeconds: number): Promise<StudioAsset> {
+  const body = await decode<{ asset: StudioAsset }>(
+    await fetch("/api/images/from-output", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ output, atSeconds }),
+    }),
+  );
+  return body.asset;
+}
+
+export type RecommendedOutputFrame = {
+  asset: StudioAsset;
+  recommendation: {
+    atSeconds: number;
+    score: number;
+    sampledFrames: number;
+    eligibleFrames: number;
+    metrics: {
+      faceSharpness: number;
+      faceAreaRatio: number;
+      faceConfidence: number;
+      stability: number;
+      exposure: number;
+      frontalness: number;
+      prominentFaceCount: number;
+    };
+  };
+};
+
+export async function takeRecommendedOutputFrame(output: string): Promise<RecommendedOutputFrame> {
+  return decode<RecommendedOutputFrame>(
+    await fetch("/api/images/from-output", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ output, strategy: "best-face" }),
+    }),
+  );
+}
+
 export async function prepareImageCrop(input: {
   path: string;
   x: number;

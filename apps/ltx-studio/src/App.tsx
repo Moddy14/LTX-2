@@ -34,6 +34,8 @@ import {
   setJobFavorite,
   setOutputQualityReview,
   startOutputAnalysis,
+  takeOutputFrame,
+  takeRecommendedOutputFrame,
   cancelOutputAnalysis,
   createExperiment as createExperimentApi,
   freezeExperiment as freezeExperimentApi,
@@ -44,6 +46,10 @@ import { protocolOrderedComparisonOutputs } from "./objectiveComparison";
 import { RefreshFence } from "./refreshFence";
 import type { QualityReviewInput } from "../shared/quality";
 import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
+import {
+  MIN_SCENE_REFERENCE_FACE_SHARPNESS,
+  sceneReferenceTooSoftMessage,
+} from "../shared/sceneReferenceQuality";
 import type {
   ControlledExperiment,
   ExperimentCreateInput,
@@ -52,6 +58,7 @@ import { Editor } from "./components/Editor";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
 import { mergeOutputAnalysis, mergeOutputRefresh } from "./outputState";
+import { withSceneReference } from "./sceneReference";
 import {
   ApiError,
   type Health,
@@ -119,6 +126,7 @@ export function App() {
   const [submitting, setSubmitting] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [deletingOutputName, setDeletingOutputName] = useState<string | null>(null);
+  const [extractingReferenceFrom, setExtractingReferenceFrom] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [serverWarnings, setServerWarnings] = useState<string[]>([]);
   const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
@@ -537,6 +545,74 @@ export function App() {
     }
   };
 
+  const handleUseFrameAsReference = async (output: StudioOutput, atSeconds: number) => {
+    setServerErrors([]);
+    setServerWarnings([]);
+    setExtractingReferenceFrom(output.name);
+    try {
+      const asset = await takeOutputFrame(output.name, atSeconds);
+      setPreviews((current) => ({ ...current, [asset.path]: asset.url }));
+      setRequest((current) => ({
+        ...withSceneReference(current, asset),
+        outputName: nextEditableOutputName(current.outputName, jobs, outputs),
+      }));
+      setAttempted(false);
+      setPreflightErrors([]);
+      setPreflightWarnings([]);
+      setPreflightSuggestions([]);
+      setCommand(null);
+      setServerWarnings([
+        `Der sichtbare Frame bei ${atSeconds.toLocaleString("de-AT", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} s ist als Szenenreferenz mit Stärke 1,0 im Editor eingesetzt.`,
+      ]);
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Frame konnte nicht als Referenz übernommen werden."]);
+    } finally {
+      setExtractingReferenceFrom(null);
+    }
+  };
+
+  const handleUseBestFrameAsReference = async (output: StudioOutput): Promise<number | null> => {
+    setServerErrors([]);
+    setServerWarnings([]);
+    setExtractingReferenceFrom(output.name);
+    try {
+      const { asset, recommendation } = await takeRecommendedOutputFrame(output.name);
+      if (recommendation.metrics.faceSharpness < MIN_SCENE_REFERENCE_FACE_SHARPNESS) {
+        setServerErrors([sceneReferenceTooSoftMessage(recommendation.metrics.faceSharpness)]);
+        return null;
+      }
+      setPreviews((current) => ({ ...current, [asset.path]: asset.url }));
+      setRequest((current) => ({
+        ...withSceneReference(current, asset),
+        outputName: nextEditableOutputName(current.outputName, jobs, outputs),
+      }));
+      setAttempted(false);
+      setPreflightErrors([]);
+      setPreflightWarnings([]);
+      setPreflightSuggestions([]);
+      setCommand(null);
+      setServerWarnings([
+        `Automatisch gewählter Frame bei ${recommendation.atSeconds.toLocaleString("de-AT", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} s eingesetzt: Gesichtsschärfe ${recommendation.metrics.faceSharpness.toLocaleString("de-AT", {
+          maximumFractionDigits: 1,
+        })}, Stabilität ${(recommendation.metrics.stability * 100).toLocaleString("de-AT", {
+          maximumFractionDigits: 0,
+        })} %, ${recommendation.eligibleFrames} geeignete Frames geprüft.`,
+      ]);
+      return recommendation.atSeconds;
+    } catch (error) {
+      setServerErrors([error instanceof Error ? error.message : "Bester Referenzframe konnte nicht ermittelt werden."]);
+      return null;
+    } finally {
+      setExtractingReferenceFrom(null);
+    }
+  };
+
   const toggleComparison = (output: StudioOutput) => {
     setComparisonNames((current) => {
       if (current.includes(output.name)) return current.filter((name) => name !== output.name);
@@ -791,6 +867,10 @@ export function App() {
           deletingOutputName={deletingOutputName}
           onLoadSettings={loadJobSettings}
           onLoadOutputSettings={loadOutputSettings}
+          onUseFrameAsReference={handleUseFrameAsReference}
+          onUseBestFrameAsReference={handleUseBestFrameAsReference}
+          qualityGuidedSceneReferenceAvailable={Boolean(config?.features?.qualityGuidedSceneReference)}
+          extractingReferenceFrom={extractingReferenceFrom}
           experiments={experiments}
           onCreateExperiment={handleCreateExperiment}
           onFreezeExperiment={handleFreezeExperiment}

@@ -1585,6 +1585,95 @@ test("generated video picker exposes dialogue, restores settings, and deletes th
   await expect(page.getByText("Noch keine MP4- oder WAV-Ausgabe im Studio-Ordner")).toBeVisible();
 });
 
+test("manual and quality-guided output frames become bound scene references", async ({ page }) => {
+  const stored = createDefaultRequest("two-stage");
+  stored.outputName = "casting-shot.mp4";
+  const extractionRequests: Array<{ output: string; atSeconds?: number; strategy?: string }> = [];
+  let recommendedSharpness = 91.2;
+
+  await page.route("**/api/outputs", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      outputs: [{
+        name: stored.outputName,
+        url: "/api/outputs/casting-shot.mp4",
+        sizeBytes: 123456,
+        modifiedAt: "2026-08-10T07:00:00.000Z",
+        jobId: null,
+        jobStatus: "completed",
+        request: stored,
+        settingsAvailable: true,
+      }],
+    }),
+  }));
+  await page.route("**/api/outputs/casting-shot.mp4", (route) => route.fulfill({
+    status: 200,
+    contentType: "video/mp4",
+    body: "",
+  }));
+  await page.route("**/api/images/from-output", async (route) => {
+    const payload = route.request().postDataJSON() as { output: string; atSeconds?: number; strategy?: string };
+    extractionRequests.push(payload);
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset: {
+          id: "a1b2c3d4-5555-4666-8777-123456789012",
+          path: "/uploads/scene-frame.png",
+          name: "casting-shot-frame-1.30s.png",
+          size: 43210,
+          kind: "image",
+          url: "/api/uploads/image/a1b2c3d4-5555-4666-8777-123456789012.png",
+          createdAt: "2026-08-10T07:01:00.000Z",
+          derivation: null,
+        },
+        recommendation: payload.strategy === "best-face" ? {
+          atSeconds: 1.88,
+          score: 0.81,
+          sampledFrames: 40,
+          eligibleFrames: 32,
+          metrics: {
+            faceSharpness: recommendedSharpness,
+            faceAreaRatio: 0.08,
+            faceConfidence: 0.95,
+            stability: 0.94,
+            exposure: 0.72,
+            frontalness: 0.88,
+            prominentFaceCount: 1,
+          },
+        } : null,
+      }),
+    });
+  });
+  await page.reload();
+
+  const referenceButton = page.getByRole("button", { name: "Frame als Referenz" });
+  await expect(referenceButton).toBeEnabled();
+  await page.getByLabel("Referenzzeitpunkt in Sekunden").fill("1.3");
+  await referenceButton.click();
+
+  expect(extractionRequests[0]).toEqual({ output: "casting-shot.mp4", atSeconds: 1.3 });
+  await expect(page.getByRole("button", { name: "Bild zu Video · empfohlen" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByLabel("casting-shot-frame-1.30s.png")).toHaveValue("/uploads/scene-frame.png");
+  await expect(page.getByText(/als Szenenreferenz mit Stärke 1,0 im Editor eingesetzt/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Besten Referenzframe automatisch auswählen" }).click();
+  expect(extractionRequests[1]).toEqual({ output: "casting-shot.mp4", strategy: "best-face" });
+  await expect(page.getByLabel("Referenzzeitpunkt in Sekunden")).toHaveValue("1.88");
+  await expect(page.getByText(/Gesichtsschärfe 91,2, Stabilität 94 %, 32 geeignete Frames/)).toBeVisible();
+
+  recommendedSharpness = 22.4;
+  await page.getByRole("button", { name: "Besten Referenzframe automatisch auswählen" }).click();
+  expect(extractionRequests[2]).toEqual({ output: "casting-shot.mp4", strategy: "best-face" });
+  await expect(page.getByText(/Gesicht ist im gesamten Video zu weich/)).toBeVisible();
+  await expect(page.getByLabel("Referenzzeitpunkt in Sekunden")).toHaveValue("1.88");
+  await expect(page.getByLabel("casting-shot-frame-1.30s.png")).toHaveValue("/uploads/scene-frame.png");
+});
+
 test("terminal jobs can be removed from persistent history", async ({ page }) => {
   const request = createDefaultRequest("two-stage");
   request.outputName = "obsolete-job.mp4";
