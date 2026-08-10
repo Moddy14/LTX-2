@@ -1,0 +1,139 @@
+{
+  "schemaVersion": "ltx-studio-scene-reference-ab.v1",
+  "createdAt": "2026-08-10T12:45:00+02:00",
+  "protocol": {
+    "promptSeedAndTimelineIdentical": true,
+    "seed": 3001,
+    "frames": 129,
+    "fps": 25,
+    "width": 1280,
+    "height": 704,
+    "onlyIntendedDifference": "one scene-derived first-frame reference at strength 1.0",
+    "jumpMetric": "maximum grayscale mean absolute difference between adjacent frames divided by the median adjacent-frame difference"
+  },
+  "baseline": {
+    "outputName": "einzelshot-20260808.mp4",
+    "jobId": "05bebfee-eec9-41e2-a939-e1428c79c3f7",
+    "outputSha256": "7d331724c57748056dab96df26b76bbb4a76fc5f8273db8aed92ef755ed3400b",
+    "analysisSha256": "512ae75cfd5fb02099ae50ad728d52af2d4d9a396bf3c8b820ced6ffe92904aa",
+    "provenanceFingerprint": "f18be98ad703b4b7f8ba7ad2525894992bcc482630f39e6670eb1aa7fa8b9b1b",
+    "provenanceVerifiedAt": "2026-08-08T21:21:19.454Z",
+    "sceneReferenceCount": 0,
+    "jumpRatio": 1.777975,
+    "identity": null,
+    "dialogueWer": 0,
+    "rawPhonemeViseme": {
+      "globalAvLagMilliseconds": -360,
+      "bilabialClosureF1": 0.2,
+      "openingCorrelation": 0.30182434937334257,
+      "roundingCorrelation": 0.26968262907035073,
+      "pauseLeakRatio": 0.18181818181818182,
+      "medianBlurVariance": 52.71670703446569
+    },
+    "faceStability": {
+      "noseVelocityP95PerSecond": 1.6666507017796877,
+      "noseAccelerationP95PerSecond2": 38.672981245833796,
+      "mouthAngleVelocityP95DegreesPerSecond": 8.802930495886898,
+      "mouthSkinWarpResidualP95": 0.02395974127575755,
+      "mouthSkinFlowDeformationP95": 0.44764653146266936
+    }
+  },
+  "sceneReference": {
+    "outputName": "einzelshot-mit-szenenreferenz.mp4",
+    "jobId": "04a98565-6f6c-40dc-888b-555c3cce9a63",
+    "outputSha256": "b7737622ac91dd85e809f45a311c2244795ae3c2979f54e2fe0cb022e1fb1fcf",
+    "analysisSha256": "44748eb42c136830f16cff4b6803c5971e462ad02b35fb3e2e32c0450f336b77",
+    "provenanceFingerprint": "028afe2eec137578dd202eb25af07a3d0be9dd89a5d75d8b4e42e867bcfa9a91",
+    "provenanceVerifiedAt": "2026-08-10T06:39:59.893Z",
+    "sceneReferenceCount": 1,
+    "jumpRatio": 1.491007,
+    "identity": {
+      "coverage": 1,
+      "cosineMedian": 0.9112079809579161,
+      "cosineP10": 0.8891976782703085,
+      "cosineMinimum": 0.8519385121553765,
+      "temporalConsistencyMedian": 0.9879163619292712
+    },
+    "dialogueWer": 0,
+    "rawPhonemeViseme": {
+      "globalAvLagMilliseconds": 0,
+      "bilabialClosureF1": 0.2222222222222222,
+      "openingCorrelation": 0.5575483373674555,
+      "roundingCorrelation": 0.6753396525025821,
+      "pauseLeakRatio": 0.1,
+      "medianBlurVariance": 5.511409086529629
+    },
+    "faceStability": {
+      "noseVelocityP95PerSecond": 0.4319580552797597,
+      "noseAccelerationP95PerSecond2": 14.492167987578023,
+      "mouthAngleVelocityP95DegreesPerSecond": 5.237724073592224,
+      "mouthSkinWarpResidualP95": 0.01520353648811578,
+      "mouthSkinFlowDeformationP95": 0.2274382941424845
+    }
+  },
+  "qualityGuidedFrameSelection": {
+    "status": "rerender-rejected-selector-hardened",
+    "previousAlgorithmSha256": "5a233900566fb5039132e9e771fd8a079c741f3c4706cfd507074ac23d257224",
+    "algorithmSha256": "67386e186c4a78a9c86c41cfdf072cf90dd9bbf8a835fb24f2b694c602db9c51",
+    "minimumFaceSharpness": 35,
+    "faceModelSha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    "syntheticControl": {
+      "protocol": "four-second portrait clip with blurred 0.0-1.4 s, sharp 1.4-2.8 s, blurred 2.8-4.0 s",
+      "selectedAtSeconds": 1.88,
+      "insideSharpWindow": true,
+      "faceSharpness": 89.9109835093841
+    },
+    "castingA": {
+      "sourceOutput": "casting-a.mp4",
+      "manualFrameAtSeconds": 1.6,
+      "manualFaceSharpness": 17.901722735725343,
+      "recommendedFrameAtSeconds": 0.96,
+      "recommendedFaceSharpness": 22.016615837579593,
+      "relativeSharpnessGainPercent": 22.98601739397079,
+      "recommendedFaceAreaRatio": 0.07215003529014077,
+      "recommendedStability": 0.9145582610485601,
+      "recommendedProminentFaceCount": 1,
+      "currentDecision": "rejected-too-soft"
+    },
+    "controlledRerender": {
+      "outputName": "einzelshot-mit-auto-szenenreferenz-20260810.mp4",
+      "jobId": "ddf37871-2fe6-497c-8bdb-447b8925531b",
+      "outputSha256": "377ba486e5acced4eda742ebf1a0157d48bfeef7e3ba117155bcd96a9e2df8fe",
+      "analysisSha256": "3a44c5bdad0a408606202ad6755a4b6e042d5ee8ca490ac3a01a1939de70de2c",
+      "provenanceFingerprint": "f623dc27278bdcdc20e9c904734586ec7d9937c97f48b3bb06a012cadb900753",
+      "provenanceVerifiedAt": "2026-08-10T12:19:41.664Z",
+      "onlyIntendedDifference": "manual scene frame at 1.60 s replaced by automatically selected scene frame at 0.96 s",
+      "manual": {
+        "jumpRatio": 1.4910067447289272,
+        "identityMedian": 0.9112079809579161,
+        "identityMinimum": 0.8519385121553765,
+        "bilabialClosureF1": 0.2222222222222222,
+        "openingCorrelation": 0.5575483373674555,
+        "roundingCorrelation": 0.6753396525025821,
+        "medianBlurVariance": 5.511409086529629
+      },
+      "automatic": {
+        "jumpRatio": 2.2651957862798673,
+        "identityMedian": 0.889135012805266,
+        "identityMinimum": 0.7381365875327552,
+        "bilabialClosureF1": 0.1,
+        "openingCorrelation": 0.394309677494511,
+        "roundingCorrelation": 0.43001217389690627,
+        "medianBlurVariance": 5.417368347426831
+      },
+      "decision": "rejected: no downstream sharpness gain and worse continuity, identity and speech-motion metrics"
+    },
+    "calibrationControls": {
+      "knownSoftRange": [14.790370321832597, 22.35343099362217],
+      "knownSharpValues": [84.74401760101318, 85.60033240821213]
+    },
+    "claimBoundary": "The first relative-only selector failed the controlled GPU rerender. The current absolute sharpness gate is CPU-verified and prevents reuse of this inadequate source; a new GPU run requires a genuinely sharper source."
+  },
+  "decision": {
+    "sceneContinuityImproved": true,
+    "identityBindingMeasured": true,
+    "speechContentPreserved": true,
+    "automaticLipSyncRelease": false,
+    "remainingQualityProblem": "the scene-reference arm is substantially softer and remains below the evaluator sharpness floor"
+  }
+}

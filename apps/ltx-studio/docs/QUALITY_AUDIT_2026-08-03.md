@@ -658,3 +658,94 @@ an Admission, Queue, Pause/Resume oder Start-Fence arbeitet, liest zuerst:
   `2026-08-05-was-aufrufer-wissen-muessen.md`,
   `2026-08-06-was-aufrufer-wissen-muessen.md` (R91–R93) und
   `2026-08-06-antwort-an-ltx2-oom-reserve.md` (R100)
+
+## Integritäts- und Qualitätsnachtrag 2026-08-10
+
+Dieser Nachtrag ersetzt keine ältere Rohmessung. Er ordnet den aktuellen
+Arbeitsbaum nach der Szenenreferenz-Serie ein und ist für den nächsten
+Entwicklungsschritt maßgeblich.
+
+### Verifizierter technischer Stand
+
+- Studio: 570/570 Tests nach der Union-Control-Validator-Korrektur
+  vollständig grün. ESLint und Produktionsbuild bestehen.
+- Browser: 53 E2E-Fälle auf Desktop/Mobile bestehen, ein Desktop-only-Fall
+  wird mobil absichtlich übersprungen.
+- Native LTX-Suite: 60/60 grün; Python-Compile-Gate grün.
+- Der Produktionsbuild meldet weiterhin den nicht blockierenden Vite-Hinweis
+  für ein initiales JavaScript-Bundle von rund 533 kB. Für die lokale
+  Loopback-App ist das kein Qualitäts- oder Korrektheitsblocker, bleibt aber
+  ein P4-Polish-Befund.
+- Während Audit und Änderungen lief kein Studio-GPU-Job. Die
+  Provenienz-Worktree-Sperre wurde eingehalten.
+
+### Abweichungen: gut, schlecht oder bewusst begrenzt
+
+1. **Gut — offizieller Union-Control-Vertrag korrigiert.** Das am Commit
+   `7653f1cdef1d92394b6ef9946018c0a8aa4136b8` gepinnte Comfy-Template
+   `templates/video_ltx2_3_ic_lora.json` hat SHA-256
+   `48650e2f459391173e33686f0f27e4eafdc4fb79ce3be9b19a77a5d235666f04`
+   und verwendet den Distilled-FP8-Checkpoint, keine separate
+   Distilled-LoRA sowie acht Schritte mit Euler Ancestral bei CFG 1. Die
+   frühere Bindung an den abweichenden Lightricks-Beispielgraphen war für den
+   in der Comfy-Dokumentation sichtbaren Union-Control-Modus nicht mehr die
+   richtige Quelle.
+2. **Schlecht, jetzt behoben — uneinheitliches Asset-Gate.** Schema, UI,
+   Kommando und Modellinventar ließen die obsolete Distilled-LoRA bereits weg;
+   `validateOfficialSpeechAssets` forderte sie trotzdem. Ein offiziell
+   korrekter Request konnte dadurch im Preflight scheitern. Der Validator
+   folgt nun demselben Union-Control-Vertrag; ein Regressionstest leert den
+   versteckten LoRA-Pfad ausdrücklich.
+3. **Gut — Szenenreferenz statt fremder Bildwelt.** Der kontrollierte A/B-Lauf
+   belegt bessere zeitliche Kontinuität und gebundene Identität bei einer
+   Referenz aus derselben Szene. Der Weltnaht-Befund ist damit reproduzierbar
+   und als Produktregel brauchbar.
+4. **Schlecht — Schärfe bleibt der aktuelle Qualitätsblocker.** Der
+   Szenenreferenz-Arm erreicht nur `5,51` Schärfe-Rohwert gegenüber `52,72`
+   ohne Referenz. Die automatisch gewählte, im Quellclip relativ schärfere
+   Referenz verschlechterte im Gegenlauf zusätzlich Kontinuität, Identität und
+   Sprachbewegung. Sie ist kein Qualitätsgewinn.
+5. **Gut als Guardrail, nicht als SOTA-Beleg — absolutes Referenz-Gate.** Der
+   neue CPU-Selektor lehnt lokale Gesichtsschärfe unter `35` ab und verhindert
+   damit die bekannte schädliche Wiederverwendung von `casting-a.mp4`.
+   Diese Schwelle trennt die vorhandenen Negativ- und Positivkontrollen, ist
+   aber noch nicht auf einem ausreichend großen Tune-Set kalibriert. Sie darf
+   als Fail-closed-Betriebsschutz, nicht als allgemeine Qualitätsfreigabe
+   bezeichnet werden.
+6. **Bewusst offen — manuelle Auswahl.** Der Operator darf weiterhin einen
+   sichtbaren Frame exakt übernehmen. Das ist wichtig, weil die automatische
+   Rangfolge downstream nicht bewiesen ist. Ein manueller Frame erhält volle
+   Herkunftsbindung, aber keine automatische Qualitätszusage.
+7. **Weiter offen für P0 — ein sauberer Commit ist noch kein Release-Digest.**
+   Die Szenenreferenz- und Union-Control-Serie ist revisionsgebunden und
+   vollständig getestet. Der Produktionsdienst startet aber weiterhin aus
+   dem veränderlichen Arbeitsbaum und nutzt die gemeinsame Python-Umgebung;
+   damit fehlen unveränderliche Laufzeit und Release-Digest weiterhin.
+
+### Nächster beweisender Qualitätslauf
+
+Nicht noch einen Frame aus `casting-a.mp4` auswählen: Das Fail-closed-Gate
+hat gezeigt, dass die Quelle insgesamt zu weich ist. Der nächste Lauf braucht
+eine **neue, nachweislich scharfe, szenengleiche Quelle**:
+
+1. Einen ruhigen, hellen, nahen Casting-Shot aus derselben Szene erzeugen oder
+   ein hochauflösendes Originalbild in diese Szene überführen. Vor dem teuren
+   Dialoglauf muss der CPU-Selektor mindestens das Gate `35` bestehen; wegen
+   der beiden Positivkontrollen um `85` ist für den nächsten Beweislauf ein
+   deutlich höherer Zielwert als nur knapp über dem Gate sinnvoll.
+2. Den Referenzframe in der App sichtbar prüfen, dann zwei Dialogshots mit
+   derselben gebundenen Szenenreferenz und festen Seeds rendern. Damit wird
+   erstmals nicht nur Intra-Shot-, sondern Cross-Shot-Identität getestet.
+3. Gegen die referenzlose Baseline vergleichen: Bildsprung, SFace-Abdeckung
+   und -Minimum, Schärfe, Nasen-/Mundhautstabilität, Öffnungs-/
+   Rundungskorrelation, WER und blindes Betreiberurteil. Ein Identitätsgewinn
+   bei weiter massiv schlechterer Schärfe ist kein Sieger.
+4. Erst wenn dieser Lauf besteht, die Kandidaten-Vorschau und anschließend
+   Sequenz-/Projektverwaltung als P4-Workflow ausbauen. Die App kann heute
+   Frames und Sequenzen erzeugen, aber noch kein vollständiges Storyboard als
+   persistentes Projekt verwalten.
+
+Der ehrliche Gesamtstatus bleibt damit unter `10/10`: Engineering-Integrität
+ist hoch, die aktuelle Qualitätshypothese ist sauber eingegrenzt, aber weder
+der scharfe Cross-Shot-Nachweis noch P0/P2/P5-Abnahme und statistischer lokaler
+Bake-off sind abgeschlossen.

@@ -148,3 +148,105 @@ Render unterschied. Der Unterschied zum gelungenen MuseTalk-Fall: Dort war die
 Basis seit Stunden veröffentlicht, hier erst drei Minuten alt. Verdacht auf ein
 Zeitfenster in der Registrierung der Output-Library. Noch nicht diagnostiziert;
 für die sieben Dialogshots des Films geht es um rund zwei Stunden.
+
+## Nachtrag 10.08.2026: Szenenreferenz löst die Weltnaht, aber nicht die Schärfe
+
+Der spätere v3-Film widerlegte die zu frühe Aussage oben, der Anlauf-Transient
+sei mit einem eingepassten externen Porträt generell erledigt. Je nach Seed
+blieb der Sprung massiv: Bei v3-02 lag die größte benachbarte Bildänderung in
+einer frisch reproduzierten Graustufenmessung beim 52-Fachen des Clip-Medians,
+bei v3-08 beim 108-Fachen. Der gemeinsame Fehler war nicht nur das Seitenformat,
+sondern die **andere Bildwelt** der Referenz: Studio beziehungsweise Gemälde
+gegen nächtliche Industriehalle.
+
+Der kontrollierte A/B-Test `scene-reference-ab-2026-08-10.json` hält Prompt,
+Seed 3001, 129 Frames, 25 fps und 1280×704 konstant. Einziger beabsichtigter
+Unterschied ist ein bei Stärke 1,0 gebundener Frame aus einem zuvor in derselben
+Szene erzeugten Casting-Shot.
+
+| Rohmessung | Ohne Referenz | Referenz aus der Szene |
+| --- | ---: | ---: |
+| Bildsprung Maximum / Median | 1,78× | **1,49×** |
+| Identitätsabdeckung | nicht anwendbar | **100 %** |
+| SFace Median / Minimum | — | **0,911 / 0,852** |
+| Zeitliche Identitätskonsistenz | — | **0,988** |
+| Nasengeschwindigkeit p95 | 1,667 | **0,432** |
+| Mundhaut-Flussdeformation p95 | 0,448 | **0,227** |
+| Öffnungskorrelation | 0,302 | **0,558** |
+| Rundungskorrelation | 0,270 | **0,675** |
+| Dialog-WER | **0 %** | **0 %** |
+| Schärfe-Rohwert | **52,7** | 5,5 |
+
+Damit ist die Produktentscheidung enger und belastbarer:
+
+- Eine Referenz **aus derselben Szene** hält die Person messbar gebunden, ohne
+  die harte Bildnaht externer Porträts wieder einzuführen.
+- Der Test gibt **keine automatische Lip-Sync-Freigabe**: Der AV-Proxy enthält
+  sich wegen geringer Konfidenz, und der Szenenreferenz-Arm unterschreitet die
+  Schärfeschwelle deutlich.
+- Der nächste Optimierungsschritt ist daher keine weitere Referenztheorie,
+  sondern eine bessere Frame-Auswahl beziehungsweise ein schärferer Casting-
+  Shot. Der sichtbare Frame muss in der App auswählbar sein, bevor weitere GPU-
+  Varianten sinnvoll sind.
+
+Die reproduzierbare Rohbilanz mit Artefakt-, Analyse- und Provenienz-Hashes
+steht in `docs/evidence/scene-reference-ab-2026-08-10.json`.
+
+### Qualitätsgeführte Frame-Auswahl
+
+Die App bietet dafür jetzt zwei Wege: Der Operator kann den sichtbaren Frame
+weiterhin exakt per Zeitpunkt übernehmen oder den gepinnten CPU-Selektor
+verwenden. Dieser untersucht höchstens 48 Frames außerhalb der Anlauf- und
+Endphase. Er bewertet nur nachvollziehbare Bildmerkmale: YuNet-Erkennung und
+-Konfidenz, Gesichtsgröße, lokale Laplace-Schärfe, Belichtung, frontale
+Fünf-Punkt-Geometrie, Bildzentrum, zweite prominente Gesichter und Änderung
+zum direkten Nachbarframe. Auswahlskript, YuNet-Modell, Kandidatenwerte und
+FFmpeg-Griff werden in der Asset-Herkunft gebunden.
+
+Zwei CPU-Nachweise bestehen:
+
+1. In einem absichtlich unscharf–scharf–unscharf codierten Vier-Sekunden-Clip
+   wählt der Selektor `1,88 s` und damit den scharfen Mittelteil
+   (`1,40–2,80 s`).
+2. Beim tatsächlich verwendeten `casting-a.mp4` empfiehlt er `0,96 s` statt
+   des manuellen Frames bei `1,60 s`. Die lokale Gesichtsschärfe steigt von
+   `17,90` auf `22,02`, also um **23,0 %**, bei einem Gesicht und praktisch
+   gleicher zeitlicher Stabilität.
+
+Das beweist die bessere **Eingangswahl**, noch nicht die Schärfe des nächsten
+LTX-Renders.
+
+### Kontrollierter Gegenlauf: relative Auswahl reicht nicht
+
+Der GPU-Gegenlauf `einzelshot-mit-auto-szenenreferenz-20260810.mp4` hielt
+Prompt, Dialog, Seed 3001, 129 Frames, 25 fps, 1280×704 und alle
+Modellparameter konstant. Nur der manuelle Frame bei `1,60 s` wurde durch den
+automatisch gewählten Frame bei `0,96 s` ersetzt. Laufprovenienz und
+Identitätsreferenz wurden nach der vollständigen Ausgabe verifiziert.
+
+| Rohmessung | Manuell 1,60 s | Automatisch 0,96 s |
+| --- | ---: | ---: |
+| Bildsprung Maximum / Median | **1,49×** | 2,27× |
+| Schärfe-Rohwert | **5,51** | 5,42 |
+| SFace Median / Minimum | **0,911 / 0,852** | 0,889 / 0,738 |
+| Nasengeschwindigkeit p95 | **0,432** | 0,845 |
+| Mundhaut-Flussdeformation p95 | **0,227** | 0,322 |
+| Öffnungskorrelation | **0,558** | 0,394 |
+| Rundungskorrelation | **0,675** | 0,430 |
+| Bilabial-F1 | **0,222** | 0,100 |
+| Dialog-WER | **0 %** | **0 %** |
+
+Der automatisch gewählte Quellframe war innerhalb des Casting-Clips zwar um
+23 % schärfer, lag absolut aber nur bei `22,02`. Das ist kein ausreichend
+gutes Referenzmaterial; die zweite Generation verstärkte die bereits vorhandene
+Weichheit. Die Hypothese „bester Frame eines beliebig schlechten Clips genügt"
+ist damit widerlegt.
+
+Der Selektor enthält deshalb nun ein absolutes Fail-closed-Gate bei lokaler
+Gesichtsschärfe `< 35`. `casting-a.mp4` wird mit der konkreten Abhilfe
+„schärferes Ausgangsvideo oder Originalbild verwenden" abgelehnt. Die Grenze
+trennt die kontrollierten schlechten Frames (`14,8–22,4`) von den beiden
+hochwertigen Positivkontrollen (`84,7` und `85,6`). Ein real codierter,
+durchgehend weichgezeichneter Negativclip ist Teil der Testsuite. Damit heißt
+„automatisch" nicht mehr „das kleinste Übel auswählen", sondern enthält sich,
+wenn die Eingangsbasis nachweislich ungeeignet ist.
