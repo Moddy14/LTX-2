@@ -9,6 +9,7 @@ from .authorization import (
     validate_release_authorization,
     verify_detached_signature,
 )
+from .bundle import D1BundleError, build_fixed_d1_report
 from .calibration import CalibrationError, build_calibration_gate_report
 from .comparator import ComparatorMatrixError, build_comparator_matrix_report
 from .content import ContentMeasurementError, build_content_measurements
@@ -43,6 +44,7 @@ __all__ = [
     "ComparatorMatrixError",
     "ContentMeasurementError",
     "CrossShotProtocolError",
+    "D1BundleError",
     "DesignError",
     "FrozenDatasetSession",
     "GovernanceError",
@@ -58,6 +60,7 @@ __all__ = [
     "build_comparator_matrix_report",
     "build_content_measurements",
     "build_cross_shot_protocol_report",
+    "build_fixed_d1_report",
     "build_identity_measurements",
     "build_offset_measurements",
     "build_power_report",

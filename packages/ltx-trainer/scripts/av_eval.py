@@ -17,6 +17,7 @@ from ltx_trainer.av_eval import (
     ComparatorMatrixError,
     ContentMeasurementError,
     CrossShotProtocolError,
+    D1BundleError,
     DesignError,
     GovernanceError,
     IdentityMeasurementError,
@@ -29,6 +30,7 @@ from ltx_trainer.av_eval import (
     build_comparator_matrix_report,
     build_content_measurements,
     build_cross_shot_protocol_report,
+    build_fixed_d1_report,
     build_identity_measurements,
     build_offset_measurements,
     build_power_report,
@@ -130,6 +132,18 @@ def _run_sharpness_score(path: Path) -> int:
     return 0
 
 
+def _run_fixed_d1(bundle_path: Path, catalog_path: Path) -> int:
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        report = build_fixed_d1_report(bundle, calibration_catalog=catalog)
+    except (OSError, json.JSONDecodeError, D1BundleError) as error:
+        logger.error("Fixed D1 bundle rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["verdict"] == "pass" else 2
+
+
 def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) -> int:
     try:
         protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
@@ -185,6 +199,9 @@ def main() -> int:
     freeze.add_argument("--output-root", type=Path, required=True)
     freeze.add_argument("--split-seed-file", type=Path, required=True)
     freeze.add_argument("--profile", choices=["development", "product"], default="product")
+    fixed_d1 = subcommands.add_parser("fixed-d1", help="assemble the 37 non-VBench D1 gates")
+    fixed_d1.add_argument("--bundle", type=Path, required=True)
+    fixed_d1.add_argument("--catalog", type=Path, required=True)
     design_check = subcommands.add_parser("design-check", help="validate D0a gates and compute fixed sample sizes")
     design_check.add_argument("--design", type=Path, required=True)
     calibration_check = subcommands.add_parser("calibration-check", help="validate the complete D1 gate catalog")
@@ -219,6 +236,7 @@ def main() -> int:
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),
+        "fixed-d1": lambda: _run_fixed_d1(args.bundle, args.catalog),
         "identity-score": lambda: _run_identity_score(args.pairs),
         "offset-score": lambda: _run_offset_score(args.observations),
         "readiness-check": lambda: _run_readiness_check(args.package),

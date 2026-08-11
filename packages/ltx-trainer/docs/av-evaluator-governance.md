@@ -205,6 +205,14 @@ statistic is the p10 across component medians, and the gate uses the lower
 bootstrap bound of the worst registered stratum. Its numerical threshold
 remains a D1 calibration output with mandatory basis evidence.
 
+`fixed-d1` then assembles exactly one report from each of the six local
+scorers. It requires one shared dataset, preregistration, release, strata plan
+and bootstrap contract; verifies every evaluator fingerprint against the
+ready calibration catalog; rejects missing or extra source metrics; and
+recomputes each of the 37 fixed decisions from its registered estimate or
+confidence bound. The remaining 12 gates are intentionally not synthesized:
+they require the pinned official VBench runtime and Holm-corrected evidence.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory
