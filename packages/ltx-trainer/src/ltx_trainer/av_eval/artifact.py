@@ -227,6 +227,7 @@ def build_artifact_measurements(raw: object) -> dict[str, Any]:
             "schema_version",
             "dataset_digest",
             "preregistration_digest",
+            "release_digest",
             "evaluator_digest",
             "strata_plan_digest",
             "bootstrap",
@@ -237,7 +238,13 @@ def build_artifact_measurements(raw: object) -> dict[str, Any]:
     )
     if raw["schema_version"] != ARTIFACT_OBSERVATIONS_SCHEMA:
         raise ArtifactMeasurementError("unsupported artifact observations schema")
-    for field in ("dataset_digest", "preregistration_digest", "evaluator_digest", "strata_plan_digest"):
+    for field in (
+        "dataset_digest",
+        "preregistration_digest",
+        "release_digest",
+        "evaluator_digest",
+        "strata_plan_digest",
+    ):
         _sha256(raw[field], field)
     seed = _validate_bootstrap(raw["bootstrap"])
     registered, decision = _validate_strata(raw["strata"])
@@ -295,6 +302,7 @@ def build_artifact_measurements(raw: object) -> dict[str, Any]:
         "input_digest": document_sha256(raw),
         "dataset_digest": raw["dataset_digest"],
         "preregistration_digest": raw["preregistration_digest"],
+        "release_digest": raw["release_digest"],
         "evaluator_digest": raw["evaluator_digest"],
         "strata_plan_digest": raw["strata_plan_digest"],
         "bootstrap": raw["bootstrap"],

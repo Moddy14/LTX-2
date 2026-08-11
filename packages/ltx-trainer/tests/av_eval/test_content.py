@@ -46,6 +46,7 @@ def _input() -> dict[str, object]:
         "schema_version": "ltx-av-eval-content-observations.v1",
         "dataset_digest": "a" * 64,
         "preregistration_digest": "b" * 64,
+        "release_digest": "f" * 64,
         "content_evaluator_digest": "c" * 64,
         "annotation_policy_digest": "d" * 64,
         "strata_plan_digest": "e" * 64,

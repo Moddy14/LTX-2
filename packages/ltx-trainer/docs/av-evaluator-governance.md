@@ -141,6 +141,11 @@ evidence, or an unbound upstream catalog. Its output is the exact 49-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
 
+Every executable D1 scorer binds the same dataset, preregistration, release
+candidate and strata-plan digests in both its input and output. This prevents
+calibration or output-quality evidence from a previous candidate or a
+different quota definition from being reused after an invalidating change.
+
 The `asr-score` command is the executable measurement path for the seven ASR
 gate values. Its input contains already case-folded tokens from the pinned
 normalizer, human reference-token annotations, leakage-component IDs and the
@@ -183,7 +188,7 @@ multiframe controls plus zero offset, each over at least two leakage
 components. Error median/p95, the cluster-bootstrap upper p95 bound,
 within-frame rate, fixed ten-bin ECE, Brier score, ID/OOD abstention and the
 generated-output offset p95 remain separately visible. Evaluator, calibration
-and abstention policies, output release and strata plan are digest-bound.
+and abstention policies, release candidate and strata plan are digest-bound.
 
 `content-score` measures the P/B/M content controls without reducing them to
 raw frame accuracy. The fixed bilabial-closure/open/rounded/other labels use

@@ -61,7 +61,7 @@ def _input() -> dict[str, object]:
         "offset_evaluator_digest": "c" * 64,
         "calibration_policy_digest": "d" * 64,
         "abstention_policy_digest": "e" * 64,
-        "output_release_digest": "f" * 64,
+        "release_digest": "f" * 64,
         "strata_plan_digest": "1" * 64,
         "bootstrap": {"replicates": 10000, "confidence_level": 0.95, "seed": 11082026},
         "registered_strata": ["fps.25"],

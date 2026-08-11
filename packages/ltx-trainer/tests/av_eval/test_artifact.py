@@ -45,6 +45,7 @@ def _input() -> dict[str, object]:
         "schema_version": "ltx-av-eval-artifact-observations.v1",
         "dataset_digest": "a" * 64,
         "preregistration_digest": "b" * 64,
+        "release_digest": "e" * 64,
         "evaluator_digest": "c" * 64,
         "strata_plan_digest": "d" * 64,
         "bootstrap": {"replicates": 10000, "confidence_level": 0.95, "seed": 23072026},

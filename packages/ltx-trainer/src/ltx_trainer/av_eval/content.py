@@ -260,6 +260,7 @@ def build_content_measurements(raw: object) -> dict[str, Any]:
             "schema_version",
             "dataset_digest",
             "preregistration_digest",
+            "release_digest",
             "content_evaluator_digest",
             "annotation_policy_digest",
             "strata_plan_digest",
@@ -275,6 +276,7 @@ def build_content_measurements(raw: object) -> dict[str, Any]:
     for field in (
         "dataset_digest",
         "preregistration_digest",
+        "release_digest",
         "content_evaluator_digest",
         "annotation_policy_digest",
         "strata_plan_digest",
@@ -324,6 +326,7 @@ def build_content_measurements(raw: object) -> dict[str, Any]:
         "input_digest": document_sha256(raw),
         "dataset_digest": raw["dataset_digest"],
         "preregistration_digest": raw["preregistration_digest"],
+        "release_digest": raw["release_digest"],
         "content_evaluator_digest": raw["content_evaluator_digest"],
         "annotation_policy_digest": raw["annotation_policy_digest"],
         "strata_plan_digest": raw["strata_plan_digest"],

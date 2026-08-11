@@ -19,6 +19,7 @@ def _input() -> dict[str, object]:
         "schema_version": "ltx-av-eval-sharpness-observations.v1",
         "dataset_digest": "a" * 64,
         "preregistration_digest": "b" * 64,
+        "release_digest": "f" * 64,
         "sharpness_evaluator_digest": "c" * 64,
         "face_alignment_policy_digest": "d" * 64,
         "strata_plan_digest": "e" * 64,

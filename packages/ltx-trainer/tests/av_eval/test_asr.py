@@ -25,6 +25,7 @@ def _observations() -> dict[str, object]:
         "schema_version": "ltx-av-eval-asr-observations.v1",
         "dataset_digest": "a" * 64,
         "preregistration_digest": "b" * 64,
+        "release_digest": "f" * 64,
         "asr_model_digest": "c" * 64,
         "normalization_digest": "d" * 64,
         "strata_plan_digest": "e" * 64,
@@ -77,6 +78,7 @@ def test_asr_measurements_are_deterministic_and_keep_critical_types_separate() -
         "asr-wer-estimate-worst-stratum",
     }
     assert metrics["asr-wer-estimate"]["estimate"] == 0
+    assert metrics["asr-wer-estimate"]["independent_units"] == 2
     assert metrics["asr-critical-name-accuracy-ci-lower"]["ci_lower"] == 1
 
 

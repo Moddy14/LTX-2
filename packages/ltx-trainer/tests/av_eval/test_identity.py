@@ -43,6 +43,7 @@ def _input() -> dict[str, object]:
         "schema_version": "ltx-av-eval-identity-pairs.v1",
         "dataset_digest": "a" * 64,
         "preregistration_digest": "b" * 64,
+        "release_digest": "2" * 64,
         "sface_model_digest": "c" * 64,
         "preprocessing_digest": "d" * 64,
         "reference_gallery_digest": "e" * 64,

@@ -328,7 +328,7 @@ def build_offset_measurements(raw: object) -> dict[str, Any]:
             "offset_evaluator_digest",
             "calibration_policy_digest",
             "abstention_policy_digest",
-            "output_release_digest",
+            "release_digest",
             "strata_plan_digest",
             "bootstrap",
             "registered_strata",
@@ -345,7 +345,7 @@ def build_offset_measurements(raw: object) -> dict[str, Any]:
         "offset_evaluator_digest",
         "calibration_policy_digest",
         "abstention_policy_digest",
-        "output_release_digest",
+        "release_digest",
         "strata_plan_digest",
     ):
         _sha256(raw[field], field)
@@ -459,7 +459,7 @@ def build_offset_measurements(raw: object) -> dict[str, Any]:
         "offset_evaluator_digest": raw["offset_evaluator_digest"],
         "calibration_policy_digest": raw["calibration_policy_digest"],
         "abstention_policy_digest": raw["abstention_policy_digest"],
-        "output_release_digest": raw["output_release_digest"],
+        "release_digest": raw["release_digest"],
         "strata_plan_digest": raw["strata_plan_digest"],
         "bootstrap": raw["bootstrap"],
         "ece_bins": ECE_BINS,

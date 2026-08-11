@@ -159,7 +159,7 @@ def _bootstrap_rate(
     critical_index: int | None,
     seed: int,
     label: str,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, int]:
     if critical_index is not None:
         groups = {group_id: score for group_id, score in groups.items() if score.critical_total[critical_index] > 0}
     group_ids = sorted(groups)
@@ -187,7 +187,7 @@ def _bootstrap_rate(
     samples.sort()
     lower_index = math.floor((1 - CONFIDENCE_LEVEL) / 2 * (BOOTSTRAP_REPLICATES - 1))
     upper_index = math.ceil((1 + CONFIDENCE_LEVEL) / 2 * (BOOTSTRAP_REPLICATES - 1))
-    return point, samples[lower_index], samples[upper_index]
+    return point, samples[lower_index], samples[upper_index], len(group_ids)
 
 
 def _group_scores(observations: list[dict[str, Any]], *, stratum: str | None = None) -> dict[str, _Score]:
@@ -200,14 +200,15 @@ def _group_scores(observations: list[dict[str, Any]], *, stratum: str | None = N
     return groups
 
 
-def _metric(metric_id: str, result: tuple[float, float, float], *, stratum_id: str) -> dict[str, Any]:
-    estimate, ci_lower, ci_upper = result
+def _metric(metric_id: str, result: tuple[float, float, float, int], *, stratum_id: str) -> dict[str, Any]:
+    estimate, ci_lower, ci_upper, independent_units = result
     return {
         "metric_id": metric_id,
         "estimate": estimate,
         "ci_lower": ci_lower,
         "ci_upper": ci_upper,
         "decision_stratum_id": stratum_id,
+        "independent_units": independent_units,
     }
 
 
@@ -282,6 +283,7 @@ def _validate_input(raw: object) -> tuple[dict[str, Any], list[dict[str, Any]], 
             "schema_version",
             "dataset_digest",
             "preregistration_digest",
+            "release_digest",
             "asr_model_digest",
             "normalization_digest",
             "strata_plan_digest",
@@ -297,6 +299,7 @@ def _validate_input(raw: object) -> tuple[dict[str, Any], list[dict[str, Any]], 
     for field in (
         "dataset_digest",
         "preregistration_digest",
+        "release_digest",
         "asr_model_digest",
         "normalization_digest",
         "strata_plan_digest",
@@ -342,7 +345,7 @@ def build_asr_measurements(raw: object) -> dict[str, Any]:
             stratum_id=worst_wer_ci_stratum,
         ),
     ]
-    critical_results: dict[str, dict[str, tuple[float, float, float]]] = {}
+    critical_results: dict[str, dict[str, tuple[float, float, float, int]]] = {}
     for index, kind in enumerate(CRITICAL_KINDS):
         results = {
             stratum: _bootstrap_rate(
@@ -369,6 +372,7 @@ def build_asr_measurements(raw: object) -> dict[str, Any]:
         "input_digest": document_sha256(document),
         "dataset_digest": document["dataset_digest"],
         "preregistration_digest": document["preregistration_digest"],
+        "release_digest": document["release_digest"],
         "asr_model_digest": document["asr_model_digest"],
         "normalization_digest": document["normalization_digest"],
         "strata_plan_digest": document["strata_plan_digest"],
