@@ -236,7 +236,10 @@ statisch grün. Der Projektworkspace lädt auch seine Zustandsabfrage, Polling-
 und Mutations-API erst nach ausdrücklichem Öffnen. `startup:measure` und
 `startup:compare` schreiben ihre Rohmessung beziehungsweise den
 artefaktgebundenen Vergleich write-once. Der finale Bundlebericht übernimmt
-einen R1-Digest nur nach vollständiger Manifest-/Artefaktprüfung. Doppelbuild und 40+40
+einen R1-Digest nur nach vollständiger Manifest-/Artefaktprüfung. Bei
+schwankender Hostlast misst `startup:measure-paired` Basis und Kandidat in 40
+alternierenden Runden mit je neuem Browserkontext, statt zeitliche Lastdrift als
+Produktunterschied auszugeben. Doppelbuild und 40+40
 Cold-Context-Messung werden für den nächsten stabilen Release Candidate neu
 gebunden. Die folgenden Punkte bleiben als Reproduktionsvorgabe bestehen.
 

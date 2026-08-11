@@ -26,6 +26,11 @@ grün und muss für den nächsten Finalkandidaten neu gemessen werden.
 - `startup:measure` kann eine Rohmessung atomar neu anlegen;
   `startup:compare` prüft Protokoll, Hostprofil, Artefakthash, N und p95 und
   erzeugt den write-once Vergleich. Vorhandene Belege werden nie überschrieben.
+- Unter schwankender Hostlast ist `startup:measure-paired` der verbindliche
+  Pfad: Er baut auf zwei separat bereitgestellten Artefakten auf und wechselt
+  pro Runde die Reihenfolge Basis→Kandidat/Kandidat→Basis. Je Arm entstehen
+  mindestens 40 neue Browserkontexte; beide Rohstichproben, Hostlast vor/nach
+  dem Lauf sowie beide Entry-Hashes bleiben im v2-Bericht erhalten.
 - Der finale Bundlebericht akzeptiert eine Releasebindung nur nach vollständiger
   Manifest-/Artefaktprüfung und nennt Release-Digest, Git-Commit und Git-Tree;
   ein bloß übergebenes, ungeprüftes Digest-Label genügt nicht.

@@ -18,6 +18,7 @@
     "audit:finalize": "node scripts/finalize-release-audit.mjs",
     "release:install": "node scripts/install-release.mjs",
     "startup:measure": "node scripts/measure-startup.mjs",
+    "startup:measure-paired": "node scripts/measure-startup-paired.mjs",
     "startup:compare": "node scripts/compare-startup.mjs",
     "start": "tsx server/index.ts",
     "test": "vitest run",

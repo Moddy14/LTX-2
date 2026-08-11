@@ -41,7 +41,9 @@ function performanceEvidence(path, initialChunk) {
   const evidence = JSON.parse(bytes.toString("utf8"));
   const artifact = evidence.candidateArtifact;
   const valid =
-    evidence.schemaVersion === "ltx-studio-startup-comparison.v1" &&
+    ["ltx-studio-startup-comparison.v1", "ltx-studio-startup-comparison.v2"].includes(
+      evidence.schemaVersion,
+    ) &&
     evidence.verdict === "pass" &&
     evidence.protocol?.runsPerArm >= 40 &&
     evidence.candidate?.interactiveMs?.p95 <= evidence.baseline?.interactiveMs?.p95 &&
