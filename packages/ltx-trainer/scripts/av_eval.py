@@ -15,6 +15,7 @@ from ltx_trainer.av_eval import (
     AsrMeasurementError,
     CalibrationError,
     ComparatorMatrixError,
+    ContentMeasurementError,
     CrossShotProtocolError,
     DesignError,
     GovernanceError,
@@ -25,6 +26,7 @@ from ltx_trainer.av_eval import (
     build_asr_measurements,
     build_calibration_gate_report,
     build_comparator_matrix_report,
+    build_content_measurements,
     build_cross_shot_protocol_report,
     build_identity_measurements,
     build_offset_measurements,
@@ -106,6 +108,16 @@ def _run_offset_score(path: Path) -> int:
     return 0
 
 
+def _run_content_score(path: Path) -> int:
+    try:
+        report = build_content_measurements(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, ContentMeasurementError) as error:
+        logger.error("Content observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
 def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) -> int:
     try:
         protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
@@ -165,6 +177,8 @@ def main() -> int:
     design_check.add_argument("--design", type=Path, required=True)
     calibration_check = subcommands.add_parser("calibration-check", help="validate the complete D1 gate catalog")
     calibration_check.add_argument("--catalog", type=Path, required=True)
+    content_score = subcommands.add_parser("content-score", help="score mouth-content and transition observations")
+    content_score.add_argument("--observations", type=Path, required=True)
     asr_score = subcommands.add_parser("asr-score", help="score normalized ASR observations with cluster bootstrap")
     asr_score.add_argument("--observations", type=Path, required=True)
     artifact_score = subcommands.add_parser("artifact-score", help="score artifact and warp observations")
@@ -187,6 +201,7 @@ def main() -> int:
         "asr-score": lambda: _run_asr_score(args.observations),
         "calibration-check": lambda: _run_calibration_check(args.catalog),
         "comparator-check": lambda: _run_comparator_check(args.matrix, args.landscape),
+        "content-score": lambda: _run_content_score(args.observations),
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),

@@ -184,6 +184,13 @@ within-frame rate, fixed ten-bin ECE, Brier score, ID/OOD abstention and the
 generated-output offset p95 remain separately visible. Evaluator, calibration
 and abstention policies, output release and strata plan are digest-bound.
 
+`content-score` measures the P/B/M content controls without reducing them to
+raw frame accuracy. The fixed bilabial-closure/open/rounded/other labels use
+macro F1, while annotated boundary changes use a separate transition F1.
+Every leakage component in every registered stratum must contain every frame
+class plus positive and negative transition controls. Overall and worst-stratum
+estimates and lower confidence bounds remain distinct gates.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory

@@ -11,6 +11,7 @@ from .authorization import (
 )
 from .calibration import CalibrationError, build_calibration_gate_report
 from .comparator import ComparatorMatrixError, build_comparator_matrix_report
+from .content import ContentMeasurementError, build_content_measurements
 from .cross_shot import CrossShotProtocolError, build_cross_shot_protocol_report
 from .design import DesignError, build_power_report, document_sha256
 from .governance import (
@@ -39,6 +40,7 @@ __all__ = [
     "AuthorizationError",
     "CalibrationError",
     "ComparatorMatrixError",
+    "ContentMeasurementError",
     "CrossShotProtocolError",
     "DesignError",
     "FrozenDatasetSession",
@@ -52,6 +54,7 @@ __all__ = [
     "build_asr_measurements",
     "build_calibration_gate_report",
     "build_comparator_matrix_report",
+    "build_content_measurements",
     "build_cross_shot_protocol_report",
     "build_identity_measurements",
     "build_offset_measurements",
