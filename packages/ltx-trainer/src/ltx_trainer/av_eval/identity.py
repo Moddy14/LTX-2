@@ -222,6 +222,7 @@ def build_identity_measurements(raw: object) -> dict[str, Any]:
             "preprocessing_digest",
             "reference_gallery_digest",
             "threshold_policy_digest",
+            "strata_plan_digest",
             "similarity_threshold",
             "bootstrap",
             "strata",
@@ -238,6 +239,7 @@ def build_identity_measurements(raw: object) -> dict[str, Any]:
         "preprocessing_digest",
         "reference_gallery_digest",
         "threshold_policy_digest",
+        "strata_plan_digest",
     ):
         _sha256(raw[field], field)
     threshold = _number(raw["similarity_threshold"], "similarity_threshold")
@@ -288,6 +290,7 @@ def build_identity_measurements(raw: object) -> dict[str, Any]:
         "preprocessing_digest": raw["preprocessing_digest"],
         "reference_gallery_digest": raw["reference_gallery_digest"],
         "threshold_policy_digest": raw["threshold_policy_digest"],
+        "strata_plan_digest": raw["strata_plan_digest"],
         "similarity_threshold": threshold,
         "bootstrap": raw["bootstrap"],
         "pairs": len(pairs),

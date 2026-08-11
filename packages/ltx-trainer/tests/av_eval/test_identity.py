@@ -47,6 +47,7 @@ def _input() -> dict[str, object]:
         "preprocessing_digest": "d" * 64,
         "reference_gallery_digest": "e" * 64,
         "threshold_policy_digest": "f" * 64,
+        "strata_plan_digest": "1" * 64,
         "similarity_threshold": 0.5,
         "bootstrap": {"replicates": 10000, "confidence_level": 0.95, "seed": 11082026},
         "strata": {"registered": STRATA, "far": STRATA, "frr": STRATA},

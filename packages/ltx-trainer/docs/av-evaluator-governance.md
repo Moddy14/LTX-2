@@ -172,9 +172,10 @@ catalog.
 impostor similarities at an already frozen threshold. Dataset,
 preregistration, SFace model, preprocessing, threshold policy and the fixed
 reference gallery are digest-bound. Resampling is by probe leakage component,
-and every registered pose, lighting and Fitzpatrick stratum must independently
-support both FAR and FRR decisions. TAR is the exact confidence-bound
-complement of FRR, not a separately tunable result.
+and the shared strata-plan digest plus every registered pose, lighting and
+Fitzpatrick stratum must independently support both FAR and FRR decisions. TAR
+is the exact confidence-bound complement of FRR, not a separately tunable
+result.
 
 `offset-score` closes the nine AV-offset gates with one input contract. It
 requires non-abstained positive and negative subframe, one-frame and
