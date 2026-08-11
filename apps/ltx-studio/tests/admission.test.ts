@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdmissionRequests,
   decisionMessage,
+  normalizeSegmentBoundaryDecision,
   normalizeQueueJobs,
   retryAfterMs,
   shouldRetryQueueSubmit,
@@ -11,6 +12,38 @@ import {
 import { validRequest } from "./fixtures.js";
 
 describe("DGX admission contract", () => {
+  it("normalizes all four canonical segment-boundary actions", () => {
+    for (const action of [
+      "continue_current",
+      "yield_to_waiting_job",
+      "wait_for_successor",
+      "resume_current",
+    ] as const) {
+      expect(normalizeSegmentBoundaryDecision({
+        action,
+        current_job_id: "dgx-job-1",
+        next_job_id: null,
+        reason: "test",
+        retry_after_seconds: 3,
+        additive_future_field: true,
+      }, "dgx-job-1")).toMatchObject({ action, current_job_id: "dgx-job-1" });
+    }
+  });
+
+  it("rejects stale or malformed segment-boundary responses", () => {
+    expect(() => normalizeSegmentBoundaryDecision({
+      action: "continue_current",
+      current_job_id: "dgx-job-stale",
+    }, "dgx-job-current")).toThrow(/anderen DGX-Job/);
+    expect(() => normalizeSegmentBoundaryDecision({ action: "invented_action" }, "dgx-job-current"))
+      .toThrow(/keine bekannte Aktion/);
+    expect(() => normalizeSegmentBoundaryDecision({
+      action: "wait_for_successor",
+      current_job_id: "dgx-job-current",
+      retry_after_seconds: -1,
+    }, "dgx-job-current")).toThrow(/Wartezeit/);
+  });
+
   it("never promises cooperative checkpoints for CFG++ sampler modes", () => {
     expect(supportsCooperativeCheckpoint(validRequest("text-to-audio"))).toBe(false);
     expect(supportsCooperativeCheckpoint(validRequest("ic-lora"))).toBe(false);

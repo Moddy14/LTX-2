@@ -354,7 +354,7 @@ describe("job persistence and reservations", () => {
     expect(Reflect.get(restored, "queue")).toEqual([id]);
   });
 
-  it("retires a resource-free paused slice before acquiring a fresh resume slice", async () => {
+  it("resumes a resource-free paused slice with the same orchestrator job id", async () => {
     const transitions: Array<{ jobId: string; state: string }> = [];
     const manager = new JobManager(await statePath(), false, null, {
       capture: async () => notApplicableIdentityEvidence(),
@@ -380,26 +380,135 @@ describe("job persistence and reservations", () => {
     const runtimeJob = internalJobs.get(created.id)!;
     runtimeJob.status = "running";
     runtimeJob.dgxJobId = "dgx-job-old-slice";
-    Reflect.set(manager, "waitForQwenIdleGrace", async () => true);
-    Reflect.set(manager, "waitForDgxQueueStart", async (job: { dgxJobId: string | null }) => {
-      job.dgxJobId = "dgx-job-new-slice";
-      return true;
-    });
-    const pauseAndReacquire = Reflect.get(manager, "pauseAndReacquireDgxSlice") as (
+    Reflect.set(manager, "waitForSchedulerResume", async () => true);
+    const pauseAndResume = Reflect.get(manager, "pauseAndResumeDgxSlice") as (
       job: unknown,
       artifact: { type: string; path: string },
     ) => Promise<boolean>;
 
-    expect(await pauseAndReacquire.call(manager, runtimeJob, {
+    expect(await pauseAndResume.call(manager, runtimeJob, {
       type: "ltx-cooperative-checkpoint",
       path: "/checkpoints/job/manifest.json",
     })).toBe(true);
     expect(transitions).toEqual([
       { jobId: "dgx-job-old-slice", state: "pausing" },
       { jobId: "dgx-job-old-slice", state: "paused" },
-      { jobId: "dgx-job-old-slice", state: "cancelled" },
+      { jobId: "dgx-job-old-slice", state: "resuming" },
     ]);
-    expect(runtimeJob.dgxJobId).toBe("dgx-job-new-slice");
+    expect(runtimeJob.dgxJobId).toBe("dgx-job-old-slice");
+  });
+
+  it("requests a fresh canonical decision for every Euler boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-boundary-watcher-"));
+    roots.push(root);
+    const transitions: string[] = [];
+    const decide = vi.fn()
+      .mockResolvedValueOnce({
+        action: "continue_current",
+        current_job_id: "dgx-job-boundary",
+        next_job_id: null,
+        reason: "no_waiting_job",
+        retry_after_seconds: 5,
+      })
+      .mockResolvedValueOnce({
+        action: "yield_to_waiting_job",
+        current_job_id: "dgx-job-boundary",
+        next_job_id: "dgx-job-waiter",
+        reason: "selected_waiter",
+        retry_after_seconds: 5,
+      });
+    const manager = new JobManager(join(root, "jobs.json"), false, null, undefined, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0",
+        job: { job_id: jobId, state: "running" },
+      }),
+      transition: async (jobId, state) => {
+        transitions.push(state);
+        return {
+          schema_version: "dgx-job-transition.v0",
+          job: { job_id: jobId, state },
+        };
+      },
+    }, null, undefined, undefined, { decide });
+    const created = manager.create(validRequest());
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>).get(created.id)!;
+    runtimeJob.status = "running";
+    runtimeJob.dgxJobId = "dgx-job-boundary";
+    runtimeJob.runProvenance = runProvenance();
+    const child = spawn("/usr/bin/python3", ["-c", "import time; time.sleep(30)"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    runtimeJob.process = child;
+    const checkpointRoot = join(root, "checkpoint");
+    await mkdir(checkpointRoot, { recursive: true });
+    const watch = Reflect.get(manager, "watchSegmentBoundaries") as (
+      job: unknown,
+      path: string,
+      fingerprint: string,
+      generation: number,
+    ) => { stop: () => Promise<void> };
+    const watcher = watch.call(
+      manager,
+      runtimeJob,
+      checkpointRoot,
+      (runtimeJob.runProvenance as RunProvenance).fingerprint,
+      0,
+    );
+    const decisionPath = join(checkpointRoot, "boundary-decision.json");
+    const readyPath = join(checkpointRoot, "boundary-ready.json");
+    const waitForDecision = async (): Promise<Record<string, unknown>> => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        try {
+          return JSON.parse(await readFile(decisionPath, "utf8")) as Record<string, unknown>;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      throw new Error("segment decision was not written");
+    };
+    try {
+      await writeFile(readyPath, JSON.stringify({
+        schema_version: "ltx-segment-boundary-ready.v1",
+        job_fingerprint: (runtimeJob.runProvenance as RunProvenance).fingerprint,
+        dgx_job_id: "dgx-job-boundary",
+        generation: 0,
+        boundary_id: "0:0:1",
+        loop_index: 0,
+        next_step_index: 1,
+      }));
+      await expect(waitForDecision()).resolves.toMatchObject({
+        boundary_id: "0:0:1",
+        action: "continue_current",
+      });
+      await rm(readyPath, { force: true });
+      await rm(decisionPath, { force: true });
+
+      await writeFile(readyPath, JSON.stringify({
+        schema_version: "ltx-segment-boundary-ready.v1",
+        job_fingerprint: (runtimeJob.runProvenance as RunProvenance).fingerprint,
+        dgx_job_id: "dgx-job-boundary",
+        generation: 0,
+        boundary_id: "0:0:2",
+        loop_index: 0,
+        next_step_index: 2,
+      }));
+      await expect(waitForDecision()).resolves.toMatchObject({
+        boundary_id: "0:0:2",
+        action: "yield_to_waiting_job",
+      });
+      expect(decide).toHaveBeenCalledTimes(2);
+      expect(transitions).toEqual(["pausing"]);
+    } finally {
+      await watcher.stop();
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // Process already ended.
+        }
+      }
+    }
   });
 
   it("accepts only a complete checkpoint bound to the current run provenance", async () => {

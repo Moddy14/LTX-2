@@ -37,15 +37,14 @@ import {
 } from "../shared/models.js";
 import {
   decisionMessage,
+  decideSegmentBoundary,
   cooperativeCheckpointPath,
   heartbeatQueueJob,
   listQueueJobs,
   queueAdmissionMemoryGiB,
-  readQwenDemand,
   readQueueJob,
   retryAfterMs,
   shouldRetryQueueSubmit,
-  checkQueueAdmission,
   submitQueueAdmission,
   supportsCooperativeCheckpoint,
   transitionQueueJob,
@@ -54,6 +53,7 @@ import {
   type QueueJobSummary,
   type QueueJobState,
   type QueueTransitionState,
+  type SegmentBoundaryDecision,
 } from "./admission.js";
 import { buildCommand, type CommandPlan, validateRequestPlan } from "./command.js";
 import { getModelInventory } from "./models.js";
@@ -235,10 +235,9 @@ type DgxQueueOperations = {
 type DgxAdmissionOperations = {
   submit: typeof submitQueueAdmission;
   list?: typeof listQueueJobs;
-  check?: typeof checkQueueAdmission;
 };
-type DgxDemandOperations = {
-  read: typeof readQwenDemand;
+type DgxSchedulerOperations = {
+  decide: typeof decideSegmentBoundary;
 };
 type RunProvenanceOperations = {
   capture: typeof captureRunProvenance;
@@ -270,20 +269,13 @@ export const DGX_OWNER_HEARTBEAT_INTERVAL_MS = Math.min(
 );
 const LOCAL_PROCESS_GROUP_RECONCILE_MS = 2_000;
 const LTX_COOPERATIVE_YIELD_EXIT_CODE = 75;
-const QWEN_DEMAND_POLL_MS = Math.max(
-  1_000,
-  Number.parseInt(process.env.LTX_STUDIO_QWEN_DEMAND_POLL_MS ?? "5000", 10) || 5_000,
+const SEGMENT_BOUNDARY_FILE_POLL_MS = Math.max(
+  25,
+  Number.parseInt(process.env.LTX_STUDIO_SEGMENT_BOUNDARY_FILE_POLL_MS ?? "50", 10) || 50,
 );
-const QWEN_IDLE_GRACE_MS = Math.max(
-  0,
-  Number.parseInt(process.env.LTX_STUDIO_QWEN_IDLE_GRACE_MS ?? "30000", 10) || 30_000,
-);
-// A waiting consumer may renew its demand forever; the paused runner therefore
-// probes the read-only admission check as its wake-up call instead of trusting
-// the demand flag alone.
-const QWEN_PAUSED_ADMISSION_PROBE_MS = Math.max(
-  1_000,
-  Number.parseInt(process.env.LTX_STUDIO_QWEN_ADMISSION_PROBE_MS ?? "120000", 10) || 120_000,
+const SEGMENT_BOUNDARY_PAUSED_POLL_MS = Math.max(
+  10,
+  Number.parseInt(process.env.LTX_STUDIO_SEGMENT_BOUNDARY_PAUSED_POLL_MS ?? "5000", 10) || 5_000,
 );
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["queued", "running", "paused"];
 const DGX_TERMINAL_STATES = new Set<DgxTerminalState>(["completed", "failed", "cancelled"]);
@@ -922,15 +914,14 @@ export class JobManager extends EventEmitter {
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
       submit: submitQueueAdmission,
       list: listQueueJobs,
-      check: checkQueueAdmission,
     },
     private readonly runProvenanceOperations: RunProvenanceOperations = {
       capture: captureRunProvenance,
       verify: verifyRunProvenance,
       bindFile: bindRunProvenanceFile,
     },
-    private readonly dgxDemandOperations: DgxDemandOperations = {
-      read: readQwenDemand,
+    private readonly dgxSchedulerOperations: DgxSchedulerOperations = {
+      decide: decideSegmentBoundary,
     },
     private readonly modelInventoryOperations: ModelInventoryOperations = {
       read: getModelInventory,
@@ -1821,6 +1812,7 @@ export class JobManager extends EventEmitter {
       const checkpointManifest = cooperativeCheckpointPath(job.id);
       const checkpointRoot = dirname(checkpointManifest);
       if (cooperativeEnabled) mkdirSync(checkpointRoot, { recursive: true, mode: 0o700 });
+      let cooperativeGeneration = 0;
 
       while (true) {
         const thermalBaselineC = await this.readThermalBaseline(job);
@@ -1844,6 +1836,9 @@ export class JobManager extends EventEmitter {
             LTX_COOPERATIVE_JOB_FINGERPRINT: cooperativeEnabled
               ? job.runProvenance?.fingerprint
               : undefined,
+            LTX_COOPERATIVE_GENERATION: cooperativeEnabled
+              ? String(cooperativeGeneration)
+              : undefined,
             PYTHONPATH: pythonPath,
             PYTHONUNBUFFERED: "1",
           },
@@ -1864,13 +1859,18 @@ export class JobManager extends EventEmitter {
         }
         this.changed();
         this.consumeProcessLogs(job, child, progressTracker);
-        const qwenWatcher = cooperativeEnabled
-          ? this.watchQwenDemand(job, checkpointRoot, job.runProvenance!.fingerprint)
+        const boundaryWatcher = cooperativeEnabled
+          ? this.watchSegmentBoundaries(
+              job,
+              checkpointRoot,
+              job.runProvenance!.fingerprint,
+              cooperativeGeneration,
+            )
           : null;
         const stopThermalWatcher = this.watchThermals(job, child, thermalBaselineC);
         const ltxResult = await this.waitForProcess(child);
         stopThermalWatcher();
-        await qwenWatcher?.stop();
+        await boundaryWatcher?.stop();
         await this.confirmProcessGroupGone(job, child);
         if (this.jobShouldStop(job)) {
           return;
@@ -1880,9 +1880,10 @@ export class JobManager extends EventEmitter {
           const artifact = this.validateCooperativeCheckpoint(
             job,
             checkpointManifest,
-            qwenWatcher?.requestId() ?? null,
+            boundaryWatcher?.yieldDecisionId() ?? null,
           );
-          rmSync(join(checkpointRoot, "yield-request.json"), { force: true });
+          rmSync(join(checkpointRoot, "boundary-ready.json"), { force: true });
+          rmSync(join(checkpointRoot, "boundary-decision.json"), { force: true });
           if (!artifact) {
             await this.failDgxJob(
               job,
@@ -1891,7 +1892,7 @@ export class JobManager extends EventEmitter {
             );
             return;
           }
-          if (!await this.pauseAndReacquireDgxSlice(job, artifact)) return;
+          if (!await this.pauseAndResumeDgxSlice(job, artifact)) return;
           if (!await this.verifyJobRunProvenance(job, "vor dem LTX-Resume")) {
             await this.transitionDgxJob(job, "failed", {
               current_step: "run provenance changed before LTX resume",
@@ -1901,6 +1902,7 @@ export class JobManager extends EventEmitter {
           }
           this.appendLog(job, "LTX wird aus dem bestätigten Euler-Checkpoint fortgesetzt.");
           this.changed();
+          cooperativeGeneration += 1;
           continue;
         }
 
@@ -2799,14 +2801,17 @@ export class JobManager extends EventEmitter {
         try {
           const response = await this.dgxQueueOperations.transition(job.dgxJobId!, state, metadata);
           this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
-          if (state === "starting" || state === "running" || state === "pausing") {
+          if (state === "starting" || state === "running" || state === "pausing" || state === "resuming") {
             this.startDgxOwnerHeartbeat(job, state === "running" ? "ltx_rendering" : state);
           }
           this.changed();
           return true;
         } catch (error) {
-          const retryDelayMs = state === "starting" ? retryableStartFenceDelayMs(error) : null;
-          if (retryDelayMs === null) {
+          const startFenceState = state === "starting" || state === "resuming" ? state : null;
+          const retryDelayMs = startFenceState
+            ? retryableStartFenceDelayMs(error)
+            : null;
+          if (retryDelayMs === null || startFenceState === null) {
             this.appendLog(
               job,
               `DGX-Queue-State konnte nicht auf ${state} gesetzt werden: ${error instanceof Error ? error.message : String(error)}`,
@@ -2814,10 +2819,11 @@ export class JobManager extends EventEmitter {
             this.changed();
             return false;
           }
-          const reconciled = await this.reconcileRetryableStartingFence(
+          const reconciled = await this.reconcileRetryableStartFence(
             job,
             error,
             retryDelayMs,
+            startFenceState,
           );
           if (reconciled === "applied") return true;
           if (reconciled === "failed") return false;
@@ -2835,10 +2841,11 @@ export class JobManager extends EventEmitter {
     }
   }
 
-  private async reconcileRetryableStartingFence(
+  private async reconcileRetryableStartFence(
     job: RuntimeJob,
     transitionError: unknown,
     retryDelayMs: number,
+    targetState: "starting" | "resuming",
   ): Promise<"applied" | "retry" | "failed"> {
     const detail = transitionError instanceof Error
       ? transitionError.message
@@ -2858,7 +2865,7 @@ export class JobManager extends EventEmitter {
         if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
         continue;
       }
-      if (remote.state === "starting" || remote.state === "running") {
+      if (remote.state === targetState || remote.state === "running") {
         this.appendLog(
           job,
           `DGX-Start-Fence per GET abgeglichen: ${remote.job_id} ist bereits ${remote.state}.`,
@@ -2867,7 +2874,7 @@ export class JobManager extends EventEmitter {
         this.changed();
         return "applied";
       }
-      if (remote.state === "accepted") {
+      if (targetState === "starting" && remote.state === "accepted") {
         this.appendLog(
           job,
           `DGX-Start-Fence wartet beim Orchestrator (${detail}); Queue-Job bleibt accepted. `
@@ -2877,11 +2884,21 @@ export class JobManager extends EventEmitter {
         if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
         return "retry";
       }
-      if (remote.state === "queued") {
+      if (targetState === "starting" && remote.state === "queued") {
         this.appendLog(
           job,
           `DGX-Start-Fence wartet mit Queue-Job ${remote.job_id} auf seine Auswahl; `
             + `neuer Versuch in ${(retryDelayMs / 1000).toFixed(0)} s.`,
+        );
+        this.changed();
+        if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
+        return "retry";
+      }
+      if (targetState === "resuming" && remote.state === "paused") {
+        this.appendLog(
+          job,
+          `DGX-Resume-Fence wartet beim Orchestrator (${detail}); Queue-Job bleibt ressourcenfrei pausiert. `
+            + `Neuer Versuch in ${(retryDelayMs / 1000).toFixed(0)} s.`,
         );
         this.changed();
         if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
@@ -3240,50 +3257,94 @@ export class JobManager extends EventEmitter {
     });
   }
 
-  private watchQwenDemand(
+  private watchSegmentBoundaries(
     job: RuntimeJob,
     checkpointRoot: string,
     fingerprint: string,
-  ): { stop: () => Promise<void>; requestId: () => string | null } {
-    const requestPath = join(checkpointRoot, "yield-request.json");
-    const readyPath = join(checkpointRoot, "yield-ready.json");
-    let currentRequestId: string | null = null;
+    generation: number,
+  ): { stop: () => Promise<void>; yieldDecisionId: () => string | null } {
+    const readyPath = join(checkpointRoot, "boundary-ready.json");
+    const decisionPath = join(checkpointRoot, "boundary-decision.json");
+    rmSync(readyPath, { force: true });
+    rmSync(decisionPath, { force: true });
+    let lastBoundaryId: string | null = null;
+    let currentYieldDecisionId: string | null = null;
     let stopped = false;
     let pollInFlight: Promise<void> | null = null;
 
     const poll = async (): Promise<void> => {
-      let visible = true;
-      try {
-        const demand = await this.dgxDemandOperations.read();
-        if (demand.schema_version !== "dgx-qwen-demand.v0" || typeof demand.visible !== "boolean") {
-          throw new Error("Qwen-Demand-Antwort verletzt den API-Vertrag");
-        }
-        visible = demand.visible;
-      } catch (error) {
-        process.stderr.write(`LTX Studio Qwen-Demand-Wächter (fail-closed): ${String(error)}\n`);
-      }
       const child = job.process;
       if (stopped || !child || !processIsAlive(child)) return;
+      const ready = readJsonObject(readyPath);
+      if (!ready) return;
+      if (
+        ready.schema_version !== "ltx-segment-boundary-ready.v1"
+        || ready.job_fingerprint !== fingerprint
+        || ready.dgx_job_id !== job.dgxJobId
+        || ready.generation !== generation
+        || typeof ready.boundary_id !== "string"
+        || !ready.boundary_id
+        || !Number.isInteger(ready.loop_index)
+        || (ready.loop_index as number) < 0
+        || !Number.isInteger(ready.next_step_index)
+        || (ready.next_step_index as number) < 0
+      ) {
+        process.stderr.write("LTX Studio Segmentgrenzen-Wächter: ungültiges oder veraltetes boundary-ready verworfen.\n");
+        return;
+      }
+      if (ready.boundary_id === lastBoundaryId || existsSync(decisionPath)) return;
+      lastBoundaryId = ready.boundary_id;
 
-      if (visible && currentRequestId === null) {
-        currentRequestId = randomUUID();
-        rmSync(readyPath, { force: true });
-        atomicJsonFile(requestPath, {
-          schema_version: "ltx-cooperative-yield-request.v1",
-          job_fingerprint: fingerprint,
-          request_id: currentRequestId,
-          requested_at: now(),
-          reason: "production Qwen demand visible",
+      const decisionId = randomUUID();
+      let decision: SegmentBoundaryDecision;
+      try {
+        if (!job.dgxJobId) throw new Error("DGX-Job-ID fehlt an der Segmentgrenze");
+        decision = await this.dgxSchedulerOperations.decide(job.dgxJobId);
+        if (!job.dgxJobId || decision.current_job_id !== job.dgxJobId) {
+          throw new Error("Segmententscheidung gehört nicht zum laufenden DGX-Job");
+        }
+      } catch (error) {
+        process.stderr.write(`LTX Studio Segmentgrenzen-Wächter (fail-closed): ${String(error)}\n`);
+        decision = {
+          action: "yield_to_waiting_job",
+          current_job_id: job.dgxJobId ?? "missing",
+          next_job_id: null,
+          reason: "scheduler_unavailable_fail_closed",
+          retry_after_seconds: 5,
+        };
+      }
+      if (stopped || !processIsAlive(child)) return;
+      const action = decision.action === "continue_current"
+        ? "continue_current"
+        : "yield_to_waiting_job";
+      let reason = action === decision.action
+        ? decision.reason
+        : `invalid_running_action_${decision.action}`;
+      if (action === "yield_to_waiting_job") {
+        const pausing = await this.transitionDgxJob(job, "pausing", {
+          current_step: `yield selected at LTX Euler boundary ${ready.boundary_id}`,
         });
+        if (!pausing) reason = `${reason}:pausing_transition_failed_fail_closed`;
+      }
+      if (stopped || !processIsAlive(child)) return;
+      atomicJsonFile(decisionPath, {
+        schema_version: "ltx-segment-boundary-decision.v1",
+        job_fingerprint: fingerprint,
+        dgx_job_id: job.dgxJobId,
+        generation,
+        boundary_id: ready.boundary_id,
+        decision_id: decisionId,
+        action,
+        reason,
+        next_job_id: decision.next_job_id,
+        decided_at: now(),
+      });
+      if (action === "yield_to_waiting_job") {
+        currentYieldDecisionId = decisionId;
         this.appendLog(
           job,
-          "Produktions-Qwen wird benötigt. LTX schreibt nach dem aktuellen Diffusionsschritt einen Checkpoint.",
+          `Orchestrator fordert an Euler-Grenze ${ready.boundary_id} einen kooperativen Yield an (${reason}).`,
         );
-        this.changed();
-      } else if (!visible && currentRequestId !== null && !existsSync(readyPath)) {
-        rmSync(requestPath, { force: true });
-        currentRequestId = null;
-        this.appendLog(job, "Qwen-Bedarf endete vor der Checkpoint-Grenze; der aktuelle LTX-Slice läuft weiter.");
         this.changed();
       }
     };
@@ -3294,7 +3355,7 @@ export class JobManager extends EventEmitter {
       });
     };
     startPoll();
-    const timer = setInterval(startPoll, QWEN_DEMAND_POLL_MS);
+    const timer = setInterval(startPoll, SEGMENT_BOUNDARY_FILE_POLL_MS);
     timer.unref();
 
     return {
@@ -3303,7 +3364,7 @@ export class JobManager extends EventEmitter {
         clearInterval(timer);
         await pollInFlight;
       },
-      requestId: () => currentRequestId,
+      yieldDecisionId: () => currentYieldDecisionId,
     };
   }
 
@@ -3336,63 +3397,39 @@ export class JobManager extends EventEmitter {
     };
   }
 
-  private async waitForQwenIdleGrace(job: RuntimeJob): Promise<boolean> {
-    let idleSince: number | null = null;
-    let demandWasVisible: boolean | null = null;
-    let lastAdmissionProbe = Date.now();
+  private async waitForSchedulerResume(job: RuntimeJob): Promise<boolean> {
+    let lastDisposition: string | null = null;
     while (!this.shuttingDown && isActiveJobStatus(job.status)) {
-      let visible = true;
+      let delayMs = SEGMENT_BOUNDARY_PAUSED_POLL_MS;
+      let disposition = "scheduler_unavailable";
       try {
-        const demand = await this.dgxDemandOperations.read();
-        visible = demand.schema_version === "dgx-qwen-demand.v0"
-          && typeof demand.visible === "boolean"
-          ? demand.visible
-          : true;
-      } catch {
-        visible = true;
-      }
-      if (visible) {
-        idleSince = null;
-        // The demand flag cannot distinguish a waiting consumer from a working
-        // one, so a renewed demand alone must not starve the paused slice: the
-        // read-only admission check is the authoritative wake-up call.
-        const check = this.dgxAdmissionOperations.check;
-        if (check && Date.now() - lastAdmissionProbe >= QWEN_PAUSED_ADMISSION_PROBE_MS) {
-          lastAdmissionProbe = Date.now();
-          try {
-            const probe = await check(job.request);
-            if (probe.decision === "accepted") {
-              this.appendLog(
-                job,
-                "Admission-Probe akzeptiert trotz angemeldetem Qwen-Bedarf; LTX beantragt den regulären Resume.",
-              );
-              this.changed();
-              return true;
-            }
-          } catch {
-            // A failed probe changes nothing about the resource-free wait.
-          }
+        if (!job.dgxJobId) throw new Error("DGX-Job-ID fehlt während der Pause");
+        const decision = await this.dgxSchedulerOperations.decide(job.dgxJobId);
+        disposition = decision.action;
+        delayMs = Math.max(SEGMENT_BOUNDARY_PAUSED_POLL_MS, decision.retry_after_seconds * 1_000);
+        if (decision.action === "resume_current") return true;
+        if (decision.action !== "wait_for_successor") {
+          disposition = `invalid_paused_action_${decision.action}`;
+        } else if (decision.next_job_id) {
+          disposition = `wait_for_${decision.next_job_id}`;
         }
-      } else {
-        idleSince ??= Date.now();
-        if (Date.now() - idleSince >= QWEN_IDLE_GRACE_MS) return true;
+      } catch (error) {
+        disposition = `scheduler_unavailable:${error instanceof Error ? error.message : String(error)}`;
       }
-      if (visible !== demandWasVisible) {
+      if (disposition !== lastDisposition) {
         this.appendLog(
           job,
-          visible
-            ? "LTX bleibt ressourcenfrei, solange Produktions-Qwen angefordert ist."
-            : `Qwen-Bedarf ist beendet; LTX wartet noch ${Math.ceil(QWEN_IDLE_GRACE_MS / 1000)} s Ruhezeit.`,
+          `LTX bleibt fail-closed ressourcenfrei pausiert (${disposition}).`,
         );
         this.changed();
-        demandWasVisible = visible;
+        lastDisposition = disposition;
       }
-      if (!await this.waitForDelay(job, QWEN_DEMAND_POLL_MS)) return false;
+      if (!await this.waitForDelay(job, delayMs)) return false;
     }
     return false;
   }
 
-  private async pauseAndReacquireDgxSlice(
+  private async pauseAndResumeDgxSlice(
     job: RuntimeJob,
     artifact: QueueArtifact,
   ): Promise<boolean> {
@@ -3420,38 +3457,22 @@ export class JobManager extends EventEmitter {
     job.status = "paused";
     this.appendLog(
       job,
-      `LTX-Slice ${pausedJobId} ist ressourcenfrei pausiert; Qwen erhält die Produktionspriorität.`,
+      `LTX-Slice ${pausedJobId} ist ressourcenfrei pausiert; der Orchestrator wählt den Nachfolger.`,
     );
     this.changed();
-    if (!await this.waitForQwenIdleGrace(job)) return false;
+    if (!await this.waitForSchedulerResume(job)) return false;
 
     while (!this.shuttingDown && isActiveJobStatus(job.status)) {
-      try {
-        const cancelled = await this.dgxQueueOperations.transition(pausedJobId, "cancelled", {
-          current_step: "paused LTX slice retired before fresh resume admission",
-          artifact,
-        });
-        if (cancelled.job.state !== "cancelled") {
-          throw new Error(`Orchestrator bestätigte ${cancelled.job.state} statt cancelled`);
-        }
-        break;
-      } catch (error) {
-        this.appendLog(
-          job,
-          `Pausierter DGX-Slice konnte noch nicht abgeschlossen werden: ${error instanceof Error ? error.message : String(error)}.`,
-        );
-        this.changed();
-        if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
-      }
+      if (await this.transitionDgxJob(job, "resuming", {
+        current_step: "fresh start gate before resuming durable LTX checkpoint",
+        artifact,
+      })) break;
+      if (this.jobShouldStop(job)) return false;
+      if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
     }
     if (!isActiveJobStatus(job.status)) return false;
 
-    job.dgxJobId = null;
-    job.dgxJobTerminal = false;
-    delete job.dgxTerminalDelivery;
-    delete job.dgxTerminalDeliveryInFlight;
-    if (!await this.waitForDgxQueueStart(job)) return false;
-    this.appendLog(job, `LTX-Resume hat eine frische DGX-Zuteilung ${job.dgxJobId ?? "unbekannt"} erhalten.`);
+    this.appendLog(job, `LTX-Resume bleibt an dieselbe DGX-Zuteilung ${pausedJobId} gebunden.`);
     this.changed();
     return true;
   }

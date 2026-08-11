@@ -71,6 +71,136 @@ def reset_loop_counter() -> None:
     importlib.reload(cooperative_checkpoint)
 
 
+def boundary_decision(
+    boundary_id: str,
+    action: str,
+    *,
+    generation: int = 0,
+    decision_id: str = "decision-1",
+) -> dict[str, object]:
+    return {
+        "schema_version": "ltx-segment-boundary-decision.v1",
+        "job_fingerprint": "fingerprint",
+        "dgx_job_id": "dgx-job-test",
+        "generation": generation,
+        "boundary_id": boundary_id,
+        "decision_id": decision_id,
+        "action": action,
+    }
+
+
+def test_boundary_continue_is_consumed_for_the_exact_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LTX_COOPERATIVE_CHECKPOINT_DIR", str(tmp_path))
+    monkeypatch.setenv("LTX_COOPERATIVE_JOB_FINGERPRINT", "fingerprint")
+    monkeypatch.setenv("LTX_COOPERATIVE_GENERATION", "4")
+    monkeypatch.setenv("DGX_JOB_ID", "dgx-job-test")
+    original_read = cooperative_checkpoint._read_json
+
+    def read_with_decision(path: Path) -> dict[str, object] | None:
+        if path.name == "boundary-decision.json":
+            return boundary_decision("4:2:7", "continue_current", generation=4)
+        return original_read(path)
+
+    monkeypatch.setattr(cooperative_checkpoint, "_read_json", read_with_decision)
+    cooperative_checkpoint.checkpoint_and_yield_if_requested(
+        loop_index=2,
+        next_step_index=7,
+        sigmas=torch.tensor([1.0, 0.0]),
+        video_state=state(),
+        audio_state=None,
+    )
+
+    assert not (tmp_path / "boundary-ready.json").exists()
+    assert not (tmp_path / "boundary-decision.json").exists()
+    assert not (tmp_path / "manifest.json").exists()
+
+
+def test_boundary_yield_commits_decision_id_and_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LTX_COOPERATIVE_CHECKPOINT_DIR", str(tmp_path))
+    monkeypatch.setenv("LTX_COOPERATIVE_JOB_FINGERPRINT", "fingerprint")
+    monkeypatch.setenv("LTX_COOPERATIVE_GENERATION", "1")
+    monkeypatch.setenv("DGX_JOB_ID", "dgx-job-test")
+    original_read = cooperative_checkpoint._read_json
+
+    def read_with_decision(path: Path) -> dict[str, object] | None:
+        if path.name == "boundary-decision.json":
+            return boundary_decision("1:0:1", "yield_to_waiting_job", generation=1, decision_id="yield-7")
+        return original_read(path)
+
+    monkeypatch.setattr(cooperative_checkpoint, "_read_json", read_with_decision)
+    with pytest.raises(SystemExit) as yielded:
+        cooperative_checkpoint.checkpoint_and_yield_if_requested(
+            loop_index=0,
+            next_step_index=1,
+            sigmas=torch.tensor([1.0, 0.0]),
+            video_state=state(),
+            audio_state=None,
+        )
+
+    assert yielded.value.code == 75
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["request_id"] == "yield-7"
+    assert manifest["boundary_id"] == "1:0:1"
+
+
+def test_stale_boundary_decision_fails_closed_to_a_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LTX_COOPERATIVE_CHECKPOINT_DIR", str(tmp_path))
+    monkeypatch.setenv("LTX_COOPERATIVE_JOB_FINGERPRINT", "fingerprint")
+    monkeypatch.setenv("LTX_COOPERATIVE_GENERATION", "2")
+    monkeypatch.setenv("DGX_JOB_ID", "dgx-job-test")
+    original_read = cooperative_checkpoint._read_json
+
+    def read_stale(path: Path) -> dict[str, object] | None:
+        if path.name == "boundary-decision.json":
+            return boundary_decision("1:0:1", "continue_current", generation=1)
+        return original_read(path)
+
+    monkeypatch.setattr(cooperative_checkpoint, "_read_json", read_stale)
+    with pytest.raises(SystemExit):
+        cooperative_checkpoint.checkpoint_and_yield_if_requested(
+            loop_index=0,
+            next_step_index=1,
+            sigmas=torch.tensor([1.0, 0.0]),
+            video_state=state(),
+            audio_state=None,
+        )
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["request_id"] == "invalid:2:0:1"
+
+
+def test_missing_boundary_decision_times_out_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LTX_COOPERATIVE_CHECKPOINT_DIR", str(tmp_path))
+    monkeypatch.setenv("LTX_COOPERATIVE_JOB_FINGERPRINT", "fingerprint")
+    monkeypatch.setenv("LTX_COOPERATIVE_GENERATION", "3")
+    monkeypatch.setenv("DGX_JOB_ID", "dgx-job-test")
+    monkeypatch.setenv("LTX_SEGMENT_BOUNDARY_TIMEOUT_SECONDS", "0.05")
+
+    with pytest.raises(SystemExit):
+        cooperative_checkpoint.checkpoint_and_yield_if_requested(
+            loop_index=0,
+            next_step_index=1,
+            sigmas=torch.tensor([1.0, 0.0]),
+            video_state=state(),
+            audio_state=None,
+        )
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["request_id"] == "timeout:3:0:1"
+
+
 def test_euler_loop_yields_and_resumes_from_committed_step(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

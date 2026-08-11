@@ -131,7 +131,7 @@ export type QueueHeartbeatResponse = {
 
 export type QueueTransitionState = Extract<
   QueueJobState,
-  "starting" | "running" | "pausing" | "paused" | "completed" | "failed" | "cancelled"
+  "starting" | "running" | "pausing" | "paused" | "resuming" | "completed" | "failed" | "cancelled"
 >;
 
 export type QueueArtifact = {
@@ -153,13 +153,26 @@ const TRANSIENT_REASONS = new Set([
   "qwen_required_reclaim_not_completed",
 ]);
 
-export type QwenDemandResponse = {
-  schema_version: "dgx-qwen-demand.v0";
-  visible: boolean;
-  updated_at?: string | null;
-  expires_at?: string | null;
-  owners?: string[];
+export type SegmentBoundaryAction =
+  | "continue_current"
+  | "yield_to_waiting_job"
+  | "wait_for_successor"
+  | "resume_current";
+
+export type SegmentBoundaryDecision = {
+  action: SegmentBoundaryAction;
+  current_job_id: string;
+  next_job_id: string | null;
+  reason: string;
+  retry_after_seconds: number;
 };
+
+const SEGMENT_BOUNDARY_ACTIONS = new Set<SegmentBoundaryAction>([
+  "continue_current",
+  "yield_to_waiting_job",
+  "wait_for_successor",
+  "resume_current",
+]);
 
 export function supportsCooperativeCheckpoint(request: GenerationRequest): boolean {
   // The CFG++ sampler loop has no restore/yield hooks; promising resumability
@@ -402,8 +415,54 @@ export async function readQueueJob(jobId: string): Promise<QueueJobReadResponse>
   return runtimeApiJson("GET", `/dgx/jobs/${encodeURIComponent(jobId)}`, undefined, { timeoutMs: 30_000 });
 }
 
-export async function readQwenDemand(): Promise<QwenDemandResponse> {
-  return runtimeApiJson("GET", "/dgx/qwen-demand", undefined, { timeoutMs: 30_000 });
+export function normalizeSegmentBoundaryDecision(
+  response: unknown,
+  expectedJobId: string,
+): SegmentBoundaryDecision {
+  if (!response || typeof response !== "object") {
+    throw new Error("Segmentgrenzen-Antwort ist kein JSON-Objekt");
+  }
+  const value = response as Record<string, unknown>;
+  if (typeof value.action !== "string"
+    || !SEGMENT_BOUNDARY_ACTIONS.has(value.action as SegmentBoundaryAction)) {
+    throw new Error("Segmentgrenzen-Antwort enthält keine bekannte Aktion");
+  }
+  if (value.current_job_id !== expectedJobId) {
+    throw new Error("Segmentgrenzen-Antwort gehört zu einem anderen DGX-Job");
+  }
+  if (value.next_job_id !== undefined
+    && value.next_job_id !== null
+    && typeof value.next_job_id !== "string") {
+    throw new Error("Segmentgrenzen-Antwort enthält eine ungültige Nachfolger-ID");
+  }
+  if (value.retry_after_seconds !== undefined
+    && (typeof value.retry_after_seconds !== "number"
+      || !Number.isFinite(value.retry_after_seconds)
+      || !Number.isInteger(value.retry_after_seconds)
+      || value.retry_after_seconds < 0)) {
+    throw new Error("Segmentgrenzen-Antwort enthält eine ungültige Wartezeit");
+  }
+  return {
+    action: value.action as SegmentBoundaryAction,
+    current_job_id: expectedJobId,
+    next_job_id: typeof value.next_job_id === "string" ? value.next_job_id : null,
+    reason: typeof value.reason === "string" && value.reason
+      ? value.reason
+      : "scheduler_policy",
+    retry_after_seconds: typeof value.retry_after_seconds === "number"
+      ? value.retry_after_seconds
+      : 5,
+  };
+}
+
+export async function decideSegmentBoundary(jobId: string): Promise<SegmentBoundaryDecision> {
+  const response = await runtimeApiJson<unknown>(
+    "POST",
+    "/dgx/scheduler/segment-boundary/decide",
+    { current_job_id: jobId },
+    { timeoutMs: 8_000, maxBytes: 64 * 1024 },
+  );
+  return normalizeSegmentBoundaryDecision(response, jobId);
 }
 
 export async function transitionQueueJob(

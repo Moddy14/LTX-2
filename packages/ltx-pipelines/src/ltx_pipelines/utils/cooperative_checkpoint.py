@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,8 @@ from ltx_core.types import LatentState
 
 CHECKPOINT_SCHEMA = "ltx-cooperative-checkpoint.v1"
 YIELD_REQUEST_SCHEMA = "ltx-cooperative-yield-request.v1"
+BOUNDARY_READY_SCHEMA = "ltx-segment-boundary-ready.v1"
+BOUNDARY_DECISION_SCHEMA = "ltx-segment-boundary-decision.v1"
 YIELD_EXIT_CODE = 75
 
 _loop_index = 0
@@ -34,6 +37,32 @@ def _checkpoint_root() -> Path | None:
 def _job_fingerprint() -> str | None:
     value = os.environ.get("LTX_COOPERATIVE_JOB_FINGERPRINT", "").strip()
     return value or None
+
+
+def _dgx_job_id() -> str | None:
+    value = os.environ.get("DGX_JOB_ID", "").strip()
+    return value or None
+
+
+def _generation() -> int | None:
+    raw = os.environ.get("LTX_COOPERATIVE_GENERATION", "").strip()
+    if not raw:
+        return None
+    try:
+        generation = int(raw)
+    except ValueError as error:
+        raise RuntimeError("Cooperative checkpoint generation is invalid") from error
+    if generation < 0:
+        raise RuntimeError("Cooperative checkpoint generation is invalid")
+    return generation
+
+
+def _boundary_timeout_seconds() -> float:
+    raw = os.environ.get("LTX_SEGMENT_BOUNDARY_TIMEOUT_SECONDS", "10").strip()
+    try:
+        return max(0.05, float(raw))
+    except ValueError as error:
+        raise RuntimeError("Segment boundary timeout is invalid") from error
 
 
 def _fsync_directory(path: Path) -> None:
@@ -132,7 +161,13 @@ def _state_from_cpu(
 
 
 def _clear_checkpoint(root: Path) -> None:
-    for name in ("manifest.json", "state.pt", "yield-ready.json"):
+    for name in (
+        "manifest.json",
+        "state.pt",
+        "yield-ready.json",
+        "boundary-ready.json",
+        "boundary-decision.json",
+    ):
         (root / name).unlink(missing_ok=True)
     _fsync_directory(root)
 
@@ -189,6 +224,62 @@ def restore_euler_checkpoint(
     return loop_index, next_step, restored_video, restored_audio
 
 
+def _checkpoint_and_yield(
+    *,
+    root: Path,
+    fingerprint: str,
+    request_id: str,
+    boundary_id: str | None,
+    loop_index: int,
+    next_step_index: int,
+    sigmas: torch.Tensor,
+    video_state: LatentState | None,
+    audio_state: LatentState | None,
+) -> None:
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    state_file = "state.pt"
+    created_at = datetime.now(timezone.utc).isoformat()
+    state_payload = {
+        "schema_version": CHECKPOINT_SCHEMA,
+        "job_fingerprint": fingerprint,
+        "loop_index": loop_index,
+        "next_step_index": next_step_index,
+        "boundary_id": boundary_id,
+        "sigmas": sigmas.detach().to(device="cpu", copy=True),
+        "video_state": _state_to_cpu(video_state),
+        "audio_state": _state_to_cpu(audio_state),
+    }
+    _atomic_torch_save(root / state_file, state_payload)
+    manifest = {
+        "schema_version": CHECKPOINT_SCHEMA,
+        "job_fingerprint": fingerprint,
+        "loop_index": loop_index,
+        "next_step_index": next_step_index,
+        "state_file": state_file,
+        "request_id": request_id,
+        "boundary_id": boundary_id,
+        "created_at": created_at,
+    }
+    _atomic_json(root / "manifest.json", manifest)
+    _atomic_json(
+        root / "yield-ready.json",
+        {
+            "schema_version": "ltx-cooperative-yield-ready.v1",
+            "job_fingerprint": fingerprint,
+            "request_id": request_id,
+            "boundary_id": boundary_id,
+            "manifest": str(root / "manifest.json"),
+            "created_at": created_at,
+        },
+    )
+    print(
+        f"LTX_COOPERATIVE_YIELD_READY request_id={request_id} "
+        f"loop={loop_index} next_step={next_step_index}",
+        flush=True,
+    )
+    raise SystemExit(YIELD_EXIT_CODE)
+
+
 def checkpoint_and_yield_if_requested(
     *,
     loop_index: int,
@@ -201,55 +292,101 @@ def checkpoint_and_yield_if_requested(
     fingerprint = _job_fingerprint()
     if root is None or fingerprint is None:
         return
+
+    # Legacy/local safety requests remain readable during the migration, but
+    # production scheduling is decided by the canonical boundary endpoint.
     request = _read_json(root / "yield-request.json")
     if (
-        request is None
-        or request.get("schema_version") != YIELD_REQUEST_SCHEMA
-        or request.get("job_fingerprint") != fingerprint
-        or not isinstance(request.get("request_id"), str)
-        or not request["request_id"]
+        request is not None
+        and request.get("schema_version") == YIELD_REQUEST_SCHEMA
+        and request.get("job_fingerprint") == fingerprint
+        and isinstance(request.get("request_id"), str)
+        and request["request_id"]
     ):
-        return
+        _checkpoint_and_yield(
+            root=root,
+            fingerprint=fingerprint,
+            request_id=request["request_id"],
+            boundary_id=None,
+            loop_index=loop_index,
+            next_step_index=next_step_index,
+            sigmas=sigmas,
+            video_state=video_state,
+            audio_state=audio_state,
+        )
 
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    state_file = "state.pt"
-    created_at = datetime.now(timezone.utc).isoformat()
-    state_payload = {
-        "schema_version": CHECKPOINT_SCHEMA,
-        "job_fingerprint": fingerprint,
-        "loop_index": loop_index,
-        "next_step_index": next_step_index,
-        "sigmas": sigmas.detach().to(device="cpu", copy=True),
-        "video_state": _state_to_cpu(video_state),
-        "audio_state": _state_to_cpu(audio_state),
-    }
-    _atomic_torch_save(root / state_file, state_payload)
-    manifest = {
-        "schema_version": CHECKPOINT_SCHEMA,
-        "job_fingerprint": fingerprint,
-        "loop_index": loop_index,
-        "next_step_index": next_step_index,
-        "state_file": state_file,
-        "request_id": request["request_id"],
-        "created_at": created_at,
-    }
-    _atomic_json(root / "manifest.json", manifest)
+    generation = _generation()
+    if generation is None:
+        return
+    dgx_job_id = _dgx_job_id()
+    if dgx_job_id is None:
+        raise RuntimeError("DGX job id is required for cooperative segment decisions")
+    boundary_id = f"{generation}:{loop_index}:{next_step_index}"
+    ready_path = root / "boundary-ready.json"
+    decision_path = root / "boundary-decision.json"
+    decision_path.unlink(missing_ok=True)
     _atomic_json(
-        root / "yield-ready.json",
+        ready_path,
         {
-            "schema_version": "ltx-cooperative-yield-ready.v1",
+            "schema_version": BOUNDARY_READY_SCHEMA,
             "job_fingerprint": fingerprint,
-            "request_id": request["request_id"],
-            "manifest": str(root / "manifest.json"),
-            "created_at": created_at,
+            "dgx_job_id": dgx_job_id,
+            "generation": generation,
+            "boundary_id": boundary_id,
+            "loop_index": loop_index,
+            "next_step_index": next_step_index,
+            "ready_at": datetime.now(timezone.utc).isoformat(),
         },
     )
-    print(
-        f"LTX_COOPERATIVE_YIELD_READY request_id={request['request_id']} "
-        f"loop={loop_index} next_step={next_step_index}",
-        flush=True,
+
+    deadline = time.monotonic() + _boundary_timeout_seconds()
+    while time.monotonic() < deadline:
+        decision = _read_json(decision_path)
+        if decision is None:
+            time.sleep(0.05)
+            continue
+        matches_boundary = (
+            decision.get("schema_version") == BOUNDARY_DECISION_SCHEMA
+            and decision.get("job_fingerprint") == fingerprint
+            and decision.get("dgx_job_id") == dgx_job_id
+            and decision.get("generation") == generation
+            and decision.get("boundary_id") == boundary_id
+            and isinstance(decision.get("decision_id"), str)
+            and bool(decision["decision_id"])
+        )
+        if matches_boundary and decision.get("action") == "continue_current":
+            decision_path.unlink(missing_ok=True)
+            ready_path.unlink(missing_ok=True)
+            _fsync_directory(root)
+            return
+        request_id = (
+            decision["decision_id"]
+            if matches_boundary and decision.get("action") == "yield_to_waiting_job"
+            else f"invalid:{boundary_id}"
+        )
+        _checkpoint_and_yield(
+            root=root,
+            fingerprint=fingerprint,
+            request_id=request_id,
+            boundary_id=boundary_id,
+            loop_index=loop_index,
+            next_step_index=next_step_index,
+            sigmas=sigmas,
+            video_state=video_state,
+            audio_state=audio_state,
+        )
+
+    _checkpoint_and_yield(
+        root=root,
+        fingerprint=fingerprint,
+        request_id=f"timeout:{boundary_id}",
+        boundary_id=boundary_id,
+        loop_index=loop_index,
+        next_step_index=next_step_index,
+        sigmas=sigmas,
+        video_state=video_state,
+        audio_state=audio_state,
     )
-    raise SystemExit(YIELD_EXIT_CODE)
 
 
 def complete_restored_euler_loop(loop_index: int, restored_from_step: int) -> None:
