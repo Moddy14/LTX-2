@@ -23,6 +23,7 @@ from .governance import (
     open_frozen_dataset,
 )
 from .identity import IdentityMeasurementError, build_identity_measurements
+from .offset import OffsetMeasurementError, build_offset_measurements
 from .product import (
     ProductGovernanceError,
     append_signed_access_event,
@@ -43,6 +44,7 @@ __all__ = [
     "FrozenDatasetSession",
     "GovernanceError",
     "IdentityMeasurementError",
+    "OffsetMeasurementError",
     "ProductGovernanceError",
     "ReadinessError",
     "append_signed_access_event",
@@ -52,6 +54,7 @@ __all__ = [
     "build_comparator_matrix_report",
     "build_cross_shot_protocol_report",
     "build_identity_measurements",
+    "build_offset_measurements",
     "build_power_report",
     "build_product_readiness_report",
     "document_sha256",

@@ -19,6 +19,7 @@ from ltx_trainer.av_eval import (
     DesignError,
     GovernanceError,
     IdentityMeasurementError,
+    OffsetMeasurementError,
     ReadinessError,
     build_artifact_measurements,
     build_asr_measurements,
@@ -26,6 +27,7 @@ from ltx_trainer.av_eval import (
     build_comparator_matrix_report,
     build_cross_shot_protocol_report,
     build_identity_measurements,
+    build_offset_measurements,
     build_power_report,
     build_product_readiness_report,
     freeze_dataset,
@@ -89,6 +91,16 @@ def _run_identity_score(path: Path) -> int:
         report = build_identity_measurements(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, IdentityMeasurementError) as error:
         logger.error("Identity pairs rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
+def _run_offset_score(path: Path) -> int:
+    try:
+        report = build_offset_measurements(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, OffsetMeasurementError) as error:
+        logger.error("Offset observations rejected: %s", error)
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0
@@ -159,6 +171,8 @@ def main() -> int:
     artifact_score.add_argument("--observations", type=Path, required=True)
     identity_score = subcommands.add_parser("identity-score", help="score frozen-threshold SFace pairs")
     identity_score.add_argument("--pairs", type=Path, required=True)
+    offset_score = subcommands.add_parser("offset-score", help="score AV offset and abstention observations")
+    offset_score.add_argument("--observations", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -177,6 +191,7 @@ def main() -> int:
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),
         "identity-score": lambda: _run_identity_score(args.pairs),
+        "offset-score": lambda: _run_offset_score(args.observations),
         "readiness-check": lambda: _run_readiness_check(args.package),
     }
     return handlers[args.command]()

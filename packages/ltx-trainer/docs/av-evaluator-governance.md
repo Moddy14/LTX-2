@@ -176,6 +176,14 @@ and every registered pose, lighting and Fitzpatrick stratum must independently
 support both FAR and FRR decisions. TAR is the exact confidence-bound
 complement of FRR, not a separately tunable result.
 
+`offset-score` closes the nine AV-offset gates with one input contract. It
+requires non-abstained positive and negative subframe, one-frame and
+multiframe controls plus zero offset, each over at least two leakage
+components. Error median/p95, the cluster-bootstrap upper p95 bound,
+within-frame rate, fixed ten-bin ECE, Brier score, ID/OOD abstention and the
+generated-output offset p95 remain separately visible. Evaluator, calibration
+and abstention policies, output release and strata plan are digest-bound.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory
