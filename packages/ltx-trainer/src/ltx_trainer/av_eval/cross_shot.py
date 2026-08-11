@@ -40,6 +40,11 @@ INVARIANTS = {
     "render_revision": "identical",
     "timeline": "identical",
 }
+COMPARISON_SPECS = {
+    "automatic-vs-manual": ("automatic-scene-reference", "manual-scene-reference"),
+    "automatic-vs-none": ("automatic-scene-reference", "no-reference"),
+    "manual-vs-none": ("manual-scene-reference", "no-reference"),
+}
 ENDPOINT_SPECS = {
     "asr-word-error-rate": ("noninferiority", "lower"),
     "identity-similarity": ("superiority", "higher"),
@@ -187,6 +192,33 @@ def _validate_endpoints(raw: object) -> list[str]:
     return blockers
 
 
+def _validate_comparisons(raw: object) -> None:
+    if not isinstance(raw, list):
+        raise CrossShotProtocolError("comparisons must be a list")
+    identifiers: list[str] = []
+    for index, comparison in enumerate(raw):
+        if not isinstance(comparison, dict):
+            raise CrossShotProtocolError(f"comparison {index} must be an object")
+        _exact_keys(
+            comparison,
+            {"comparison_id", "challenger_arm_id", "comparator_arm_id", "endpoint_policy"},
+            f"comparison {index}",
+        )
+        comparison_id = _identifier(comparison["comparison_id"], f"comparison {index}.comparison_id")
+        identifiers.append(comparison_id)
+        if comparison_id not in COMPARISON_SPECS:
+            raise CrossShotProtocolError(f"unknown Q0 comparison: {comparison_id}")
+        actual = (
+            comparison["challenger_arm_id"],
+            comparison["comparator_arm_id"],
+            comparison["endpoint_policy"],
+        )
+        if actual != (*COMPARISON_SPECS[comparison_id], "registered"):
+            raise CrossShotProtocolError(f"Q0 comparison semantics changed for {comparison_id}")
+    if identifiers != sorted(COMPARISON_SPECS):
+        raise CrossShotProtocolError("comparisons must exactly match the sorted Q0 comparison inventory")
+
+
 def _validate_sample_plan(raw: object) -> list[str]:
     if not isinstance(raw, dict):
         raise CrossShotProtocolError("sample_plan must be an object")
@@ -254,6 +286,7 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
             "bindings",
             "sample_plan",
             "arms",
+            "comparisons",
             "paired_invariants",
             "endpoint_bindings",
             "required_measurement_ids",
@@ -279,6 +312,7 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
     blockers = _validate_bindings(raw["bindings"])
     blockers.extend(_validate_sample_plan(raw["sample_plan"]))
     blockers.extend(_validate_arms(raw["arms"]))
+    _validate_comparisons(raw["comparisons"])
     blockers.extend(_validate_endpoints(raw["endpoint_bindings"]))
     blockers.extend(_validate_design_report(design_report, raw))
     blockers = sorted(blockers)
@@ -294,6 +328,7 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
         "blockers": blockers,
         "bindings_digest": document_sha256(raw["bindings"]),
         "arms_digest": document_sha256(raw["arms"]),
+        "comparisons_digest": document_sha256(raw["comparisons"]),
         "endpoints_digest": document_sha256(raw["endpoint_bindings"]),
         "required_measurements_digest": document_sha256(raw["required_measurement_ids"]),
         "planned_renders": (

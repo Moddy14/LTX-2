@@ -92,6 +92,11 @@ def test_cross_shot_protocol_rejects_unpaired_or_result_driven_changes() -> None
     with pytest.raises(CrossShotProtocolError, match="arm semantics changed"):
         build_cross_shot_protocol_report(automatic, design_report=design_report)
 
+    comparison, design_report = _ready()
+    comparison["comparisons"][0]["comparator_arm_id"] = "no-reference"  # type: ignore[index]
+    with pytest.raises(CrossShotProtocolError, match="comparison semantics changed"):
+        build_cross_shot_protocol_report(comparison, design_report=design_report)
+
 
 def test_cross_shot_protocol_rejects_power_mismatch() -> None:
     protocol, design_report = _ready()

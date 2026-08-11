@@ -265,6 +265,11 @@ least two shots per identity. The reported render count multiplies identities,
 shots, seeds, arms and both claims, so capacity planning cannot silently omit a
 dimension.
 
+All three directed comparisons are frozen as well: manual versus no reference,
+automatic versus no reference, and automatic versus manual. Each uses the
+same registered endpoint family; a result consumer may not drop the manual
+comparator or select a more favorable baseline after seeing quality values.
+
 ```bash
 uv run python scripts/av_eval.py cross-shot-check \
   --protocol configs/av_eval/cross-shot-protocol.v1.json \

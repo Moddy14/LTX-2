@@ -29,6 +29,11 @@
     {"arm_id": "manual-scene-reference", "reference_strategy": "manual", "strategy_artifact_sha256": null, "default_enabled": true},
     {"arm_id": "no-reference", "reference_strategy": "none", "strategy_artifact_sha256": null, "default_enabled": false}
   ],
+  "comparisons": [
+    {"comparison_id": "automatic-vs-manual", "challenger_arm_id": "automatic-scene-reference", "comparator_arm_id": "manual-scene-reference", "endpoint_policy": "registered"},
+    {"comparison_id": "automatic-vs-none", "challenger_arm_id": "automatic-scene-reference", "comparator_arm_id": "no-reference", "endpoint_policy": "registered"},
+    {"comparison_id": "manual-vs-none", "challenger_arm_id": "manual-scene-reference", "comparator_arm_id": "no-reference", "endpoint_policy": "registered"}
+  ],
   "paired_invariants": {
     "dialogue": "identical",
     "duration": "identical",
