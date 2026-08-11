@@ -26,6 +26,9 @@ grün und muss für den nächsten Finalkandidaten neu gemessen werden.
 - `startup:measure` kann eine Rohmessung atomar neu anlegen;
   `startup:compare` prüft Protokoll, Hostprofil, Artefakthash, N und p95 und
   erzeugt den write-once Vergleich. Vorhandene Belege werden nie überschrieben.
+- Der finale Bundlebericht akzeptiert eine Releasebindung nur nach vollständiger
+  Manifest-/Artefaktprüfung und nennt Release-Digest, Git-Commit und Git-Tree;
+  ein bloß übergebenes, ungeprüftes Digest-Label genügt nicht.
 
 ## Ergebnis
 

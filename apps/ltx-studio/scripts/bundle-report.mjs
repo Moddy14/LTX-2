@@ -3,6 +3,8 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
+import { loadVerifiedReleaseRoot } from "./release-audit-io-lib.mjs";
+
 const distRoot = new URL("../dist/", import.meta.url).pathname;
 const assetsRoot = join(distRoot, "assets");
 const html = readFileSync(join(distRoot, "index.html"), "utf8");
@@ -71,6 +73,32 @@ const measuredPerformance = performanceEvidence(
   argumentValue("--performance-evidence"),
   initial,
 );
+const expectedReleaseDigest = argumentValue("--release");
+const releaseRoot = argumentValue("--release-root");
+if (Boolean(expectedReleaseDigest) !== Boolean(releaseRoot)) {
+  throw new Error("--release and --release-root must be provided together");
+}
+const releaseBinding = expectedReleaseDigest
+  ? loadVerifiedReleaseRoot(releaseRoot, expectedReleaseDigest)
+  : null;
+if (releaseBinding) {
+  const releaseDistRoot = join(releaseBinding.releaseRoot, "apps", "ltx-studio", "dist");
+  const releaseHtml = readFileSync(join(releaseDistRoot, "index.html"));
+  const releaseEntryMatch = releaseHtml.toString("utf8").match(/<script[^>]+src="\/assets\/([^"]+\.js)"/);
+  const releaseEntry = releaseEntryMatch?.[1];
+  const releaseEntryBytes = releaseEntry
+    ? readFileSync(join(releaseDistRoot, "assets", releaseEntry))
+    : null;
+  if (
+    !releaseEntryBytes
+    || !releaseHtml.equals(readFileSync(join(distRoot, "index.html")))
+    || releaseEntry !== initial.file
+    || releaseEntryBytes.byteLength !== initial.rawBytes
+    || createHash("sha256").update(releaseEntryBytes).digest("hex") !== initial.sha256
+  ) {
+    throw new Error("Current bundle does not match the verified release root");
+  }
+}
 
 const report = {
   schemaVersion: "ltx-studio-bundle-report.v1",
@@ -89,6 +117,15 @@ const report = {
   chunks,
   staticGate: initial.rawBytes <= 450_000 && initial.gzipBytes <= 140_000 ? "pass" : "fail",
   performanceGate: measuredPerformance.gate,
+  ...(releaseBinding
+    ? {
+        release: {
+          digest: releaseBinding.releaseDigest,
+          gitCommit: releaseBinding.manifest.source.gitCommit,
+          gitTree: releaseBinding.manifest.source.gitTree,
+        },
+      }
+    : {}),
   ...(measuredPerformance.evidence
     ? { performanceEvidence: measuredPerformance.evidence }
     : {}),
