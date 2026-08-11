@@ -4,7 +4,7 @@
 
 Der isolierte native Python-Stack aus R1 ist als reproduzierbarer
 Engineering-Baustein **bestanden**. R1 insgesamt bleibt **hold**, weil
-Candidate-Surface, kanonischer Release-Digest, unveränderliche Installation,
+kanonischer Release-Digest, unveränderliche Installation,
 Digest-gebundene Health/Provenienz und Cold-Canary eigene nachfolgende
 Abnahmen sind.
 
@@ -57,8 +57,8 @@ Waiver.
   ausgeblendeter CUDA-Sichtbarkeit, einschließlich HDR und In/Outpainting.
 - `npm run lint`: bestanden.
 - `npm test`: 59 Dateien, 573 Tests bestanden.
-- `npm run build`: bestanden; der getrennte R2-Bundle-Hinweis bleibt bei
-  533,43 kB raw / 155,28 kB gzip offen.
+- `npm run build`: bestanden. Der getrennte R2-Bundle- und Kaltstart-Gate ist
+  inzwischen geschlossen; siehe `R2_BUNDLE_IMPLEMENTATION_2026-08-11.md`.
 - Ruff 0.14.3 und `git diff --check`: bestanden.
 
 ## Versionsentscheidung
@@ -80,13 +80,37 @@ Primärquellen, abgerufen am 11.08.2026:
 
 ## Verbleibende R1-Abnahme
 
-1. `candidate-release-surface.v1.json` aus Schema und Capability-Matrix
-   generieren und Rechte-/Blocked-Status je Surface-Eintrag binden.
-2. Deterministischen Produktionsbuild, kanonisches Manifest, externen Digest,
+Die schema-validierte `candidate-release-surface.v1.json` wird jetzt
+deterministisch aus `shared/pipelines.ts` und `shared/releaseSurface.ts`
+erzeugt und bindet deren SHA-256. Ihre 123 Einträge werden in Tests auf reale,
+schema-valide Requests abgebildet; alle 13 Gates sind je Eintrag exakt einmal
+als anwendbar oder mit Grund als nicht anwendbar klassifiziert. Der Stand hat
+27 konditionale Kandidaten und 96 gesperrte Kombinationen.
+
+Die Sperre ist absichtlich streng: Die lokalen LatentSync-, MuseTalk- und
+LipForcing-Pfade verwenden InsightFace-`buffalo_l`-Gewichte, deren
+Upstream-Policy sie auf nichtkommerzielle Forschung beschränkt. Im
+MuseTalk-Inventar ist außerdem das Face-Parsing-Gewicht ohne deklarierte
+Upstream-Lizenz erfasst. LTX-Basispfade und LongCat bleiben nur konditionale
+Kandidaten und benötigen vor Aktivierung ein aktuelles signiertes
+Rights-Attest; `candidate` bedeutet ausdrücklich noch nicht `released`.
+
+Primärquellen dieser Einstufung, abgerufen am 11.08.2026:
+
+- <https://github.com/Lightricks/LTX-2/blob/main/LICENSE>
+- <https://github.com/deepinsight/insightface#license>
+- <https://github.com/bytedance/LatentSync>
+- <https://github.com/TMElyralab/MuseTalk>
+- <https://github.com/cvlab-kaist/LipForcing>
+- <https://github.com/meituan-longcat/LongCat-Video>
+
+Noch offen:
+
+1. Deterministischen Produktionsbuild, kanonisches Manifest, externen Digest,
    SBOM und statische Rights-Evidence erzeugen.
-3. Immutable Releasewurzel und Start-Driftprüfung implementieren; Health und
+2. Immutable Releasewurzel und Start-Driftprüfung implementieren; Health und
    Run-Provenienz auf denselben Digest heben.
-4. Erst nach leerem Job-Preflight und Betreiberfreigabe atomar umschalten,
+3. Erst nach leerem Job-Preflight und Betreiberfreigabe atomar umschalten,
    Cold-Canary und absichtlichen Manipulations-Negativtest ausführen.
 
 Bis diese Punkte erfüllt sind, bleibt **R1 = hold** und es gibt weder Product-GO

@@ -9,6 +9,7 @@
     "dev:ui": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "bundle:report": "node scripts/bundle-report.mjs",
+    "release:surface": "tsx scripts/generate-release-surface.ts --output release/candidate-release-surface.v1.json",
     "startup:measure": "node scripts/measure-startup.mjs",
     "start": "tsx server/index.ts",
     "test": "vitest run",
