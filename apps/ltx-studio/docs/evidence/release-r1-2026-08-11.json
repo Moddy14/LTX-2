@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "ltx-studio-release-build-evidence.v1",
+  "source": {
+    "gitCommit": "b7f12d133192757ef989011f41a17a785e989e3e",
+    "gitTree": "c829fbc2a934fc44da844a707423c7ccc8c77d27",
+    "clean": true
+  },
+  "release": {
+    "digest": "f7101fa2a0680a16ffd30a7da549619d96861aa147ea069bd4bb59c1a0c9cc14",
+    "manifestBytes": 1392550,
+    "artifactCount": 5387,
+    "candidateSurfaceEntries": 123,
+    "rendererDistributionCount": 59
+  },
+  "reproducibility": {
+    "cleanRoots": 2,
+    "separateAbsolutePaths": true,
+    "manifestsByteIdentical": true,
+    "digestsIdentical": true
+  },
+  "verification": {
+    "uvLockedSync": "pass",
+    "uvPipCheck": "pass",
+    "requestsWarningsAsErrors": "pass",
+    "runtimeCpuSmoke": "pass",
+    "compiledServerHttpSmoke": "pass",
+    "externalRendererPathRejected": "pass",
+    "deliberateArtifactDriftRejected": "pass",
+    "restoredArtifactVerification": "pass"
+  },
+  "qualification": {
+    "releaseDecision": "hold",
+    "blockers": [
+      "current-signed-rights-attest-missing",
+      "longcat-runtime-worktree-dirty",
+      "digest-bound-cold-canary-missing",
+      "quality-and-holdout-evidence-missing"
+    ]
+  }
+}

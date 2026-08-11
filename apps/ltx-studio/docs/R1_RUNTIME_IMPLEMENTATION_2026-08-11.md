@@ -106,9 +106,23 @@ Primärquellen dieser Einstufung, abgerufen am 11.08.2026:
 
 Noch offen:
 
-1. Deterministischen Produktionsbuild, kanonisches Manifest, externen Digest,
-   SBOM und statische Rights-Evidence erzeugen.
-2. Immutable Releasewurzel und Start-Driftprüfung implementieren; Health und
+Der deterministische Produktionsbuild ist inzwischen ebenfalls implementiert.
+Er emittiert Server/Shared-Code als JavaScript, enthält kein `tsx` in den
+Produktionsabhängigkeiten, synchronisiert die isolierte Runtime innerhalb der
+Releasewurzel und erzeugt ein kanonisches Manifest mit 5.387 Artefakten,
+Node-/Python-/Modell-SBOM und externem SHA-256. Zwei vollständige Builds aus
+getrennten Clean-Clones waren byteidentisch; beide sowie der Hauptbuild ergaben
+`f7101fa2a0680a16ffd30a7da549619d96861aa147ea069bd4bb59c1a0c9cc14`.
+Eine absichtliche Änderung an `dist/index.html` wurde als Drift abgelehnt; nach
+bytegenauer Wiederherstellung war der Verifier wieder grün. Der kompakte Beleg
+liegt in `docs/evidence/release-r1-2026-08-11.json`.
+
+Noch offen:
+
+1. Die statische Rights-Evidence vollständig katalogisieren und ein aktuelles,
+   signiertes externes Rights-Attest erzeugen; der Manifeststatus bleibt bis
+   dahin `hold`.
+2. Immutable Releasewurzel und Start-Driftprüfung an den Server binden; Health und
    Run-Provenienz auf denselben Digest heben.
 3. Erst nach leerem Job-Preflight und Betreiberfreigabe atomar umschalten,
    Cold-Canary und absichtlichen Manipulations-Negativtest ausführen.
