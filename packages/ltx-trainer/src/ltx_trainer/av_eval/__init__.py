@@ -22,6 +22,7 @@ from .governance import (
     open_frozen_artifact,
     open_frozen_dataset,
 )
+from .identity import IdentityMeasurementError, build_identity_measurements
 from .product import (
     ProductGovernanceError,
     append_signed_access_event,
@@ -41,6 +42,7 @@ __all__ = [
     "DesignError",
     "FrozenDatasetSession",
     "GovernanceError",
+    "IdentityMeasurementError",
     "ProductGovernanceError",
     "ReadinessError",
     "append_signed_access_event",
@@ -49,6 +51,7 @@ __all__ = [
     "build_calibration_gate_report",
     "build_comparator_matrix_report",
     "build_cross_shot_protocol_report",
+    "build_identity_measurements",
     "build_power_report",
     "build_product_readiness_report",
     "document_sha256",

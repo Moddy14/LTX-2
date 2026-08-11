@@ -168,6 +168,14 @@ required artifact kinds must be registered FRR strata. Overall residual p95 is
 limited to 0.04 and the worst motion/light stratum to 0.06 by the calibration
 catalog.
 
+`identity-score` measures the five SFace identity gates from genuine and
+impostor similarities at an already frozen threshold. Dataset,
+preregistration, SFace model, preprocessing, threshold policy and the fixed
+reference gallery are digest-bound. Resampling is by probe leakage component,
+and every registered pose, lighting and Fitzpatrick stratum must independently
+support both FAR and FRR decisions. TAR is the exact confidence-bound
+complement of FRR, not a separately tunable result.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory

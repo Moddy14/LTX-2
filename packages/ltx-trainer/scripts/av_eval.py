@@ -18,12 +18,14 @@ from ltx_trainer.av_eval import (
     CrossShotProtocolError,
     DesignError,
     GovernanceError,
+    IdentityMeasurementError,
     ReadinessError,
     build_artifact_measurements,
     build_asr_measurements,
     build_calibration_gate_report,
     build_comparator_matrix_report,
     build_cross_shot_protocol_report,
+    build_identity_measurements,
     build_power_report,
     build_product_readiness_report,
     freeze_dataset,
@@ -77,6 +79,16 @@ def _run_artifact_score(path: Path) -> int:
         report = build_artifact_measurements(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, ArtifactMeasurementError) as error:
         logger.error("Artifact observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
+def _run_identity_score(path: Path) -> int:
+    try:
+        report = build_identity_measurements(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, IdentityMeasurementError) as error:
+        logger.error("Identity pairs rejected: %s", error)
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0
@@ -145,6 +157,8 @@ def main() -> int:
     asr_score.add_argument("--observations", type=Path, required=True)
     artifact_score = subcommands.add_parser("artifact-score", help="score artifact and warp observations")
     artifact_score.add_argument("--observations", type=Path, required=True)
+    identity_score = subcommands.add_parser("identity-score", help="score frozen-threshold SFace pairs")
+    identity_score.add_argument("--pairs", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -162,6 +176,7 @@ def main() -> int:
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),
+        "identity-score": lambda: _run_identity_score(args.pairs),
         "readiness-check": lambda: _run_readiness_check(args.package),
     }
     return handlers[args.command]()
