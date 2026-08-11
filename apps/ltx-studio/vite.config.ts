@@ -10,6 +10,11 @@ export default defineConfig({
     host: "127.0.0.1",
     port: uiPort,
     strictPort: true,
+    watch: {
+      // Release staging contains a complete Python environment. Watching it can
+      // exhaust the host inotify budget and terminate both UI and API in dev/E2E.
+      ignored: ["**/build/**", "**/release/**", "**/.venv/**"],
+    },
     proxy: {
       "/api": `http://127.0.0.1:${apiPort}`,
     },

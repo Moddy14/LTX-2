@@ -17,14 +17,14 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und nun auch den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 152/152, Studio 612/612 Tests; Lint und Build sind grün | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 152/152, Studio 612/612 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
 | Python HTTP-Stack | Die isolierte R1-Runtime besteht `uv lock --check`, `uv pip check`, `requests` unter `-W error` und den Runtime-Verifier; `chardet` ist dort verboten. Nur das nicht als Releasequelle zulässige Shared-ComfyUI-Environment enthält weiter `chardet 7.4.3` | Releasepfad gut; Shared-Env-Abweichung bleibt bewusst isoliert | abgeschlossen |
-| Frontend-Bundle | R2 ist mit artefaktgebundener Evidenz bestanden: 388.269/115.561 Bytes raw/gzip, keine Vite-Chunkwarnung, echte Lazy-Chunks und 40+40 kalte Chromium-Kontexte; p95 175,42 ms -> 131,58 ms | gut; kein offener Bundle-Defekt | abgeschlossen |
+| Frontend-Bundle | Der frühere R2-Digest bestand mit 388.269/115.561 Bytes raw/gzip und 40+40 kalten Chromium-Kontexten. Der aktuelle Engineering-Build bleibt trotz lazy Projektworkspace mit 392.625/116.813 Bytes unter 450/140 kB und ohne Vite-Warnung; gemäß Invalidierungsmatrix müssen Doppelbuild und 40+40-Messung für den neuen Finaldigest wiederholt werden | statisches Gate grün; digestgebundene R2-Erneuerung offen | P1 |
 | Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 123 Einträge, davon 17 konditionale Kandidaten und 106 rechtlich/technisch gesperrt | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
-| Produktionsworkflow | Der persistente Projektkern speichert Shots, Request-Revisionen, konkrete Continuity-/Retake-Quellen sowie Output-, Sidecar- und Export-Digests in einer owner-only, monotonen Hashkette. API, Jobstart und v7-Sidecar binden den exakten Projekt-/Request-Stand; Restarts, Stale Writes, Kettenlücken, Legacy-Provenienz und verdeckte Mutationen bleiben fail-closed. Ein isolierter HTTP-Smoke besteht | Backend/API/Jobbindung gut; UI offen | P1 |
+| Produktionsworkflow | Der persistente Projektkern speichert Shots, Request-Revisionen, konkrete Continuity-/Retake-Quellen sowie Output-, Sidecar- und Export-Digests in einer owner-only, monotonen Hashkette. API, Jobstart und v7-Sidecar binden den exakten Projekt-/Request-Stand; Restarts, Stale Writes, Kettenlücken, Legacy-Provenienz und verdeckte Mutationen bleiben fail-closed. Der lazy Desktop-/Mobile-Workspace bedient Anlage, Shot-/Continuity-Bindung, Start, Output-Erfassung/Freigabe, Edit/Retake, Kettenprüfung und Archivierung; Integritätswarnungen bleiben sichtbar | Engineering-Workflow gut; reale Cross-Shot-/P4-Evidenz offen | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten, Signatur-/Audit-/ACL-Prüfer, Blind-Scorer-Verträge und eine Draft-Preregistrierung existieren. `profile=product` bleibt absichtlich hart blockiert, bis getrennte UID/GID, versiegelte Roots, externe Schlüssel, aktuelle Rechte und reale disjunkte Daten provisioniert und belegt sind | technische Grundlage gut; unabhängige Provisionierung und Product-GO offen | P2 |
 | Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. Der D1-Katalog umfasst jetzt alle 37 festen und 72 claim-spezifischen VBench-Gates der zwölf visuellen Candidate-Claims; 144 Holm-Ränge werden dynamisch revalidiert. Es gibt weiterhin keinen rechtsgeprüften Kalibriersatz, keinen versiegelten Holdout und keine unabhängigen Signaturen; fünf Tune-Clips reichen nicht zur biometrischen Schwellenkalibrierung | Vertrag gut; reale Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
@@ -225,11 +225,16 @@ beziehungsweise Freigabe.
 
 ### R2 — Bundle-Hinweis durch reale Startkosten schließen
 
-**Status: abgeschlossen.** Der reproduzierbare Bericht
-`docs/evidence/bundle-r2-2026-08-11.json` bindet den aktuellen Entry-Chunk an
+**Status: früherer Digest abgeschlossen, aktueller Engineering-Digest neu zu
+qualifizieren.** Der reproduzierbare Bericht
+`docs/evidence/bundle-r2-2026-08-11.json` bindet den damaligen Entry-Chunk an
 die 40+40 Cold-Context-Messung in
-`docs/evidence/startup-r2-2026-08-11.json`. Die folgenden Punkte beschreiben
-den erfüllten Vertrag und bleiben als Reproduktionsvorgabe bestehen.
+`docs/evidence/startup-r2-2026-08-11.json`. Diese Evidenz belegt den damaligen
+Digest; spätere Projektworkflow-Änderungen invalidieren sie gemäß Matrix. Der
+aktuelle unversiegelte Build liegt bei 392,625/116,813 kB raw/gzip und bleibt
+statisch grün. Doppelbuild und 40+40 Cold-Context-Messung werden erst für den
+nächsten stabilen Release Candidate neu gebunden. Die folgenden Punkte bleiben
+als Reproduktionsvorgabe bestehen.
 
 1. Einen reproduzierbaren Bundlebericht mit Input-/Chunk-Zuordnung sowie Raw-,
    gzip- und Brotli-Größe versionieren. Die gespeicherte Basis ist
@@ -247,7 +252,7 @@ den erfüllten Vertrag und bleiben als Reproduktionsvorgabe bestehen.
    40 kalte, cachefreie Browserkontexte auf Loopback. Bericht: N, Median, p95
    und Streuung für erste bedienbare Moduswahl.
 
-**Exit R2 (bestanden):** Initiales JS höchstens 450 kB raw und 140 kB gzip, keine
+**Exit R2 (für den früheren Digest bestanden; für den neuen Digest offen):** Initiales JS höchstens 450 kB raw und 140 kB gzip, keine
 Vite-Chunkwarnung, alle E2E grün und kein schlechterer p95-Wert für erste
 bedienbare Moduswahl gegenüber dem vorab gespeicherten Basislauf.
 

@@ -9,6 +9,7 @@ import {
   Dices,
   Download,
   Film,
+  FolderKanban,
   LoaderCircle,
   ListVideo,
   Pause,
@@ -41,6 +42,15 @@ import type {
   ControlledExperiment,
   ExperimentCreateInput,
 } from "../../shared/experiments";
+import type {
+  ProjectArchiveRequest,
+  ProjectCreateRequest,
+  ProjectOutputApprovalRequest,
+  ProjectOutputCaptureRequest,
+  ProjectRevisionEnvelope,
+  ProjectShotCreateRequest,
+  ProjectShotRevisionRequest,
+} from "../../shared/projects";
 import { isSpeechQualityCandidate } from "../qualityCandidates";
 import { supportsSceneReference } from "../sceneReference";
 import { importWithSingleReload } from "../lazyImport";
@@ -49,6 +59,9 @@ import { LazyPanelBoundary, LazyPanelLoading } from "./LazyPanelBoundary";
 
 const ExperimentPanel = lazy(async () => ({
   default: (await importWithSingleReload("experiments", () => import("./ExperimentPanel"))).ExperimentPanel,
+}));
+const ProjectPanel = lazy(async () => ({
+  default: (await importWithSingleReload("projects", () => import("./ProjectPanel"))).ProjectPanel,
 }));
 const ObjectiveAnalysisPanel = lazy(async () => ({
   default: (await importWithSingleReload("objective-analysis", () => import("./ObjectiveAnalysisPanel")))
@@ -163,6 +176,29 @@ type RunPanelProps = {
   onCreateExperiment: (input: ExperimentCreateInput) => Promise<void>;
   onFreezeExperiment: (id: string) => Promise<void>;
   onLaunchExperiment: (id: string, arm: "baseline" | "candidate") => Promise<void>;
+  projects: ProjectRevisionEnvelope[];
+  projectWarnings: string[];
+  onCreateProject: (input: ProjectCreateRequest) => Promise<ProjectRevisionEnvelope>;
+  onAddProjectShot: (id: string, input: ProjectShotCreateRequest) => Promise<ProjectRevisionEnvelope>;
+  onReviseProjectShot: (
+    id: string,
+    shotId: string,
+    input: ProjectShotRevisionRequest,
+  ) => Promise<ProjectRevisionEnvelope>;
+  onLaunchProjectShot: (id: string, shotId: string, expectedRevision: number) => Promise<void>;
+  onCaptureProjectOutput: (
+    id: string,
+    shotId: string,
+    input: ProjectOutputCaptureRequest,
+  ) => Promise<ProjectRevisionEnvelope>;
+  onApproveProjectOutput: (
+    id: string,
+    shotId: string,
+    input: ProjectOutputApprovalRequest,
+  ) => Promise<ProjectRevisionEnvelope>;
+  onArchiveProject: (id: string, input: ProjectArchiveRequest) => Promise<ProjectRevisionEnvelope>;
+  onGetProjectHistory: (id: string) => Promise<ProjectRevisionEnvelope[]>;
+  onLoadProjectRequest: (request: GenerationRequest) => void;
   estimate: ResourceEstimate;
   requiredStartMemoryGiB: number;
 };
@@ -210,12 +246,24 @@ export function RunPanel({
   onCreateExperiment,
   onFreezeExperiment,
   onLaunchExperiment,
+  projects,
+  projectWarnings,
+  onCreateProject,
+  onAddProjectShot,
+  onReviseProjectShot,
+  onLaunchProjectShot,
+  onCaptureProjectOutput,
+  onApproveProjectOutput,
+  onArchiveProject,
+  onGetProjectHistory,
+  onLoadProjectRequest,
   estimate,
   requiredStartMemoryGiB,
 }: RunPanelProps) {
   const selectedVideoRef = useRef<HTMLVideoElement | null>(null);
   const [selectedFrameSeconds, setSelectedFrameSeconds] = useState(0);
   const [experimentsExpanded, setExperimentsExpanded] = useState(false);
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
   const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
   const duration = request.mode === "retake"
     ? request.retake.endTime - request.retake.startTime
@@ -506,6 +554,39 @@ export function RunPanel({
         )}
       </section>
 
+      {projectsExpanded ? (
+        <LazyPanelBoundary label="Projektansicht">
+          <Suspense fallback={<LazyPanelLoading label="Projektansicht" />}>
+            <ProjectPanel
+              request={request}
+              requestValid={requestValid}
+              projects={projects}
+              warnings={projectWarnings}
+              jobs={jobs}
+              selectedOutput={selectedOutput}
+              onCreate={onCreateProject}
+              onAddShot={onAddProjectShot}
+              onReviseShot={onReviseProjectShot}
+              onLaunch={onLaunchProjectShot}
+              onCapture={onCaptureProjectOutput}
+              onApprove={onApproveProjectOutput}
+              onArchive={onArchiveProject}
+              onHistory={onGetProjectHistory}
+              onLoadRequest={onLoadProjectRequest}
+            />
+          </Suspense>
+        </LazyPanelBoundary>
+      ) : (
+        <section className="output-library" aria-label="Produktionsprojekte">
+          <div className="run-panel__heading">
+            <h2><FolderKanban size={16} /> Produktionsprojekte</h2>
+            <button type="button" className="button" onClick={() => setProjectsExpanded(true)}>
+              Projekte öffnen
+            </button>
+          </div>
+        </section>
+      )}
+
       {request.mode !== "text-to-audio" ? (
         experimentsExpanded ? (
           <LazyPanelBoundary label="Experimentansicht">
@@ -530,7 +611,7 @@ export function RunPanel({
             <div className="run-panel__heading">
               <h2>Kontrollierte Experimente</h2>
               <button type="button" className="button" onClick={() => setExperimentsExpanded(true)}>
-                Öffnen
+                Experimente öffnen
               </button>
             </div>
           </section>

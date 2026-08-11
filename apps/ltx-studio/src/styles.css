@@ -1668,6 +1668,7 @@ summary:focus-visible,
 
 .output-library,
 .experiment-panel,
+.project-panel,
 .run-monitor {
   padding: 10px 0 12px;
   border-bottom: 1px solid #c7ccc6;
@@ -1676,6 +1677,214 @@ summary:focus-visible,
 .experiment-create {
   margin-top: 7px;
   border-top: 1px solid #d5d9d4;
+}
+
+.project-create {
+  margin-top: 7px;
+  border-top: 1px solid #d5d9d4;
+}
+
+.project-create summary {
+  padding: 8px 0;
+  color: #3d4940;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.project-create[open] {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.project-create .button {
+  width: 100%;
+  justify-content: center;
+}
+
+.project-workspace {
+  min-width: 0;
+  margin-top: 10px;
+}
+
+.project-workspace__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #d5d9d4;
+}
+
+.project-workspace__summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.project-workspace__summary strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-workspace__summary span,
+.project-description,
+.project-chain-status,
+.project-evidence {
+  color: #59645c;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.project-description {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.project-chain,
+.project-chain-status,
+.project-binding,
+.project-output strong {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-chain {
+  flex: 0 0 auto;
+  color: var(--teal-dark);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.project-chain-status {
+  margin: 7px 0;
+  color: var(--teal-dark);
+  font-weight: 700;
+}
+
+.project-shot-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.project-shot {
+  min-width: 0;
+  padding: 9px;
+  background: #eef1ed;
+  border: 1px solid #d0d5cf;
+  border-radius: 4px;
+}
+
+.project-shot__heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-shot__heading > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-shot__status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #76571d;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.project-shot__status.is-approved {
+  color: var(--teal-dark);
+}
+
+.project-shot__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-top: 6px;
+  color: #5e695f;
+  font-size: 8px;
+}
+
+.project-shot__facts span:nth-child(2),
+.project-output > span:nth-child(2) {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.project-binding {
+  margin: 7px 0 0;
+  color: var(--teal-dark);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.project-actions .button,
+.project-retake .button,
+.project-output .button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.project-retake {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 7px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #d3d8d2;
+}
+
+.project-output-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #d3d8d2;
+}
+
+.project-output {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #566159;
+  font-size: 8px;
+}
+
+.project-output > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-output strong {
+  color: var(--teal-dark);
+  white-space: nowrap;
+}
+
+.project-evidence {
+  margin: 9px 0 0;
+  color: #72521d;
 }
 
 .experiment-create summary {
@@ -3175,6 +3384,7 @@ summary:focus-visible,
   .objective-analysis,
   .objective-comparison,
   .experiment-panel,
+  .project-panel,
   .run-errors,
   .run-warnings,
   .run-suggestions,
@@ -3184,6 +3394,13 @@ summary:focus-visible,
     max-width: 720px;
     margin-right: auto;
     margin-left: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .project-retake,
+  .project-output {
+    grid-template-columns: 1fr;
   }
 }
 

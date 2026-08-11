@@ -185,9 +185,12 @@ output provenance fingerprint, settings-sidecar digest, and exported-media diges
 The project API derives the actor from server configuration and hashes artifacts
 itself; browser-supplied actors or digests are rejected. Project-launched jobs and
 their v7 output sidecars retain the exact project, shot, project-revision, and
-request-revision binding across restart. The Studio project UI is still under
-development, so this backend contract does not yet constitute the complete P4
-workflow.
+request-revision binding across restart. The lazy Studio project workspace can
+create projects and shots, bind continuity, start the exact stored revision,
+capture and approve matching outputs, register edit/retake revisions, verify
+the append-only history, and archive a project. It shows store-integrity
+warnings and never upgrades this production history to P4/SOTA evidence by
+itself.
 
 ## Runtime Settings
 

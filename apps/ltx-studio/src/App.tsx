@@ -41,6 +41,15 @@ import {
   freezeExperiment as freezeExperimentApi,
   getExperiments,
   launchExperimentArm,
+  addProjectShot,
+  approveProjectShotOutput,
+  archiveProject,
+  captureProjectShotOutput,
+  createProject,
+  getProjectHistory,
+  getProjects,
+  launchProjectShot,
+  reviseProjectShot,
 } from "./api";
 import { protocolOrderedComparisonOutputs } from "./objectiveComparison";
 import { RefreshFence } from "./refreshFence";
@@ -54,6 +63,15 @@ import type {
   ControlledExperiment,
   ExperimentCreateInput,
 } from "../shared/experiments";
+import type {
+  ProjectArchiveRequest,
+  ProjectCreateRequest,
+  ProjectOutputApprovalRequest,
+  ProjectOutputCaptureRequest,
+  ProjectRevisionEnvelope,
+  ProjectShotCreateRequest,
+  ProjectShotRevisionRequest,
+} from "../shared/projects";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
 import { LazyPanelBoundary, LazyPanelLoading } from "./components/LazyPanelBoundary";
@@ -123,6 +141,9 @@ export function App() {
   const [outputs, setOutputs] = useState<StudioOutput[]>([]);
   const [experiments, setExperiments] = useState<ControlledExperiment[]>([]);
   const experimentRefreshFence = useRef(new RefreshFence());
+  const [projects, setProjects] = useState<ProjectRevisionEnvelope[]>([]);
+  const [projectWarnings, setProjectWarnings] = useState<string[]>([]);
+  const projectRefreshFence = useRef(new RefreshFence());
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedOutputName, setSelectedOutputName] = useState<string | null>(null);
   const [comparisonNames, setComparisonNames] = useState<string[]>([]);
@@ -173,7 +194,8 @@ export function App() {
     let mounted = true;
     const refresh = async () => {
       const experimentSnapshot = experimentRefreshFence.current.snapshot();
-      const [coreResult, experimentResult] = await Promise.allSettled([
+      const projectSnapshot = projectRefreshFence.current.snapshot();
+      const [coreResult, experimentResult, projectResult] = await Promise.allSettled([
         Promise.all([
           getConfig(),
           getHealth(),
@@ -183,6 +205,7 @@ export function App() {
           getOutputs(),
         ]),
         getExperiments(),
+        getProjects(),
       ]);
       if (!mounted) return;
       if (coreResult.status === "rejected") {
@@ -211,9 +234,18 @@ export function App() {
       ) {
         setExperiments(experimentResult.value.experiments);
       }
-      if (experimentResult.status === "rejected") {
-        const error = experimentResult.reason;
-        setStartupError(error instanceof Error ? error.message : "Experimentdaten sind nicht verfügbar");
+      if (
+        projectResult.status === "fulfilled"
+        && projectRefreshFence.current.accepts(projectSnapshot)
+      ) {
+        setProjects(projectResult.value.projects);
+        setProjectWarnings(projectResult.value.warnings);
+      }
+      if (experimentResult.status === "rejected" || projectResult.status === "rejected") {
+        const error = experimentResult.status === "rejected"
+          ? experimentResult.reason
+          : projectResult.status === "rejected" ? projectResult.reason : null;
+        setStartupError(error instanceof Error ? error.message : "Workflowdaten sind nicht verfügbar");
       } else {
         setStartupError(null);
       }
@@ -237,6 +269,20 @@ export function App() {
       },
       10_000,
     );
+    const projectsTimer = window.setInterval(
+      () => {
+        const snapshot = projectRefreshFence.current.snapshot();
+        void getProjects()
+          .then((next) => {
+            if (projectRefreshFence.current.accepts(snapshot)) {
+              setProjects(next.projects);
+              setProjectWarnings(next.warnings);
+            }
+          })
+          .catch(() => undefined);
+      },
+      10_000,
+    );
     const events = new EventSource("/api/events");
     events.addEventListener("jobs", (event) => {
       setJobs(JSON.parse((event as MessageEvent).data) as StudioJob[]);
@@ -249,6 +295,7 @@ export function App() {
       window.clearInterval(healthTimer);
       window.clearInterval(outputsTimer);
       window.clearInterval(experimentsTimer);
+      window.clearInterval(projectsTimer);
       events.close();
     };
   }, []);
@@ -482,6 +529,73 @@ export function App() {
       finishMutation();
       throw error;
     }
+  };
+
+  const commitProjectMutation = async (
+    mutation: () => Promise<ProjectRevisionEnvelope>,
+  ): Promise<ProjectRevisionEnvelope> => {
+    const finishMutation = projectRefreshFence.current.beginMutation();
+    try {
+      const project = await mutation();
+      finishMutation();
+      setProjects((current) => [
+        project,
+        ...current.filter(({ projectId }) => projectId !== project.projectId),
+      ]);
+      return project;
+    } catch (error) {
+      finishMutation();
+      throw error;
+    }
+  };
+
+  const handleCreateProject = (input: ProjectCreateRequest) =>
+    commitProjectMutation(() => createProject(input));
+
+  const handleAddProjectShot = (id: string, input: ProjectShotCreateRequest) =>
+    commitProjectMutation(() => addProjectShot(id, input));
+
+  const handleReviseProjectShot = (
+    id: string,
+    shotId: string,
+    input: ProjectShotRevisionRequest,
+  ) => commitProjectMutation(() => reviseProjectShot(id, shotId, input));
+
+  const handleCaptureProjectOutput = (
+    id: string,
+    shotId: string,
+    input: ProjectOutputCaptureRequest,
+  ) => commitProjectMutation(() => captureProjectShotOutput(id, shotId, input));
+
+  const handleApproveProjectOutput = (
+    id: string,
+    shotId: string,
+    input: ProjectOutputApprovalRequest,
+  ) => commitProjectMutation(() => approveProjectShotOutput(id, shotId, input));
+
+  const handleArchiveProject = (id: string, input: ProjectArchiveRequest) =>
+    commitProjectMutation(() => archiveProject(id, input));
+
+  const handleLaunchProjectShot = async (id: string, shotId: string, expectedRevision: number) => {
+    const launched = await launchProjectShot(id, shotId, { expectedRevision });
+    setJobs((current) => [launched.job, ...current.filter((item) => item.id !== launched.job.id)]);
+    setSelectedJobId(launched.job.id);
+  };
+
+  const loadProjectRequest = (projectRequest: GenerationRequest) => {
+    const merged = mergeGenerationRequest(projectRequest, projectRequest.mode);
+    const loaded = withOfficialSpeechModelPaths(
+      modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
+    );
+    setRequest({ ...loaded, outputName: nextEditableOutputName(loaded.outputName, jobs, outputs) });
+    setPromptUndo(null);
+    setAttempted(false);
+    setServerErrors([]);
+    setServerWarnings([]);
+    setPreflightErrors([]);
+    setPreflightWarnings([]);
+    setPreflightSuggestions([]);
+    setCommand(null);
   };
 
   const handleQualityReview = async (output: StudioOutput, input: QualityReviewInput) => {
@@ -884,6 +998,17 @@ export function App() {
           onCreateExperiment={handleCreateExperiment}
           onFreezeExperiment={handleFreezeExperiment}
           onLaunchExperiment={handleLaunchExperiment}
+          projects={projects}
+          projectWarnings={projectWarnings}
+          onCreateProject={handleCreateProject}
+          onAddProjectShot={handleAddProjectShot}
+          onReviseProjectShot={handleReviseProjectShot}
+          onLaunchProjectShot={handleLaunchProjectShot}
+          onCaptureProjectOutput={handleCaptureProjectOutput}
+          onApproveProjectOutput={handleApproveProjectOutput}
+          onArchiveProject={handleArchiveProject}
+          onGetProjectHistory={getProjectHistory}
+          onLoadProjectRequest={loadProjectRequest}
         />
       </div>
 

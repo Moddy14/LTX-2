@@ -1,20 +1,55 @@
 import { expect, test } from "@playwright/test";
 import { createDefaultRequest, pipelineModes } from "../../shared/pipelines.js";
 import { applyExperimentCandidate } from "../../shared/experiments.js";
+import { validRequest } from "../fixtures.js";
 
 test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Text / Bild zu Video");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Text / Bild zu Video", {
+    timeout: 15_000,
+  });
 });
 
 test("loads the experiment workspace only on explicit demand", async ({ page }) => {
-  await expect(page.getByRole("button", { name: "Öffnen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Experimente öffnen" })).toBeVisible();
   await expect(page.getByText("Experiment vorregistrieren", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Öffnen" }).click();
+  await page.getByRole("button", { name: "Experimente öffnen" }).click();
 
   await expect(page.getByText("Experiment vorregistrieren", { exact: true })).toBeVisible();
+});
+
+test("creates and verifies a revision-bound production project from the lazy workspace", async ({ page }, testInfo) => {
+  const projectRequest = validRequest("distilled");
+  projectRequest.outputName = `project-ui-${testInfo.project.name}.mp4`;
+  const draft = Buffer.from(JSON.stringify(projectRequest), "utf8").toString("base64url");
+  await page.goto(`/?draft=${draft}`);
+  await expect(page.getByRole("button", { name: "Projekte öffnen" })).toBeVisible();
+  await expect(page.getByText("Neues Projekt anlegen", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Projekte öffnen" }).click();
+  await expect(page.getByText("Neues Projekt anlegen", { exact: true })).toBeVisible();
+  await page.getByText("Neues Projekt anlegen", { exact: true }).click();
+
+  const suffix = `${testInfo.project.name}-${Date.now()}`;
+  await page.getByLabel("Projekttitel").fill(`Continuity ${suffix}`);
+  await page.getByLabel("Projektbeschreibung").fill("Revisionsgebundener Cross-Shot-Test.");
+  await page.getByRole("button", { name: "Projekt anlegen" }).click();
+  await expect(page.getByText(`Continuity ${suffix}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(/Revision 1 · aktiv/)).toBeVisible();
+
+  await page.getByText("Aktuellen Editorstand als Shot hinzufügen", { exact: true }).click();
+  await page.getByLabel("Shot-Titel").fill("Eröffnung");
+  await page.getByRole("button", { name: "Shot revisionsgebunden anlegen" }).click();
+
+  await expect(page.getByText("1. Eröffnung", { exact: true })).toBeVisible();
+  await expect(page.getByText("Request R1", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Gebunden starten" })).toBeVisible();
+  await page.getByRole("button", { name: "Kette prüfen" }).click();
+  await expect(page.getByText("2 Revisionen vollständig und hashverkettet gelesen.")).toBeVisible();
+  await expect(page.getByText(/keine SOTA-Freigabe ohne P4-Evidence/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test("fails visibly when a lazy deploy chunk is no longer available", async ({ page }) => {
@@ -22,10 +57,10 @@ test("fails visibly when a lazy deploy chunk is no longer available", async ({ p
 
   await Promise.all([
     page.waitForEvent("framenavigated"),
-    page.getByRole("button", { name: "Öffnen" }).click(),
+    page.getByRole("button", { name: "Experimente öffnen" }).click(),
   ]);
-  await expect(page.getByRole("button", { name: "Öffnen" })).toBeVisible();
-  await page.getByRole("button", { name: "Öffnen" }).click();
+  await expect(page.getByRole("button", { name: "Experimente öffnen" })).toBeVisible();
+  await page.getByRole("button", { name: "Experimente öffnen" }).click();
 
   await expect(page.getByRole("alert")).toContainText(
     "Experimentansicht konnte nach dem Deploywechsel nicht geladen werden.",
@@ -469,7 +504,7 @@ test("controlled experiments freeze one variable before either arm can run", asy
 
   const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
-  await page.getByRole("button", { name: "Öffnen" }).click();
+  await page.getByRole("button", { name: "Experimente öffnen" }).click();
   await page.getByText("Experiment vorregistrieren", { exact: true }).click();
   await page.getByLabel("Kontrollierte Variable").selectOption("lipforcing-enabled");
   await expect(page.getByText("Kandidat: LipForcing mit qualitativem Wan-VAE-Decoder")).toBeVisible();
