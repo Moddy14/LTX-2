@@ -101,19 +101,20 @@ def _fixed_report(catalog: dict[str, object], design: dict[str, object]) -> dict
     }
 
 
-def _effect(rank: int) -> dict[str, object]:
+def _effect(rank: int, hypothesis_count: int) -> dict[str, object]:
     adjusted_p = rank / 1_000_000
     standard_error = 0.01
     estimate = 0.1
     raw_critical = NormalDist().inv_cdf(0.975)
-    holm_alpha = 0.05 / (25 - rank)
+    remaining = hypothesis_count - rank + 1
+    holm_alpha = 0.05 / remaining
     holm_critical = NormalDist().inv_cdf(1 - holm_alpha)
     return {
         "estimate": estimate,
         "standard_error": standard_error,
         "raw_ci_lower": estimate - raw_critical * standard_error,
         "raw_ci_upper": estimate + raw_critical * standard_error,
-        "raw_p": adjusted_p / (25 - rank),
+        "raw_p": adjusted_p / remaining,
         "holm_adjusted_p": adjusted_p,
         "holm_rank": rank,
         "holm_alpha": holm_alpha,
@@ -125,9 +126,11 @@ def _effect(rank: int) -> dict[str, object]:
 def _vbench_report(design: dict[str, object]) -> dict[str, object]:
     metrics: list[dict[str, object]] = []
     rank = 1
-    for gate in design["vbench_gate_catalog"]["gates"]:  # type: ignore[index]
-        absolute = _effect(rank)
-        relative = _effect(rank + 1)
+    gates = design["vbench_gate_catalog"]["gates"]  # type: ignore[index]
+    hypothesis_count = 2 * len(gates)
+    for gate in gates:
+        absolute = _effect(rank, hypothesis_count)
+        relative = _effect(rank + 1, hypothesis_count)
         rank += 2
         metrics.append(
             {
@@ -210,7 +213,7 @@ def _bundle(catalog: dict[str, object], design: dict[str, object]) -> dict[str, 
     }
 
 
-def test_complete_d1_report_is_deterministic_and_covers_all_49_gates() -> None:
+def test_complete_d1_report_is_deterministic_and_covers_the_full_surface_gate_matrix() -> None:
     design = _design()
     catalog = _catalog(design)
     bundle = _bundle(catalog, design)
@@ -223,7 +226,7 @@ def test_complete_d1_report_is_deterministic_and_covers_all_49_gates() -> None:
 
     assert first == second
     assert first["verdict"] == "pass"
-    assert len(first["metrics"]) == 49
+    assert len(first["metrics"]) == 109
     assert first["metrics"] == sorted(first["metrics"], key=lambda metric: metric["metric_id"])
 
 
@@ -235,7 +238,7 @@ def test_complete_d1_accepts_the_executable_vbench_scorer_output() -> None:
     report = build_complete_d1_report(bundle, calibration_catalog=catalog, design=design)
 
     assert report["verdict"] == "pass"
-    assert len(report["metrics"]) == 49
+    assert len(report["metrics"]) == 109
 
 
 def test_complete_d1_report_recomputes_fixed_and_vbench_decisions() -> None:

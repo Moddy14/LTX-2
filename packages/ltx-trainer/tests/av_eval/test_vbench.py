@@ -85,8 +85,8 @@ def test_vbench_measurements_are_deterministic_and_holm_controlled() -> None:
     assert first == second
     assert first["verdict"] == "pass"
     assert first["multiplicity"] == "holm"
-    assert first["hypotheses"] == 24
-    assert len(first["metrics"]) == 12
+    assert first["hypotheses"] == 144
+    assert len(first["metrics"]) == 72
     assert all(metric["estimate"] <= 0.05 for metric in first["metrics"])
     assert all(metric["absolute"]["holm_ci_lower"] > 0 for metric in first["metrics"])
     assert all(metric["relative"]["holm_ci_lower"] > 0 for metric in first["metrics"])

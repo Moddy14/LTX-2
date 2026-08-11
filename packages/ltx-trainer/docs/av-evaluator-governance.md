@@ -123,7 +123,8 @@ the gates after results are visible.
 `configs/av_eval/calibration-gates.v1.json` is the complete machine-readable
 gate inventory for calibration. It includes 37 fixed AV, phoneme/viseme,
 identity, artifact, ASR, sharpness, calibration and abstention decisions plus
-the 12 claim-specific VBench measurements from D0a. Names, numbers and
+72 claim-specific VBench measurements from D0a: six dimensions for every
+unique visual claim among the 17 Candidate-Surface entries. Names, numbers and
 negations have separate 99%-accuracy gates and separate D0a power endpoints;
 they may never be hidden in one aggregate. Plan-fixed thresholds are
 immutable in the validator; only the still-unknown relative sharpness floor is
@@ -137,7 +138,7 @@ uv run python scripts/av_eval.py calibration-check \
 
 The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
 metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
-evidence, or an unbound upstream catalog. Its output is the exact 49-ID set
+evidence, or an unbound upstream catalog. Its output is the exact 109-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
 
@@ -262,21 +263,22 @@ scorers. It requires one shared dataset, preregistration, release, strata plan
 and bootstrap contract; verifies every evaluator fingerprint against the
 ready calibration catalog; rejects missing or extra source metrics; and
 recomputes each of the 37 fixed decisions from its registered estimate or
-confidence bound. The remaining 12 gates are intentionally not synthesized:
+confidence bound. The remaining 72 gates are intentionally not synthesized:
 they require the pinned official VBench runtime and Holm-corrected evidence.
 
-`vbench-score` supplies those twelve remaining measurements. It validates the
+`vbench-score` supplies those 72 remaining measurements: six dimensions for
+each of the twelve visual candidate claims. It validates the
 frozen D0a catalog, official repository commit and config, runtime,
 comparator-matrix and release bindings. Candidate and anchor scores are paired
 within leakage components. Every claim/dimension must clear both its absolute
-minimum and its registered noninferiority/superiority margin. The resulting 24
+minimum and its registered noninferiority/superiority margin. The resulting 144
 hypotheses share one Holm family; each effect retains its raw interval,
 adjusted p-value, rank-specific alpha and one-sided Holm lower bound. A metric
 passes only when both corrected lower bounds are positive.
 
 Finally, `complete-d1` revalidates both source reports against the same frozen
-D0a design and calibration catalog, verifies all 24 Holm ranks and the pinned
-VBench runtime, and emits one sorted 49-gate report. It recomputes every local
+D0a design and calibration catalog, verifies all 144 Holm ranks and the pinned
+VBench runtime, and emits one sorted 109-gate report. It recomputes every local
 estimate/bound decision and both corrected VBench subtests. Mixed releases,
 changed strata, duplicate ranks, missing metrics or copied pass labels reject
 the complete evidence instead of degrading to a warning.

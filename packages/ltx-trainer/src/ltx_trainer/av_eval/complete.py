@@ -1,4 +1,4 @@
-"""Complete 49-gate D1 evidence assembly."""
+"""Complete fixed and claim-specific VBench D1 evidence assembly."""
 
 from __future__ import annotations
 
@@ -186,7 +186,13 @@ def _validate_fixed_metrics(
     return metrics
 
 
-def _validate_effect(effect: object, *, metric_id: str, kind: str) -> tuple[float, float, int, int]:
+def _validate_effect(
+    effect: object,
+    *,
+    metric_id: str,
+    kind: str,
+    hypothesis_count: int,
+) -> tuple[float, float, int, int]:
     if not isinstance(effect, dict):
         raise CompleteD1Error(f"VBench {metric_id} {kind} effect must be an object")
     _exact_keys(
@@ -220,11 +226,11 @@ def _validate_effect(effect: object, *, metric_id: str, kind: str) -> tuple[floa
     }
     rank = effect["holm_rank"]
     units = effect["independent_units"]
-    if isinstance(rank, bool) or not isinstance(rank, int) or not 1 <= rank <= 24:
+    if isinstance(rank, bool) or not isinstance(rank, int) or not 1 <= rank <= hypothesis_count:
         raise CompleteD1Error(f"VBench {metric_id} {kind} has invalid Holm rank")
     if isinstance(units, bool) or not isinstance(units, int) or units < 2:
         raise CompleteD1Error(f"VBench {metric_id} {kind} has invalid independent units")
-    if effect["holm_alpha"] != FAMILYWISE_ALPHA / (25 - rank):
+    if effect["holm_alpha"] != FAMILYWISE_ALPHA / (hypothesis_count - rank + 1):
         raise CompleteD1Error(f"VBench {metric_id} {kind} has invalid rank-specific alpha")
     if values["standard_error"] < 0:
         raise CompleteD1Error(f"VBench {metric_id} {kind} has a negative standard error")
@@ -255,6 +261,7 @@ def _validate_vbench_metrics(
     identifiers: list[str] = []
     ranks: list[int] = []
     ranked_p: list[tuple[int, float, float]] = []
+    hypothesis_count = 2 * len(gates)
     for index, metric in enumerate(raw_metrics):
         if not isinstance(metric, dict):
             raise CompleteD1Error(f"VBench metric {index} must be an object")
@@ -304,10 +311,16 @@ def _validate_vbench_metrics(
         if actual_gate != expected_gate:
             raise CompleteD1Error(f"VBench metric {metric_id} gate contract mismatch")
         absolute_p, absolute_raw_p, absolute_rank, absolute_units = _validate_effect(
-            metric["absolute"], metric_id=metric_id, kind="absolute"
+            metric["absolute"],
+            metric_id=metric_id,
+            kind="absolute",
+            hypothesis_count=hypothesis_count,
         )
         relative_p, relative_raw_p, relative_rank, relative_units = _validate_effect(
-            metric["relative"], metric_id=metric_id, kind="relative"
+            metric["relative"],
+            metric_id=metric_id,
+            kind="relative",
+            hypothesis_count=hypothesis_count,
         )
         ranks.extend((absolute_rank, relative_rank))
         ranked_p.extend(
@@ -354,8 +367,8 @@ def _validate_vbench_metrics(
             }
         )
     if identifiers != sorted(set(identifiers)) or set(identifiers) != set(gates):
-        raise CompleteD1Error("VBench report does not exactly cover the 12 registered gates")
-    if sorted(ranks) != list(range(1, 25)):
+        raise CompleteD1Error("VBench report does not exactly cover the registered claim/dimension gates")
+    if sorted(ranks) != list(range(1, hypothesis_count + 1)):
         raise CompleteD1Error("VBench Holm ranks must cover every hypothesis exactly once")
     ordered = sorted(ranked_p)
     raw_probabilities = [raw_p for _rank, raw_p, _adjusted_p in ordered]
@@ -363,7 +376,7 @@ def _validate_vbench_metrics(
         raise CompleteD1Error("VBench raw p-values must be monotonic by Holm rank")
     running_adjusted = 0.0
     for rank, raw_p, adjusted_p in ordered:
-        running_adjusted = max(running_adjusted, min(1.0, (25 - rank) * raw_p))
+        running_adjusted = max(running_adjusted, min(1.0, (hypothesis_count - rank + 1) * raw_p))
         if not math.isclose(adjusted_p, running_adjusted, rel_tol=1e-12, abs_tol=1e-12):
             raise CompleteD1Error("VBench Holm-adjusted p-values are inconsistent")
     return metrics
@@ -375,7 +388,7 @@ def build_complete_d1_report(
     calibration_catalog: object,
     design: object,
 ) -> dict[str, Any]:
-    """Revalidate and merge all 49 fixed and VBench D1 gates."""
+    """Revalidate and merge every fixed and claim-specific VBench D1 gate."""
 
     if not isinstance(raw, dict):
         raise CompleteD1Error("complete D1 bundle must be an object")
@@ -416,8 +429,8 @@ def build_complete_d1_report(
     fixed_metrics = _validate_fixed_metrics(fixed, fixed_gates)
     vbench_metrics = _validate_vbench_metrics(vbench, vbench_gates)
     metrics = sorted([*fixed_metrics, *vbench_metrics], key=lambda metric: metric["metric_id"])
-    if len(metrics) != 49 or [metric["metric_id"] for metric in metrics] != catalog_report["required_metric_ids"]:
-        raise CompleteD1Error("complete D1 report does not exactly cover all 49 gates")
+    if [metric["metric_id"] for metric in metrics] != catalog_report["required_metric_ids"]:
+        raise CompleteD1Error("complete D1 report does not exactly cover the full gate catalog")
     return {
         "schema_version": COMPLETE_D1_REPORT_SCHEMA,
         "report_id": raw["report_id"],
