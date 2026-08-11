@@ -23,7 +23,7 @@ def _load(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object]]:
+def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object]]:  # noqa: PLR0912
     landscape = copy.deepcopy(_load(LANDSCAPE_PATH))
     landscape["status"] = "verified"
     landscape["cutoff_date"] = "2026-08-11"
@@ -35,8 +35,14 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
         character = str(index + 1)
         candidate["code_revision"] = character * 40
         candidate["weights_revision"] = character * 40
-        for field in ("code_license_sha256", "weights_license_sha256", "resource_profile_sha256"):
+        for field in ("code_license_sha256", "weights_license_sha256"):
             candidate[field] = character * 64
+        if candidate["compatible_claim_ids"]:
+            candidate["resource_profile_sha256"] = character * 64
+            candidate["resource_fit_status"] = "pass"
+        else:
+            candidate["resource_profile_sha256"] = None
+            candidate["resource_fit_status"] = "not-applicable"
 
     matrix = copy.deepcopy(_load(MATRIX_PATH))
     matrix["status"] = "frozen"
@@ -112,7 +118,8 @@ def test_checked_in_comparator_matrix_is_an_explicit_hold() -> None:
 
     assert report["status"] == "hold"
     assert report["sota_status"] == "hold"
-    assert "candidate-artifact-missing:mova:resource_profile_sha256" in report["blockers"]
+    assert "candidate-artifact-missing:mova:resource_profile_sha256" not in report["blockers"]
+    assert "candidate-resource-fit-pending:mova" not in report["blockers"]
     assert "anchor-landscape-not-verified" in report["blockers"]
     assert "claim-undecided:audio-driven-video.image-audio-to-video" in report["blockers"]
     assert "arm-pending:longcat-video-avatar-1.5" in report["blockers"]
@@ -191,6 +198,19 @@ def test_landscape_rejects_unknown_or_unsorted_compatible_claims() -> None:
     with pytest.raises(ComparatorMatrixError, match="sorted subset of Q1 claims"):
         build_comparator_matrix_report(matrix, landscape=landscape, as_of=AS_OF)
 
+
+def test_matrix_requires_resource_evidence_consistent_with_the_decision() -> None:
+    matrix, landscape = _ready()
+    landscape["candidates"][0]["resource_fit_status"] = "fail"  # type: ignore[index]
+    matrix["landscape_sha256"] = document_sha256(landscape)
+    with pytest.raises(ComparatorMatrixError, match="no passing resource profile"):
+        build_comparator_matrix_report(matrix, landscape=landscape, as_of=AS_OF)
+
+    matrix, landscape = _ready()
+    landscape["candidates"][0]["resource_profile_sha256"] = None  # type: ignore[index]
+    matrix["landscape_sha256"] = document_sha256(landscape)
+    with pytest.raises(ComparatorMatrixError, match="digest and status are inconsistent"):
+        build_comparator_matrix_report(matrix, landscape=landscape, as_of=AS_OF)
 
 def test_comparator_cli_reports_draft_hold(tmp_path: Path) -> None:
     environment = dict(os.environ)

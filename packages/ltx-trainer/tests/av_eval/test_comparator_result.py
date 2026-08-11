@@ -30,7 +30,7 @@ def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _contracts(*, targets: bool = True) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _contracts(*, targets: bool = True) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:  # noqa: PLR0912
     landscape = copy.deepcopy(_load(LANDSCAPE_PATH))
     landscape["status"] = "verified"
     for index, candidate in enumerate(landscape["candidates"], start=1):
@@ -39,7 +39,12 @@ def _contracts(*, targets: bool = True) -> tuple[dict[str, Any], dict[str, Any],
         candidate["weights_revision"] = marker * 40
         candidate["code_license_sha256"] = marker * 64
         candidate["weights_license_sha256"] = marker * 64
-        candidate["resource_profile_sha256"] = marker * 64
+        if candidate["compatible_claim_ids"]:
+            candidate["resource_profile_sha256"] = marker * 64
+            candidate["resource_fit_status"] = "pass"
+        else:
+            candidate["resource_profile_sha256"] = None
+            candidate["resource_fit_status"] = "not-applicable"
 
     matrix = copy.deepcopy(_load(MATRIX_PATH))
     matrix["status"] = "frozen"

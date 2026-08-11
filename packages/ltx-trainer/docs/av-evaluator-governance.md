@@ -378,8 +378,8 @@ applicable gates are digest commitments.
 The current cutoff record is
 `apps/ltx-studio/docs/ANCHOR_LANDSCAPE_2026-08-11.md`. It pins official Git and
 Hugging Face revisions plus separate code- and weight-license evidence. The
-landscape remains `draft` because all three resource profiles and reproducible
-local starts are not yet measured; repository licenses alone do not clear
+landscape remains `draft` because the LongCat/Wan resource profiles and
+reproducible local starts are not yet measured; repository licenses alone do not clear
 training-data or biometric-use rights. The landscape also freezes each
 candidate's sorted `compatible_claim_ids`. Under the current exact input
 contracts, only LongCat and Wan match
@@ -387,6 +387,25 @@ contracts, only LongCat and Wan match
 generates its own audio instead of consuming the fixed driving track, and none
 of the three implements exact-dialogue native generation or exact
 reference-video redubbing.
+
+`comparator-resource-check` turns the live resource boundary into a
+digest-bound report:
+
+```bash
+uv run python scripts/av_eval.py comparator-resource-check \
+  --profile /sealed/q1/longcat-resource-profile.json \
+  --landscape configs/av_eval/anchor-landscape.v1.json
+```
+
+The profile contains exactly three attempted cold runs. Every row must be
+offline, single-GPU, orchestrator-admitted, playable and provenance-verified,
+with zero foreign-service actions and no orphan. Code/weight revisions,
+hardware inventory, launch manifest, normalized input, runner, raw telemetry,
+outputs and the measurement policy are digest-bound. Peak VRAM, remaining
+headroom, wall time and maximum temperature are evaluated against limits fixed
+in the profile. Failed attempts remain in the ITT decision. A compatible arm
+needs a passing profile digest before inclusion; `not-applicable` is accepted
+only when the frozen compatible-claim set is empty.
 
 ```bash
 uv run python scripts/av_eval.py comparator-check \

@@ -14,6 +14,7 @@
       "code_license_sha256": "dfdbf36556065706ef8b26e5866acb85209b6465af0395578d38b63470e0bed0",
       "weights_license_sha256": "d4b5dc706d13a511cc1aac623f75c10ac1dff902ffd915a411e398218b675cb4",
       "resource_profile_sha256": null,
+      "resource_fit_status": "pending",
       "compatible_claim_ids": ["audio-driven-video.image-audio-to-video"]
     },
     {
@@ -24,6 +25,7 @@
       "code_license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
       "weights_license_sha256": "facf3856a51fdb8fdb096946af952a63254eb3078eb49a7fcdd178ae67575a89",
       "resource_profile_sha256": null,
+      "resource_fit_status": "not-applicable",
       "compatible_claim_ids": []
     },
     {
@@ -34,6 +36,7 @@
       "code_license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
       "weights_license_sha256": "b8361d366abbf2b0d211a20ecb0e721e6879a63f2c3bb66dd4bfc153ed870530",
       "resource_profile_sha256": null,
+      "resource_fit_status": "pending",
       "compatible_claim_ids": ["audio-driven-video.image-audio-to-video"]
     }
   ]

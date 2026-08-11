@@ -15,6 +15,7 @@ from ltx_trainer.av_eval import (
     AsrMeasurementError,
     CalibrationError,
     ComparatorMatrixError,
+    ComparatorResourceError,
     ComparatorResultError,
     CompleteD1Error,
     ContentMeasurementError,
@@ -38,6 +39,7 @@ from ltx_trainer.av_eval import (
     build_calibration_gate_report,
     build_comparator_decision,
     build_comparator_matrix_report,
+    build_comparator_resource_report,
     build_complete_d1_report,
     build_content_measurements,
     build_cross_shot_decision,
@@ -82,6 +84,19 @@ def _run_vbench_runtime_check(config_path: Path, checkout: Path) -> int:
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0
+
+
+def _run_comparator_resource_check(profile_path: Path, landscape_path: Path) -> int:
+    try:
+        report = build_comparator_resource_report(
+            json.loads(profile_path.read_text(encoding="utf-8")),
+            landscape=json.loads(landscape_path.read_text(encoding="utf-8")),
+        )
+    except (OSError, json.JSONDecodeError, ComparatorResourceError) as error:
+        logger.error("Comparator resource profile rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "resource-fit-pass" else 2
 
 
 def _run_pilot_score(path: Path) -> int:
@@ -435,6 +450,12 @@ def _add_comparator_commands(subcommands: argparse._SubParsersAction) -> None:  
     comparator_score.add_argument("--gates", type=Path, required=True)
     comparator_score.add_argument("--matrix", type=Path, required=True)
     comparator_score.add_argument("--landscape", type=Path, required=True)
+    resource = subcommands.add_parser(
+        "comparator-resource-check",
+        help="validate three cold orchestrated resource-profile runs",
+    )
+    resource.add_argument("--profile", type=Path, required=True)
+    resource.add_argument("--landscape", type=Path, required=True)
 
 
 def _add_f0_command(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
@@ -562,6 +583,7 @@ def main() -> int:  # noqa: PLR0915
         "asr-score": lambda: _run_asr_score(args.observations),
         "calibration-check": lambda: _run_calibration_check(args.catalog),
         "comparator-check": lambda: _run_comparator_check(args.matrix, args.landscape),
+        "comparator-resource-check": lambda: _run_comparator_resource_check(args.profile, args.landscape),
         "comparator-score": lambda: _run_comparator_score(args.results, args.gates, args.matrix, args.landscape),
         "content-score": lambda: _run_content_score(args.observations),
         "complete-d1": lambda: _run_complete_d1(args.bundle, args.catalog, args.design),

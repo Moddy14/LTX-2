@@ -17,7 +17,7 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 165/165, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 170/170, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
@@ -29,7 +29,7 @@ lautet der ehrliche Status **nicht 10/10**.
 | Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. D0a wertet jetzt gepaarte Rohpilotmessungen, Wiederholbarkeit, Clustereffekt und Binomialraten deterministisch aus und bindet sie fail-closed an Powerdesign, D0 und F0. Der D1-Katalog umfasst alle 37 festen und 90 claim-spezifischen VBench-Gates der aktuellen Candidate-Surface. Es gibt weiterhin keine reale rechtsgeprüfte Pilot-/Kalibrierstichprobe, keinen versiegelten Holdout und keine unabhängigen Signaturen | Auswertungsvertrag gut; reale Pilot-, Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
 | Video-Benchmark | Der offizielle VBench-I2V-Commit `45e79ec1…` und 17 relevante Source-/Config-Dateien sind durch einen fail-closed Source-Contract gebunden und gegen einen sauberen offiziellen Checkout verifiziert. Die sechs releasebezogenen Custom-Input-Dimensionen werden einzeln ausgewertet, nie als Gesamtscore. Isolierter Dependency-/Checkpoint-Runtime-Fingerprint und reale Messungen fehlen noch | Source-Vertrag gut; D1-Runtime und Evidenz offen | P2 |
-| Komparatoren | Die cutoff-datierte Landschaft und Matrix binden die Eingabeverträge jetzt maschinell: Nur `audio-driven-video.image-audio-to-video` hat mit LongCat und Wan anwendbare externe Kandidaten; MOVA konsumiert den festen Ziel-Audiotrack nicht. Native Dialoggenerierung und exaktes Referenzvideo-Redubbing sind mit diesen drei Armen `local-only`. LongCat ist lokal vorhanden, MOVA und Wan fehlen lokal; Ressourcenprofile, Rechtefreigaben und technische Piloten sind offen | Fairnessvertrag gut; lokaler Bake-off offen | P3 |
+| Komparatoren | Die cutoff-datierte Landschaft und Matrix binden die Eingabeverträge jetzt maschinell: Nur `audio-driven-video.image-audio-to-video` hat mit LongCat und Wan anwendbare externe Kandidaten; MOVA konsumiert den festen Ziel-Audiotrack nicht. Native Dialoggenerierung und exaktes Referenzvideo-Redubbing sind mit diesen drei Armen `local-only`. Ein fail-closed Profiler bindet je anwendbarem externem Arm exakt drei kalte, offline und orchestriert zugelassene ITT-Läufe an Revisionen, Input, Hardware, Telemetrie, Output, Provenienz sowie VRAM-/Laufzeit-/Temperaturgrenzen. LongCat ist lokal vorhanden, Wan fehlt lokal; reale Profile, Rechtefreigaben und technische Piloten sind offen | Fairness- und Profilvertrag gut; lokaler Bake-off offen | P3 |
 
 Die frühere 533-kB-Warnung ist durch R2 geschlossen. Auch der frühere
 `requests`-Konflikt ist im Releasepfad durch die eigene gelockte R1-Runtime
@@ -558,8 +558,16 @@ Native-Dialog- und Redubbing-Claims sind objektiv input-inkompatibel.
 3. Komparatoren erst nach Lizenz- und Ressourcenprüfung commit- und
    gewichtsdigest-gepinnt lokal installieren. Wan2.2-S2V verlangt laut
    offiziellem Single-GPU-Pfad mindestens 80 GB und braucht einen eigenen
-   Orchestrator-Consumer; MOVA bleibt außerhalb jeder Zeile mit inkompatiblem
-   Eingabevertrag.
+   Orchestrator-Consumer. `comparator-resource-check` verlangt je anwendbarem
+   externem Arm genau drei kalte, offline ausgeführte und vom Orchestrator
+   zugelassene Versuche. Jeder Versuch bleibt nach ITT im Profil und bindet
+   Job-/Orchestrator-Evidenz, Hardwareinventar, Runner, Launchmanifest, Input,
+   Output, Provenienz, Rohtelemetrie, Peak-VRAM, Laufzeit und Maximaltemperatur.
+   Fehler, fremde Serviceaktionen, Orphans oder eine gerissene vorregistrierte
+   Ressourcen-/Thermalgrenze ergeben `resource-fit-fail`. Nur ein passender
+   Profil-Digest mit `resource_fit_status=pass` erlaubt `included`. MOVA bleibt
+   wegen inkompatiblem Eingabevertrag außerhalb jeder Qualitätszeile und darf
+   nur deshalb `not-applicable` statt eines unnötigen GPU-Profils führen.
 4. Vor jedem Qualitätslauf objektive Inclusion-/Exclusion-Kriterien hashen:
    Rechte, identischer Inputvertrag, reproduzierbarer Start, Ressourcenfit und
    vorab definierte technische Mindestfunktion. Ein Qualitätsresultat darf

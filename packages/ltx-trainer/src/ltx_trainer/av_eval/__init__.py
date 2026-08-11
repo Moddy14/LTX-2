@@ -16,6 +16,7 @@ from .authorization import (
 from .bundle import D1BundleError, build_fixed_d1_report
 from .calibration import CalibrationError, build_calibration_gate_report
 from .comparator import ComparatorMatrixError, build_comparator_matrix_report
+from .comparator_resource import ComparatorResourceError, build_comparator_resource_report
 from .comparator_result import ComparatorResultError, build_comparator_decision, build_holdout_comparator_decision
 from .complete import CompleteD1Error, build_complete_d1_report
 from .content import ContentMeasurementError, build_content_measurements
@@ -62,6 +63,7 @@ __all__ = [
     "AuthorizationError",
     "CalibrationError",
     "ComparatorMatrixError",
+    "ComparatorResourceError",
     "ComparatorResultError",
     "CompleteD1Error",
     "ContentMeasurementError",
@@ -88,6 +90,7 @@ __all__ = [
     "build_calibration_gate_report",
     "build_comparator_decision",
     "build_comparator_matrix_report",
+    "build_comparator_resource_report",
     "build_complete_d1_report",
     "build_consumption_event",
     "build_content_measurements",

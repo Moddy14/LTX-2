@@ -464,8 +464,14 @@ def _q2_comparator_contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str
         marker = str(index)
         for field in ("code_revision", "weights_revision"):
             candidate[field] = marker * 40
-        for field in ("code_license_sha256", "weights_license_sha256", "resource_profile_sha256"):
+        for field in ("code_license_sha256", "weights_license_sha256"):
             candidate[field] = marker * 64
+        if candidate["compatible_claim_ids"]:
+            candidate["resource_profile_sha256"] = marker * 64
+            candidate["resource_fit_status"] = "pass"
+        else:
+            candidate["resource_profile_sha256"] = None
+            candidate["resource_fit_status"] = "not-applicable"
     landscape_index = {candidate["candidate_id"]: candidate for candidate in landscape["candidates"]}
     matrix = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
     matrix["status"] = "frozen"

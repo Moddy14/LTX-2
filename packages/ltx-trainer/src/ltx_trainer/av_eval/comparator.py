@@ -90,7 +90,7 @@ def _revision(value: object, context: str, *, nullable: bool = False) -> str | N
     return value
 
 
-def _validate_landscape(  # noqa: PLR0912
+def _validate_landscape(  # noqa: PLR0912, PLR0915
     raw: object,
     *,
     as_of: date,
@@ -147,6 +147,7 @@ def _validate_landscape(  # noqa: PLR0912
                 "code_license_sha256",
                 "weights_license_sha256",
                 "resource_profile_sha256",
+                "resource_fit_status",
                 "compatible_claim_ids",
             },
             f"landscape candidate {index}",
@@ -159,7 +160,7 @@ def _validate_landscape(  # noqa: PLR0912
         for field in ("code_revision", "weights_revision"):
             if _revision(candidate[field], f"candidate {candidate_id}.{field}", nullable=True) is None:
                 blockers.append(f"candidate-artifact-missing:{candidate_id}:{field}")
-        for field in ("code_license_sha256", "weights_license_sha256", "resource_profile_sha256"):
+        for field in ("code_license_sha256", "weights_license_sha256"):
             if _sha256(candidate[field], f"candidate {candidate_id}.{field}", nullable=True) is None:
                 blockers.append(f"candidate-artifact-missing:{candidate_id}:{field}")
         compatible_claim_ids = candidate["compatible_claim_ids"]
@@ -171,6 +172,28 @@ def _validate_landscape(  # noqa: PLR0912
             raise ComparatorMatrixError(
                 f"candidate {candidate_id}.compatible_claim_ids must be a sorted subset of Q1 claims",
             )
+        resource_profile = _sha256(
+            candidate["resource_profile_sha256"],
+            f"candidate {candidate_id}.resource_profile_sha256",
+            nullable=True,
+        )
+        resource_fit_status = candidate["resource_fit_status"]
+        if resource_fit_status not in {"pending", "pass", "fail", "not-applicable"}:
+            raise ComparatorMatrixError(f"candidate {candidate_id}.resource_fit_status is unsupported")
+        if not compatible_claim_ids:
+            if resource_fit_status != "not-applicable" or resource_profile is not None:
+                raise ComparatorMatrixError(
+                    f"candidate {candidate_id} without compatible claims must have a not-applicable resource profile",
+                )
+        elif resource_fit_status == "not-applicable" or (resource_profile is None) != (
+            resource_fit_status == "pending"
+        ):
+            raise ComparatorMatrixError(
+                f"candidate {candidate_id} resource profile digest and status are inconsistent",
+            )
+        if compatible_claim_ids and resource_fit_status == "pending":
+            blockers.append(f"candidate-artifact-missing:{candidate_id}:resource_profile_sha256")
+            blockers.append(f"candidate-resource-fit-pending:{candidate_id}")
         indexed[candidate_id] = candidate
     if identifiers != sorted(set(identifiers)):
         raise ComparatorMatrixError("landscape candidates must be unique and sorted")
@@ -271,6 +294,8 @@ def _validate_arm(  # noqa: PLR0912
             blockers.append(f"arm-artifacts-missing:{arm_id}")
         if raw["exclusion_reason"] is not None:
             raise ComparatorMatrixError(f"included arm {arm_id} cannot have an exclusion reason")
+        if external and landscape[arm_id]["resource_fit_status"] != "pass":
+            raise ComparatorMatrixError(f"included arm {arm_id} has no passing resource profile")
     else:
         if raw["exclusion_reason"] not in EXCLUSION_REASONS:
             raise ComparatorMatrixError(f"excluded arm {arm_id} needs an objective exclusion reason")
@@ -284,6 +309,8 @@ def _validate_arm(  # noqa: PLR0912
             and raw["technical_status"] != "fail"
         ):
             raise ComparatorMatrixError(f"excluded arm {arm_id} does not prove its technical failure")
+        if reason == "resource-fit-failed" and external and landscape[arm_id]["resource_fit_status"] != "fail":
+            raise ComparatorMatrixError(f"excluded arm {arm_id} has no failing resource profile")
     if external and code is not None and code != landscape[arm_id]["code_revision"]:
         raise ComparatorMatrixError(f"arm {arm_id} code does not match the anchor landscape")
     if external and weights is not None and weights != landscape[arm_id]["weights_revision"]:

@@ -86,6 +86,9 @@ deployment rights; those remain subject to the signed rights policy.
   landscape. They remain `local-only` unless a later cutoff-dated search adds a
   rights-clear model with the same reference-video plus target-text contract.
 
-No candidate is yet execution-authorized by this record. Resource profiles,
-reproducible local starts, complete rights attestations and technical-minimum
-pilots remain mandatory before a matrix arm can become `included`.
+No candidate is yet execution-authorized by this record. LongCat and Wan need
+digest-bound resource profiles, reproducible local starts, complete rights
+attestations and technical-minimum pilots before either matrix arm can become
+`included`. MOVA's resource fit is schema-valid `not-applicable` because its
+compatible-claim set is empty; this N/A cannot be used for a candidate that is
+compatible with any frozen claim.
