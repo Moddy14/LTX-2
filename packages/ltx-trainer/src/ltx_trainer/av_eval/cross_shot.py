@@ -9,7 +9,10 @@ from .design import document_sha256
 CROSS_SHOT_SCHEMA = "ltx-av-eval-cross-shot-protocol.v1"
 CROSS_SHOT_REPORT_SCHEMA = "ltx-av-eval-cross-shot-protocol-report.v1"
 DESIGN_REPORT_SCHEMA = "ltx-sota-power-report.v1"
-CLAIM_ID = "reference-video-redubbing"
+CLAIM_IDS = (
+    "reference-video-redubbing.native-distilled",
+    "reference-video-redubbing.official-comfy-hq",
+)
 INDEPENDENT_UNIT = "identity-speaker-and-transitive-leakage-component"
 ARM_SPECS = {
     "automatic-scene-reference": ("automatic", False),
@@ -247,7 +250,7 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
             "schema_version",
             "status",
             "protocol_id",
-            "claim_id",
+            "claim_ids",
             "bindings",
             "sample_plan",
             "arms",
@@ -261,8 +264,8 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
     if raw["schema_version"] != CROSS_SHOT_SCHEMA or raw["status"] not in {"draft", "frozen"}:
         raise CrossShotProtocolError("unsupported cross-shot schema or status")
     _identifier(raw["protocol_id"], "protocol_id")
-    if raw["claim_id"] != CLAIM_ID or raw["paired_invariants"] != INVARIANTS:
-        raise CrossShotProtocolError("Q0 claim or paired invariants changed")
+    if raw["claim_ids"] != list(CLAIM_IDS) or raw["paired_invariants"] != INVARIANTS:
+        raise CrossShotProtocolError("Q0 claims or paired invariants changed")
     if raw["required_measurement_ids"] != sorted(REQUIRED_MEASUREMENT_IDS):
         raise CrossShotProtocolError("required measurements must exactly match the sorted Q0 inventory")
     expected_policy = {
@@ -292,5 +295,5 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
         "arms_digest": document_sha256(raw["arms"]),
         "endpoints_digest": document_sha256(raw["endpoint_bindings"]),
         "required_measurements_digest": document_sha256(raw["required_measurement_ids"]),
-        "planned_renders": required * shots * len(ARM_SPECS) if required is not None else None,
+        "planned_renders": required * shots * len(ARM_SPECS) * len(CLAIM_IDS) if required is not None else None,
     }

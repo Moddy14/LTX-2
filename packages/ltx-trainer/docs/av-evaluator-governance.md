@@ -188,7 +188,9 @@ evaluation or release authority and cannot open the holdout.
 comparison before any render result is visible. The no-reference, manual
 sharp scene-reference and automatic scene-reference arms must use identical
 dialogue, timeline, duration, normalization, seeds and render revision; only
-the reference strategy may differ. The identity count is checked against the
+the reference strategy may differ. Both published LipDub claims,
+`native-distilled` and `official-comfy-hq`, are explicit protocol dimensions
+and cannot be collapsed into an umbrella result. The identity count is checked against the
 complete D0a power report and can never fall below 30, with at least two shots
 per identity.
 

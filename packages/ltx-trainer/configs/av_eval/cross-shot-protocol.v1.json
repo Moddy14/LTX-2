@@ -2,7 +2,10 @@
   "schema_version": "ltx-av-eval-cross-shot-protocol.v1",
   "status": "draft",
   "protocol_id": "ltx-lipdub-cross-shot-q0-01",
-  "claim_id": "reference-video-redubbing",
+  "claim_ids": [
+    "reference-video-redubbing.native-distilled",
+    "reference-video-redubbing.official-comfy-hq"
+  ],
   "bindings": [
     {"artifact_id": "calibration_catalog", "sha256": null},
     {"artifact_id": "calibration_report", "sha256": null},
