@@ -34,6 +34,134 @@
     },
     {
       "componentIds": [
+        "evaluator.vbench.motion-smoothness.amt"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "not-applicable",
+        "code": "blocked",
+        "commercialUse": "blocked",
+        "trainingData": "not-distributed",
+        "weights": "blocked"
+      },
+      "evidenceId": "evaluator-vbench-amt-noncommercial",
+      "reason": "Official VBench motion smoothness imports the vendored AMT implementation and amt-s checkpoint; both upstream sources restrict use to noncommercial purposes, so they cannot support a commercial product qualification without a separate commercial license.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "vbench/third_party/amt/LICENSE",
+          "repository": "Vchitect/VBench",
+          "revision": "45e79ec14e69a2187202c675d2dbce1a71843d53",
+          "sha256": "5230fe1253ad281313dc26275637dc24e7455c5fd2a6113382fcf8fe007bf1ff",
+          "sizeBytes": 18208,
+          "url": "https://raw.githubusercontent.com/Vchitect/VBench/45e79ec14e69a2187202c675d2dbce1a71843d53/vbench/third_party/amt/LICENSE"
+        },
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "lalala125/AMT",
+          "revision": "31d0420ef7788f6dc22aad3445148705007141bb",
+          "sha256": "8739f354b75bf1aa6310a0ffac9b7dcafed012c42b771947e48b7f4da8b9d800",
+          "sizeBytes": 33,
+          "url": "https://huggingface.co/lalala125/AMT/resolve/31d0420ef7788f6dc22aad3445148705007141bb/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "evaluator.vbench.aesthetic-linear",
+        "evaluator.vbench.clip-vit-b-32",
+        "evaluator.vbench.clip-vit-l-14",
+        "evaluator.vbench.dino-vitbase16",
+        "evaluator.vbench.raft-things",
+        "evaluator.vbench.source"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "not-applicable",
+        "code": "permitted",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "conditional"
+      },
+      "evidenceId": "evaluator-vbench-permissive-components",
+      "reason": "The pinned VBench, CLIP, DINO, RAFT and aesthetic-predictor code licenses are permissive; a current signed attest must still confirm that the downloaded checkpoint artifacts are covered and used only for the registered evaluator purpose.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "LAION-AI/aesthetic-predictor",
+          "revision": "6d122adad522ab246644d9dc1c6d7a3810ee255f",
+          "sha256": "3c8693d95e6ae2e39f37083b1242dfefde5639f754ff8a0a6d4d51038247a00a",
+          "sizeBytes": 1065,
+          "url": "https://raw.githubusercontent.com/LAION-AI/aesthetic-predictor/6d122adad522ab246644d9dc1c6d7a3810ee255f/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "Vchitect/VBench",
+          "revision": "45e79ec14e69a2187202c675d2dbce1a71843d53",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "sizeBytes": 11356,
+          "url": "https://raw.githubusercontent.com/Vchitect/VBench/45e79ec14e69a2187202c675d2dbce1a71843d53/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "vbench/third_party/RAFT/LICENSE",
+          "repository": "Vchitect/VBench",
+          "revision": "45e79ec14e69a2187202c675d2dbce1a71843d53",
+          "sha256": "399af7e243d625e8dea2b3f81fec676ea19bacf7d9ce8cfd4ce15530d8a66173",
+          "sizeBytes": 1512,
+          "url": "https://raw.githubusercontent.com/Vchitect/VBench/45e79ec14e69a2187202c675d2dbce1a71843d53/vbench/third_party/RAFT/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "facebookresearch/dino",
+          "revision": "7c446df5b9f45747937fb0d72314eb9f7b66930a",
+          "sha256": "50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a",
+          "sizeBytes": 11324,
+          "url": "https://raw.githubusercontent.com/facebookresearch/dino/7c446df5b9f45747937fb0d72314eb9f7b66930a/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "openai/CLIP",
+          "revision": "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
+          "sha256": "987e63b32f6c89ff5160e429458a872ff048e6860b590a3912e938f9da8f14db",
+          "sizeBytes": 1064,
+          "url": "https://raw.githubusercontent.com/openai/CLIP/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "evaluator.vbench.imaging-quality.musiq"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "not-applicable",
+        "code": "blocked",
+        "commercialUse": "blocked",
+        "trainingData": "not-distributed",
+        "weights": "blocked"
+      },
+      "evidenceId": "evaluator-vbench-pyiqa-noncommercial",
+      "reason": "Official VBench imaging quality depends on IQA-PyTorch and the MUSIQ-SPAQ checkpoint; the upstream project is PolyForm Noncommercial and therefore cannot support a commercial product qualification without separate rights.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "chaofengc/IQA-PyTorch",
+          "revision": "18dd7a19694e94aac21019170e3f5e63d6b4e19e",
+          "sha256": "7cfe4165a261b8f7fb71331f68da011c583e28c3dc3208e934ae7ccc4441cc46",
+          "sizeBytes": 4659,
+          "url": "https://raw.githubusercontent.com/chaofengc/IQA-PyTorch/18dd7a19694e94aac21019170e3f5e63d6b4e19e/LICENSE"
+        }
+      ]
+    },
+    {
+      "componentIds": [
         "model.ltx23-gemma"
       ],
       "decision": "conditional",

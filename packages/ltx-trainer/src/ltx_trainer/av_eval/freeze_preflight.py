@@ -100,6 +100,11 @@ STUDIO_TRUST_ROLES = {
     "release-authorizer",
     "rights-attestor",
 }
+SOTA_EVALUATOR_RIGHTS_IDS = {
+    "evaluator-vbench-amt-noncommercial",
+    "evaluator-vbench-permissive-components",
+    "evaluator-vbench-pyiqa-noncommercial",
+}
 
 
 class FreezePreflightError(ValueError):
@@ -323,6 +328,50 @@ def _validate_rights(
         raise FreezePreflightError(f"rights signature rejected: {error}") from error
     if digest != candidate["rights_attestation_digest"]:
         raise FreezePreflightError("rights attestation digest mismatch")
+
+
+def _validate_sota_evaluator_rights(
+    candidate: dict[str, Any],
+    catalog: object,
+    rights_attestation: object,
+) -> None:
+    if not isinstance(catalog, dict):
+        raise FreezePreflightError("rights evidence catalog must be an object")
+    if (
+        catalog.get("schemaVersion") != "ltx-studio-rights-evidence.v1"
+        or catalog.get("policyVersion") != "ltx-studio-release-rights.v1"
+        or not isinstance(catalog.get("evidence"), list)
+    ):
+        raise FreezePreflightError("rights evidence catalog schema or policy is invalid")
+    if studio_sha256_document(catalog) != candidate["rights_evidence_catalog_digest"]:
+        raise FreezePreflightError("rights evidence catalog digest mismatch")
+    evidence_by_id: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(catalog["evidence"]):
+        if not isinstance(item, dict):
+            raise FreezePreflightError(f"rights evidence entry {index} must be an object")
+        evidence_id = _identifier(item.get("evidenceId"), f"rights evidence entry {index}.evidenceId")
+        if evidence_id in evidence_by_id:
+            raise FreezePreflightError(f"duplicate rights evidence id: {evidence_id}")
+        evidence_by_id[evidence_id] = item
+    missing = sorted(SOTA_EVALUATOR_RIGHTS_IDS - evidence_by_id.keys())
+    if missing:
+        raise FreezePreflightError(f"SOTA evaluator rights evidence is incomplete: {missing}")
+    if not isinstance(rights_attestation, dict):
+        raise FreezePreflightError("rights attestation must be an object")
+    attested_ids = set(rights_attestation.get("evidenceIds", []))
+    if not SOTA_EVALUATOR_RIGHTS_IDS.issubset(attested_ids):
+        raise FreezePreflightError("rights attestation misses SOTA evaluator evidence")
+    for evidence_id in sorted(SOTA_EVALUATOR_RIGHTS_IDS):
+        entry = evidence_by_id[evidence_id]
+        dimensions = entry.get("dimensions")
+        if (
+            entry.get("decision") == "blocked"
+            or not isinstance(dimensions, dict)
+            or dimensions.get("commercialUse") == "blocked"
+            or dimensions.get("code") == "blocked"
+            or dimensions.get("weights") == "blocked"
+        ):
+            raise FreezePreflightError(f"SOTA evaluator rights are blocked: {evidence_id}")
 
 
 def _validate_surface(  # noqa: PLR0912
@@ -726,6 +775,7 @@ def build_f0_preflight_report(  # noqa: PLR0913
     preregistration_signature: object,
     rights_attestation: object,
     rights_signature: object,
+    rights_evidence_catalog: object,
     evaluation_authorization: object,
     evaluation_signature: object,
     trust_policy: object,
@@ -816,6 +866,7 @@ def build_f0_preflight_report(  # noqa: PLR0913
         now=now,
         required_until=complete_by,
     )
+    _validate_sota_evaluator_rights(candidate, rights_evidence_catalog, rights_attestation)
     candidate_entries, cooperative_modes = _validate_surface(candidate, surface, rights_attestation)
     detailed_producers = _validate_detailed_reports(
         candidate,

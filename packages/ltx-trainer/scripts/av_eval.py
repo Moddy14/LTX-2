@@ -403,6 +403,7 @@ def _run_f0_check(args: argparse.Namespace) -> int:
             preregistration_signature=json.loads(args.preregistration_signature.read_text(encoding="utf-8")),
             rights_attestation=json.loads(args.rights_attestation.read_text(encoding="utf-8")),
             rights_signature=json.loads(args.rights_signature.read_text(encoding="utf-8")),
+            rights_evidence_catalog=json.loads(args.rights_evidence_catalog.read_text(encoding="utf-8")),
             evaluation_authorization=json.loads(args.evaluation_authorization.read_text(encoding="utf-8")),
             evaluation_signature=json.loads(args.evaluation_signature.read_text(encoding="utf-8")),
             trust_policy=json.loads(args.trust_policy.read_text(encoding="utf-8")),
@@ -484,6 +485,7 @@ def _add_f0_command(subcommands: argparse._SubParsersAction) -> None:  # type: i
     command.add_argument("--preregistration-signature", type=Path, required=True)
     command.add_argument("--rights-attestation", type=Path, required=True)
     command.add_argument("--rights-signature", type=Path, required=True)
+    command.add_argument("--rights-evidence-catalog", type=Path, required=True)
     command.add_argument("--evaluation-authorization", type=Path, required=True)
     command.add_argument("--evaluation-signature", type=Path, required=True)
     command.add_argument("--trust-policy", type=Path, required=True)

@@ -344,6 +344,11 @@ keys for evaluation authorization, blind scoring and release authorization.
 It additionally requires an independent scorer UID/GID, a sorted development
 UID deny-list, a sealed ACL, a verified but untouched genesis access log, a
 current unrevoked rights attestation and a passing tune report.
+For any non-empty SOTA target set, F0 also binds the static Studio rights
+catalog and requires explicit, non-blocked coverage for the official VBench
+evaluator code and weights. A release attestation cannot override a cataloged
+noncommercial AMT or IQA-PyTorch/MUSIQ dependency; separate commercial rights
+or a newly preregistered benchmark-compatible evaluator are required first.
 
 ```bash
 uv run python scripts/av_eval.py readiness-check \

@@ -47,6 +47,7 @@ python packages/ltx-trainer/scripts/av_eval.py f0-check \
   --preregistration-signature <preregistration.sig.json> \
   --rights-attestation <rights.json> \
   --rights-signature <rights.sig.json> \
+  --rights-evidence-catalog <rights-evidence.v1.json> \
   --evaluation-authorization <evaluation-authorization.json> \
   --evaluation-signature <evaluation-authorization.sig.json> \
   --trust-policy <trusted-keys.json> \

@@ -34,6 +34,7 @@ CALIBRATION_PATH = (
 )
 MATRIX_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "comparator-matrix.v1.json"
 LANDSCAPE_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "anchor-landscape.v1.json"
+RIGHTS_CATALOG_PATH = REPOSITORY_ROOT / "apps" / "ltx-studio" / "release" / "rights-evidence.v1.json"
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 TARGETS = [
     "audio-driven-video.image-audio-to-video",
@@ -47,6 +48,11 @@ QUALIFICATION_KINDS = [
     "r3-canaries",
     "r3-pause-resume",
     "r3-soak",
+]
+EVALUATOR_RIGHTS_IDS = [
+    "evaluator-vbench-amt-noncommercial",
+    "evaluator-vbench-permissive-components",
+    "evaluator-vbench-pyiqa-noncommercial",
 ]
 
 
@@ -63,6 +69,18 @@ def _key() -> tuple[Ed25519PrivateKey, str]:
     return private, base64.b64encode(public).decode()
 
 
+def _rights_catalog(*, blocked_evaluator_id: str | None) -> dict[str, Any]:
+    catalog = json.loads(RIGHTS_CATALOG_PATH.read_text(encoding="utf-8"))
+    for entry in catalog["evidence"]:
+        if entry["evidenceId"] not in EVALUATOR_RIGHTS_IDS or entry["evidenceId"] == blocked_evaluator_id:
+            continue
+        entry["decision"] = "conditional"
+        for dimension in ("code", "weights", "commercialUse"):
+            if entry["dimensions"][dimension] == "blocked":
+                entry["dimensions"][dimension] = "conditional"
+    return catalog
+
+
 def _fixture(
     *,
     now: datetime = NOW,
@@ -74,6 +92,7 @@ def _fixture(
     include_audio_candidate: bool = False,
     soak_jobs: int = 50,
     pause_mode_families: list[str] | None = None,
+    evaluator_rights_failure: str | None = None,
 ) -> dict[str, Any]:
     release_digest = "1" * 64
     holdout_digest = "3" * 64
@@ -327,16 +346,26 @@ def _fixture(
         "complete_by": _timestamp(now + timedelta(hours=30)),
         "recovery_policy": "same-transaction-and-nonce-resume-until-complete-by.v1",
     }
+    blocked_evaluator_id = (
+        "evaluator-vbench-amt-noncommercial" if evaluator_rights_failure == "blocked" else None
+    )
+    omitted_evaluator_id = (
+        "evaluator-vbench-pyiqa-noncommercial" if evaluator_rights_failure == "unattested" else None
+    )
+    rights_catalog = _rights_catalog(blocked_evaluator_id=blocked_evaluator_id)
     rights = {
         "schemaVersion": "ltx-studio-rights-attestation.v1",
         "releaseDigest": release_digest,
         "surfaceDigest": surface_digest,
-        "evidenceCatalogDigest": "9" * 64,
+        "evidenceCatalogDigest": studio_sha256_document(rights_catalog),
         "policyVersion": "ltx-studio-release-rights.v1",
         "validAt": _timestamp(now - timedelta(hours=1)),
         "expiresAt": _timestamp(now + timedelta(hours=48)),
         "revocationState": "clear",
-        "evidenceIds": ["rights.ltx-core"],
+        "evidenceIds": [
+            *(evidence_id for evidence_id in EVALUATOR_RIGHTS_IDS if evidence_id != omitted_evaluator_id),
+            "rights.ltx-core",
+        ],
         "warnings": [],
     }
     qualification_reports: list[dict[str, Any]] = []
@@ -429,6 +458,7 @@ def _fixture(
         "preregistration_signature": sign(preregistration, "freeze-key-01"),
         "rights_attestation": rights,
         "rights_signature": sign(rights, "rights-key-01"),
+        "rights_evidence_catalog": rights_catalog,
         "evaluation_authorization": evaluation_authorization,
         "evaluation_signature": sign(evaluation_authorization, "evaluation-key-01"),
         "trust_policy": trust_policy,
@@ -586,6 +616,16 @@ def test_f0_rejects_rights_that_expire_during_q2() -> None:
         build_f0_preflight_report(**short_key_window)
 
 
+def test_f0_rejects_blocked_or_unattested_sota_evaluator_rights() -> None:
+    blocked = _fixture(evaluator_rights_failure="blocked")
+    with pytest.raises(FreezePreflightError, match="SOTA evaluator rights are blocked"):
+        build_f0_preflight_report(**blocked)
+
+    unattested = _fixture(evaluator_rights_failure="unattested")
+    with pytest.raises(FreezePreflightError, match="misses SOTA evaluator evidence"):
+        build_f0_preflight_report(**unattested)
+
+
 def test_f0_rejects_any_change_to_the_signed_candidate_index() -> None:
     fixture = _fixture()
     fixture["raw"]["release_digest"] = "f" * 64
@@ -633,6 +673,7 @@ def test_f0_cli_emits_only_a_non_production_preflight(tmp_path: Path) -> None:
         "preregistration-signature": "preregistration_signature",
         "rights-attestation": "rights_attestation",
         "rights-signature": "rights_signature",
+        "rights-evidence-catalog": "rights_evidence_catalog",
         "evaluation-authorization": "evaluation_authorization",
         "evaluation-signature": "evaluation_signature",
         "trust-policy": "trust_policy",
