@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ltx_trainer import logger
 from ltx_trainer.av_eval import (
+    ArtifactMeasurementError,
     AsrMeasurementError,
     CalibrationError,
     ComparatorMatrixError,
@@ -18,6 +19,7 @@ from ltx_trainer.av_eval import (
     DesignError,
     GovernanceError,
     ReadinessError,
+    build_artifact_measurements,
     build_asr_measurements,
     build_calibration_gate_report,
     build_comparator_matrix_report,
@@ -65,6 +67,16 @@ def _run_asr_score(path: Path) -> int:
         report = build_asr_measurements(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, AsrMeasurementError) as error:
         logger.error("ASR observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
+def _run_artifact_score(path: Path) -> int:
+    try:
+        report = build_artifact_measurements(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, ArtifactMeasurementError) as error:
+        logger.error("Artifact observations rejected: %s", error)
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0
@@ -131,6 +143,8 @@ def main() -> int:
     calibration_check.add_argument("--catalog", type=Path, required=True)
     asr_score = subcommands.add_parser("asr-score", help="score normalized ASR observations with cluster bootstrap")
     asr_score.add_argument("--observations", type=Path, required=True)
+    artifact_score = subcommands.add_parser("artifact-score", help="score artifact and warp observations")
+    artifact_score.add_argument("--observations", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -141,6 +155,7 @@ def main() -> int:
     readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
     handlers = {
+        "artifact-score": lambda: _run_artifact_score(args.observations),
         "asr-score": lambda: _run_asr_score(args.observations),
         "calibration-check": lambda: _run_calibration_check(args.catalog),
         "comparator-check": lambda: _run_comparator_check(args.matrix, args.landscape),

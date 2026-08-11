@@ -121,7 +121,7 @@ the gates after results are visible.
 ## D1 calibration gates
 
 `configs/av_eval/calibration-gates.v1.json` is the complete machine-readable
-gate inventory for calibration. It includes 35 fixed AV, phoneme/viseme,
+gate inventory for calibration. It includes 37 fixed AV, phoneme/viseme,
 identity, artifact, ASR, sharpness, calibration and abstention decisions plus
 the 12 claim-specific VBench measurements from D0a. Names, numbers and
 negations have separate 99%-accuracy gates and separate D0a power endpoints;
@@ -137,7 +137,7 @@ uv run python scripts/av_eval.py calibration-check \
 
 The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
 metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
-evidence, or an unbound upstream catalog. Its output is the exact 47-ID set
+evidence, or an unbound upstream catalog. Its output is the exact 49-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
 
@@ -159,6 +159,14 @@ The output binds dataset, preregistration, ASR model, normalizer and strata
 plan digests. Unnormalized tokens, missing critical annotations, uncovered
 strata, pseudoreplicated clips or a changed bootstrap contract reject the
 complete measurement.
+
+`artifact-score` provides the corresponding D1 path for annotated mouth/skin
+events and motion-compensated skin-ring residuals. FAR, FRR and the proportion
+of frames under the 0.04 residual limit use 10,000 leakage-component bootstrap
+replicates. Overall and Worst-Stratum FAR/FRR are distinct gates; all five
+required artifact kinds must be registered FRR strata. Overall residual p95 is
+limited to 0.04 and the worst motion/light stratum to 0.06 by the calibration
+catalog.
 
 ## D0 readiness package
 

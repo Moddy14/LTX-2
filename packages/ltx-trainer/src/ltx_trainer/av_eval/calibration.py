@@ -37,7 +37,9 @@ EXPECTED_VBENCH_METRIC_IDS = {
 }
 GATE_SPECS: dict[str, tuple[str, str, float | None, str]] = {
     "artifact-event-far-ci-upper": ("lower", "ci-upper", 0.01, "overall"),
+    "artifact-event-far-ci-upper-worst-stratum": ("lower", "ci-upper", 0.01, "worst-registered-stratum"),
     "artifact-event-frr-ci-upper": ("lower", "ci-upper", 0.05, "overall"),
+    "artifact-event-frr-ci-upper-worst-stratum": ("lower", "ci-upper", 0.05, "worst-registered-stratum"),
     "artifact-frames-within-warp-limit-ci-lower": ("higher", "ci-lower", 0.99, "overall"),
     "artifact-warp-residual-p95": ("lower", "estimate", 0.04, "overall"),
     "artifact-warp-residual-p95-worst-stratum": ("lower", "estimate", 0.06, "worst-registered-stratum"),

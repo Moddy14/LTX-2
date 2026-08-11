@@ -1,5 +1,6 @@
 """Governance and training utilities for the owned phoneme/viseme evaluator."""
 
+from .artifact import ArtifactMeasurementError, build_artifact_measurements
 from .asr import AsrMeasurementError, build_asr_measurements
 from .authorization import (
     AuthorizationError,
@@ -31,6 +32,7 @@ from .product import (
 from .readiness import ReadinessError, build_product_readiness_report
 
 __all__ = [
+    "ArtifactMeasurementError",
     "AsrMeasurementError",
     "AuthorizationError",
     "CalibrationError",
@@ -42,6 +44,7 @@ __all__ = [
     "ProductGovernanceError",
     "ReadinessError",
     "append_signed_access_event",
+    "build_artifact_measurements",
     "build_asr_measurements",
     "build_calibration_gate_report",
     "build_comparator_matrix_report",
