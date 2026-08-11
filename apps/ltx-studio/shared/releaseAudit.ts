@@ -423,7 +423,51 @@ export const releaseEvidenceSchema = z
     blockers: z.array(z.string()).max(0),
     ready_for_release_authorization: z.literal(true),
   })
-  .strict();
+  .strict()
+  .superRefine((evidence, context) => {
+    const reportKinds = evidence.reports.map(({ kind }) => kind);
+    if (
+      new Set(reportKinds).size !== qualificationKinds.length ||
+      qualificationKinds.some((kind) => !reportKinds.includes(kind))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["reports"],
+        message: "every qualification kind must occur exactly once",
+      });
+    }
+    for (const [path, values] of [
+      ["targetSotaClaimIds", evidence.targetSotaClaimIds],
+      ["candidateSurfaceEntryIds", evidence.candidateSurfaceEntryIds],
+    ] as const) {
+      if (new Set(values).size !== values.length) {
+        context.addIssue({
+          code: "custom",
+          path: [path],
+          message: `${path} must be unique`,
+        });
+      }
+    }
+    const resultsByClaim = new Map(
+      evidence.claimResults.map((result) => [result.claimId, result]),
+    );
+    if (resultsByClaim.size !== evidence.claimResults.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["claimResults"],
+        message: "claim results must be unique",
+      });
+    }
+    for (const target of evidence.targetSotaClaimIds) {
+      if (resultsByClaim.get(target)?.status !== "sota-qualified") {
+        context.addIssue({
+          code: "custom",
+          path: ["targetSotaClaimIds"],
+          message: `target claim is not SOTA-qualified: ${target}`,
+        });
+      }
+    }
+  });
 
 export const releaseAuthorizationSchema = z
   .object({

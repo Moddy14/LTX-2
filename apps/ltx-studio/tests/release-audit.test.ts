@@ -8,6 +8,7 @@ import {
   finalizeReleaseAudit,
   qualificationGateOwnership,
   qualificationKinds,
+  releaseEvidenceSchema,
   type QualificationKind,
   type ReleaseEvidenceInput,
   trustedKeyPolicySchema,
@@ -402,6 +403,25 @@ describe("release evidence collector", () => {
       emptyTargets.index as { targetSotaClaimIds: string[] }
     ).targetSotaClaimIds = [];
     expect(() => collectReleaseEvidence(emptyTargets)).toThrow();
+  });
+
+  it("rejects internally inconsistent release evidence before finalization", () => {
+    const evidence = collectReleaseEvidence(fixture());
+    const unqualifiedTarget = structuredClone(evidence);
+    unqualifiedTarget.claimResults[0] = {
+      claimId: unqualifiedTarget.targetSotaClaimIds[0],
+      status: "local-only",
+      sotaAnchorDigest: null,
+    };
+    expect(releaseEvidenceSchema.safeParse(unqualifiedTarget).success).toBe(
+      false,
+    );
+
+    const duplicateReport = structuredClone(evidence);
+    duplicateReport.reports[0] = structuredClone(duplicateReport.reports[1]);
+    expect(releaseEvidenceSchema.safeParse(duplicateReport).success).toBe(
+      false,
+    );
   });
 });
 
