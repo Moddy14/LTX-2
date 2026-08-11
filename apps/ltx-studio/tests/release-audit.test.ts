@@ -321,6 +321,28 @@ describe("release evidence collector", () => {
     );
   });
 
+  it("does not let calibration coverage replace a missing Q2 holdout gate", () => {
+    const input = fixture();
+    const q2 = report(input, "q2-holdout");
+    const document = q2.document as {
+      coverage: Array<{ gates: string[] }>;
+    };
+    document.coverage[0].gates = document.coverage[0].gates.filter(
+      (gate) => gate !== "identity",
+    );
+    q2.sha256 = hash(document);
+    q2.signature = input.signHoldoutDocument(document);
+    const reference = (
+      input.index as { reports: Array<{ kind: string; sha256: string }> }
+    ).reports.find(({ kind }) => kind === "q2-holdout");
+    if (!reference) throw new Error("missing Q2 report reference");
+    reference.sha256 = q2.sha256;
+
+    expect(() => collectReleaseEvidence(input)).toThrow(
+      /lacks final-owner passing gates: identity/i,
+    );
+  });
+
   it("rejects expired rights even when their original signature is valid", () => {
     const input = fixture();
     input.now = new Date("2026-08-12T01:00:00Z");

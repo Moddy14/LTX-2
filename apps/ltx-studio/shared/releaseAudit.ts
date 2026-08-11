@@ -94,6 +94,22 @@ export const qualificationGateOwnership: Record<
   ],
 };
 
+const finalQualificationGateOwner: Record<ReleaseGateId, QualificationKind> = {
+  "runtime-import": "r1-reproducible-build",
+  "cold-canary": "r3-canaries",
+  "playable-output": "r3-canaries",
+  provenance: "r3-canaries",
+  "av-sync": "q2-holdout",
+  "phoneme-viseme": "q2-holdout",
+  "mouth-artifact": "q2-holdout",
+  identity: "q2-holdout",
+  sharpness: "q2-holdout",
+  "vbench-i2v": "q2-holdout",
+  "asr-critical-token": "q2-holdout",
+  "audio-quality": "q2-holdout",
+  mos: "q2-holdout",
+};
+
 export const trustRoles = [
   "preregistration-freezer",
   "rights-attestor",
@@ -689,9 +705,10 @@ export function collectReleaseEvidence(
         throw new Error(
           `Report claims a non-applicable gate: ${entry.surfaceEntryId}`,
         );
-      const gateSet =
-        coverage.get(entry.surfaceEntryId) ?? new Set<ReleaseGateId>();
-      for (const gate of entry.gates) gateSet.add(gate);
+      const gateSet = coverage.get(entry.surfaceEntryId) ?? new Set<ReleaseGateId>();
+      for (const gate of entry.gates) {
+        if (finalQualificationGateOwner[gate] === report.kind) gateSet.add(gate);
+      }
       coverage.set(entry.surfaceEntryId, gateSet);
     }
     if (report.kind === "q2-holdout") claimResults = report.claimResults;
@@ -704,7 +721,7 @@ export function collectReleaseEvidence(
     const missing = entry.applicableGates.filter((gate) => !passed.has(gate));
     if (missing.length > 0)
       throw new Error(
-        `Candidate ${entry.id} lacks passing gates: ${missing.join(",")}`,
+        `Candidate ${entry.id} lacks final-owner passing gates: ${missing.join(",")}`,
       );
   }
   const resultsByClaim = new Map(
