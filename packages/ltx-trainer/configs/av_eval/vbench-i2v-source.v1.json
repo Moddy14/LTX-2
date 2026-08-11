@@ -1,0 +1,49 @@
+{
+  "schema_version": "ltx-av-eval-vbench-i2v-source.v1",
+  "repository_url": "https://github.com/Vchitect/VBench",
+  "commit": "45e79ec14e69a2187202c675d2dbce1a71843d53",
+  "source_files": [
+    {"path": "LICENSE", "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"},
+    {"path": "evaluate_i2v.py", "sha256": "7fe327bed1d246c1562013b68e2e1431d43756d7ddc575b9fe447d0f5ab13f61"},
+    {"path": "requirements.txt", "sha256": "ee8d54a4c701cdc82e92c1e59b24bbf1a4e1a233bfe06ee8cd4bf68dd4d95d7f"},
+    {"path": "setup.py", "sha256": "391b66727d8ee31ff2597c72ead7244ce1c58498f71c5d66be083a9a446df672"},
+    {"path": "vbench/aesthetic_quality.py", "sha256": "baa1894c2543483901a444af9aabe0701b1f937bf304141c53019a45b27abc57"},
+    {"path": "vbench/background_consistency.py", "sha256": "7def92057819df0dad01c857eecf3b39b8b555c8cdfe881a672cc2b19dc226b4"},
+    {"path": "vbench/dynamic_degree.py", "sha256": "2e93d3a7af38bfbe459c19c9d127894f687424a0bc534dbf7e6571d17b24dff7"},
+    {"path": "vbench/imaging_quality.py", "sha256": "ac6c648cb4d5e82cd29c63be04977e9288c3540558cf12f979e66bef3e1f9e3a"},
+    {"path": "vbench/motion_smoothness.py", "sha256": "5ddc43f246b64e23d10540b8f9e6c302686e6a1ac9fa4e9942b5bd043d89e0b9"},
+    {"path": "vbench/subject_consistency.py", "sha256": "55f5c9a3e5be543380a709b94712903fa67a76340c3c0cb2414ac090dbd1b78d"},
+    {"path": "vbench/utils.py", "sha256": "1bbccddfa5108bd4bf630f9b5176342c407511dea8bfe2bffa8141cb0957d064"},
+    {"path": "vbench2_beta_i2v/__init__.py", "sha256": "da1f15cb660b4d7c92a6f8ec4d1d3ca02d43b798c2025a3bf2bfffa7564c206c"},
+    {"path": "vbench2_beta_i2v/camera_motion.py", "sha256": "de0b9d9b532ffcdbbd8492aea6be8a6606c0be71fda97fa121cb350d565cf41c"},
+    {"path": "vbench2_beta_i2v/i2v_background.py", "sha256": "fb5335849590ef49772ca4a064e3925eb68a2aa7b1f1fb70f5c2b206d72ab950"},
+    {"path": "vbench2_beta_i2v/i2v_subject.py", "sha256": "cf29896eddad3478c0ba91073b621d49cc311d8fbca8079d783115a10e0f7a80"},
+    {"path": "vbench2_beta_i2v/utils.py", "sha256": "54141c8d8fe2f9eb07e6e4b3d124462d279f53a44d7b60c614b23ac54ea41366"},
+    {"path": "vbench2_beta_i2v/vbench2_i2v_full_info.json", "sha256": "8cf4d34dc11779a336c216a1a71d482927cfa24a1bf736ab5c92425609f129f8"}
+  ],
+  "custom_input_dimensions": [
+    "aesthetic_quality",
+    "background_consistency",
+    "camera_motion",
+    "dynamic_degree",
+    "i2v_background",
+    "i2v_subject",
+    "imaging_quality",
+    "motion_smoothness",
+    "subject_consistency"
+  ],
+  "release_dimensions": [
+    "aesthetic-quality",
+    "background-consistency",
+    "dynamic-degree",
+    "imaging-quality",
+    "motion-smoothness",
+    "subject-consistency"
+  ],
+  "invocation": {
+    "entrypoint": "evaluate_i2v.py",
+    "mode": "custom_input",
+    "imaging_quality_preprocessing_mode": "longer",
+    "aggregate_scores": false
+  }
+}

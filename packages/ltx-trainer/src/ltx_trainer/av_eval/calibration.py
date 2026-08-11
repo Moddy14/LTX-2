@@ -21,6 +21,8 @@ FINGERPRINT_IDS = {
     "vbench-runtime",
 }
 VBENCH_CLAIMS = (
+    "audio-driven-video.image-audio-to-video",
+    "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
     "controlled-video.first-last-frame",
     "controlled-video.ic-lora.hdr",
     "controlled-video.ic-lora.ingredients",
@@ -28,6 +30,7 @@ VBENCH_CLAIMS = (
     "controlled-video.ic-lora.motion-track",
     "controlled-video.ic-lora.outpainting",
     "controlled-video.ic-lora.pixel-upscaler",
+    "controlled-video.ic-lora.union-control",
     "controlled-video.ic-lora.v2v-instant-shave",
     "native-generation.image-to-video",
     "reference-video-redubbing.native-distilled",

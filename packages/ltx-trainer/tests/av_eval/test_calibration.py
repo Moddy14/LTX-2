@@ -44,7 +44,7 @@ def test_checked_in_calibration_catalog_is_an_explicit_hold() -> None:
     report = build_calibration_gate_report(_draft())
 
     assert report["status"] == "hold"
-    assert len(report["required_metric_ids"]) == 109
+    assert len(report["required_metric_ids"]) == 127
     assert "threshold-missing:sharpness-relative-face-ci-lower" in report["blockers"]
     assert "fingerprint-missing:asr-model" in report["blockers"]
     assert "design-digest-missing" in report["blockers"]

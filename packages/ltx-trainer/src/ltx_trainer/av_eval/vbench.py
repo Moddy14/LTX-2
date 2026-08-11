@@ -75,6 +75,16 @@ def _sha256(value: object, context: str) -> str:
     return value
 
 
+def _revision(value: object, context: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise VBenchMeasurementError(f"{context} must be a lowercase 40-character Git revision")
+    return value
+
+
 def _score(value: object, context: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise VBenchMeasurementError(f"{context} must be a finite score")
@@ -327,12 +337,12 @@ def build_vbench_measurements(raw: object, *, design: object) -> dict[str, Any]:
         "strata_plan_digest",
         "design_digest",
         "vbench_gate_catalog_digest",
-        "repository_commit",
         "config_digest",
         "runtime_digest",
         "comparator_matrix_digest",
     ):
         _sha256(raw[field], field)
+    _revision(raw["repository_commit"], "repository_commit")
     seed = _validate_bootstrap(raw["bootstrap"])
     design_report, gates = _validate_design(design, raw)
     endpoint_ids = {f"vbench.{gate['claim_id']}.{gate['dimension']}" for gate in gates}

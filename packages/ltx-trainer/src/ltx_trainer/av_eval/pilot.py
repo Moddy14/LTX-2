@@ -7,7 +7,7 @@ from collections import defaultdict
 from statistics import NormalDist, fmean, stdev
 from typing import Any
 
-from .design import document_sha256
+from .design import DesignError, build_power_report, document_sha256
 
 PILOT_SCHEMA = "ltx-sota-design-pilot-observations.v1"
 PILOT_REPORT_SCHEMA = "ltx-sota-design-pilot-report.v1"
@@ -494,8 +494,6 @@ def build_design_pilot_report(raw: object) -> dict[str, Any]:  # noqa: PLR0912, 
 def build_design_pilot_binding_report(observations: object, design: object) -> dict[str, Any]:
     """Bind raw pilot evidence to a complete power design without optimistic drift."""
 
-    from .design import DesignError, build_power_report
-
     pilot_report = build_design_pilot_report(observations)
     validate_design_pilot_report(pilot_report)
     try:
@@ -602,6 +600,6 @@ def validate_design_pilot_binding_report(raw: object) -> dict[str, Any]:
         raise PilotError("pilot binding report must require at least 30 independent units")
     if not isinstance(required_clips, int) or required_clips < required_units * 3:
         raise PilotError("pilot binding report must require at least three clips per independent unit")
-    if hypothesis_count != 157:
-        raise PilotError("pilot binding report must preserve the 157-hypothesis planning family")
+    if not isinstance(hypothesis_count, int) or hypothesis_count < 13:
+        raise PilotError("pilot binding report must preserve a non-empty planning family")
     return raw

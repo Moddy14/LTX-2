@@ -32,7 +32,7 @@ def _design() -> dict[str, object]:
         metric["delta"] = 0.05
         metric["basis_evidence_sha256"] = "a" * 64
     vbench = design["vbench_gate_catalog"]
-    vbench["commit"] = "b" * 64
+    vbench["commit"] = "b" * 40
     vbench["config_sha256"] = "c" * 64
     for gate in vbench["gates"]:
         gate["absolute_minimum"] = 0.7
@@ -190,7 +190,7 @@ def _scored_vbench_report(design: dict[str, object]) -> dict[str, object]:
             "strata_plan_digest": "4" * 64,
             "design_digest": document_sha256(design),
             "vbench_gate_catalog_digest": document_sha256(design["vbench_gate_catalog"]),
-            "repository_commit": "b" * 64,
+            "repository_commit": "b" * 40,
             "config_digest": "c" * 64,
             "runtime_digest": "d" * 64,
             "comparator_matrix_digest": "6" * 64,
@@ -226,7 +226,7 @@ def test_complete_d1_report_is_deterministic_and_covers_the_full_surface_gate_ma
 
     assert first == second
     assert first["verdict"] == "pass"
-    assert len(first["metrics"]) == 109
+    assert len(first["metrics"]) == 127
     assert first["metrics"] == sorted(first["metrics"], key=lambda metric: metric["metric_id"])
 
 
@@ -238,7 +238,7 @@ def test_complete_d1_accepts_the_executable_vbench_scorer_output() -> None:
     report = build_complete_d1_report(bundle, calibration_catalog=catalog, design=design)
 
     assert report["verdict"] == "pass"
-    assert len(report["metrics"]) == 109
+    assert len(report["metrics"]) == 127
 
 
 def test_complete_d1_report_recomputes_fixed_and_vbench_decisions() -> None:

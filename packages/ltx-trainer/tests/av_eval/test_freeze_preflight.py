@@ -167,6 +167,7 @@ def _fixture(
             "blockers": [],
             "design_digest": design_digest,
             "required_independent_units": 30,
+            "planning_hypothesis_count": 193,
         },
         "d0a-pilot-binding": {
             "schema_version": "ltx-sota-design-pilot-binding.v1",
@@ -181,7 +182,7 @@ def _fixture(
             "power_report_digest": "pending",
             "required_independent_units": 30,
             "required_clips": 90,
-            "planning_hypothesis_count": 157,
+            "planning_hypothesis_count": 193,
         },
         "d1-calibration": {
             "schema_version": "ltx-av-eval-complete-d1-report.v1",

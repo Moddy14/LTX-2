@@ -54,6 +54,7 @@ from .readiness import ReadinessError, build_operational_readiness_evidence, bui
 from .sharpness import SharpnessMeasurementError, build_sharpness_measurements
 from .technical import TechnicalEvidenceError, build_technical_evidence_bundle
 from .vbench import VBenchMeasurementError, build_vbench_measurements
+from .vbench_runtime import VBenchRuntimeError, build_vbench_source_report
 
 __all__ = [
     "ArtifactMeasurementError",
@@ -80,6 +81,7 @@ __all__ = [
     "SharpnessMeasurementError",
     "TechnicalEvidenceError",
     "VBenchMeasurementError",
+    "VBenchRuntimeError",
     "append_signed_access_event",
     "build_artifact_measurements",
     "build_asr_measurements",
@@ -105,6 +107,7 @@ __all__ = [
     "build_sharpness_measurements",
     "build_technical_evidence_bundle",
     "build_vbench_measurements",
+    "build_vbench_source_report",
     "document_sha256",
     "freeze_dataset",
     "load_frozen_split",

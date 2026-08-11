@@ -23,7 +23,7 @@ def _design() -> dict[str, object]:
         metric["delta"] = 0.05
         metric["basis_evidence_sha256"] = "a" * 64
     vbench = design["vbench_gate_catalog"]
-    vbench["commit"] = "b" * 64
+    vbench["commit"] = "b" * 40
     vbench["config_sha256"] = "c" * 64
     for gate in vbench["gates"]:
         gate["absolute_minimum"] = 0.7
@@ -67,7 +67,7 @@ def _input(design: dict[str, object]) -> dict[str, object]:
         "strata_plan_digest": "4" * 64,
         "design_digest": document_sha256(design),
         "vbench_gate_catalog_digest": document_sha256(design["vbench_gate_catalog"]),
-        "repository_commit": "b" * 64,
+        "repository_commit": "b" * 40,
         "config_digest": "c" * 64,
         "runtime_digest": "5" * 64,
         "comparator_matrix_digest": "6" * 64,
@@ -85,8 +85,8 @@ def test_vbench_measurements_are_deterministic_and_holm_controlled() -> None:
     assert first == second
     assert first["verdict"] == "pass"
     assert first["multiplicity"] == "holm"
-    assert first["hypotheses"] == 144
-    assert len(first["metrics"]) == 72
+    assert first["hypotheses"] == 180
+    assert len(first["metrics"]) == 90
     assert all(metric["estimate"] <= 0.05 for metric in first["metrics"])
     assert all(metric["absolute"]["holm_ci_lower"] > 0 for metric in first["metrics"])
     assert all(metric["relative"]["holm_ci_lower"] > 0 for metric in first["metrics"])
@@ -142,9 +142,14 @@ def test_vbench_measurements_reject_missing_endpoints_and_pseudoreplication() ->
 def test_vbench_measurements_reject_runtime_contract_drift() -> None:
     design = _design()
     evidence = _input(design)
-    evidence["repository_commit"] = "f" * 64
+    evidence["repository_commit"] = "f" * 40
     with pytest.raises(VBenchMeasurementError, match="official VBench commit or config mismatch"):
         build_vbench_measurements(evidence, design=design)
+
+    malformed = _input(design)
+    malformed["repository_commit"] = "f" * 64
+    with pytest.raises(VBenchMeasurementError, match="40-character Git revision"):
+        build_vbench_measurements(malformed, design=design)
 
 
 def test_vbench_cli_emits_digest_bound_measurements(tmp_path: Path) -> None:

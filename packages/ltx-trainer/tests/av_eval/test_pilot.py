@@ -84,7 +84,7 @@ def _ready_design_and_observations() -> tuple[dict[str, object], dict[str, objec
         metric["delta"] = 0.05
         metric["basis_evidence_sha256"] = "a" * 64
     vbench = design["vbench_gate_catalog"]
-    vbench["commit"] = "b" * 64
+    vbench["commit"] = "b" * 40
     vbench["config_sha256"] = "c" * 64
     for gate in vbench["gates"]:
         gate["absolute_minimum"] = 0.7
@@ -252,7 +252,7 @@ def test_pilot_freeze_binding_prevents_optimistic_power_inputs() -> None:
 
     assert report["status"] == "ready-to-freeze"
     assert report["blockers"] == []
-    assert report["planning_hypothesis_count"] == 157
+    assert report["planning_hypothesis_count"] == 193
     assert report["required_independent_units"] >= 30
 
     understated_cluster = copy.deepcopy(design)

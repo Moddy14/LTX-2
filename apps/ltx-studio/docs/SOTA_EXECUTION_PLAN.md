@@ -17,7 +17,7 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 159/159, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 164/164, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
@@ -26,9 +26,9 @@ lautet der ehrliche Status **nicht 10/10**.
 | Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 160 Einträge, davon 26 konditionale Kandidaten und 134 rechtlich/technisch gesperrt. Base-Gemma und die optionale Abliterated-LoRA sind getrennte Profile; kein Abliterated-LoRA-Eintrag ist Kandidat | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
 | Produktionsworkflow | Der persistente Projektkern speichert Shots, Request-Revisionen, konkrete Continuity-/Retake-Quellen sowie Output-, Sidecar- und Export-Digests in einer owner-only, monotonen Hashkette. API, Jobstart und v7-Sidecar binden den exakten Projekt-/Request-Stand; Restarts, Stale Writes, Kettenlücken, Legacy-Provenienz und verdeckte Mutationen bleiben fail-closed. Der lazy Desktop-/Mobile-Workspace bedient Anlage, Shot-/Continuity-Bindung, Start, Output-Erfassung/Freigabe, Edit/Retake, Kettenprüfung und Archivierung; Integritätswarnungen bleiben sichtbar | Engineering-Workflow gut; reale Cross-Shot-/P4-Evidenz offen | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten, Signatur-/Audit-/ACL-Prüfer, Blind-Scorer-Verträge und eine Draft-Preregistrierung existieren. `profile=product` bleibt absichtlich hart blockiert, bis getrennte UID/GID, versiegelte Roots, externe Schlüssel, aktuelle Rechte und reale disjunkte Daten provisioniert und belegt sind | technische Grundlage gut; unabhängige Provisionierung und Product-GO offen | P2 |
-| Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. D0a wertet jetzt gepaarte Rohpilotmessungen, Wiederholbarkeit, Clustereffekt und Binomialraten deterministisch aus und bindet sie fail-closed an Powerdesign, D0 und F0. Der D1-Katalog umfasst alle 37 festen und 72 claim-spezifischen VBench-Gates. Es gibt weiterhin keine reale rechtsgeprüfte Pilot-/Kalibrierstichprobe, keinen versiegelten Holdout und keine unabhängigen Signaturen | Auswertungsvertrag gut; reale Pilot-, Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
+| Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. D0a wertet jetzt gepaarte Rohpilotmessungen, Wiederholbarkeit, Clustereffekt und Binomialraten deterministisch aus und bindet sie fail-closed an Powerdesign, D0 und F0. Der D1-Katalog umfasst alle 37 festen und 90 claim-spezifischen VBench-Gates der aktuellen Candidate-Surface. Es gibt weiterhin keine reale rechtsgeprüfte Pilot-/Kalibrierstichprobe, keinen versiegelten Holdout und keine unabhängigen Signaturen | Auswertungsvertrag gut; reale Pilot-, Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
-| Video-Benchmark | VBench ist lokal nicht installiert. Für eigene I2V-Videos ist VBench++/VBench-I2V einschlägig; VBench 2.0 misst primär intrinsische Faithfulness und ersetzt weder Lip-Sync- noch Identitätsgates | alter Werkzeugname war zu pauschal | P2 |
+| Video-Benchmark | Der offizielle VBench-I2V-Commit `45e79ec1…` und 17 relevante Source-/Config-Dateien sind durch einen fail-closed Source-Contract gebunden und gegen einen sauberen offiziellen Checkout verifiziert. Die sechs releasebezogenen Custom-Input-Dimensionen werden einzeln ausgewertet, nie als Gesamtscore. Isolierter Dependency-/Checkpoint-Runtime-Fingerprint und reale Messungen fehlen noch | Source-Vertrag gut; D1-Runtime und Evidenz offen | P2 |
 | Komparatoren | LongCat ist lokal vorhanden. MOVA und Wan2.2-S2V fehlen lokal. MOVA und Wan haben unterschiedliche Eingabeverträge und dürfen nicht in einen gemeinsamen Score gezwungen werden | lokaler Bake-off offen | P3 |
 
 Die frühere 533-kB-Warnung ist durch R2 geschlossen. Auch der frühere
@@ -328,17 +328,20 @@ Release-Digest und neue betroffene Canaries.
 
 ### D0a — Design-Pilot und feste statistische Vorgaben
 
-**Status: Rohdaten- und Freeze-Bindung implementiert; reale Pilotdaten offen.**
+**Status: Rohdaten- und Freeze-Bindung implementiert; VBench-Source gepinnt;
+reale Pilotdaten offen.**
 `pilot-score` verlangt kanonisch sortierte, vollständig gepaarte Candidate-/
 Referenzmessungen aus dem registrierten `design-pilot`-Split. Es schätzt je
 Power-Endpunkt Wiederholungsstreuung, ICC, variablen Clustereffekt,
 unabhängige-Einheiten-Streuung und bei Binomialendpunkten Rate plus
 Wilson-95-%-Intervall. `pilot-freeze-check` rekonstruiert den Report aus den
 Rohdaten und blockiert Designwerte, die Clustereffekt, Streuung oder erwartete
-Rate günstiger ansetzen. Der resultierende 157-Hypothesen-Bindingreport ist
-Pflichtevidenz in D0 und ein eigenes detailliertes F0-Dokument. Noch fehlt der
-rechtsgeprüfte, leakage-disjunkte reale Design-Pilot; der Status bleibt daher
-`hold`.
+Rate günstiger ansetzen. Der resultierende 193-Hypothesen-Bindingreport ist
+Pflichtevidenz in D0 und ein eigenes detailliertes F0-Dokument. Der offizielle
+VBench-I2V-Commit und der kanonische Source-Contract sind bereits gebunden;
+empirische Mindestwerte, Deltas und Powerparameter bleiben bis zu realen
+Pilotbelegen leer. Noch fehlt der rechtsgeprüfte, leakage-disjunkte reale
+Design-Pilot; der Status bleibt daher `hold`.
 
 Dieser Pilot verwendet ausschließlich eigene beziehungsweise ausdrücklich für
 Entwicklung freigegebene Daten und öffnet weder Kalibriersatz noch Holdout. Er
@@ -368,10 +371,10 @@ Session-, Quell- und transitiver Leakage-Komponentenebene disjunkt zu beiden.
    Strata-Matrix. Nur ein schon hier registriertes, verblindetes sequenzielles
    Design dürfte N später ändern.
 
-   Der ausführbare D0a-Report zählt die 72 claim-spezifischen VBench-Gates
+   Der ausführbare D0a-Report zählt die 90 claim-spezifischen VBench-Gates
    jeweils als absoluten und anchor-relativen Test. Zusammen mit den 13
    übrigen Power-Endpunkten umfasst die aktuelle konservative Planungsfamilie
-   damit 157 Hypothesen (`alpha = 0,05 / 157`); die sechs Dimensionsprofile
+   damit 193 Hypothesen (`alpha = 0,05 / 193`); die sechs Dimensionsprofile
    müssen dafür jeweils die ungünstigste registrierte Claim-Annahme verwenden.
 
 **Exit D0a:** `pilot-freeze-check` steht auf `ready-to-freeze`; Delta- und

@@ -81,6 +81,18 @@ def _sha256(value: object, context: str, *, nullable: bool = False) -> str | Non
     return value
 
 
+def _revision(value: object, context: str, *, nullable: bool = False) -> str | None:
+    if nullable and value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise DesignError(f"{context} must be a lowercase 40-character Git revision")
+    return value
+
+
 def _number(
     value: object,
     context: str,
@@ -147,7 +159,7 @@ def _validate_vbench_catalog(raw: object, status: str) -> tuple[dict[str, Any], 
     )
     if raw["schema_version"] != "vbench-gates.v1" or raw["repository"] != "Vchitect/VBench":
         raise DesignError("unsupported VBench catalog")
-    commit = _sha256(raw["commit"], "vbench commit", nullable=True)
+    commit = _revision(raw["commit"], "vbench commit", nullable=True)
     config_digest = _sha256(raw["config_sha256"], "vbench config", nullable=True)
     if raw["multiplicity"] != "holm" or raw["confidence_level"] != 0.95:
         raise DesignError("VBench gates require Holm-corrected 95% confidence")

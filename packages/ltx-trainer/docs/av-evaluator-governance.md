@@ -98,14 +98,25 @@ claim set from satisfying the SOTA gate vacuously.
 `configs/av_eval/design-pilot.v1.json` is the machine-readable pre-acquisition
 contract for effect sizes, VBench gates, precision targets, power, and quoted
 strata. It intentionally remains `draft`: empirical design-effect,
-repeatability, clinically/perceptually meaningful deltas, VBench commit and
-configuration, per-endpoint alternatives/CI widths, and quota counts are
-`null`. They must come from the leakage-disjoint design pilot; filling them
-from calibration or holdout results is forbidden.
+repeatability, clinically/perceptually meaningful deltas, per-endpoint
+alternatives/CI widths, and quota counts are `null`. The official VBench-I2V
+Git revision and canonical source contract are already pinned;
+`vbench-runtime-check` verifies the official remote, exact 40-character
+revision, 17 relevant file hashes, supported custom-input dimensions, and the
+dimension-level invocation before D1 may use a checkout. This source check is
+not an installed-runtime or checkpoint fingerprint. Empirical gates must come
+from the leakage-disjoint design pilot; filling them from calibration or
+holdout results is forbidden.
 
 ```bash
 uv run python scripts/av_eval.py design-check \
   --design configs/av_eval/design-pilot.v1.json
+```
+
+```bash
+uv run python scripts/av_eval.py vbench-runtime-check \
+  --config configs/av_eval/vbench-i2v-source.v1.json \
+  --checkout /path/to/official/VBench
 ```
 
 The checked-in draft exits with code 2 and a deterministic `hold` report that
@@ -123,8 +134,8 @@ the gates after results are visible.
 `configs/av_eval/calibration-gates.v1.json` is the complete machine-readable
 gate inventory for calibration. It includes 37 fixed AV, phoneme/viseme,
 identity, artifact, ASR, sharpness, calibration and abstention decisions plus
-72 claim-specific VBench measurements from D0a: six dimensions for every
-unique visual claim among the 17 Candidate-Surface entries. Names, numbers and
+90 claim-specific VBench measurements from D0a: six dimensions for every
+unique VBench-applicable visual claim in the current Candidate-Surface. Names, numbers and
 negations have separate 99%-accuracy gates and separate D0a power endpoints;
 they may never be hidden in one aggregate. Plan-fixed thresholds are
 immutable in the validator; only the still-unknown relative sharpness floor is
@@ -138,14 +149,14 @@ uv run python scripts/av_eval.py calibration-check \
 
 The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
 metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
-evidence, or an unbound upstream catalog. Its output is the exact 109-ID set
+evidence, or an unbound upstream catalog. Its output is the exact 127-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
 
-The D0a power report counts each of the 72 VBench gates as two planned
+The D0a power report counts each of the 90 VBench gates as two planned
 hypotheses (absolute and anchor-relative) and every other registered power
-endpoint as one. With the current surface this is a 157-hypothesis planning
-family, so the conservative planning alpha is `0.05 / 157`, not `0.05 / 19`.
+endpoint as one. With the current surface this is a 193-hypothesis planning
+family, so the conservative planning alpha is `0.05 / 193`, not `0.05 / 19`.
 The six VBench power profiles must exactly cover the registered dimensions;
 their effect and variability inputs are the conservative worst case across
 all claim-specific gates in that dimension. The report exposes the hypothesis
@@ -273,10 +284,10 @@ scorers. It requires one shared dataset, preregistration, release, strata plan
 and bootstrap contract; verifies every evaluator fingerprint against the
 ready calibration catalog; rejects missing or extra source metrics; and
 recomputes each of the 37 fixed decisions from its registered estimate or
-confidence bound. The remaining 72 gates are intentionally not synthesized:
+confidence bound. The remaining 90 gates are intentionally not synthesized:
 they require the pinned official VBench runtime and Holm-corrected evidence.
 
-`vbench-score` supplies those 72 remaining measurements: six dimensions for
+`vbench-score` supplies those 90 remaining measurements: six dimensions for
 each of the twelve visual candidate claims. It validates the
 frozen D0a catalog, official repository commit and config, runtime,
 comparator-matrix and release bindings. Candidate and anchor scores are paired
@@ -288,7 +299,7 @@ passes only when both corrected lower bounds are positive.
 
 Finally, `complete-d1` revalidates both source reports against the same frozen
 D0a design and calibration catalog, verifies all 144 Holm ranks and the pinned
-VBench runtime, and emits one sorted 109-gate report. It recomputes every local
+VBench runtime, and emits one sorted 127-gate report. It recomputes every local
 estimate/bound decision and both corrected VBench subtests. Mixed releases,
 changed strata, duplicate ranks, missing metrics or copied pass labels reject
 the complete evidence instead of degrading to a warning.

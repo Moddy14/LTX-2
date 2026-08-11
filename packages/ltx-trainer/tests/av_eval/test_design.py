@@ -13,6 +13,7 @@ from ltx_trainer.av_eval import DesignError, build_power_report, document_sha256
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
+SURFACE_PATH = REPOSITORY_ROOT / "apps" / "ltx-studio" / "release" / "candidate-release-surface.v1.json"
 
 
 def _draft() -> dict[str, object]:
@@ -33,7 +34,7 @@ def _ready_design() -> dict[str, object]:
         metric["basis_evidence_sha256"] = evidence_digest
     vbench = design["vbench_gate_catalog"]
     assert isinstance(vbench, dict)
-    vbench["commit"] = "b" * 64
+    vbench["commit"] = "b" * 40
     vbench["config_sha256"] = "c" * 64
     gates = vbench["gates"]
     assert isinstance(gates, list)
@@ -68,7 +69,8 @@ def test_checked_in_design_is_an_explicit_hold_without_invented_pilot_values() -
     assert report["required_clips"] is None
     assert "design-effect-missing" in report["blockers"]
     assert "delta-missing:identity-similarity" in report["blockers"]
-    assert "vbench-commit-missing" in report["blockers"]
+    assert "vbench-commit-missing" not in report["blockers"]
+    assert "vbench-config-missing" not in report["blockers"]
     assert report["design_digest"] == document_sha256(design)
 
 
@@ -83,8 +85,23 @@ def test_frozen_design_computes_deterministic_power_and_precision_requirements()
     assert first["required_independent_units"] >= 30
     assert first["required_clips"] == first["required_independent_units"] * 3
     assert len(first["endpoint_requirements"]) == len(design["power_endpoints"])
-    assert first["planning_hypothesis_count"] == 157
-    assert first["per_endpoint_planning_alpha"] == 0.05 / 157
+    assert first["planning_hypothesis_count"] == 193
+    assert first["per_endpoint_planning_alpha"] == 0.05 / 193
+
+
+def test_vbench_design_exactly_covers_candidate_surface_claims() -> None:
+    design = _draft()
+    catalog = design["vbench_gate_catalog"]
+    assert isinstance(catalog, dict)
+    design_claims = {gate["claim_id"] for gate in catalog["gates"]}
+    surface = json.loads(SURFACE_PATH.read_text(encoding="utf-8"))
+    surface_claims = {
+        entry["claimId"]
+        for entry in surface["entries"]
+        if entry["targetStatus"] == "candidate" and "vbench-i2v" in entry["applicableGates"]
+    }
+
+    assert design_claims == surface_claims
 
 
 def test_design_rejects_outcome_driven_or_vacuous_freezes() -> None:
@@ -99,6 +116,11 @@ def test_design_rejects_outcome_driven_or_vacuous_freezes() -> None:
     endpoints.reverse()
     with pytest.raises(DesignError, match="unique and sorted"):
         build_power_report(unsorted)
+
+    wrong_revision = _draft()
+    wrong_revision["vbench_gate_catalog"]["commit"] = "b" * 64
+    with pytest.raises(DesignError, match="40-character Git revision"):
+        build_power_report(wrong_revision)
 
 
 def test_design_cannot_aggregate_critical_token_types() -> None:

@@ -424,6 +424,8 @@ def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
         raise FreezePreflightError("D0a pilot binding does not bind the detailed power report")
     if pilot_binding["required_independent_units"] != design.get("required_independent_units"):
         raise FreezePreflightError("D0a pilot binding changes the required independent-unit count")
+    if pilot_binding["planning_hypothesis_count"] != design.get("planning_hypothesis_count"):
+        raise FreezePreflightError("D0a pilot binding changes the planning hypothesis family")
     if not isinstance(d1, dict) or d1.get("schema_version") != COMPLETE_D1_REPORT_SCHEMA or d1.get("verdict") != "pass":
         raise FreezePreflightError("D1 report is not a complete pass")
     if not isinstance(q0, dict) or q0.get("schema_version") != CROSS_SHOT_DECISION_SCHEMA:

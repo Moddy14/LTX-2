@@ -32,6 +32,7 @@ from ltx_trainer.av_eval import (
     SharpnessMeasurementError,
     TechnicalEvidenceError,
     VBenchMeasurementError,
+    VBenchRuntimeError,
     build_artifact_measurements,
     build_asr_measurements,
     build_calibration_gate_report,
@@ -54,6 +55,7 @@ from ltx_trainer.av_eval import (
     build_sharpness_measurements,
     build_technical_evidence_bundle,
     build_vbench_measurements,
+    build_vbench_source_report,
     freeze_dataset,
     load_split_seed,
 )
@@ -67,6 +69,19 @@ def _run_design_check(path: Path) -> int:
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0 if report["status"] == "ready-to-freeze" else 2
+
+
+def _run_vbench_runtime_check(config_path: Path, checkout: Path) -> int:
+    try:
+        report = build_vbench_source_report(
+            json.loads(config_path.read_text(encoding="utf-8")),
+            checkout=checkout,
+        )
+    except (OSError, json.JSONDecodeError, VBenchRuntimeError) as error:
+        logger.error("VBench-I2V source rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
 
 
 def _run_pilot_score(path: Path) -> int:
@@ -506,6 +521,12 @@ def main() -> int:  # noqa: PLR0915
     vbench_score = subcommands.add_parser("vbench-score", help="score paired VBench observations with Holm control")
     vbench_score.add_argument("--observations", type=Path, required=True)
     vbench_score.add_argument("--design", type=Path, required=True)
+    vbench_runtime = subcommands.add_parser(
+        "vbench-runtime-check",
+        help="verify the pinned official VBench-I2V source checkout",
+    )
+    vbench_runtime.add_argument("--config", type=Path, required=True)
+    vbench_runtime.add_argument("--checkout", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -560,6 +581,7 @@ def main() -> int:  # noqa: PLR0915
         "sharpness-score": lambda: _run_sharpness_score(args.observations),
         "technical-score": lambda: _run_technical_score(args.observations, args.surface),
         "vbench-score": lambda: _run_vbench_score(args.observations, args.design),
+        "vbench-runtime-check": lambda: _run_vbench_runtime_check(args.config, args.checkout),
     }
     return handlers[args.command]()
 
