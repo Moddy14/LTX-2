@@ -119,12 +119,23 @@ separately so downstream D1/Q0/Q1/F0/Q2 evidence can bind them without changing
 the gates after results are visible.
 
 `profile=product` is currently hard-blocked before dataset access. The
-detached-signature verifier and monotonic consumption records now exist, but
-enabling the profile still requires an operator-owned trusted-key policy,
-sealed test ACL and access log, integration with an independent blind scorer,
-expiration/revocation rechecks at every boundary, and machine-validated
-tune/holdout report schemas. The former numeric holdout checks remain defense
-in depth, not an active certification path.
+detached-signature verifier, monotonic consumption records, sealed-directory
+inspector, signed hash-chained access ledger, and machine-validated
+tune/holdout report schema now exist. Access events accept only a current
+`holdout-scorer` key, bind the authorization, holdout, transaction, actor UID,
+action and timestamp, and are appended under an exclusive lock with `fsync`.
+Every later read revalidates canonical JSON, sequence, signatures, event IDs,
+and the complete SHA-256 chain. Measurement reports bind dataset,
+preregistration, release (holdout only), D0a design, runner, evaluator,
+thresholds and strata; their overall verdict is recomputed from the registered
+direction and confidence bound of every sorted metric.
+
+The Product-HOLD remains correct until an operator provisions a separate
+blind-scorer UID/GID, owner-only `0700` holdout and log roots, an externally
+anchored trusted-key policy, current rights evidence, and a real independent
+runner using these interfaces. A development UID may never own the sealed
+root. The former numeric holdout checks remain defense in depth, not an active
+certification path.
 
 ## Command
 

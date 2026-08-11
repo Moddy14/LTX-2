@@ -22,6 +22,7 @@ RELEASE_SCHEMA = "ltx-av-eval-release-authorization.v2"
 SIGNATURE_SCHEMA = "ltx-av-eval-detached-signature.v1"
 TRUST_POLICY_SCHEMA = "ltx-av-eval-trusted-keys.v1"
 CONSUMPTION_SCHEMA = "ltx-av-eval-holdout-consumption.v1"
+TrustRole = Literal["evaluation-authorizer", "release-authorizer", "holdout-scorer"]
 
 
 class AuthorizationError(ValueError):
@@ -131,7 +132,7 @@ def verify_detached_signature(
     signature: object,
     trust_policy: object,
     *,
-    required_role: Literal["evaluation-authorizer", "release-authorizer"],
+    required_role: TrustRole,
     now: datetime,
 ) -> str:
     """Verify canonical document bytes against a current role-scoped Ed25519 key."""
