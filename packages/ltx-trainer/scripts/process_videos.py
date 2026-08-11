@@ -22,7 +22,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
-import torchaudio
 import typer
 from accelerate import PartialState
 from pillow_heif import register_heif_opener
@@ -49,7 +48,7 @@ from ltx_core.types import Audio
 from ltx_trainer import logger
 from ltx_trainer.model_loader import load_audio_vae_encoder, load_video_vae_encoder
 from ltx_trainer.utils import open_image_as_srgb
-from ltx_trainer.video_utils import get_video_frame_count, read_video
+from ltx_trainer.video_utils import get_video_frame_count, load_audio, read_video
 
 disable_progress_bar()
 
@@ -1234,16 +1233,13 @@ def _load_paths_from_dataset(dataset_file: Path, column: str) -> list[Path]:
 def _load_audio_from_file(audio_path: Path, max_duration: float | None = None) -> Audio | None:
     """Load audio from an audio or video file, optionally trimming to max_duration."""
     try:
-        waveform, sample_rate = torchaudio.load(str(audio_path))
+        decoded = load_audio(audio_path, max_duration=max_duration)
     except Exception:
         logger.debug(f"Could not load audio from {audio_path}")
         return None
-
-    if max_duration is not None:
-        max_samples = int(max_duration * sample_rate)
-        if waveform.shape[-1] > max_samples:
-            waveform = waveform[:, :max_samples]
-
+    if decoded is None:
+        return None
+    waveform, sample_rate = decoded
     return Audio(waveform=waveform, sampling_rate=sample_rate)
 
 

@@ -920,9 +920,12 @@ class ValidationRunner:
         from_end: bool = False,
     ) -> Tensor:
         """Encode an audio file through the audio VAE encoder. Returns latent on CPU."""
-        import torchaudio  # noqa: PLC0415
+        from ltx_trainer.video_utils import load_audio  # noqa: PLC0415
 
-        waveform, sr = torchaudio.load(audio_path)
+        decoded = load_audio(audio_path)
+        if decoded is None:
+            raise ValueError(f"Audio file has no decodable audio stream: {audio_path}")
+        waveform, sr = decoded
         if max_duration is not None:
             num_samples = min(round(max_duration * sr), waveform.shape[-1])
             waveform = waveform[:, -num_samples:] if from_end else waveform[:, :num_samples]
@@ -993,9 +996,12 @@ class ValidationRunner:
                 raw = raw.get("mask", next(iter(raw.values())))
             raw = raw.float().flatten()
         else:
-            import torchaudio  # noqa: PLC0415
+            from ltx_trainer.video_utils import load_audio  # noqa: PLC0415
 
-            waveform, _sr = torchaudio.load(mask_path)
+            decoded = load_audio(mask_path)
+            if decoded is None:
+                raise ValueError(f"Audio mask has no decodable audio stream: {mask_path}")
+            waveform, _sr = decoded
             raw = waveform.abs().mean(dim=0)
 
         target_duration = target_num_frames / frame_rate

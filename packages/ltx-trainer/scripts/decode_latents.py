@@ -12,7 +12,6 @@ Basic usage:
 from pathlib import Path
 
 import torch
-import torchaudio
 import torchvision.utils
 import typer
 from einops import rearrange
@@ -31,7 +30,7 @@ from transformers.utils.logging import disable_progress_bar
 from ltx_core.model.video_vae import SpatialTilingConfig, TemporalTilingConfig, TilingConfig
 from ltx_trainer import logger
 from ltx_trainer.model_loader import load_audio_vae_decoder, load_video_vae_decoder, load_vocoder
-from ltx_trainer.video_utils import save_video
+from ltx_trainer.video_utils import save_audio, save_video
 
 DEFAULT_TILE_SIZE_PIXELS = 512  # Spatial tile size in pixels (must be ≥64 and divisible by 32)
 DEFAULT_TILE_OVERLAP_PIXELS = 128  # Spatial tile overlap in pixels (must be divisible by 32)
@@ -288,7 +287,7 @@ class LatentsDecoder:
         # Save as WAV
         output_path = output_dir / f"{latent_file.stem}.wav"
         sample_rate = self.vocoder.output_sampling_rate
-        torchaudio.save(str(output_path), waveform[0].cpu(), sample_rate)
+        save_audio(waveform[0], output_path, sample_rate)
 
 
 @app.command()

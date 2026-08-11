@@ -3,6 +3,7 @@ This module provides functions for reading and writing video files using PyAV,
 with optional audio support.
 """
 
+import wave
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal
@@ -13,6 +14,81 @@ import torch
 from torch import Tensor
 
 VideoFormat = Literal["CFHW", "FCHW"]
+
+
+def _audio_frame_to_float(frame: av.AudioFrame) -> np.ndarray:
+    samples = frame.to_ndarray()
+    channels = len(frame.layout.channels)
+    if not frame.format.is_planar:
+        samples = samples.reshape(-1, channels).T
+    if np.issubdtype(samples.dtype, np.unsignedinteger):
+        midpoint = float(np.iinfo(samples.dtype).max + 1) / 2
+        samples = (samples.astype(np.float32) - midpoint) / midpoint
+    elif np.issubdtype(samples.dtype, np.signedinteger):
+        scale = float(max(abs(np.iinfo(samples.dtype).min), np.iinfo(samples.dtype).max))
+        samples = samples.astype(np.float32) / scale
+    else:
+        samples = samples.astype(np.float32)
+    return np.clip(samples, -1.0, 1.0)
+
+
+def load_audio(audio_path: str | Path, max_duration: float | None = None) -> tuple[Tensor, int] | None:
+    """Decode the first audio stream with PyAV, without TorchCodec.
+
+    Returns channel-first float32 samples in ``[-1, 1]`` and their source sample
+    rate. Files without an audio stream return ``None``.
+    """
+
+    if max_duration is not None and (not np.isfinite(max_duration) or max_duration <= 0):
+        raise ValueError("max_duration must be a finite positive number")
+    with av.open(str(audio_path)) as container:
+        audio_stream = next((stream for stream in container.streams if stream.type == "audio"), None)
+        if audio_stream is None:
+            return None
+        sample_rate = audio_stream.rate or audio_stream.codec_context.sample_rate
+        if sample_rate is None or sample_rate <= 0:
+            raise ValueError("audio stream does not declare a valid sample rate")
+        maximum_samples = round(max_duration * sample_rate) if max_duration is not None else None
+        frames: list[np.ndarray] = []
+        decoded_samples = 0
+        for frame in container.decode(audio_stream):
+            if frame.sample_rate != sample_rate:
+                raise ValueError("audio stream changes sample rate during decode")
+            samples = _audio_frame_to_float(frame)
+            if maximum_samples is not None:
+                remaining = maximum_samples - decoded_samples
+                if remaining <= 0:
+                    break
+                samples = samples[..., :remaining]
+            frames.append(samples)
+            decoded_samples += samples.shape[-1]
+            if maximum_samples is not None and decoded_samples >= maximum_samples:
+                break
+    if not frames:
+        return None
+    channel_counts = {frame.shape[0] for frame in frames}
+    if len(channel_counts) != 1:
+        raise ValueError("audio stream changes channel layout during decode")
+    return torch.from_numpy(np.concatenate(frames, axis=-1)), int(sample_rate)
+
+
+def save_audio(audio: Tensor, output_path: str | Path, sample_rate: int) -> None:
+    """Write a channel-first waveform as deterministic PCM16 WAV."""
+
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be positive")
+    if audio.ndim == 1:
+        audio = audio.unsqueeze(0)
+    if audio.ndim != 2 or audio.shape[0] < 1:
+        raise ValueError("audio must have shape [channels, samples] or [samples]")
+    pcm = (audio.detach().cpu().float().clamp(-1.0, 1.0) * 32767).round().to(torch.int16)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(pcm.shape[0])
+        output.setsampwidth(2)
+        output.setframerate(sample_rate)
+        output.writeframes(pcm.T.contiguous().numpy().tobytes())
 
 
 def get_video_frame_count(video_path: str | Path) -> int:
