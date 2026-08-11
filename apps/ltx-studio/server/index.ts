@@ -82,6 +82,7 @@ import { readResourceSnapshot } from "./system.js";
 import { matchesUploadSignature } from "./uploads.js";
 import { PhonemeVisemeEvaluatorStateProvider } from "./evaluatorStateProvider.js";
 import { shouldAutoAnalyzeCompletedJob } from "./autoAnalysis.js";
+import { releaseIdentity } from "./releaseIdentity.js";
 
 ensureRuntimeDirectories();
 cleanupAnalysisTempRoot(analysisTempRoot);
@@ -299,6 +300,7 @@ app.get("/api/health", async (_request, response) => {
   }
   response.json({
     state: resources.outputFreeGiB !== null ? "ready" : "blocked",
+    release: releaseIdentity,
     resources,
     engine: pythonRuntimeAvailable(rendererPythonExecutable, { isolated: true }) ? "available" : "missing",
     analysisEngine: pythonRuntimeAvailable(pythonExecutable) ? "available" : "missing",

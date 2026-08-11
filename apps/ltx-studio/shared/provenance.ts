@@ -50,8 +50,16 @@ export type ProvenanceUpstreamContract = {
   sha256: string;
 };
 
+export type ProvenanceReleaseIdentity = {
+  sealed: boolean;
+  verified: boolean;
+  releaseDigest: string | null;
+  manifestSha256: string | null;
+  sourceCommit: string | null;
+};
+
 export type RunProvenance = {
-  schemaVersion: "ltx-studio-run-provenance.v1";
+  schemaVersion: "ltx-studio-run-provenance.v1" | "ltx-studio-run-provenance.v2";
   capturedAt: string;
   verifiedAt: string | null;
   files: ProvenanceFileEvidence[];
@@ -59,5 +67,7 @@ export type RunProvenance = {
   runtime: ProvenanceRuntimeEvidence;
   /** Present on newly captured runs; omitted only by legacy v1 sidecars. */
   upstreamContracts?: ProvenanceUpstreamContract[];
+  /** Required for v2; absent only on legacy v1 sidecars. */
+  release?: ProvenanceReleaseIdentity;
   fingerprint: string;
 };

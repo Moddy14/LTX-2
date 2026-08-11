@@ -231,6 +231,21 @@ describe("run provenance", () => {
     };
     expect(normalizeRunProvenance(withContract)?.upstreamContracts).toHaveLength(1);
     expect(normalizeRunProvenance({
+      ...base,
+      schemaVersion: "ltx-studio-run-provenance.v2",
+      release: {
+        sealed: true,
+        verified: true,
+        releaseDigest: "e".repeat(64),
+        manifestSha256: "e".repeat(64),
+        sourceCommit: "f".repeat(40),
+      },
+    })).not.toBeNull();
+    expect(normalizeRunProvenance({
+      ...base,
+      schemaVersion: "ltx-studio-run-provenance.v2",
+    })).toBeNull();
+    expect(normalizeRunProvenance({
       ...withContract,
       upstreamContracts: [{ ...withContract.upstreamContracts![0], sha256: "invalid" }],
     })).toBeNull();

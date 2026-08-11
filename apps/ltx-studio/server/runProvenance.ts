@@ -22,6 +22,7 @@ import type {
   ProvenanceRuntimeEvidence,
   RunProvenance,
 } from "../shared/provenance.js";
+import { releaseIdentity } from "./releaseIdentity.js";
 import { upstreamWorkflowContractsForRequest } from "../shared/upstreamWorkflowContracts.js";
 import type { CommandPlan, PathRequirement } from "./command.js";
 import {
@@ -317,6 +318,26 @@ function git(root: string, args: string[], maxBuffer = 64 * 1024 * 1024): string
 
 async function captureCodeEvidence(repositoryRoot: string): Promise<ProvenanceCodeEvidence> {
   const root = resolve(repositoryRoot);
+  if (root === resolve(repoRoot) && releaseIdentity.sealed) {
+    if (!releaseIdentity.sourceCommit || !releaseIdentity.manifestSha256) {
+      throw new Error("Versiegelte Release-Identität ist unvollständig.");
+    }
+    const base = {
+      repositoryRoot: root,
+      commit: releaseIdentity.sourceCommit,
+      dirty: false,
+      trackedDiffSha256: releaseIdentity.manifestSha256,
+      untracked: [] as ProvenanceFileEvidence[],
+    };
+    return {
+      ...base,
+      fingerprint: sha256Text(stableJson({
+        commit: base.commit,
+        trackedDiffSha256: base.trackedDiffSha256,
+        untracked: [],
+      })),
+    };
+  }
   const commit = git(root, ["rev-parse", "HEAD"]).trim();
   if (!/^[0-9a-f]{40}$/i.test(commit)) throw new Error(`Git-Commit ist nicht bestimmbar: ${root}`);
   const trackedDiff = git(root, ["diff", "--binary", "HEAD", "--", "."]);
@@ -593,12 +614,13 @@ export async function captureRunProvenance(
   const upstreamContracts = upstreamWorkflowContractsForRequest(request);
   const capturedAt = new Date().toISOString();
   const base = {
-    schemaVersion: "ltx-studio-run-provenance.v1" as const,
+    schemaVersion: "ltx-studio-run-provenance.v2" as const,
     capturedAt,
     files,
     code,
     runtime,
     upstreamContracts,
+    release: releaseIdentity,
   };
   return {
     ...base,
@@ -623,6 +645,7 @@ export async function bindRunProvenanceFile(
     code: evidence.code,
     runtime: evidence.runtime,
     upstreamContracts: evidence.upstreamContracts ?? [],
+    release: evidence.release,
   };
   return {
     ...base,
@@ -672,6 +695,10 @@ export async function verifyRunProvenance(
   request: GenerationRequest,
 ): Promise<{ evidence: RunProvenance; error: string | null }> {
   try {
+    if (evidence.schemaVersion === "ltx-studio-run-provenance.v2"
+      && stableJson(evidence.release) !== stableJson(releaseIdentity)) {
+      return { evidence, error: "Die gebundene Release-Identität stimmt nicht mit dem laufenden Server überein." };
+    }
     if (evidence.upstreamContracts !== undefined) {
       const expectedContracts = upstreamWorkflowContractsForRequest(request);
       if (stableJson(evidence.upstreamContracts) !== stableJson(expectedContracts)) {
@@ -816,10 +843,27 @@ function validUpstreamContract(value: unknown): boolean {
     && HASH_PATTERN.test(item.sha256);
 }
 
+function validReleaseIdentity(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  const nullableHash = (candidate: unknown) => candidate === null
+    || (typeof candidate === "string" && HASH_PATTERN.test(candidate));
+  const nullableCommit = (candidate: unknown) => candidate === null
+    || (typeof candidate === "string" && /^[0-9a-f]{40}$/i.test(candidate));
+  return typeof item.sealed === "boolean"
+    && typeof item.verified === "boolean"
+    && nullableHash(item.releaseDigest)
+    && nullableHash(item.manifestSha256)
+    && nullableCommit(item.sourceCommit)
+    && (item.sealed
+      ? item.verified === true && item.releaseDigest !== null && item.manifestSha256 === item.releaseDigest
+      : item.verified === false && item.releaseDigest === null && item.manifestSha256 === null && item.sourceCommit === null);
+}
+
 export function normalizeRunProvenance(value: unknown): RunProvenance | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Partial<RunProvenance>;
-  if (item.schemaVersion !== "ltx-studio-run-provenance.v1"
+  if (!(["ltx-studio-run-provenance.v1", "ltx-studio-run-provenance.v2"] as const).includes(item.schemaVersion as never)
     || typeof item.capturedAt !== "string"
     || !Number.isFinite(Date.parse(item.capturedAt))
     || (item.verifiedAt !== null && (typeof item.verifiedAt !== "string" || !Number.isFinite(Date.parse(item.verifiedAt))))
@@ -830,6 +874,8 @@ export function normalizeRunProvenance(value: unknown): RunProvenance | null {
     || !validRuntimeEvidence(item.runtime)
     || (item.upstreamContracts !== undefined
       && (!Array.isArray(item.upstreamContracts) || !item.upstreamContracts.every(validUpstreamContract)))
+    || (item.schemaVersion === "ltx-studio-run-provenance.v2" && !validReleaseIdentity(item.release))
+    || (item.schemaVersion === "ltx-studio-run-provenance.v1" && item.release !== undefined)
     || typeof item.fingerprint !== "string"
     || !HASH_PATTERN.test(item.fingerprint)) return null;
   return structuredClone(item as RunProvenance);
