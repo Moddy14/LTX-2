@@ -190,9 +190,11 @@ sharp scene-reference and automatic scene-reference arms must use identical
 dialogue, timeline, duration, normalization, seeds and render revision; only
 the reference strategy may differ. Both published LipDub claims,
 `native-distilled` and `official-comfy-hq`, are explicit protocol dimensions
-and cannot be collapsed into an umbrella result. The identity count is checked against the
-complete D0a power report and can never fall below 30, with at least two shots
-per identity.
+and cannot be collapsed into an umbrella result. The identity count is checked
+against the complete D0a power report and can never fall below 30, with at
+least two shots per identity. The reported render count multiplies identities,
+shots, seeds, arms and both claims, so capacity planning cannot silently omit a
+dimension.
 
 ```bash
 uv run python scripts/av_eval.py cross-shot-check \

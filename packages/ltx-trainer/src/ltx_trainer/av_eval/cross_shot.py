@@ -286,6 +286,7 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
         raise CrossShotProtocolError(f"frozen Q0 protocol is incomplete: {blockers}")
     required = raw["sample_plan"]["required_identities"]
     shots = raw["sample_plan"]["shots_per_identity"]
+    seeds = raw["sample_plan"]["generation_seeds"]
     return {
         "schema_version": CROSS_SHOT_REPORT_SCHEMA,
         "protocol_digest": document_sha256(raw),
@@ -295,5 +296,7 @@ def build_cross_shot_protocol_report(raw: object, *, design_report: object | Non
         "arms_digest": document_sha256(raw["arms"]),
         "endpoints_digest": document_sha256(raw["endpoint_bindings"]),
         "required_measurements_digest": document_sha256(raw["required_measurement_ids"]),
-        "planned_renders": required * shots * len(ARM_SPECS) * len(CLAIM_IDS) if required is not None else None,
+        "planned_renders": (
+            required * shots * len(seeds) * len(ARM_SPECS) * len(CLAIM_IDS) if required is not None and seeds else None
+        ),
     }

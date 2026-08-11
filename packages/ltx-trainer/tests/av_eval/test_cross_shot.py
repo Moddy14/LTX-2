@@ -78,7 +78,7 @@ def test_complete_cross_shot_protocol_binds_power_and_render_count() -> None:
     assert first == second
     assert first["status"] == "ready-to-freeze"
     assert first["blockers"] == []
-    assert first["planned_renders"] == 480
+    assert first["planned_renders"] == 1440
 
 
 def test_cross_shot_protocol_rejects_unpaired_or_result_driven_changes() -> None:
