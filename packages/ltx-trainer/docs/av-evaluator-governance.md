@@ -222,6 +222,13 @@ hypotheses share one Holm family; each effect retains its raw interval,
 adjusted p-value, rank-specific alpha and one-sided Holm lower bound. A metric
 passes only when both corrected lower bounds are positive.
 
+Finally, `complete-d1` revalidates both source reports against the same frozen
+D0a design and calibration catalog, verifies all 24 Holm ranks and the pinned
+VBench runtime, and emits one sorted 49-gate report. It recomputes every local
+estimate/bound decision and both corrected VBench subtests. Mixed releases,
+changed strata, duplicate ranks, missing metrics or copied pass labels reject
+the complete evidence instead of degrading to a warning.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory

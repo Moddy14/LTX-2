@@ -351,8 +351,10 @@ def build_vbench_measurements(raw: object, *, design: object) -> dict[str, Any]:
     by_endpoint: dict[str, dict[str, _Hypothesis]] = {}
     for hypothesis in hypotheses:
         by_endpoint.setdefault(hypothesis.endpoint_id, {})[hypothesis.kind] = hypothesis
+    gates_by_endpoint = {f"vbench.{gate['claim_id']}.{gate['dimension']}": gate for gate in gates}
     metrics: list[dict[str, Any]] = []
     for endpoint_id in sorted(by_endpoint):
+        gate = gates_by_endpoint[endpoint_id]
         absolute = by_endpoint[endpoint_id]["absolute"]
         relative = by_endpoint[endpoint_id]["relative"]
         adjusted_p = max(absolute.adjusted_p, relative.adjusted_p)
@@ -365,6 +367,12 @@ def build_vbench_measurements(raw: object, *, design: object) -> dict[str, Any]:
                 "decision_stratum_id": "overall",
                 "independent_units": absolute.independent_units,
                 "source_observations": observations_by_endpoint[endpoint_id],
+                "claim_id": gate["claim_id"],
+                "dimension": gate["dimension"],
+                "test": gate["test"],
+                "absolute_minimum": gate["absolute_minimum"],
+                "delta": gate["delta"],
+                "basis_evidence_sha256": gate["basis_evidence_sha256"],
                 "decision": "pass"
                 if adjusted_p <= FAMILYWISE_ALPHA and absolute.holm_ci_lower > 0 and relative.holm_ci_lower > 0
                 else "fail",

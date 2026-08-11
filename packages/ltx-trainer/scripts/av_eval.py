@@ -15,6 +15,7 @@ from ltx_trainer.av_eval import (
     AsrMeasurementError,
     CalibrationError,
     ComparatorMatrixError,
+    CompleteD1Error,
     ContentMeasurementError,
     CrossShotProtocolError,
     D1BundleError,
@@ -29,6 +30,7 @@ from ltx_trainer.av_eval import (
     build_asr_measurements,
     build_calibration_gate_report,
     build_comparator_matrix_report,
+    build_complete_d1_report,
     build_content_measurements,
     build_cross_shot_protocol_report,
     build_fixed_d1_report,
@@ -158,6 +160,19 @@ def _run_vbench_score(observations_path: Path, design_path: Path) -> int:
     return 0 if report["verdict"] == "pass" else 2
 
 
+def _run_complete_d1(bundle_path: Path, catalog_path: Path, design_path: Path) -> int:
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        design = json.loads(design_path.read_text(encoding="utf-8"))
+        report = build_complete_d1_report(bundle, calibration_catalog=catalog, design=design)
+    except (OSError, json.JSONDecodeError, CompleteD1Error) as error:
+        logger.error("Complete D1 bundle rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["verdict"] == "pass" else 2
+
+
 def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) -> int:
     try:
         protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
@@ -222,6 +237,10 @@ def main() -> int:
     calibration_check.add_argument("--catalog", type=Path, required=True)
     content_score = subcommands.add_parser("content-score", help="score mouth-content and transition observations")
     content_score.add_argument("--observations", type=Path, required=True)
+    complete_d1 = subcommands.add_parser("complete-d1", help="assemble and revalidate all 49 D1 gates")
+    complete_d1.add_argument("--bundle", type=Path, required=True)
+    complete_d1.add_argument("--catalog", type=Path, required=True)
+    complete_d1.add_argument("--design", type=Path, required=True)
     asr_score = subcommands.add_parser("asr-score", help="score normalized ASR observations with cluster bootstrap")
     asr_score.add_argument("--observations", type=Path, required=True)
     artifact_score = subcommands.add_parser("artifact-score", help="score artifact and warp observations")
@@ -250,6 +269,7 @@ def main() -> int:
         "calibration-check": lambda: _run_calibration_check(args.catalog),
         "comparator-check": lambda: _run_comparator_check(args.matrix, args.landscape),
         "content-score": lambda: _run_content_score(args.observations),
+        "complete-d1": lambda: _run_complete_d1(args.bundle, args.catalog, args.design),
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),
