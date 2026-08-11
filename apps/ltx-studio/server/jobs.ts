@@ -63,6 +63,7 @@ import {
   executableAvailable,
   hybridCacheRoot,
   hybridRoot,
+  isolatedPythonEnvironment,
   latentSyncCheckpointPath,
   latentSyncImage,
   latentSyncInsightFaceRoot,
@@ -77,6 +78,7 @@ import {
   museTalkModelRoot,
   outputRoot,
   pythonExecutable,
+  rendererPythonExecutable,
   pythonRuntimeAvailable,
   repoRoot,
   statePath,
@@ -1782,13 +1784,6 @@ export class JobManager extends EventEmitter {
         return;
       }
       this.appendLog(job, `LTX-Start: ${job.command}`);
-      const pythonPath = [
-        `${repoRoot}/packages/ltx-core/src`,
-        `${repoRoot}/packages/ltx-pipelines/src`,
-        process.env.PYTHONPATH,
-      ]
-        .filter(Boolean)
-        .join(":");
       const ltxArgs = [...job.plan.args];
       const outputArgumentIndex = ltxArgs.indexOf("--output-path");
       if (outputArgumentIndex < 0) {
@@ -1807,7 +1802,7 @@ export class JobManager extends EventEmitter {
         expectedDenoisingStages(job.request),
       );
       const cooperativeEnabled = supportsCooperativeCheckpoint(job.request)
-        && job.plan.executable === pythonExecutable
+        && job.plan.executable === rendererPythonExecutable
         && Boolean(job.runProvenance?.fingerprint);
       const checkpointManifest = cooperativeCheckpointPath(job.id);
       const checkpointRoot = dirname(checkpointManifest);
@@ -1829,8 +1824,7 @@ export class JobManager extends EventEmitter {
         job.startedAt ??= now();
         const child = spawn(job.plan.executable, ltxArgs, {
           cwd: repoRoot,
-          env: {
-            ...process.env,
+          env: isolatedPythonEnvironment({
             DGX_JOB_ID: job.dgxJobId ?? undefined,
             LTX_COOPERATIVE_CHECKPOINT_DIR: cooperativeEnabled ? checkpointRoot : undefined,
             LTX_COOPERATIVE_JOB_FINGERPRINT: cooperativeEnabled
@@ -1839,9 +1833,8 @@ export class JobManager extends EventEmitter {
             LTX_COOPERATIVE_GENERATION: cooperativeEnabled
               ? String(cooperativeGeneration)
               : undefined,
-            PYTHONPATH: pythonPath,
             PYTHONUNBUFFERED: "1",
-          },
+          }),
           detached: true,
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],

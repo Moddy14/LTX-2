@@ -34,7 +34,6 @@ import {
   longcatProjectRoot,
   museTalkModelRoot,
   provenanceCachePath,
-  pythonExecutable,
   repoRoot,
 } from "./config.js";
 
@@ -377,7 +376,7 @@ function captureRuntimeEvidence(executable: string): ProvenanceRuntimeEvidence {
     "  except m.PackageNotFoundError: versions[name]=None",
     "print(json.dumps({'python':sys.version.split()[0],'packages':versions},sort_keys=True))",
   ].join("\n");
-  const parsed = JSON.parse(execFileSync(resolvedExecutable, ["-c", script], {
+  const parsed = JSON.parse(execFileSync(resolvedExecutable, ["-I", "-c", script], {
     encoding: "utf8",
     timeout: 30_000,
     maxBuffer: 1024 * 1024,
@@ -590,7 +589,7 @@ export async function captureRunProvenance(
     : [repoRoot];
   const code: ProvenanceCodeEvidence[] = [];
   for (const root of codeRoots) code.push(await captureCodeEvidence(root));
-  const runtime = captureRuntimeEvidence(pythonExecutable);
+  const runtime = captureRuntimeEvidence(plan.executable);
   const upstreamContracts = upstreamWorkflowContractsForRequest(request);
   const capturedAt = new Date().toISOString();
   const base = {
@@ -698,7 +697,7 @@ export async function verifyRunProvenance(
         return { evidence, error: `Codezustand wurde nach der Provenienzerfassung verändert: ${root}` };
       }
     }
-    const runtime = captureRuntimeEvidence(pythonExecutable);
+    const runtime = captureRuntimeEvidence(evidence.runtime.pythonExecutable);
     if (runtime.fingerprint !== evidence.runtime.fingerprint) {
       return { evidence, error: "Python-/Paket-/FFmpeg-Runtime wurde nach der Provenienzerfassung verändert." };
     }

@@ -33,7 +33,7 @@ describe("buildCommand", () => {
 
   it.each(pipelineModes)("maps %s to its typed Python module", (mode) => {
     const plan = buildCommand(validRequest(mode));
-    expect(plan.args.slice(0, 2)).toEqual(["-m", expectedModules[mode]]);
+    expect(plan.args.slice(0, 3)).toEqual(["-I", "-m", expectedModules[mode]]);
     expect(plan.outputPath.endsWith(`ltx-${mode}.${mode === "text-to-audio" ? "wav" : "mp4"}`)).toBe(true);
     if (["lipdub", "id-lora", "keyframes", "ic-lora", "text-to-audio"].includes(mode)) expect(plan.args).not.toContain("--enhance-prompt");
     else expect(plan.args).toContain("--enhance-prompt");
@@ -416,7 +416,7 @@ describe("buildCommand", () => {
     request.icLora.hdrHighQuality = true;
     const plan = buildCommand(request);
 
-    expect(plan.args.slice(0, 2)).toEqual(["-m", "ltx_pipelines.hdr_ic_lora"]);
+    expect(plan.args.slice(0, 3)).toEqual(["-I", "-m", "ltx_pipelines.hdr_ic_lora"]);
     expect(plan.args).toEqual(expect.arrayContaining([
       "--input",
       "/inputs/hdr-source.mp4",
@@ -483,7 +483,7 @@ describe("buildCommand", () => {
     const plan = buildCommand(request);
     const args = plan.args;
 
-    expect(args.slice(0, 2)).toEqual(["-m", "ltx_pipelines.lipdub"]);
+    expect(args.slice(0, 3)).toEqual(["-I", "-m", "ltx_pipelines.lipdub"]);
     expect(args).toEqual(expect.arrayContaining([
       "--pipeline-profile",
       "official-comfy-hq",

@@ -172,16 +172,37 @@ export const pythonExecutable = selectPythonExecutable(process.env.LTX_STUDIO_PY
   join(homedir(), "comfyui-env", "bin", "python"),
   "python3",
 ]);
+export const rendererPythonExecutable = selectPythonExecutable(
+  process.env.LTX_STUDIO_RENDER_PYTHON,
+  [join(appRoot, "runtime", ".venv", "bin", "python"), pythonExecutable],
+);
 export const phonemeVisemePythonExecutable =
   process.env.LTX_STUDIO_PHONEME_VISEME_PYTHON?.trim() || pythonExecutable;
 
 const pythonRuntimeCache = new Map<string, boolean>();
 
-export function pythonRuntimeAvailable(executable: string): boolean {
-  const cached = pythonRuntimeCache.get(executable);
+export function isolatedPythonEnvironment(
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...overrides,
+    PYTHONNOUSERSITE: "1",
+  };
+  delete environment.PYTHONHOME;
+  delete environment.PYTHONPATH;
+  return environment;
+}
+
+export function pythonRuntimeAvailable(
+  executable: string,
+  { isolated = false }: { isolated?: boolean } = {},
+): boolean {
+  const cacheKey = `${isolated ? "isolated" : "development"}:${executable}`;
+  const cached = pythonRuntimeCache.get(cacheKey);
   if (cached !== undefined) return cached;
   if (!executableAvailable(executable)) {
-    pythonRuntimeCache.set(executable, false);
+    pythonRuntimeCache.set(cacheKey, false);
     return false;
   }
 
@@ -193,6 +214,7 @@ export function pythonRuntimeAvailable(executable: string): boolean {
     .filter(Boolean)
     .join(delimiter);
   const result = spawnSync(executable, [
+    ...(isolated ? ["-I"] : []),
     "-c",
     [
       "import accelerate, av, einops, safetensors, scipy, torch, torchaudio, transformers",
@@ -200,12 +222,14 @@ export function pythonRuntimeAvailable(executable: string): boolean {
     ].join("; "),
   ], {
     cwd: repoRoot,
-    env: { ...process.env, PYTHONPATH: pythonPath },
+    env: isolated
+      ? isolatedPythonEnvironment()
+      : { ...process.env, PYTHONPATH: pythonPath },
     shell: false,
     stdio: "ignore",
     timeout: 30_000,
   });
   const available = result.status === 0 && !result.error;
-  pythonRuntimeCache.set(executable, available);
+  pythonRuntimeCache.set(cacheKey, available);
   return available;
 }

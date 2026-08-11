@@ -38,6 +38,7 @@ import {
   outputRoot,
   pythonRuntimeAvailable,
   pythonExecutable,
+  rendererPythonExecutable,
   serverHost,
   serverPort,
   uploadRoot,
@@ -299,7 +300,8 @@ app.get("/api/health", async (_request, response) => {
   response.json({
     state: resources.outputFreeGiB !== null ? "ready" : "blocked",
     resources,
-    engine: pythonRuntimeAvailable(pythonExecutable) ? "available" : "missing",
+    engine: pythonRuntimeAvailable(rendererPythonExecutable, { isolated: true }) ? "available" : "missing",
+    analysisEngine: pythonRuntimeAvailable(pythonExecutable) ? "available" : "missing",
     orchestrator: admissionRequired && orchestratorReachable && admissionClientAvailable() ? "available" : admissionRequired ? "missing" : "disabled",
     qwen: runtimeStatus.qwen,
     runtimeOverall: runtimeStatus.overall,

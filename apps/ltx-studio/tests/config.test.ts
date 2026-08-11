@@ -19,4 +19,8 @@ describe("local endpoint configuration", () => {
   it("rejects an executable without the Python LTX runtime", () => {
     expect(pythonRuntimeAvailable(process.execPath)).toBe(false);
   });
+
+  it("does not let an isolated runtime inherit Python path overrides", () => {
+    expect(pythonRuntimeAvailable(process.execPath, { isolated: true })).toBe(false);
+  });
 });

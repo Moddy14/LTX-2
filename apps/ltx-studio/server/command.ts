@@ -20,7 +20,7 @@ import {
   type PipelineMode,
 } from "../shared/pipelines.js";
 import type { PlanSuggestion } from "../shared/plan.js";
-import { outputRoot, pythonExecutable } from "./config.js";
+import { outputRoot, rendererPythonExecutable } from "./config.js";
 import {
   inspectLipDubReference,
   OFFICIAL_COMFY_LIPDUB_OUTPUT_AREA,
@@ -339,6 +339,7 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
   const inOutpaintICLora = request.mode === "ic-lora"
     && ["inpainting", "outpainting"].includes(request.icLora.profile);
   const args = [
+    "-I",
     "-m",
     hdrICLora
       ? "ltx_pipelines.hdr_ic_lora"
@@ -738,9 +739,9 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
   }
 
   return {
-    executable: pythonExecutable,
+    executable: rendererPythonExecutable,
     args,
-    displayCommand: [pythonExecutable, ...args].map(shellQuote).join(" "),
+    displayCommand: [rendererPythonExecutable, ...args].map(shellQuote).join(" "),
     outputPath,
     requiredPaths,
   };

@@ -1,0 +1,41 @@
+[project]
+name = "ltx-studio-native-runtime"
+version = "0.1.0"
+description = "Locked native LTX renderer runtime for LTX Studio"
+requires-python = "==3.12.*"
+dependencies = [
+    "accelerate==1.13.0",
+    "av==16.1.0",
+    "kornia==0.8.2",
+    "ltx-core",
+    "ltx-pipelines",
+    "opencv-python-headless==4.13.0.92",
+    "openimageio==3.1.15.0",
+    "requests==2.32.5",
+    "torch==2.11.0+cu130",
+    "torchaudio==2.11.0+cu130",
+    "transformers==4.57.6",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
+
+[tool.uv.workspace]
+members = []
+
+[tool.uv.sources]
+ltx-core = { path = "../../../packages/ltx-core", editable = true }
+ltx-pipelines = { path = "../../../packages/ltx-pipelines", editable = true }
+torch = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
