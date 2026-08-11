@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "ltx-studio-bundle-report.v1",
+  "build": {
+    "node": "v24.18.0",
+    "vite": "7.3.6"
+  },
+  "baseline": {
+    "initialRawBytes": 533430,
+    "initialGzipBytes": 155280
+  },
+  "target": {
+    "initialRawBytesMax": 450000,
+    "initialGzipBytesMax": 140000
+  },
+  "initial": {
+    "file": "index-jtj3L-tt.js",
+    "rawBytes": 388269,
+    "gzipBytes": 115561,
+    "brotliBytes": 99656
+  },
+  "chunks": [
+    { "file": "Editor-C8_h0Iqu.js", "initial": false, "rawBytes": 59185, "gzipBytes": 14926, "brotliBytes": 13461 },
+    { "file": "ExperimentPanel-CdaBdvgg.js", "initial": false, "rawBytes": 13343, "gzipBytes": 4713, "brotliBytes": 4308 },
+    { "file": "ObjectiveAnalysisPanel-B1dK7b6i.js", "initial": false, "rawBytes": 18751, "gzipBytes": 5204, "brotliBytes": 4756 },
+    { "file": "ObjectiveComparisonPanel-Cm8pl5Yq.js", "initial": false, "rawBytes": 3487, "gzipBytes": 1017, "brotliBytes": 917 },
+    { "file": "QualityScorecard-pr97hXMJ.js", "initial": false, "rawBytes": 3315, "gzipBytes": 1493, "brotliBytes": 1365 },
+    { "file": "SynchronizedComparePreview-DzP6nC-n.js", "initial": false, "rawBytes": 3993, "gzipBytes": 1630, "brotliBytes": 1494 },
+    { "file": "circle-check-DCe0eKIk.js", "initial": false, "rawBytes": 169, "gzipBytes": 162, "brotliBytes": 157 },
+    { "file": "fieldHelp-Do0s1OP_.js", "initial": false, "rawBytes": 47968, "gzipBytes": 16199, "brotliBytes": 14933 },
+    { "file": "index-jtj3L-tt.js", "initial": true, "rawBytes": 388269, "gzipBytes": 115561, "brotliBytes": 99656 }
+  ],
+  "staticGate": "pass",
+  "performanceGate": "pending-40-cold-context-runs"
+}

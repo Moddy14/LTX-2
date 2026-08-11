@@ -8,6 +8,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:ui": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "bundle:report": "node scripts/bundle-report.mjs",
     "start": "tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",

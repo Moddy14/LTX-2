@@ -8,6 +8,31 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Text / Bild zu Video");
 });
 
+test("loads the experiment workspace only on explicit demand", async ({ page }) => {
+  await expect(page.getByRole("button", { name: "Öffnen" })).toBeVisible();
+  await expect(page.getByText("Experiment vorregistrieren", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Öffnen" }).click();
+
+  await expect(page.getByText("Experiment vorregistrieren", { exact: true })).toBeVisible();
+});
+
+test("fails visibly when a lazy deploy chunk is no longer available", async ({ page }) => {
+  await page.route("**/src/components/ExperimentPanel.tsx*", (route) => route.abort("failed"));
+
+  await Promise.all([
+    page.waitForEvent("framenavigated"),
+    page.getByRole("button", { name: "Öffnen" }).click(),
+  ]);
+  await expect(page.getByRole("button", { name: "Öffnen" })).toBeVisible();
+  await page.getByRole("button", { name: "Öffnen" }).click();
+
+  await expect(page.getByRole("alert")).toContainText(
+    "Experimentansicht konnte nach dem Deploywechsel nicht geladen werden.",
+  );
+  await expect(page.getByRole("button", { name: "Studio aktualisieren" })).toBeVisible();
+});
+
 test("desktop exposes every production mode and contextual controls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Desktop-only density assertions");
   const modes = page.locator(".mode-button");
@@ -444,6 +469,7 @@ test("controlled experiments freeze one variable before either arm can run", asy
 
   const draft = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
   await page.goto(`/?draft=${draft}`);
+  await page.getByRole("button", { name: "Öffnen" }).click();
   await page.getByText("Experiment vorregistrieren", { exact: true }).click();
   await page.getByLabel("Kontrollierte Variable").selectOption("lipforcing-enabled");
   await expect(page.getByText("Kandidat: LipForcing mit qualitativem Wan-VAE-Decoder")).toBeVisible();

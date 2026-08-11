@@ -1,5 +1,5 @@
 import { Activity, Cpu, FolderClock, MemoryStick, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   createDefaultRequest,
@@ -54,9 +54,10 @@ import type {
   ControlledExperiment,
   ExperimentCreateInput,
 } from "../shared/experiments";
-import { Editor } from "./components/Editor";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
+import { LazyPanelBoundary, LazyPanelLoading } from "./components/LazyPanelBoundary";
+import { importWithSingleReload } from "./lazyImport";
 import { mergeOutputAnalysis, mergeOutputRefresh } from "./outputState";
 import { withSceneReference } from "./sceneReference";
 import {
@@ -70,6 +71,10 @@ import {
 } from "./types";
 
 const STORAGE_KEY = "ltx-studio.request.v1";
+
+const Editor = lazy(async () => ({
+  default: (await importWithSingleReload("editor", () => import("./components/Editor"))).Editor,
+}));
 
 function restoreRequest(): GenerationRequest {
   try {
@@ -801,23 +806,27 @@ export function App() {
 
       <div className="studio-grid">
         <ModeRail active={request.mode} onChange={changeMode} />
-        <Editor
-          request={request}
-          onChange={updateRequest}
-          errors={fieldErrors}
-          previews={previews}
-          onPreview={(path, url) => setPreviews((current) => ({ ...current, [path]: url }))}
-          onPreparedLipDubReference={applyPreparedLipDubReference}
-          onComposePrompt={handleComposePrompt}
-          promptComposeError={promptComposeError}
-          modelInventory={modelInventory}
-          canUndoPrompt={promptUndo !== null}
-          onUndoPrompt={() => {
-            if (promptUndo === null) return;
-            setRequest((current) => ({ ...current, prompt: promptUndo }));
-            setPromptUndo(null);
-          }}
-        />
+        <LazyPanelBoundary label="Editor">
+          <Suspense fallback={<LazyPanelLoading label="Editor" />}>
+            <Editor
+              request={request}
+              onChange={updateRequest}
+              errors={fieldErrors}
+              previews={previews}
+              onPreview={(path, url) => setPreviews((current) => ({ ...current, [path]: url }))}
+              onPreparedLipDubReference={applyPreparedLipDubReference}
+              onComposePrompt={handleComposePrompt}
+              promptComposeError={promptComposeError}
+              modelInventory={modelInventory}
+              canUndoPrompt={promptUndo !== null}
+              onUndoPrompt={() => {
+                if (promptUndo === null) return;
+                setRequest((current) => ({ ...current, prompt: promptUndo }));
+                setPromptUndo(null);
+              }}
+            />
+          </Suspense>
+        </LazyPanelBoundary>
         <RunPanel
           request={request}
           requestValid={validation.success}

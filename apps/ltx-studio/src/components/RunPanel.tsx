@@ -24,7 +24,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 
 import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
 import type { PlanSuggestion } from "../../shared/plan";
@@ -43,12 +43,28 @@ import type {
 } from "../../shared/experiments";
 import { isSpeechQualityCandidate } from "../qualityCandidates";
 import { supportsSceneReference } from "../sceneReference";
-import { QualityScorecard } from "./QualityScorecard";
-import { ObjectiveAnalysisPanel } from "./ObjectiveAnalysisPanel";
-import { ObjectiveComparisonPanel } from "./ObjectiveComparisonPanel";
-import { SynchronizedComparePreview } from "./SynchronizedComparePreview";
-import { ExperimentPanel } from "./ExperimentPanel";
+import { importWithSingleReload } from "../lazyImport";
 import { InfoTooltip } from "./Controls";
+import { LazyPanelBoundary, LazyPanelLoading } from "./LazyPanelBoundary";
+
+const ExperimentPanel = lazy(async () => ({
+  default: (await importWithSingleReload("experiments", () => import("./ExperimentPanel"))).ExperimentPanel,
+}));
+const ObjectiveAnalysisPanel = lazy(async () => ({
+  default: (await importWithSingleReload("objective-analysis", () => import("./ObjectiveAnalysisPanel")))
+    .ObjectiveAnalysisPanel,
+}));
+const ObjectiveComparisonPanel = lazy(async () => ({
+  default: (await importWithSingleReload("objective-comparison", () => import("./ObjectiveComparisonPanel")))
+    .ObjectiveComparisonPanel,
+}));
+const QualityScorecard = lazy(async () => ({
+  default: (await importWithSingleReload("quality-scorecard", () => import("./QualityScorecard"))).QualityScorecard,
+}));
+const SynchronizedComparePreview = lazy(async () => ({
+  default: (await importWithSingleReload("synchronized-compare", () => import("./SynchronizedComparePreview")))
+    .SynchronizedComparePreview,
+}));
 
 const statusLabels: Record<StudioJob["status"], string> = {
   queued: "Wartet",
@@ -199,6 +215,7 @@ export function RunPanel({
 }: RunPanelProps) {
   const selectedVideoRef = useRef<HTMLVideoElement | null>(null);
   const [selectedFrameSeconds, setSelectedFrameSeconds] = useState(0);
+  const [experimentsExpanded, setExperimentsExpanded] = useState(false);
   const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
   const duration = request.mode === "retake"
     ? request.retake.endTime - request.retake.startTime
@@ -249,13 +266,17 @@ export function RunPanel({
       <section className="preview-stage">
         <div className="preview-stage__media">
           {comparisonOutputs.length === 2 ? (
-            <SynchronizedComparePreview
-              outputs={[comparisonOutputs[0], comparisonOutputs[1]]}
-              scores={[
-                qualityAverageForOutput(comparisonOutputs[0]),
-                qualityAverageForOutput(comparisonOutputs[1]),
-              ]}
-            />
+            <LazyPanelBoundary label="Synchronvergleich">
+              <Suspense fallback={<LazyPanelLoading label="Synchronvergleich" />}>
+                <SynchronizedComparePreview
+                  outputs={[comparisonOutputs[0], comparisonOutputs[1]]}
+                  scores={[
+                    qualityAverageForOutput(comparisonOutputs[0]),
+                    qualityAverageForOutput(comparisonOutputs[1]),
+                  ]}
+                />
+              </Suspense>
+            </LazyPanelBoundary>
           ) : selectedOutput ? (
             isAudioOutputName(selectedOutput.name)
               ? <audio key={selectedOutput.url} src={selectedOutput.url} controls preload="metadata" />
@@ -311,7 +332,11 @@ export function RunPanel({
       </section>
 
       {comparisonOutputs.length === 2 ? (
-        <ObjectiveComparisonPanel outputs={[comparisonOutputs[0], comparisonOutputs[1]]} />
+        <LazyPanelBoundary label="Objektiver Vergleich">
+          <Suspense fallback={<LazyPanelLoading label="Objektiver Vergleich" />}>
+            <ObjectiveComparisonPanel outputs={[comparisonOutputs[0], comparisonOutputs[1]]} />
+          </Suspense>
+        </LazyPanelBoundary>
       ) : null}
 
       <section className="output-library" aria-label="Erzeugte Medien und Einstellungen">
@@ -482,19 +507,34 @@ export function RunPanel({
       </section>
 
       {request.mode !== "text-to-audio" ? (
-        <ExperimentPanel
-          request={request}
-          requestValid={requestValid}
-          experiments={experiments}
-          jobs={jobs}
-          outputs={outputs}
-          health={health}
-          onCreate={onCreateExperiment}
-          onFreeze={onFreezeExperiment}
-          onLaunch={onLaunchExperiment}
-          onAnalyze={(output) => onStartAnalysis(output)}
-          onCompare={onCompareExperiment}
-        />
+        experimentsExpanded ? (
+          <LazyPanelBoundary label="Experimentansicht">
+            <Suspense fallback={<LazyPanelLoading label="Experimentansicht" />}>
+              <ExperimentPanel
+                request={request}
+                requestValid={requestValid}
+                experiments={experiments}
+                jobs={jobs}
+                outputs={outputs}
+                health={health}
+                onCreate={onCreateExperiment}
+                onFreeze={onFreezeExperiment}
+                onLaunch={onLaunchExperiment}
+                onAnalyze={(output) => onStartAnalysis(output)}
+                onCompare={onCompareExperiment}
+              />
+            </Suspense>
+          </LazyPanelBoundary>
+        ) : (
+          <section className="output-library" aria-label="Experimente">
+            <div className="run-panel__heading">
+              <h2>Kontrollierte Experimente</h2>
+              <button type="button" className="button" onClick={() => setExperimentsExpanded(true)}>
+                Öffnen
+              </button>
+            </div>
+          </section>
+        )
       ) : null}
 
       <section className={`run-monitor ${activeJob ? "is-live" : ""}`} aria-label="Laufmonitor">
@@ -628,21 +668,23 @@ export function RunPanel({
       ) : null}
 
       {comparisonOutputs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
-        <>
-          <QualityScorecard
-            key={`manual-${selectedOutput.name}`}
-            output={selectedOutput}
-            outputs={outputs}
-            onSave={onSaveQualityReview}
-          />
-          <ObjectiveAnalysisPanel
-            key={`objective-${selectedOutput.name}-${selectedOutput.fileId}-${selectedOutput.changedAt}`}
-            output={selectedOutput}
-            onStart={onStartAnalysis}
-            onCancel={onCancelAnalysis}
-            onPrepareLipSyncRetry={onPrepareLipSyncRetry}
-          />
-        </>
+        <LazyPanelBoundary label="Qualitätsanalyse">
+          <Suspense fallback={<LazyPanelLoading label="Qualitätsanalyse" />}>
+            <QualityScorecard
+              key={`manual-${selectedOutput.name}`}
+              output={selectedOutput}
+              outputs={outputs}
+              onSave={onSaveQualityReview}
+            />
+            <ObjectiveAnalysisPanel
+              key={`objective-${selectedOutput.name}-${selectedOutput.fileId}-${selectedOutput.changedAt}`}
+              output={selectedOutput}
+              onStart={onStartAnalysis}
+              onCancel={onCancelAnalysis}
+              onPrepareLipSyncRetry={onPrepareLipSyncRetry}
+            />
+          </Suspense>
+        </LazyPanelBoundary>
       ) : null}
 
       {errors.length > 0 ? (
