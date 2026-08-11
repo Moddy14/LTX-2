@@ -99,6 +99,24 @@ def test_design_rejects_outcome_driven_or_vacuous_freezes() -> None:
         build_power_report(unsorted)
 
 
+def test_design_cannot_aggregate_critical_token_types() -> None:
+    missing_delta = _ready_design()
+    delta_catalog = missing_delta["delta_catalog"]
+    assert isinstance(delta_catalog, dict)
+    delta_catalog["metrics"] = [
+        metric for metric in delta_catalog["metrics"] if metric["metric_id"] != "asr-critical-negation-accuracy"
+    ]
+    with pytest.raises(DesignError, match="names, numbers, and negations separately"):
+        build_power_report(missing_delta)
+
+    missing_endpoint = _ready_design()
+    missing_endpoint["power_endpoints"] = [
+        endpoint for endpoint in missing_endpoint["power_endpoints"] if endpoint["endpoint_id"] != "asr-critical-number"
+    ]
+    with pytest.raises(DesignError, match="names, numbers, and negations separately"):
+        build_power_report(missing_endpoint)
+
+
 def test_design_cli_reports_hold_with_a_nonzero_exit(tmp_path: Path) -> None:
     environment = dict(os.environ)
     environment["PYTHONPATH"] = str(REPOSITORY_ROOT / "packages" / "ltx-trainer" / "src")

@@ -121,9 +121,11 @@ the gates after results are visible.
 ## D1 calibration gates
 
 `configs/av_eval/calibration-gates.v1.json` is the complete machine-readable
-gate inventory for calibration. It includes 33 fixed AV, phoneme/viseme,
+gate inventory for calibration. It includes 35 fixed AV, phoneme/viseme,
 identity, artifact, ASR, sharpness, calibration and abstention decisions plus
-the 12 claim-specific VBench measurements from D0a. Plan-fixed thresholds are
+the 12 claim-specific VBench measurements from D0a. Names, numbers and
+negations have separate 99%-accuracy gates and separate D0a power endpoints;
+they may never be hidden in one aggregate. Plan-fixed thresholds are
 immutable in the validator; only the still-unknown relative sharpness floor is
 nullable. Evaluator fingerprints, D0a/preregistration/VBench bindings and a
 basis-evidence hash for every gate remain null in the checked-in draft.
@@ -136,8 +138,8 @@ uv run python scripts/av_eval.py calibration-check \
 The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
 metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
 evidence, or an unbound upstream catalog. Its output is the exact 45-ID set
-that the tune/holdout report validator must cover; a VBench omission cannot be
-hidden behind the other D1 metrics.
+that the tune/holdout report validator must cover; a VBench or critical-token
+omission cannot be hidden behind the other D1 metrics.
 
 ## D0 readiness package
 

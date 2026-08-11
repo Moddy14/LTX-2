@@ -22,6 +22,16 @@ VBench_DIMENSIONS = {
     "aesthetic-quality",
     "imaging-quality",
 }
+REQUIRED_CRITICAL_TOKEN_DELTA_IDS = {
+    "asr-critical-name-accuracy",
+    "asr-critical-negation-accuracy",
+    "asr-critical-number-accuracy",
+}
+REQUIRED_CRITICAL_TOKEN_ENDPOINT_IDS = {
+    "asr-critical-name",
+    "asr-critical-negation",
+    "asr-critical-number",
+}
 
 
 class DesignError(ValueError):
@@ -114,6 +124,8 @@ def _validate_delta_catalog(raw: object, status: str) -> tuple[dict[str, Any], l
             blockers.append(f"delta-basis-missing:{metric_id}")
     if identifiers != sorted(set(identifiers)):
         raise DesignError("delta metrics must be unique and sorted")
+    if not REQUIRED_CRITICAL_TOKEN_DELTA_IDS.issubset(identifiers):
+        raise DesignError("delta catalog must power names, numbers, and negations separately")
     if status == "frozen" and blockers:
         raise DesignError(f"frozen delta catalog is incomplete: {blockers}")
     return raw, blockers
@@ -293,6 +305,8 @@ def _validate_power_endpoints(
             )
     if endpoint_ids != sorted(set(endpoint_ids)):
         raise DesignError("power endpoints must be unique and sorted")
+    if not REQUIRED_CRITICAL_TOKEN_ENDPOINT_IDS.issubset(endpoint_ids):
+        raise DesignError("power endpoints must cover names, numbers, and negations separately")
     return requirements, blockers, per_endpoint_alpha
 
 

@@ -42,7 +42,7 @@ def test_checked_in_calibration_catalog_is_an_explicit_hold() -> None:
     report = build_calibration_gate_report(_draft())
 
     assert report["status"] == "hold"
-    assert len(report["required_metric_ids"]) == 45
+    assert len(report["required_metric_ids"]) == 47
     assert "threshold-missing:sharpness-relative-face-ci-lower" in report["blockers"]
     assert "fingerprint-missing:asr-model" in report["blockers"]
     assert "design-digest-missing" in report["blockers"]
@@ -56,6 +56,9 @@ def test_complete_catalog_freezes_all_required_metrics_deterministically() -> No
     assert first["status"] == "ready-to-freeze"
     assert first["blockers"] == []
     assert first["required_metric_ids"] == sorted(first["required_metric_ids"])
+    assert "asr-critical-name-accuracy-ci-lower" in first["required_metric_ids"]
+    assert "asr-critical-negation-accuracy-ci-lower" in first["required_metric_ids"]
+    assert "asr-critical-number-accuracy-ci-lower" in first["required_metric_ids"]
 
 
 def test_catalog_rejects_missing_gates_and_changed_plan_thresholds() -> None:

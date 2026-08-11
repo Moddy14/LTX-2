@@ -12,7 +12,9 @@
   "delta_catalog": {
     "schema_version": "ltx-sota-delta-catalog.v1",
     "metrics": [
-      {"metric_id": "asr-critical-token-accuracy", "test": "noninferiority", "direction": "higher", "delta": null, "unit": "proportion", "basis_evidence_sha256": null},
+      {"metric_id": "asr-critical-name-accuracy", "test": "noninferiority", "direction": "higher", "delta": null, "unit": "proportion", "basis_evidence_sha256": null},
+      {"metric_id": "asr-critical-negation-accuracy", "test": "noninferiority", "direction": "higher", "delta": null, "unit": "proportion", "basis_evidence_sha256": null},
+      {"metric_id": "asr-critical-number-accuracy", "test": "noninferiority", "direction": "higher", "delta": null, "unit": "proportion", "basis_evidence_sha256": null},
       {"metric_id": "asr-word-error-rate", "test": "noninferiority", "direction": "lower", "delta": null, "unit": "proportion", "basis_evidence_sha256": null},
       {"metric_id": "av-sync-offset-p95", "test": "noninferiority", "direction": "lower", "delta": null, "unit": "milliseconds", "basis_evidence_sha256": null},
       {"metric_id": "identity-similarity", "test": "superiority", "direction": "higher", "delta": null, "unit": "cosine", "basis_evidence_sha256": null},
@@ -50,7 +52,9 @@
   "power_endpoints": [
     {"endpoint_id": "artifact-false-accept", "model": "binomial-upper", "effect": null, "variability": null, "null_value": 0.01, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "artifact-true-positive", "model": "binomial-lower", "effect": null, "variability": null, "null_value": 0.95, "alternative": null, "max_ci_width": null},
-    {"endpoint_id": "asr-critical-token", "model": "binomial-lower", "effect": null, "variability": null, "null_value": 0.99, "alternative": null, "max_ci_width": null},
+    {"endpoint_id": "asr-critical-name", "model": "binomial-lower", "effect": null, "variability": null, "null_value": 0.99, "alternative": null, "max_ci_width": null},
+    {"endpoint_id": "asr-critical-negation", "model": "binomial-lower", "effect": null, "variability": null, "null_value": 0.99, "alternative": null, "max_ci_width": null},
+    {"endpoint_id": "asr-critical-number", "model": "binomial-lower", "effect": null, "variability": null, "null_value": 0.99, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "asr-wer", "model": "binomial-upper", "effect": null, "variability": null, "null_value": 0.05, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "identity-superiority", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "mos-identity-mouth", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},
