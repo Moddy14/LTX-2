@@ -4,9 +4,10 @@
 
 Der isolierte native Python-Stack aus R1 ist als reproduzierbarer
 Engineering-Baustein **bestanden**. R1 insgesamt bleibt **hold**, weil
-kanonischer Release-Digest, unveränderliche Installation,
-Digest-gebundene Health/Provenienz und Cold-Canary eigene nachfolgende
-Abnahmen sind.
+ein aktuelles signiertes Rights-Attest, der Digest-gebundene GPU-Cold-Canary
+und die Qualitäts-/Holdout-Belege noch fehlen. Release-Digest,
+unveränderliche Installation und Digest-gebundene Health/Provenienz sind
+inzwischen implementiert und CPU/HTTP-seitig abgenommen.
 
 ## Implementierter Vertrag
 
@@ -85,15 +86,26 @@ deterministisch aus `shared/pipelines.ts` und `shared/releaseSurface.ts`
 erzeugt und bindet deren SHA-256. Ihre 123 Einträge werden in Tests auf reale,
 schema-valide Requests abgebildet; alle 13 Gates sind je Eintrag exakt einmal
 als anwendbar oder mit Grund als nicht anwendbar klassifiziert. Der Stand hat
-27 konditionale Kandidaten und 96 gesperrte Kombinationen.
+17 konditionale Kandidaten und 106 gesperrte Kombinationen.
 
 Die Sperre ist absichtlich streng: Die lokalen LatentSync-, MuseTalk- und
 LipForcing-Pfade verwenden InsightFace-`buffalo_l`-Gewichte, deren
 Upstream-Policy sie auf nichtkommerzielle Forschung beschränkt. Im
 MuseTalk-Inventar ist außerdem das Face-Parsing-Gewicht ohne deklarierte
-Upstream-Lizenz erfasst. LTX-Basispfade und LongCat bleiben nur konditionale
-Kandidaten und benötigen vor Aktivierung ein aktuelles signiertes
+Upstream-Lizenz erfasst. Zusätzlich sperrt die statische Prüfung alle Rezepte
+mit dem nicht deklarierten Comfy-Gemma-Abliterated-LoRA sowie den ID-LoRA-Arm,
+dessen TalkVid-, Einwilligungs- und Biometrierechte nicht auditierbar belegt
+sind. LTX-/Gemma-/LongCat-Pfade ohne diese Komponenten bleiben nur
+konditionale Kandidaten und benötigen vor Aktivierung ein aktuelles signiertes
 Rights-Attest; `candidate` bedeutet ausdrücklich noch nicht `released`.
+
+`release/rights-evidence.v1.json` bindet die offiziellen Git- und
+Modellkartenquellen auf konkrete Revision, Pfad, Größe und SHA-256. Das Schema
+erfasst getrennt Code, Gewichte, Trainingsdaten, Biometrieverarbeitung und
+kommerzielle Nutzung. Tests erzwingen, dass jeder Surface-Evidence-Identifier
+auflösbar ist, jedes Modell im statischen SBOM Rechtebelege besitzt und kein
+Eintrag mit blockierter Evidenz Kandidatenstatus behält. Das Release-Manifest
+bindet den Katalog separat von der späteren zeitvariablen Signatur.
 
 Primärquellen dieser Einstufung, abgerufen am 11.08.2026:
 
@@ -117,13 +129,27 @@ Eine absichtliche Änderung an `dist/index.html` wurde als Drift abgelehnt; nach
 bytegenauer Wiederherstellung war der Verifier wieder grün. Der kompakte Beleg
 liegt in `docs/evidence/release-r1-2026-08-11.json`.
 
+Ein späterer Engineering-Kandidat aus Commit `0268779` wurde nach einem
+zweiten Clean-Build mit dem Digest
+`3a66445b00f8e18223f8cec0c95f5c749534169e992002d696156830ba864349`
+unter `/opt/ltx-studio/releases/<digest>/` installiert. Ein erster Installlauf
+hatte zwar Leserechte erzwungen, aber die Quelldatei-Eigentümer übernommen; das
+war schlecht, weil der normale Benutzer die Modi wieder hätte ändern können.
+Der Installer verweigert jetzt Nicht-root-Ausführung, setzt rekursiv
+`root:root` und versiegelt danach. Der wiederholte Install hatte null
+nicht-root-eigene und null schreibbare reguläre Dateien. Das versiegelte Release
+lieferte auf einem isolierten Test-Port exakt seinen erwarteten Digest in
+`/api/health`; die erneute Vollprüfung aller 5.389 Artefakte blieb danach grün.
+Der verworfene Install wurde entfernt, ein `current`-Zeiger wurde nicht gesetzt
+und kein Produktdienst wurde umgeschaltet.
+
 Noch offen:
 
-1. Die statische Rights-Evidence vollständig katalogisieren und ein aktuelles,
-   signiertes externes Rights-Attest erzeugen; der Manifeststatus bleibt bis
-   dahin `hold`.
-2. Immutable Releasewurzel und Start-Driftprüfung an den Server binden; Health und
-   Run-Provenienz auf denselben Digest heben.
+1. Ein aktuelles, extern signiertes Rights-Attest für den finalen Digest
+   erzeugen; der Manifeststatus bleibt bis dahin `hold`.
+2. Den schmutzigen externen LongCat-Runtimebaum durch einen eigenen sauberen,
+   digestgebundenen Runtime-Release ersetzen, ohne Benutzeränderungen zu
+   verwerfen.
 3. Erst nach leerem Job-Preflight und Betreiberfreigabe atomar umschalten,
    Cold-Canary und absichtlichen Manipulations-Negativtest ausführen.
 

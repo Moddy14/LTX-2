@@ -1,0 +1,361 @@
+{
+  "activationContract": {
+    "blocked": "must-not-run-in-production-or-support-release-claims",
+    "conditional": "requires-current-signed-rights-attest",
+    "permitted": "may-proceed-subject-to-applicable-quality-gates"
+  },
+  "cutoffDate": "2026-08-11",
+  "evidence": [
+    {
+      "componentIds": [
+        "model.ltx23-gemma-abliterated-lora"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "not-applicable",
+        "code": "not-applicable",
+        "commercialUse": "blocked",
+        "trainingData": "blocked",
+        "weights": "blocked"
+      },
+      "evidenceId": "comfy-ltx2-abliterated-lora-license-undeclared",
+      "reason": "The pinned Comfy-Org/ltx-2 model card does not identify this abliterated Gemma LoRA or declare license, provenance, or training-data rights for it.",
+      "sources": [
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "Comfy-Org/ltx-2",
+          "revision": "bd5f9c87fcb0360ae7112f9784562670894d9492",
+          "sha256": "a949d9a13ab47cf0416357f6f3a72fee289ce84b435ea9a8e2debbc7054a0e9c",
+          "sizeBytes": 261,
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/bd5f9c87fcb0360ae7112f9784562670894d9492/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "model.ltx23-gemma"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "not-applicable",
+        "code": "conditional",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "conditional"
+      },
+      "evidenceId": "gemma-terms-model-card",
+      "reason": "The gated Gemma model card requires acceptance of Google's usage license; a current signed attest must prove acceptance and policy compliance.",
+      "sources": [
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "google/gemma-3-12b-it-qat-q4_0-unquantized",
+          "revision": "68f7ee4fbd59087436ada77ed2d62f373fdd4482",
+          "sha256": "50d992b38a248cef103765fab69dcec8d82953113ea82cbded2726997eaafc30",
+          "sizeBytes": 22784,
+          "url": "https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/68f7ee4fbd59087436ada77ed2d62f373fdd4482/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "runtime.latentsync-1.6",
+        "runtime.lipforcing-14b",
+        "runtime.musetalk-1.5"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "blocked",
+        "code": "permitted",
+        "commercialUse": "blocked",
+        "trainingData": "blocked",
+        "weights": "blocked"
+      },
+      "evidenceId": "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+      "reason": "InsightFace code is MIT, but upstream limits the supplied buffalo_l model package to non-commercial research and requires separate licensing for face-recognition models.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "README.md",
+          "repository": "deepinsight/insightface",
+          "revision": "7fadd420c2351d0ffa8cac403421c1a3ed733365",
+          "sha256": "84606d9ab37a38606b12c10d96172c6343768d2ef72c802a16482e476f8baf22",
+          "sizeBytes": 16158,
+          "url": "https://raw.githubusercontent.com/deepinsight/insightface/7fadd420c2351d0ffa8cac403421c1a3ed733365/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "runtime.latentsync-1.6"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "permitted",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "conditional"
+      },
+      "evidenceId": "latentsync-apache-2.0",
+      "reason": "The pinned code is Apache-2.0, while the pinned checkpoint card declares OpenRAIL++; activation must cover both and all auxiliary checkpoints.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "bytedance/LatentSync",
+          "revision": "a229c3948406bc2cf6eaf4873e662e70c6a04746",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "sizeBytes": 11356,
+          "url": "https://raw.githubusercontent.com/bytedance/LatentSync/a229c3948406bc2cf6eaf4873e662e70c6a04746/LICENSE"
+        },
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "ByteDance/LatentSync",
+          "revision": "405eda8eab9f65c1a6e0c292a5dee5a08089e2ae",
+          "sha256": "1d973e48b6382baf350bdc74331b87ea2dd9cd4da9fc2b50ebf40d9b9d11cc94",
+          "sizeBytes": 490,
+          "url": "https://huggingface.co/ByteDance/LatentSync/resolve/405eda8eab9f65c1a6e0c292a5dee5a08089e2ae/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "runtime.lipforcing-14b"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "permitted",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "permitted"
+      },
+      "evidenceId": "lipforcing-apache-2.0",
+      "reason": "The pinned code and weight card declare Apache-2.0, but production still requires a current attest for biometric inputs and separately licensed dependencies.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "cvlab-kaist/LipForcing",
+          "revision": "fc864771eb347ca3ccaaef9c0b583ff6ccc9f184",
+          "sha256": "e27d3412810eb8420110b2595aa86a013628e8f441d65cf75f00e14973f051b7",
+          "sizeBytes": 11361,
+          "url": "https://raw.githubusercontent.com/cvlab-kaist/LipForcing/fc864771eb347ca3ccaaef9c0b583ff6ccc9f184/LICENSE"
+        },
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "JinhyukJang/lipforcing",
+          "revision": "49f1f15bdc0d266e6e6ef64ccaa1ee86367a8799",
+          "sha256": "79ec741a977ff8ac064bcbeed22684bd21af027dd1f2fa29e5312ab04d818a4f",
+          "sizeBytes": 3821,
+          "url": "https://huggingface.co/JinhyukJang/lipforcing/resolve/49f1f15bdc0d266e6e6ef64ccaa1ee86367a8799/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "runtime.longcat-lipsync"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "permitted",
+        "commercialUse": "permitted",
+        "trainingData": "not-distributed",
+        "weights": "permitted"
+      },
+      "evidenceId": "longcat-video-mit-model-card",
+      "reason": "The official pinned repository states that code and model weights are MIT; a current attest is still required for consent and lawful face/voice processing.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "meituan-longcat/LongCat-Video",
+          "revision": "6b3f4b8582a8bc3f20f795735f5383716c4ba794",
+          "sha256": "dfdbf36556065706ef8b26e5866acb85209b6465af0395578d38b63470e0bed0",
+          "sizeBytes": 1063,
+          "url": "https://raw.githubusercontent.com/meituan-longcat/LongCat-Video/6b3f4b8582a8bc3f20f795735f5383716c4ba794/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "README.md",
+          "repository": "meituan-longcat/LongCat-Video",
+          "revision": "6b3f4b8582a8bc3f20f795735f5383716c4ba794",
+          "sha256": "195f2c382d1e55ff734f26ce22946280fa892aba5d4c38ca616256f442c449d4",
+          "sizeBytes": 19815,
+          "url": "https://raw.githubusercontent.com/meituan-longcat/LongCat-Video/6b3f4b8582a8bc3f20f795735f5383716c4ba794/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "model.lipdub-distilled-checkpoint",
+        "model.lipdub-lora",
+        "model.lipdub-spatial-upscaler",
+        "model.ltx23-comfy-distilled-lora",
+        "model.ltx23-dev-checkpoint",
+        "model.ltx23-dev-fp8-checkpoint",
+        "model.ltx23-distilled-fp8-checkpoint",
+        "model.ltx23-distilled-lora",
+        "model.ltx23-hdr-lora",
+        "model.ltx23-hdr-scene-embeddings",
+        "model.ltx23-ingredients-lora",
+        "model.ltx23-inoutpaint-lora",
+        "model.ltx23-instant-shave-lora",
+        "model.ltx23-motion-track-lora",
+        "model.ltx23-pixel-upscaler-x4-lora",
+        "model.ltx23-spatial-upscaler",
+        "model.ltx23-union-control-lora"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "conditional",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "conditional"
+      },
+      "evidenceId": "ltx2-community-license-2026-01-05",
+      "reason": "LTX-2 code, weights, and derivatives are under the January 5, 2026 Community License; revenue threshold, acceptable-use, notice, and consent controls require a current signed attest.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "Lightricks/LTX-2",
+          "revision": "4f8905737aac86a554637cac86c178877a39c744",
+          "sha256": "7c8ef302fa1444a3a5650c2dfa09c6927a52b233202431023abb32519f354397",
+          "sizeBytes": 21467,
+          "url": "https://raw.githubusercontent.com/Lightricks/LTX-2/4f8905737aac86a554637cac86c178877a39c744/LICENSE"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "model.ltx23-id-lora-talkvid"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "blocked",
+        "code": "not-applicable",
+        "commercialUse": "blocked",
+        "trainingData": "blocked",
+        "weights": "conditional"
+      },
+      "evidenceId": "ltx23-id-lora-talkvid-data-rights-undeclared",
+      "reason": "The pinned model card identifies TalkVid training and visual/voice identity transfer but provides no auditable dataset, subject-consent, biometric, or commercial-use grant.",
+      "sources": [
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "AviadDahan/LTX-2.3-ID-LoRA-TalkVid-3K",
+          "revision": "6eabedadefbcfa6c95092d50006629d9413102fd",
+          "sha256": "2b7c3c7e19a04d5132cf44d2d18b8bc579e29695b7eabce559555262fdba41f7",
+          "sizeBytes": 4336,
+          "url": "https://huggingface.co/AviadDahan/LTX-2.3-ID-LoRA-TalkVid-3K/resolve/6eabedadefbcfa6c95092d50006629d9413102fd/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "model.ltx23-moge"
+      ],
+      "decision": "permitted",
+      "dimensions": {
+        "biometricProcessing": "not-applicable",
+        "code": "permitted",
+        "commercialUse": "permitted",
+        "trainingData": "not-distributed",
+        "weights": "permitted"
+      },
+      "evidenceId": "moge-mit-model-card",
+      "reason": "The pinned Comfy-Org MoGe repository carries an MIT license for the distributed geometry model artifact.",
+      "sources": [
+        {
+          "authority": "upstream-model-card",
+          "path": "LICENSE",
+          "repository": "Comfy-Org/MoGe",
+          "revision": "7f19f325949e1e7bb31c720333936f03cf932f57",
+          "sha256": "ad7d951c80c5fc2b2bce035f2041bc0a0dbf9028c8ecc4c9a8e1fba8130b6b59",
+          "sizeBytes": 12500,
+          "url": "https://huggingface.co/Comfy-Org/MoGe/resolve/7f19f325949e1e7bb31c720333936f03cf932f57/LICENSE"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "runtime.musetalk-1.5"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "blocked",
+        "code": "not-applicable",
+        "commercialUse": "blocked",
+        "trainingData": "blocked",
+        "weights": "blocked"
+      },
+      "evidenceId": "musetalk-face-parse-license-undeclared",
+      "reason": "The pinned download script fetches face-parse weights from opaque endpoints without a declared artifact license or provenance; production activation is prohibited.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "download_weights.sh",
+          "repository": "TMElyralab/MuseTalk",
+          "revision": "0a89dec45a0192b824e3cf4daf96c239440c5ed8",
+          "sha256": "926e9f48ca878829eb145ce0a40cc17472c14cda73bf408604358cccc28c78a0",
+          "sizeBytes": 1734,
+          "url": "https://raw.githubusercontent.com/TMElyralab/MuseTalk/0a89dec45a0192b824e3cf4daf96c239440c5ed8/download_weights.sh"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "runtime.musetalk-1.5"
+      ],
+      "decision": "blocked",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "permitted",
+        "commercialUse": "blocked",
+        "trainingData": "blocked",
+        "weights": "blocked"
+      },
+      "evidenceId": "musetalk-model-card",
+      "reason": "The GitHub model card says commercial model use is allowed, while the pinned weight card declares CreativeML OpenRAIL-M and identifies HDTF training; the unresolved scope conflict remains fail-closed.",
+      "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "LICENSE",
+          "repository": "TMElyralab/MuseTalk",
+          "revision": "0a89dec45a0192b824e3cf4daf96c239440c5ed8",
+          "sha256": "992ec5fd1dd4964cfa003665196cd0c0c10a7a5aa10109991e964eebd2c7f116",
+          "sizeBytes": 13427,
+          "url": "https://raw.githubusercontent.com/TMElyralab/MuseTalk/0a89dec45a0192b824e3cf4daf96c239440c5ed8/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "README.md",
+          "repository": "TMElyralab/MuseTalk",
+          "revision": "0a89dec45a0192b824e3cf4daf96c239440c5ed8",
+          "sha256": "63587c38fa53bd3292654a71aa6978628db02dd02cc93153030f3d0dca7721bf",
+          "sizeBytes": 22817,
+          "url": "https://raw.githubusercontent.com/TMElyralab/MuseTalk/0a89dec45a0192b824e3cf4daf96c239440c5ed8/README.md"
+        },
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "TMElyralab/MuseTalk",
+          "revision": "3ef28bc5cff08c90ad8178a25f1b570cd800170f",
+          "sha256": "8bb088ed2d38de5d600a33c82512053b9fb6f5857bb89056cc766a7425929a6c",
+          "sizeBytes": 11145,
+          "url": "https://huggingface.co/TMElyralab/MuseTalk/resolve/3ef28bc5cff08c90ad8178a25f1b570cd800170f/README.md"
+        }
+      ]
+    }
+  ],
+  "policyVersion": "ltx-studio-release-rights.v1",
+  "schemaVersion": "ltx-studio-rights-evidence.v1"
+}

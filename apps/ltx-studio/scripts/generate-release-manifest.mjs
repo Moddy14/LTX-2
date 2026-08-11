@@ -50,6 +50,8 @@ function visitNodeDependencies(dependencies = {}) {
 visitNodeDependencies(npmTree.dependencies);
 
 const modelsModule = await import(pathToFileURL(join(releaseAppRoot, "shared", "models.js")));
+const releaseSurfaceModule = await import(pathToFileURL(join(releaseAppRoot, "shared", "releaseSurface.js")));
+const rightsEvidenceModule = await import(pathToFileURL(join(releaseAppRoot, "shared", "rightsEvidence.js")));
 const models = modelsModule.recommendedModelAssets.map((asset) => ({
   id: asset.id,
   repository: asset.repoId,
@@ -79,6 +81,21 @@ try {
 
 const sourceDateEpoch = Number(command("git", ["show", "-s", "--format=%ct", "HEAD"]));
 const surfacePath = join(releaseAppRoot, "release", "candidate-release-surface.v1.json");
+const rightsEvidencePath = join(releaseAppRoot, "release", "rights-evidence.v1.json");
+const surface = releaseSurfaceModule.candidateReleaseSurfaceSchema.parse(
+  JSON.parse(readFileSync(surfacePath, "utf8")),
+);
+const rightsEvidence = rightsEvidenceModule.rightsEvidenceCatalogSchema.parse(
+  JSON.parse(readFileSync(rightsEvidencePath, "utf8")),
+);
+const knownEvidenceIds = new Set(rightsEvidence.evidence.map(({ evidenceId }) => evidenceId));
+for (const entry of surface.entries) {
+  for (const evidenceId of entry.rights.evidenceIds) {
+    if (!knownEvidenceIds.has(evidenceId)) {
+      throw new Error(`Release surface ${entry.id} references unknown rights evidence ${evidenceId}`);
+    }
+  }
+}
 const artifacts = releaseArtifacts(releaseRoot);
 const manifest = {
   schemaVersion: "ltx-studio-release-manifest.v1",
@@ -119,6 +136,10 @@ const manifest = {
   rights: {
     policyVersion: "ltx-studio-release-rights.v1",
     ltx2CommunityLicenseSha256: sha256File(join(releaseRoot, "LICENSE")),
+    evidenceCatalog: {
+      path: "apps/ltx-studio/release/rights-evidence.v1.json",
+      sha256: sha256File(rightsEvidencePath),
+    },
     status: "requires-current-signed-rights-attest",
   },
   sbom: {

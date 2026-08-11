@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   icLoraProfiles,
   lipDubPipelineProfiles,
+  needsGemmaAbliteratedLora,
   pipelineModes,
   type ICLoraProfile,
   type LipDubPipelineProfile,
@@ -250,23 +251,50 @@ function baseVariants(): BaseVariant[] {
   return variants;
 }
 
-const ltxRights = {
-  status: "conditional" as const,
-  evidenceIds: ["ltx2-community-license-2026-01-05"],
-  reason: "Activation requires a current signed attestation for revenue threshold, commercial agreement if applicable, and acceptable-use/user-notice controls.",
-};
+const blockedBaseEvidence = new Set([
+  "comfy-ltx2-abliterated-lora-license-undeclared",
+  "ltx23-id-lora-talkvid-data-rights-undeclared",
+]);
 
-function rightsFor(postprocessor: PostprocessorId): ReleaseSurfaceEntry["rights"] {
-  if (postprocessor === "none") return ltxRights;
+function baseRightsFor(variant: BaseVariant): ReleaseSurfaceEntry["rights"] {
+  const evidenceIds = ["ltx2-community-license-2026-01-05"];
+  if (!(variant.mode === "ic-lora" && variant.icLoraProfile === "hdr")) {
+    evidenceIds.push("gemma-terms-model-card");
+  }
+  if (needsGemmaAbliteratedLora(variant.mode)
+    || (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control")) {
+    evidenceIds.push("comfy-ltx2-abliterated-lora-license-undeclared");
+  }
+  if (variant.mode === "id-lora") {
+    evidenceIds.push("ltx23-id-lora-talkvid-data-rights-undeclared");
+  }
+  if (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control") {
+    evidenceIds.push("moge-mit-model-card");
+  }
+  const blocked = evidenceIds.some((evidenceId) => blockedBaseEvidence.has(evidenceId));
+  return {
+    status: blocked ? "blocked" : "conditional",
+    evidenceIds,
+    reason: blocked
+      ? "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable."
+      : "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+  };
+}
+
+function rightsFor(variant: BaseVariant, postprocessor: PostprocessorId): ReleaseSurfaceEntry["rights"] {
+  const base = baseRightsFor(variant);
+  if (postprocessor === "none") return base;
   if (postprocessor === "longcat-lipsync") {
     return {
-      status: "conditional",
-      evidenceIds: ["ltx2-community-license-2026-01-05", "longcat-video-mit-model-card"],
-      reason: "LongCat is MIT-licensed, while activation still requires the signed LTX-2 conditional-rights attestation for the base output.",
+      status: base.status,
+      evidenceIds: [...base.evidenceIds, "longcat-video-mit-model-card"],
+      reason: base.status === "blocked"
+        ? `${base.reason} Adding LongCat does not remove that block.`
+        : "LongCat is MIT-licensed, while activation still requires signed LTX-2, Gemma, and biometric-input attestations.",
     };
   }
   const commonEvidence = [
-    "ltx2-community-license-2026-01-05",
+    ...base.evidenceIds,
     "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
   ];
   if (postprocessor === "musetalk-1.5") {
@@ -329,7 +357,7 @@ function gatesFor(variant: BaseVariant, postprocessor: PostprocessorId): Pick<Re
 }
 
 function entryFor(variant: BaseVariant, postprocessor: PostprocessorId): ReleaseSurfaceEntry {
-  const rights = rightsFor(postprocessor);
+  const rights = rightsFor(variant, postprocessor);
   return {
     id: `${variant.id}.post.${postprocessor}`,
     claimId: postprocessor === "none" ? variant.claimId : `${variant.claimId}.refined.${postprocessor}`,

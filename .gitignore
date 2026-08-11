@@ -83,6 +83,7 @@ playwright-report/
 .ltx-studio/
 !apps/ltx-studio/*.json
 !apps/ltx-studio/evaluators/phoneme-viseme/*.json
+!apps/ltx-studio/release/rights-evidence.v1.json
 !apps/ltx-studio/docs/evidence/scene-reference-ab-2026-08-10.json
 !packages/ltx-trainer/configs/av_eval/*.json
 
