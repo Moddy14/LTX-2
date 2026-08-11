@@ -59,9 +59,11 @@ deployment rights; those remain subject to the signed rights policy.
   `9b39667838a7c7ff2c367f5c5189d35c422878bd`.
 - Weights: `OpenMOSS-Team/MOVA-360p`, revision
   `eab4aa91d6d5eb515e259a0c8533c90062b117a5`.
-- MOVA jointly generates video and audio from a first-frame image and prompt.
-  It is therefore a plausible native `image-to-video` dialog arm, but not a
-  fair text-only, driving-audio or reference-video-redubbing arm.
+- MOVA jointly generates video and audio from a first-frame image and prompt,
+  but the official interface does not expose the exact-dialogue input contract
+  required by LTX Studio's native-dialog claim. It is therefore not a fair
+  native-dialog, driving-audio or reference-video-redubbing arm under the
+  frozen claim contracts.
 - The official repository and model card declare Apache-2.0. Code license
   SHA-256:
   `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`.
@@ -75,10 +77,11 @@ deployment rights; those remain subject to the signed rights policy.
 - `audio-driven-video.image-audio-to-video`: LongCat and Wan are input-contract
   candidates; MOVA is incompatible because it does not consume the fixed
   driving-audio track.
-- `native-generation.image-to-video`: MOVA is an input-contract candidate;
-  LongCat Avatar and Wan S2V require driving audio.
-- `native-generation.text-to-video`: none of these three is an exact arm under
-  the current text-only input contract.
+- `native-generation.image-to-video` and
+  `native-generation.text-to-video`: none of these three accepts the current
+  exact `prompt-with-dialogue` contract; MOVA's free prompt does not establish
+  exact spoken-dialogue delivery, while LongCat Avatar and Wan S2V require
+  driving audio.
 - Both `reference-video-redubbing.*` claims have no exact external arm in this
   landscape. They remain `local-only` unless a later cutoff-dated search adds a
   rights-clear model with the same reference-video plus target-text contract.

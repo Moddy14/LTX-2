@@ -378,9 +378,15 @@ applicable gates are digest commitments.
 The current cutoff record is
 `apps/ltx-studio/docs/ANCHOR_LANDSCAPE_2026-08-11.md`. It pins official Git and
 Hugging Face revisions plus separate code- and weight-license evidence. The
-landscape remains `draft` because MOVA/Wan resource profiles and reproducible
+landscape remains `draft` because all three resource profiles and reproducible
 local starts are not yet measured; repository licenses alone do not clear
-training-data or biometric-use rights.
+training-data or biometric-use rights. The landscape also freezes each
+candidate's sorted `compatible_claim_ids`. Under the current exact input
+contracts, only LongCat and Wan match
+`audio-driven-video.image-audio-to-video`; MOVA matches none because it
+generates its own audio instead of consuming the fixed driving track, and none
+of the three implements exact-dialogue native generation or exact
+reference-video redubbing.
 
 ```bash
 uv run python scripts/av_eval.py comparator-check \
@@ -393,8 +399,10 @@ functional and code/weight-identical to the landscape. An exclusion needs a
 machine-consistent reason limited to rights, input contract, reproducibility,
 resource fit or the preregistered technical minimum. The protocol requires
 `quality_evidence_seen=false`, so a poor pilot score cannot remove a strong
-opponent. A matrix with only `local-only` claims may be production-useful, but
-its `sota_status` remains `hold`.
+opponent. Matrix compatibility must exactly match the frozen landscape; it
+cannot hide LongCat/Wan from the driving-audio claim or invent MOVA as a fair
+arm. A matrix with only `local-only` claims may be production-useful, but its
+`sota_status` remains `hold`.
 
 F0 also binds every pre-Q2 technical attestation to a detailed producer
 report. A bare signed `pass` is insufficient: R0 must prove all four scheduler

@@ -36,8 +36,7 @@ MATRIX_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eva
 LANDSCAPE_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "anchor-landscape.v1.json"
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 TARGETS = [
-    "reference-video-redubbing.native-distilled",
-    "reference-video-redubbing.official-comfy-hq",
+    "audio-driven-video.image-audio-to-video",
 ]
 QUALIFICATION_KINDS = [
     "d1-calibration",
@@ -475,8 +474,12 @@ def _q2_comparator_contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str
     for claim in matrix["claims"]:
         target = claim["claim_id"] in TARGETS
         claim["claim_status"] = "sota-target" if target else "local-only"
-        claim["sota_anchor_arm_id"] = "mova" if target else None
+        claim["sota_anchor_arm_id"] = "longcat-video-avatar-1.5" if target else None
         for arm in claim["arms"]:
+            if arm["provider"] == "external":
+                candidate = landscape_index[arm["arm_id"]]
+                arm["code_revision"] = candidate["code_revision"]
+                arm["weights_revision"] = candidate["weights_revision"]
             if arm["provider"] == "owned":
                 arm.update(
                     inclusion_status="included",
@@ -486,8 +489,8 @@ def _q2_comparator_contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str
                     code_revision="d" * 40,
                     weights_revision="e" * 40,
                 )
-            elif target and arm["arm_id"] == "mova":
-                candidate = landscape_index["mova"]
+            elif target and claim["claim_id"] in landscape_index[arm["arm_id"]]["compatible_claim_ids"]:
+                candidate = landscape_index[arm["arm_id"]]
                 arm.update(
                     inclusion_status="included",
                     input_compatibility="compatible",

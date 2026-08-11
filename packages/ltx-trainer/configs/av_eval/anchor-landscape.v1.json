@@ -13,7 +13,8 @@
       "weights_revision": "92016c71d5d318d0f5d84e4db30015a571484ab6",
       "code_license_sha256": "dfdbf36556065706ef8b26e5866acb85209b6465af0395578d38b63470e0bed0",
       "weights_license_sha256": "d4b5dc706d13a511cc1aac623f75c10ac1dff902ffd915a411e398218b675cb4",
-      "resource_profile_sha256": null
+      "resource_profile_sha256": null,
+      "compatible_claim_ids": ["audio-driven-video.image-audio-to-video"]
     },
     {
       "candidate_id": "mova",
@@ -22,7 +23,8 @@
       "weights_revision": "eab4aa91d6d5eb515e259a0c8533c90062b117a5",
       "code_license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
       "weights_license_sha256": "facf3856a51fdb8fdb096946af952a63254eb3078eb49a7fcdd178ae67575a89",
-      "resource_profile_sha256": null
+      "resource_profile_sha256": null,
+      "compatible_claim_ids": []
     },
     {
       "candidate_id": "wan2.2-s2v-14b",
@@ -31,7 +33,8 @@
       "weights_revision": "dab4e9c55bbe4c8c4d03db1c2c98c7f0ac9c454b",
       "code_license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
       "weights_license_sha256": "b8361d366abbf2b0d211a20ecb0e721e6879a63f2c3bb66dd4bfc153ed870530",
-      "resource_profile_sha256": null
+      "resource_profile_sha256": null,
+      "compatible_claim_ids": ["audio-driven-video.image-audio-to-video"]
     }
   ]
 }

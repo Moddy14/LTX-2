@@ -17,7 +17,7 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 164/164, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 165/165, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
@@ -29,7 +29,7 @@ lautet der ehrliche Status **nicht 10/10**.
 | Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. D0a wertet jetzt gepaarte Rohpilotmessungen, Wiederholbarkeit, Clustereffekt und Binomialraten deterministisch aus und bindet sie fail-closed an Powerdesign, D0 und F0. Der D1-Katalog umfasst alle 37 festen und 90 claim-spezifischen VBench-Gates der aktuellen Candidate-Surface. Es gibt weiterhin keine reale rechtsgeprüfte Pilot-/Kalibrierstichprobe, keinen versiegelten Holdout und keine unabhängigen Signaturen | Auswertungsvertrag gut; reale Pilot-, Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
 | Video-Benchmark | Der offizielle VBench-I2V-Commit `45e79ec1…` und 17 relevante Source-/Config-Dateien sind durch einen fail-closed Source-Contract gebunden und gegen einen sauberen offiziellen Checkout verifiziert. Die sechs releasebezogenen Custom-Input-Dimensionen werden einzeln ausgewertet, nie als Gesamtscore. Isolierter Dependency-/Checkpoint-Runtime-Fingerprint und reale Messungen fehlen noch | Source-Vertrag gut; D1-Runtime und Evidenz offen | P2 |
-| Komparatoren | LongCat ist lokal vorhanden. MOVA und Wan2.2-S2V fehlen lokal. MOVA und Wan haben unterschiedliche Eingabeverträge und dürfen nicht in einen gemeinsamen Score gezwungen werden | lokaler Bake-off offen | P3 |
+| Komparatoren | Die cutoff-datierte Landschaft und Matrix binden die Eingabeverträge jetzt maschinell: Nur `audio-driven-video.image-audio-to-video` hat mit LongCat und Wan anwendbare externe Kandidaten; MOVA konsumiert den festen Ziel-Audiotrack nicht. Native Dialoggenerierung und exaktes Referenzvideo-Redubbing sind mit diesen drei Armen `local-only`. LongCat ist lokal vorhanden, MOVA und Wan fehlen lokal; Ressourcenprofile, Rechtefreigaben und technische Piloten sind offen | Fairnessvertrag gut; lokaler Bake-off offen | P3 |
 
 Die frühere 533-kB-Warnung ist durch R2 geschlossen. Auch der frühere
 `requests`-Konflikt ist im Releasepfad durch die eigene gelockte R1-Runtime
@@ -528,6 +528,11 @@ Q1-Entscheider erzwingt die vor Ergebnisansicht gebundene Matrix, vollständige
 claim-spezifische Gate-Familien, ITT, unabhängige Leakage-Komponenten und eine
 globale Holm-Korrektur. Ohne reale, rechtsklare Comparator-Installationen und
 Kalibrierruns bleibt Q1 `hold`; `local-only` kann niemals SOTA vortäuschen.
+Der Landschaftsvertrag enthält pro externem Kandidaten die sortierte Menge der
+kompatiblen Claim-IDs; eine davon abweichende Matrix wird fail-closed
+abgewiesen. Im aktuellen Cutoff sind ausschließlich LongCat und Wan für den
+Driving-Audio-/Portrait-Claim kompatibel. MOVA sowie alle externen Arme der
+Native-Dialog- und Redubbing-Claims sind objektiv input-inkompatibel.
 
 1. Mit dokumentiertem Cutoff-Datum eine reproduzierbare Landschaftssuche in
    Primärpapieren, offiziellen Repositories und anwendbaren Leaderboards
@@ -539,9 +544,9 @@ Kalibrierruns bleibt Q1 `hold`; `local-only` kann niemals SOTA vortäuschen.
 
    | Claim | identische zulässige Inputs | zulässige Arme |
    | --- | --- | --- |
-   | native Dialoggenerierung | Prompt/Dialog, optional dasselbe Startbild; kein Zielaudio | LTX-native; MOVA nur bei exakt kompatiblem Vertrag |
-   | Driving Audio/Portrait | dasselbe Portrait und derselbe Audiotrack | LTX IA2V/A2V, Wan2.2-S2V und LongCat, soweit der jeweilige Arm exakt diese Inputs akzeptiert |
-   | Referenzvideo-Redubbing | dasselbe Referenzvideo und derselbe Zieltext | LTX LipDub und nur Komparatoren mit demselben Text-/Video-Vertrag |
+   | native Dialoggenerierung | exakter Prompt/Dialog, optional dasselbe Startbild; kein Zielaudio | LTX-native; kein kompatibler externer Arm im aktuellen Cutoff |
+   | Driving Audio/Portrait | dasselbe Portrait und derselbe Audiotrack | LTX IA2V/A2V, Wan2.2-S2V und LongCat |
+   | Referenzvideo-Redubbing | dasselbe Referenzvideo und derselbe Zieltext | LTX LipDub; kein kompatibler externer Arm im aktuellen Cutoff |
 
    Jede Zeile bindet Timeline-/Auflösungsnormalisierung, Seed oder dokumentierte
    Seed-Policy, Failure/Abstention nach Intention-to-treat und die anwendbaren
@@ -561,9 +566,11 @@ Kalibrierruns bleibt Q1 `hold`; `local-only` kann niemals SOTA vortäuschen.
    einen anwendbaren starken Gegner nie entfernen. Technisches Versagen zählt
    nach ITT oder begrenzt den Claim auf `local-only`; es erzeugt keinen
    bequemeren SOTA-Vergleich.
-5. Da die Preregistrierung noch `draft` ist, vor dem Freeze entscheiden, ob
-   MOVA als eigener Arm aufgenommen oder ausdrücklich außerhalb des Claims
-   gehalten wird. Nach dem Freeze keine nachträgliche Favoritenaufnahme.
+5. MOVA ist in jeder Matrixzeile sichtbar, aber wegen des abweichenden
+   Inputvertrags objektiv ausgeschlossen. Eine spätere Claim-Erweiterung oder
+   ein neuer passender Comparator erfordert eine neue cutoff-datierte
+   Landschaft, Preregistrierung und Invalidierung der nachgelagerten Belege;
+   nach dem Freeze gibt es keine nachträgliche Favoritenaufnahme.
 6. Einen Pilot auf ausschließlich Kalibrierdaten fahren. Fehler führen zu
    neuer Release-/Evaluatorrevision und über die Invalidierungsmatrix zurück zu
    den betroffenen Gates, niemals zur Inspektion des Holdouts.

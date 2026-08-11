@@ -50,11 +50,16 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
     assert isinstance(claims, list)
     target_ids: list[str] = []
     for claim in claims:
-        claim["claim_status"] = "sota-target" if targets else "local-only"
-        claim["sota_anchor_arm_id"] = "mova" if targets else None
-        if targets:
+        target_claim = targets and claim["claim_id"] == "audio-driven-video.image-audio-to-video"
+        claim["claim_status"] = "sota-target" if target_claim else "local-only"
+        claim["sota_anchor_arm_id"] = "longcat-video-avatar-1.5" if target_claim else None
+        if target_claim:
             target_ids.append(claim["claim_id"])
         for arm in claim["arms"]:
+            if arm["provider"] == "external":
+                candidate = candidate_index[arm["arm_id"]]
+                arm["code_revision"] = candidate["code_revision"]
+                arm["weights_revision"] = candidate["weights_revision"]
             if arm["provider"] == "owned":
                 arm.update(
                     {
@@ -66,7 +71,7 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
                         "weights_revision": "e" * 40,
                     }
                 )
-            elif targets and arm["arm_id"] == "mova":
+            elif claim["claim_id"] in candidate_index[arm["arm_id"]]["compatible_claim_ids"] and target_claim:
                 candidate = candidate_index[arm["arm_id"]]
                 arm.update(
                     {
@@ -76,6 +81,16 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
                         "technical_status": "pass",
                         "code_revision": candidate["code_revision"],
                         "weights_revision": candidate["weights_revision"],
+                    }
+                )
+            elif claim["claim_id"] in candidate_index[arm["arm_id"]]["compatible_claim_ids"]:
+                arm.update(
+                    {
+                        "inclusion_status": "excluded",
+                        "input_compatibility": "compatible",
+                        "rights_status": "blocked",
+                        "technical_status": "pass",
+                        "exclusion_reason": "rights-blocked",
                     }
                 )
             else:
@@ -100,7 +115,9 @@ def test_checked_in_comparator_matrix_is_an_explicit_hold() -> None:
     assert "candidate-artifact-missing:mova:resource_profile_sha256" in report["blockers"]
     assert "anchor-landscape-not-verified" in report["blockers"]
     assert "claim-undecided:audio-driven-video.image-audio-to-video" in report["blockers"]
-    assert "arm-pending:mova" in report["blockers"]
+    assert "arm-pending:longcat-video-avatar-1.5" in report["blockers"]
+    assert "arm-pending:wan2.2-s2v-14b" in report["blockers"]
+    assert "arm-pending:mova" not in report["blockers"]
 
 
 def test_complete_matrix_is_anchor_ready_and_deterministic() -> None:
@@ -111,7 +128,7 @@ def test_complete_matrix_is_anchor_ready_and_deterministic() -> None:
     assert first == second
     assert first["status"] == "ready-to-freeze"
     assert first["sota_status"] == "anchor-ready"
-    assert len(first["target_sota_claim_ids"]) == 5
+    assert first["target_sota_claim_ids"] == ["audio-driven-video.image-audio-to-video"]
 
 
 def test_honest_local_only_matrix_cannot_be_sota_ready() -> None:
@@ -137,9 +154,14 @@ def test_matrix_rejects_result_driven_or_hidden_comparators() -> None:
 
 def test_matrix_rejects_unproven_exclusion_and_anchor_drift() -> None:
     unproven, landscape = _ready()
-    unproven["claims"][0]["arms"][0]["input_compatibility"] = "compatible"  # type: ignore[index]
-    with pytest.raises(ComparatorMatrixError, match="does not prove input incompatibility"):
+    unproven["claims"][0]["arms"][0]["input_compatibility"] = "incompatible"  # type: ignore[index]
+    with pytest.raises(ComparatorMatrixError, match="contradicts the frozen landscape"):
         build_comparator_matrix_report(unproven, landscape=landscape, as_of=AS_OF)
+
+    invented, landscape = _ready()
+    invented["claims"][0]["arms"][2]["input_compatibility"] = "compatible"  # type: ignore[index]
+    with pytest.raises(ComparatorMatrixError, match="contradicts the frozen landscape"):
+        build_comparator_matrix_report(invented, landscape=landscape, as_of=AS_OF)
 
     drift, landscape = _ready()
     drift["claims"][0]["arms"][2]["code_revision"] = "f" * 40  # type: ignore[index]
@@ -151,6 +173,23 @@ def test_matrix_rejects_unproven_exclusion_and_anchor_drift() -> None:
     future["landscape_sha256"] = document_sha256(landscape)
     with pytest.raises(ComparatorMatrixError, match="cannot be in the future"):
         build_comparator_matrix_report(future, landscape=landscape, as_of=AS_OF)
+
+
+def test_landscape_rejects_unknown_or_unsorted_compatible_claims() -> None:
+    matrix, landscape = _ready()
+    landscape["candidates"][0]["compatible_claim_ids"] = [  # type: ignore[index]
+        "native-generation.text-to-video",
+        "audio-driven-video.image-audio-to-video",
+    ]
+    matrix["landscape_sha256"] = document_sha256(landscape)
+    with pytest.raises(ComparatorMatrixError, match="sorted subset of Q1 claims"):
+        build_comparator_matrix_report(matrix, landscape=landscape, as_of=AS_OF)
+
+    matrix, landscape = _ready()
+    landscape["candidates"][0]["compatible_claim_ids"] = ["unknown.claim"]  # type: ignore[index]
+    matrix["landscape_sha256"] = document_sha256(landscape)
+    with pytest.raises(ComparatorMatrixError, match="sorted subset of Q1 claims"):
+        build_comparator_matrix_report(matrix, landscape=landscape, as_of=AS_OF)
 
 
 def test_comparator_cli_reports_draft_hold(tmp_path: Path) -> None:

@@ -45,13 +45,18 @@ def _contracts(*, targets: bool = True) -> tuple[dict[str, Any], dict[str, Any],
     matrix["status"] = "frozen"
     matrix["landscape_sha256"] = document_sha256(landscape)
     target_ids: list[str] = []
+    landscape_index = {candidate["candidate_id"]: candidate for candidate in landscape["candidates"]}
     for claim in matrix["claims"]:
-        claim["claim_status"] = "sota-target" if targets else "local-only"
-        claim["sota_anchor_arm_id"] = "mova" if targets else None
-        if targets:
+        target_claim = targets and claim["claim_id"] == "audio-driven-video.image-audio-to-video"
+        claim["claim_status"] = "sota-target" if target_claim else "local-only"
+        claim["sota_anchor_arm_id"] = "longcat-video-avatar-1.5" if target_claim else None
+        if target_claim:
             target_ids.append(claim["claim_id"])
-        landscape_index = {candidate["candidate_id"]: candidate for candidate in landscape["candidates"]}
         for arm in claim["arms"]:
+            if arm["provider"] == "external":
+                candidate = landscape_index[arm["arm_id"]]
+                arm["code_revision"] = candidate["code_revision"]
+                arm["weights_revision"] = candidate["weights_revision"]
             if arm["provider"] == "owned":
                 arm.update(
                     {
@@ -63,7 +68,7 @@ def _contracts(*, targets: bool = True) -> tuple[dict[str, Any], dict[str, Any],
                         "weights_revision": "e" * 40,
                     }
                 )
-            elif targets and arm["arm_id"] == "mova":
+            elif target_claim and claim["claim_id"] in landscape_index[arm["arm_id"]]["compatible_claim_ids"]:
                 candidate = landscape_index[arm["arm_id"]]
                 arm.update(
                     {
@@ -73,6 +78,16 @@ def _contracts(*, targets: bool = True) -> tuple[dict[str, Any], dict[str, Any],
                         "technical_status": "pass",
                         "code_revision": candidate["code_revision"],
                         "weights_revision": candidate["weights_revision"],
+                    }
+                )
+            elif claim["claim_id"] in landscape_index[arm["arm_id"]]["compatible_claim_ids"]:
+                arm.update(
+                    {
+                        "inclusion_status": "excluded",
+                        "input_compatibility": "compatible",
+                        "rights_status": "blocked",
+                        "technical_status": "pass",
+                        "exclusion_reason": "rights-blocked",
                     }
                 )
             else:
@@ -197,9 +212,11 @@ def test_paired_q1_pilot_passes_registered_holm_gates() -> None:
     assert first["status"] == "ready-to-freeze"
     assert first["sota_status"] == "anchor-pilot-pass"
     assert first["failed_rows"] == 0
-    assert {claim["status"] for claim in first["claims"]} == {"sota-pilot-pass"}
+    statuses = {claim["claim_id"]: claim["status"] for claim in first["claims"]}
+    assert statuses["audio-driven-video.image-audio-to-video"] == "sota-pilot-pass"
+    assert set(statuses.values()) == {"local-only", "sota-pilot-pass"}
     ranks = sorted(gate["holm_rank"] for claim in first["claims"] for gate in claim["gates"])
-    assert ranks == list(range(1, 45))
+    assert ranks == list(range(1, 10))
 
 
 def test_q1_itt_failure_and_material_shortfall_hold_the_freeze() -> None:
@@ -228,7 +245,9 @@ def test_q1_itt_failure_and_material_shortfall_hold_the_freeze() -> None:
         as_of=AS_OF,
     )
     assert shortfall_report["status"] == "hold"
-    assert all(claim["status"] == "sota-pilot-fail" for claim in shortfall_report["claims"])
+    statuses = {claim["claim_id"]: claim["status"] for claim in shortfall_report["claims"]}
+    assert statuses["audio-driven-video.image-audio-to-video"] == "sota-pilot-fail"
+    assert set(statuses.values()) == {"local-only", "sota-pilot-fail"}
 
 
 def test_q2_reuses_the_frozen_paired_rule_on_the_holdout_without_q1_schema_aliasing() -> None:
@@ -249,13 +268,15 @@ def test_q2_reuses_the_frozen_paired_rule_on_the_holdout_without_q1_schema_alias
     assert report["schema_version"] == "ltx-av-eval-holdout-comparator-decision.v1"
     assert report["status"] == "pass"
     assert report["sota_status"] == "anchor-holdout-pass"
-    assert {claim["status"] for claim in report["claims"]} == {"sota-holdout-pass"}
+    statuses = {claim["claim_id"]: claim["status"] for claim in report["claims"]}
+    assert statuses["audio-driven-video.image-audio-to-video"] == "sota-holdout-pass"
+    assert set(statuses.values()) == {"local-only", "sota-holdout-pass"}
 
 
 def test_q1_rejects_unpaired_rows_and_post_commitment_gate_drift() -> None:
     matrix, landscape, gates = _contracts()
     unpaired = _results(matrix)
-    unpaired["rows"].pop()
+    unpaired["rows"].pop(0)
     with pytest.raises(ComparatorResultError, match="exact paired arm factorial"):
         build_comparator_decision(unpaired, gates=gates, matrix=matrix, landscape=landscape, as_of=AS_OF)
 

@@ -147,6 +147,7 @@ def _validate_landscape(  # noqa: PLR0912
                 "code_license_sha256",
                 "weights_license_sha256",
                 "resource_profile_sha256",
+                "compatible_claim_ids",
             },
             f"landscape candidate {index}",
         )
@@ -161,6 +162,15 @@ def _validate_landscape(  # noqa: PLR0912
         for field in ("code_license_sha256", "weights_license_sha256", "resource_profile_sha256"):
             if _sha256(candidate[field], f"candidate {candidate_id}.{field}", nullable=True) is None:
                 blockers.append(f"candidate-artifact-missing:{candidate_id}:{field}")
+        compatible_claim_ids = candidate["compatible_claim_ids"]
+        if (
+            not isinstance(compatible_claim_ids, list)
+            or compatible_claim_ids != sorted(set(compatible_claim_ids))
+            or any(claim_id not in CLAIM_SPECS for claim_id in compatible_claim_ids)
+        ):
+            raise ComparatorMatrixError(
+                f"candidate {candidate_id}.compatible_claim_ids must be a sorted subset of Q1 claims",
+            )
         indexed[candidate_id] = candidate
     if identifiers != sorted(set(identifiers)):
         raise ComparatorMatrixError("landscape candidates must be unique and sorted")
@@ -200,6 +210,7 @@ def _validate_arm(  # noqa: PLR0912
     *,
     context: str,
     candidate_id: str,
+    claim_id: str,
     landscape: dict[str, dict[str, Any]],
 ) -> list[str]:
     if not isinstance(raw, dict):
@@ -240,6 +251,12 @@ def _validate_arm(  # noqa: PLR0912
             raise ComparatorMatrixError(f"{context}.{field} is unsupported")
     code = _revision(raw["code_revision"], f"{context}.code_revision", nullable=True)
     weights = _revision(raw["weights_revision"], f"{context}.weights_revision", nullable=True)
+    if external and raw["input_compatibility"] != "pending":
+        declared_compatible = claim_id in landscape[arm_id]["compatible_claim_ids"]
+        if (raw["input_compatibility"] == "compatible") != declared_compatible:
+            raise ComparatorMatrixError(
+                f"{context}.input_compatibility contradicts the frozen landscape input contract",
+            )
     blockers: list[str] = []
     if inclusion == "pending":
         blockers.append(f"arm-pending:{arm_id}")
@@ -301,7 +318,13 @@ def _validate_claim(  # noqa: PLR0912
     blockers: list[str] = []
     for arm, arm_id in zip(arms, expected_arm_ids, strict=True):
         blockers.extend(
-            _validate_arm(arm, context=f"claim {claim_id} arm {arm_id}", candidate_id=arm_id, landscape=landscape)
+            _validate_arm(
+                arm,
+                context=f"claim {claim_id} arm {arm_id}",
+                candidate_id=arm_id,
+                claim_id=claim_id,
+                landscape=landscape,
+            )
         )
     status = raw["claim_status"]
     anchor_id = raw["sota_anchor_arm_id"]
