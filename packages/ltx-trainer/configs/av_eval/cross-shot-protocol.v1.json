@@ -1,0 +1,74 @@
+{
+  "schema_version": "ltx-av-eval-cross-shot-protocol.v1",
+  "status": "draft",
+  "protocol_id": "ltx-lipdub-cross-shot-q0-01",
+  "claim_id": "reference-video-redubbing",
+  "bindings": [
+    {"artifact_id": "calibration_catalog", "sha256": null},
+    {"artifact_id": "calibration_report", "sha256": null},
+    {"artifact_id": "dataset", "sha256": null},
+    {"artifact_id": "design_report", "sha256": null},
+    {"artifact_id": "evaluator_bundle", "sha256": null},
+    {"artifact_id": "generation_runner", "sha256": null},
+    {"artifact_id": "preregistration", "sha256": null},
+    {"artifact_id": "prompt_set", "sha256": null},
+    {"artifact_id": "rating_protocol", "sha256": null},
+    {"artifact_id": "release", "sha256": null}
+  ],
+  "sample_plan": {
+    "independent_unit": "identity-speaker-and-transitive-leakage-component",
+    "required_identities": null,
+    "shots_per_identity": 2,
+    "generation_seeds": [23072026, 24072026, 25072026]
+  },
+  "arms": [
+    {"arm_id": "automatic-scene-reference", "reference_strategy": "automatic", "strategy_artifact_sha256": null, "default_enabled": false},
+    {"arm_id": "manual-scene-reference", "reference_strategy": "manual", "strategy_artifact_sha256": null, "default_enabled": true},
+    {"arm_id": "no-reference", "reference_strategy": "none", "strategy_artifact_sha256": null, "default_enabled": false}
+  ],
+  "paired_invariants": {
+    "dialogue": "identical",
+    "duration": "identical",
+    "generation_seeds": "identical",
+    "input_normalization": "identical",
+    "only_varying_factor": "reference-strategy",
+    "render_revision": "identical",
+    "timeline": "identical"
+  },
+  "endpoint_bindings": [
+    {"metric_id": "asr-word-error-rate", "test": "noninferiority", "direction": "lower", "delta_basis_sha256": null},
+    {"metric_id": "identity-similarity", "test": "superiority", "direction": "higher", "delta_basis_sha256": null},
+    {"metric_id": "lip-sync-mos", "test": "noninferiority", "direction": "higher", "delta_basis_sha256": null},
+    {"metric_id": "mouth-naturalness-mos", "test": "noninferiority", "direction": "higher", "delta_basis_sha256": null},
+    {"metric_id": "sharpness-relative-face", "test": "noninferiority", "direction": "higher", "delta_basis_sha256": null},
+    {"metric_id": "skin-stability", "test": "noninferiority", "direction": "higher", "delta_basis_sha256": null}
+  ],
+  "required_measurement_ids": [
+    "asr-critical-name-accuracy",
+    "asr-critical-negation-accuracy",
+    "asr-critical-number-accuracy",
+    "asr-word-error-rate",
+    "av-sync-offset-p95",
+    "cross-shot-min-identity-probability",
+    "face-sharpness-relative",
+    "face-track-coverage",
+    "lip-sync-mos",
+    "mouth-artifact-rate",
+    "mouth-naturalness-mos",
+    "mouth-opening-rounding",
+    "phoneme-viseme-pbm",
+    "skin-nose-mouth-stability",
+    "vbench-aesthetic-quality",
+    "vbench-background-consistency",
+    "vbench-dynamic-degree",
+    "vbench-imaging-quality",
+    "vbench-motion-smoothness",
+    "vbench-subject-consistency"
+  ],
+  "selection_policy": {
+    "automatic_reference_default": "off-until-manual-noninferiority",
+    "failure_outcome": "abstention",
+    "multiplicity": "holm",
+    "primary_rule": "positive-ci-lower-superiority-and-all-ni-and-absolute-gates-pass"
+  }
+}

@@ -9,6 +9,7 @@ from .authorization import (
     verify_detached_signature,
 )
 from .calibration import CalibrationError, build_calibration_gate_report
+from .cross_shot import CrossShotProtocolError, build_cross_shot_protocol_report
 from .design import DesignError, build_power_report, document_sha256
 from .governance import (
     FrozenDatasetSession,
@@ -32,6 +33,7 @@ __all__ = [
     "AsrMeasurementError",
     "AuthorizationError",
     "CalibrationError",
+    "CrossShotProtocolError",
     "DesignError",
     "FrozenDatasetSession",
     "GovernanceError",
@@ -40,6 +42,7 @@ __all__ = [
     "append_signed_access_event",
     "build_asr_measurements",
     "build_calibration_gate_report",
+    "build_cross_shot_protocol_report",
     "build_power_report",
     "build_product_readiness_report",
     "document_sha256",

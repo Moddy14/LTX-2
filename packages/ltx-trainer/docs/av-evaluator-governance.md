@@ -182,6 +182,29 @@ only with the exact evidence and artifact inventories, distinct role keys and
 no blocker. The resulting hashes are commitments for F0; the report grants no
 evaluation or release authority and cannot open the holdout.
 
+## Q0 cross-shot protocol
+
+`configs/av_eval/cross-shot-protocol.v1.json` freezes the paired three-arm
+comparison before any render result is visible. The no-reference, manual
+sharp scene-reference and automatic scene-reference arms must use identical
+dialogue, timeline, duration, normalization, seeds and render revision; only
+the reference strategy may differ. The identity count is checked against the
+complete D0a power report and can never fall below 30, with at least two shots
+per identity.
+
+```bash
+uv run python scripts/av_eval.py cross-shot-check \
+  --protocol configs/av_eval/cross-shot-protocol.v1.json \
+  --design-report /secure/design/power-report.v1.json
+```
+
+The protocol requires positive Holm-corrected identity superiority plus every
+registered noninferiority and absolute quality gate. All ASR critical types,
+AV offset, P/B/M, artifact/stability, sharpness, identity, MOS and six VBench
+dimensions remain mandatory. Automatic selection stays disabled until it is
+noninferior to manual selection; an unclear result is an abstention, never an
+implicit win.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory
 inspector, signed hash-chained access ledger, and machine-validated
