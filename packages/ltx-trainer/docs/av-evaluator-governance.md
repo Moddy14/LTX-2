@@ -103,8 +103,10 @@ alternatives/CI widths, and quota counts are `null`. The official VBench-I2V
 Git revision and canonical source contract are already pinned;
 `vbench-runtime-check` verifies the official remote, exact 40-character
 revision, 17 relevant file hashes, supported custom-input dimensions, and the
-dimension-level invocation before D1 may use a checkout. This source check is
-not an installed-runtime or checkpoint fingerprint. Empirical gates must come
+dimension-level invocation before D1 may use a checkout. The entire Git tree
+must also have zero tracked or untracked changes, so an uninventoried imported
+module cannot override the pinned commit. This source check is not an
+installed-runtime or checkpoint fingerprint. Empirical gates must come
 from the leakage-disjoint design pilot; filling them from calibration or
 holdout results is forbidden.
 

@@ -197,9 +197,9 @@ def build_vbench_source_report(raw: object, *, checkout: Path) -> dict[str, Any]
         if digest != item["sha256"]:
             raise VBenchRuntimeError(f"VBench source hash mismatch: {item['path']}")
 
-    dirty = _run_git(checkout, "status", "--porcelain", "--", *[item["path"] for item in source_files])
+    dirty = _run_git(checkout, "status", "--porcelain", "--untracked-files=all")
     if dirty:
-        raise VBenchRuntimeError("VBench source inventory has tracked or untracked changes")
+        raise VBenchRuntimeError("VBench checkout has tracked or untracked changes")
     return {
         "schema_version": SOURCE_REPORT_SCHEMA,
         "status": "source-verified",

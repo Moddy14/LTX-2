@@ -104,6 +104,12 @@ def test_vbench_source_report_fails_closed_on_source_or_remote_drift(tmp_path: P
     with pytest.raises(VBenchRuntimeError, match="official repository"):
         build_vbench_source_report(config, checkout=checkout)
 
+    config, checkout = _fixture_checkout(tmp_path / "untracked")
+    (checkout / "vbench" / "third_party" / "runtime_override.py").parent.mkdir(parents=True)
+    (checkout / "vbench" / "third_party" / "runtime_override.py").write_text("drift = True\n", encoding="utf-8")
+    with pytest.raises(VBenchRuntimeError, match="tracked or untracked changes"):
+        build_vbench_source_report(config, checkout=checkout)
+
 
 def test_vbench_source_cli_emits_digest_bound_report(tmp_path: Path) -> None:
     config, checkout = _fixture_checkout(tmp_path)
