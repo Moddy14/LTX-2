@@ -33,6 +33,7 @@ function timestamp(offsetHours: number): string {
 
 type Fixture = ReleaseEvidenceInput & {
   signDocument: (document: unknown) => Record<string, unknown>;
+  signHoldoutDocument: (document: unknown) => Record<string, unknown>;
   finalizerPrivateKeyPem: string;
 };
 
@@ -253,6 +254,7 @@ function fixture(): Fixture {
     reports,
     trustPolicyDigest,
     signDocument: signature,
+    signHoldoutDocument: holdoutSignature,
     finalizerPrivateKeyPem: finalizer.privateKey
       .export({ format: "pem", type: "pkcs8" })
       .toString(),
@@ -337,6 +339,34 @@ describe("release evidence collector", () => {
     q2.sha256 = hash(document);
     expect(() => collectReleaseEvidence(input)).toThrow(
       /report index mismatch|signature payload digest mismatch/i,
+    );
+  });
+
+  it("rejects signed Q2 results for claims outside the candidate surface", () => {
+    const input = fixture();
+    const q2 = report(input, "q2-holdout");
+    const document = q2.document as {
+      claimResults: Array<{
+        claimId: string;
+        status: string;
+        sotaAnchorDigest: string | null;
+      }>;
+    };
+    document.claimResults.push({
+      claimId: "invented.claim",
+      status: "sota-qualified",
+      sotaAnchorDigest: "9".repeat(64),
+    });
+    q2.sha256 = hash(document);
+    q2.signature = input.signHoldoutDocument(document);
+    const reference = (
+      input.index as { reports: Array<{ kind: string; sha256: string }> }
+    ).reports.find(({ kind }) => kind === "q2-holdout");
+    if (!reference) throw new Error("missing Q2 report reference");
+    reference.sha256 = q2.sha256;
+
+    expect(() => collectReleaseEvidence(input)).toThrow(
+      /result for a non-candidate claim/i,
     );
   });
 

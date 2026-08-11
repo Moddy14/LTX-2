@@ -719,6 +719,12 @@ export function collectReleaseEvidence(
         `Q2 report has no final result for candidate claim: ${claim}`,
       );
   }
+  for (const claim of resultsByClaim.keys()) {
+    if (!candidateClaims.has(claim))
+      throw new Error(
+        `Q2 report publishes a result for a non-candidate claim: ${claim}`,
+      );
+  }
   for (const target of index.targetSotaClaimIds) {
     if (!candidateClaims.has(target))
       throw new Error(`Target SOTA claim has no candidate surface: ${target}`);
