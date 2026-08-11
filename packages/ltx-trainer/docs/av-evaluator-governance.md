@@ -139,6 +139,28 @@ evidence, or an unbound upstream catalog. Its output is the exact 45-ID set
 that the tune/holdout report validator must cover; a VBench omission cannot be
 hidden behind the other D1 metrics.
 
+## D0 readiness package
+
+`configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory
+that must become complete before the candidate may enter the final freeze. It
+binds the dataset, rights, D0a, tune, ACL, access-log and key-policy evidence;
+all model, runner, prompt, rating and baseline artifacts; and three distinct
+keys for evaluation authorization, blind scoring and release authorization.
+It additionally requires an independent scorer UID/GID, a sorted development
+UID deny-list, a sealed ACL, a verified but untouched genesis access log, a
+current unrevoked rights attestation and a passing tune report.
+
+```bash
+uv run python scripts/av_eval.py readiness-check \
+  --package configs/av_eval/product-readiness.v1.json
+```
+
+The checked-in package is deliberately `draft`, so this command exits 2 and
+reports every missing digest or operational fact. `ready-to-freeze` is accepted
+only with the exact evidence and artifact inventories, distinct role keys and
+no blocker. The resulting hashes are commitments for F0; the report grants no
+evaluation or release authority and cannot open the holdout.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory
 inspector, signed hash-chained access ledger, and machine-validated

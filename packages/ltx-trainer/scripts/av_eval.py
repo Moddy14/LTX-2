@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ltx_trainer import logger
@@ -13,11 +14,62 @@ from ltx_trainer.av_eval import (
     CalibrationError,
     DesignError,
     GovernanceError,
+    ReadinessError,
     build_calibration_gate_report,
     build_power_report,
+    build_product_readiness_report,
     freeze_dataset,
     load_split_seed,
 )
+
+
+def _run_design_check(path: Path) -> int:
+    try:
+        report = build_power_report(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, DesignError) as error:
+        logger.error("D0a design rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "ready-to-freeze" else 2
+
+
+def _run_readiness_check(path: Path) -> int:
+    try:
+        package = json.loads(path.read_text(encoding="utf-8"))
+        report = build_product_readiness_report(package, now=datetime.now(UTC).replace(microsecond=0))
+    except (OSError, json.JSONDecodeError, ReadinessError) as error:
+        logger.error("D0 readiness package rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "ready-to-freeze" else 2
+
+
+def _run_calibration_check(path: Path) -> int:
+    try:
+        report = build_calibration_gate_report(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, CalibrationError) as error:
+        logger.error("D1 calibration catalog rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "ready-to-freeze" else 2
+
+
+def _run_freeze(args: argparse.Namespace) -> int:
+    try:
+        root = freeze_dataset(
+            args.manifest,
+            args.rights,
+            args.mapping,
+            args.preregistration,
+            args.output_root,
+            split_seed=load_split_seed(args.split_seed_file),
+            profile=args.profile,
+        )
+    except GovernanceError as error:
+        logger.error("AV evaluator freeze rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps({"status": "frozen", "path": str(root)}, sort_keys=True) + "\n")
+    return 0
 
 
 def main() -> int:
@@ -35,40 +87,16 @@ def main() -> int:
     design_check.add_argument("--design", type=Path, required=True)
     calibration_check = subcommands.add_parser("calibration-check", help="validate the complete D1 gate catalog")
     calibration_check.add_argument("--catalog", type=Path, required=True)
+    readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
+    readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "design-check":
-        try:
-            design = json.loads(args.design.read_text(encoding="utf-8"))
-            report = build_power_report(design)
-        except (OSError, json.JSONDecodeError, DesignError) as error:
-            logger.error("D0a design rejected: %s", error)
-            return 2
-        sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
-        return 0 if report["status"] == "ready-to-freeze" else 2
+        return _run_design_check(args.design)
+    if args.command == "readiness-check":
+        return _run_readiness_check(args.package)
     if args.command == "calibration-check":
-        try:
-            catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
-            report = build_calibration_gate_report(catalog)
-        except (OSError, json.JSONDecodeError, CalibrationError) as error:
-            logger.error("D1 calibration catalog rejected: %s", error)
-            return 2
-        sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
-        return 0 if report["status"] == "ready-to-freeze" else 2
-    try:
-        root = freeze_dataset(
-            args.manifest,
-            args.rights,
-            args.mapping,
-            args.preregistration,
-            args.output_root,
-            split_seed=load_split_seed(args.split_seed_file),
-            profile=args.profile,
-        )
-    except GovernanceError as error:
-        logger.error("AV evaluator freeze rejected: %s", error)
-        return 2
-    sys.stdout.write(json.dumps({"status": "frozen", "path": str(root)}, sort_keys=True) + "\n")
-    return 0
+        return _run_calibration_check(args.catalog)
+    return _run_freeze(args)
 
 
 if __name__ == "__main__":

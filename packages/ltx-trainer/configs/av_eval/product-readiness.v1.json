@@ -1,0 +1,44 @@
+{
+  "schema_version": "ltx-av-eval-product-readiness.v1",
+  "status": "draft",
+  "package_id": "ltx-lipdub-de-en-readiness-01",
+  "evidence": [
+    {"artifact_id": "blind-scorer-runner", "sha256": null},
+    {"artifact_id": "dataset-freeze", "sha256": null},
+    {"artifact_id": "dataset-rights-attestation", "sha256": null},
+    {"artifact_id": "design-power-report", "sha256": null},
+    {"artifact_id": "empty-access-log-report", "sha256": null},
+    {"artifact_id": "sealed-acl-report", "sha256": null},
+    {"artifact_id": "static-surface-rights-catalog", "sha256": null},
+    {"artifact_id": "trusted-key-policy", "sha256": null},
+    {"artifact_id": "tune-report", "sha256": null}
+  ],
+  "artifact_commitments": [
+    {"artifact_id": "baseline-matrix", "sha256": null},
+    {"artifact_id": "evaluation-runner", "sha256": null},
+    {"artifact_id": "hyperparameter-search-space", "sha256": null},
+    {"artifact_id": "initial-weights", "sha256": null},
+    {"artifact_id": "model-recipe", "sha256": null},
+    {"artifact_id": "prompt-set", "sha256": null},
+    {"artifact_id": "rating-protocol", "sha256": null},
+    {"artifact_id": "training-runner", "sha256": null}
+  ],
+  "role_bindings": [
+    {"role": "evaluation-authorizer", "key_id": null},
+    {"role": "holdout-scorer", "key_id": null},
+    {"role": "release-authorizer", "key_id": null}
+  ],
+  "operational": {
+    "blind_scorer_uid": null,
+    "blind_scorer_gid": null,
+    "development_uids": [],
+    "acl_status": null,
+    "access_log_status": null,
+    "access_log_events": null,
+    "access_log_head_sha256": null,
+    "rights_valid_at": null,
+    "rights_expires_at": null,
+    "rights_revocation_state": null,
+    "tune_report_verdict": null
+  }
+}

@@ -25,6 +25,7 @@ from .product import (
     validate_sealed_directory,
     verify_access_log,
 )
+from .readiness import ReadinessError, build_product_readiness_report
 
 __all__ = [
     "AuthorizationError",
@@ -33,9 +34,11 @@ __all__ = [
     "FrozenDatasetSession",
     "GovernanceError",
     "ProductGovernanceError",
+    "ReadinessError",
     "append_signed_access_event",
     "build_calibration_gate_report",
     "build_power_report",
+    "build_product_readiness_report",
     "document_sha256",
     "freeze_dataset",
     "load_frozen_split",
