@@ -433,3 +433,40 @@ def build_vbench_runtime_report(  # noqa: PLR0912, PLR0915
         **fingerprint,
         "runtime_digest": document_sha256(fingerprint),
     }
+
+
+def validate_vbench_runtime_report(raw: object) -> dict[str, Any]:
+    """Recompute a verified runtime report before another evidence layer binds it."""
+
+    if not isinstance(raw, dict):
+        raise VBenchEnvironmentError("VBench runtime report must be an object")
+    fingerprint_fields = {
+        "runtime_contract_digest",
+        "source_report_digest",
+        "python_executable_sha256",
+        "python_version",
+        "dependency_lock_sha256",
+        "network_policy_sha256",
+        "distribution_inventory_digest",
+        "artifact_inventory_digest",
+        "import_inventory_digest",
+    }
+    _exact_keys(
+        raw,
+        {"schema_version", "status", "blockers", "runtime_digest", *fingerprint_fields},
+        "VBench runtime report",
+    )
+    if raw["schema_version"] != RUNTIME_REPORT_SCHEMA or raw["status"] != "runtime-verified":
+        raise VBenchEnvironmentError("VBench runtime report is not verified")
+    if raw["blockers"] != []:
+        raise VBenchEnvironmentError("verified VBench runtime report cannot contain blockers")
+    fingerprint: dict[str, str] = {}
+    for field in sorted(fingerprint_fields):
+        if field == "python_version":
+            fingerprint[field] = _version(raw[field], f"runtime report {field}")
+        else:
+            fingerprint[field] = _sha256(raw[field], f"runtime report {field}")
+    runtime_digest = _sha256(raw["runtime_digest"], "runtime report runtime_digest")
+    if runtime_digest != document_sha256(fingerprint):
+        raise VBenchEnvironmentError("VBench runtime report digest is inconsistent")
+    return dict(raw)

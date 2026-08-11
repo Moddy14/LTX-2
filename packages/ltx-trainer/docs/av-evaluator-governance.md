@@ -144,7 +144,10 @@ uv run python scripts/av_eval.py vbench-environment-check \
 The checked-in runtime stays `draft` and returns `hold`; hashes are never
 invented from the shared trainer environment. Only the emitted
 `runtime_digest` may fill the calibration catalog's `vbench-runtime`
-fingerprint and the D1 observation binding.
+fingerprint and the D1 observation binding. `complete-d1` additionally requires
+the complete verified runtime report, recomputes its fingerprint and binds the
+report digest in the final 127-gate D1 report. Matching arbitrary hash strings
+in the catalog and observation file are therefore insufficient.
 
 The checked-in draft exits with code 2 and a deterministic `hold` report that
 lists every missing input. A `frozen` document rejects any missing delta,

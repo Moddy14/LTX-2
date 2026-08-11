@@ -52,6 +52,27 @@ def _design() -> dict[str, object]:
     return design
 
 
+def _runtime_report() -> dict[str, object]:
+    fingerprint = {
+        "runtime_contract_digest": "1" * 64,
+        "source_report_digest": "2" * 64,
+        "python_executable_sha256": "3" * 64,
+        "python_version": "3.12.3",
+        "dependency_lock_sha256": "4" * 64,
+        "network_policy_sha256": "5" * 64,
+        "distribution_inventory_digest": "6" * 64,
+        "artifact_inventory_digest": "7" * 64,
+        "import_inventory_digest": "8" * 64,
+    }
+    return {
+        "schema_version": "ltx-av-eval-vbench-i2v-runtime-report.v1",
+        "status": "runtime-verified",
+        "blockers": [],
+        **fingerprint,
+        "runtime_digest": document_sha256(fingerprint),
+    }
+
+
 def _catalog(design: dict[str, object]) -> dict[str, object]:
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     catalog["status"] = "frozen"
@@ -59,7 +80,9 @@ def _catalog(design: dict[str, object]) -> dict[str, object]:
     catalog["preregistration_digest"] = "2" * 64
     catalog["vbench_gate_catalog_digest"] = document_sha256(design["vbench_gate_catalog"])
     for fingerprint in catalog["evaluator_fingerprints"]:
-        fingerprint["sha256"] = "d" * 64
+        fingerprint["sha256"] = (
+            _runtime_report()["runtime_digest"] if fingerprint["evaluator_id"] == "vbench-runtime" else "d" * 64
+        )
     for gate in catalog["gates"]:
         gate["basis_evidence_sha256"] = "e" * 64
         if gate["threshold"] is None:
@@ -160,7 +183,7 @@ def _vbench_report(design: dict[str, object]) -> dict[str, object]:
         "release_digest": "3" * 64,
         "design_digest": document_sha256(design),
         "strata_plan_digest": "4" * 64,
-        "runtime_digest": "d" * 64,
+        "runtime_digest": _runtime_report()["runtime_digest"],
         "design_report_digest": document_sha256(build_power_report(design)),
         "metrics": metrics,
     }
@@ -192,7 +215,7 @@ def _scored_vbench_report(design: dict[str, object]) -> dict[str, object]:
             "vbench_gate_catalog_digest": document_sha256(design["vbench_gate_catalog"]),
             "repository_commit": "b" * 40,
             "config_digest": "c" * 64,
-            "runtime_digest": "d" * 64,
+            "runtime_digest": _runtime_report()["runtime_digest"],
             "comparator_matrix_digest": "6" * 64,
             "bootstrap": {"replicates": 10000, "confidence_level": 0.95, "seed": 11082026},
             "observations": observations,
@@ -210,6 +233,7 @@ def _bundle(catalog: dict[str, object], design: dict[str, object]) -> dict[str, 
         "runner_digest": "f" * 64,
         "fixed_report": _fixed_report(catalog, design),
         "vbench_report": _vbench_report(design),
+        "vbench_runtime_report": _runtime_report(),
     }
 
 
@@ -281,6 +305,16 @@ def test_complete_d1_report_rejects_rank_and_release_mixing() -> None:
     mixed_release["vbench_report"]["release_digest"] = "9" * 64  # type: ignore[index]
     with pytest.raises(CompleteD1Error, match="disagree on release_digest"):
         build_complete_d1_report(mixed_release, calibration_catalog=catalog, design=design)
+
+
+def test_complete_d1_recomputes_the_vbench_runtime_fingerprint() -> None:
+    design = _design()
+    catalog = _catalog(design)
+    drift = _bundle(catalog, design)
+    drift["vbench_runtime_report"]["runtime_digest"] = "f" * 64  # type: ignore[index]
+
+    with pytest.raises(CompleteD1Error, match="runtime report digest is inconsistent"):
+        build_complete_d1_report(drift, calibration_catalog=catalog, design=design)
 
 
 def test_complete_d1_cli_emits_decided_report(tmp_path: Path) -> None:

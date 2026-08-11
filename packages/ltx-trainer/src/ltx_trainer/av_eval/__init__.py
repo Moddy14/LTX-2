@@ -55,7 +55,7 @@ from .readiness import ReadinessError, build_operational_readiness_evidence, bui
 from .sharpness import SharpnessMeasurementError, build_sharpness_measurements
 from .technical import TechnicalEvidenceError, build_technical_evidence_bundle
 from .vbench import VBenchMeasurementError, build_vbench_measurements
-from .vbench_environment import VBenchEnvironmentError, build_vbench_runtime_report
+from .vbench_environment import VBenchEnvironmentError, build_vbench_runtime_report, validate_vbench_runtime_report
 from .vbench_runtime import VBenchRuntimeError, build_vbench_source_report
 
 __all__ = [
@@ -132,6 +132,7 @@ __all__ = [
     "validate_release_authorization",
     "validate_sealed_directory",
     "validate_trust_policy_bindings",
+    "validate_vbench_runtime_report",
     "verify_access_log",
     "verify_detached_signature",
 ]

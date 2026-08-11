@@ -11,6 +11,7 @@ from .bundle import FIXED_D1_REPORT_SCHEMA
 from .calibration import CalibrationError, build_calibration_gate_report
 from .design import DesignError, build_power_report, document_sha256
 from .vbench import FAMILYWISE_ALPHA, VBENCH_MEASUREMENTS_SCHEMA
+from .vbench_environment import VBenchEnvironmentError, validate_vbench_runtime_report
 
 COMPLETE_D1_BUNDLE_SCHEMA = "ltx-av-eval-complete-d1-bundle.v1"
 COMPLETE_D1_REPORT_SCHEMA = "ltx-av-eval-complete-d1-report.v1"
@@ -402,6 +403,7 @@ def build_complete_d1_report(
             "runner_digest",
             "fixed_report",
             "vbench_report",
+            "vbench_runtime_report",
         },
         "complete D1 bundle",
     )
@@ -413,6 +415,10 @@ def build_complete_d1_report(
     _sha256(raw["runner_digest"], "runner_digest")
     fixed = raw["fixed_report"]
     vbench = raw["vbench_report"]
+    try:
+        vbench_runtime = validate_vbench_runtime_report(raw["vbench_runtime_report"])
+    except VBenchEnvironmentError as error:
+        raise CompleteD1Error(f"VBench runtime report rejected: {error}") from error
     if not isinstance(fixed, dict) or fixed.get("schema_version") != FIXED_D1_REPORT_SCHEMA:
         raise CompleteD1Error("fixed D1 report schema mismatch")
     if not isinstance(vbench, dict) or vbench.get("schema_version") != VBENCH_MEASUREMENTS_SCHEMA:
@@ -424,7 +430,9 @@ def build_complete_d1_report(
     if vbench["design_report_digest"] != document_sha256(design_report):
         raise CompleteD1Error("VBench report D0a design report mismatch")
     fingerprints = {item["evaluator_id"]: item["sha256"] for item in calibration_catalog["evaluator_fingerprints"]}
-    if vbench["runtime_digest"] != fingerprints["vbench-runtime"]:
+    if vbench["runtime_digest"] != fingerprints["vbench-runtime"] or vbench["runtime_digest"] != vbench_runtime[
+        "runtime_digest"
+    ]:
         raise CompleteD1Error("VBench runtime does not match the calibration fingerprint")
     fixed_metrics = _validate_fixed_metrics(fixed, fixed_gates)
     vbench_metrics = _validate_vbench_metrics(vbench, vbench_gates)
@@ -445,6 +453,7 @@ def build_complete_d1_report(
         "calibration_catalog_digest": catalog_report["catalog_digest"],
         "fixed_report_digest": document_sha256(fixed),
         "vbench_report_digest": document_sha256(vbench),
+        "vbench_runtime_report_digest": document_sha256(vbench_runtime),
         "verdict": "pass" if all(metric["decision"] == "pass" for metric in metrics) else "fail",
         "metrics": metrics,
     }
