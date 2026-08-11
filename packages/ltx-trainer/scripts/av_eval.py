@@ -11,10 +11,12 @@ from pathlib import Path
 
 from ltx_trainer import logger
 from ltx_trainer.av_eval import (
+    AsrMeasurementError,
     CalibrationError,
     DesignError,
     GovernanceError,
     ReadinessError,
+    build_asr_measurements,
     build_calibration_gate_report,
     build_power_report,
     build_product_readiness_report,
@@ -54,6 +56,16 @@ def _run_calibration_check(path: Path) -> int:
     return 0 if report["status"] == "ready-to-freeze" else 2
 
 
+def _run_asr_score(path: Path) -> int:
+    try:
+        report = build_asr_measurements(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, AsrMeasurementError) as error:
+        logger.error("ASR observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
 def _run_freeze(args: argparse.Namespace) -> int:
     try:
         root = freeze_dataset(
@@ -87,6 +99,8 @@ def main() -> int:
     design_check.add_argument("--design", type=Path, required=True)
     calibration_check = subcommands.add_parser("calibration-check", help="validate the complete D1 gate catalog")
     calibration_check.add_argument("--catalog", type=Path, required=True)
+    asr_score = subcommands.add_parser("asr-score", help="score normalized ASR observations with cluster bootstrap")
+    asr_score.add_argument("--observations", type=Path, required=True)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
@@ -96,6 +110,8 @@ def main() -> int:
         return _run_readiness_check(args.package)
     if args.command == "calibration-check":
         return _run_calibration_check(args.catalog)
+    if args.command == "asr-score":
+        return _run_asr_score(args.observations)
     return _run_freeze(args)
 
 

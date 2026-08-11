@@ -137,9 +137,28 @@ uv run python scripts/av_eval.py calibration-check \
 
 The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
 metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
-evidence, or an unbound upstream catalog. Its output is the exact 45-ID set
+evidence, or an unbound upstream catalog. Its output is the exact 47-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
+
+The `asr-score` command is the executable measurement path for the seven ASR
+gate values. Its input contains already case-folded tokens from the pinned
+normalizer, human reference-token annotations, leakage-component IDs and the
+predeclared WER/critical-token strata. It computes word edits with a
+deterministic alignment and 10,000 fixed-seed bootstrap replicates over whole
+leakage components. Names, numbers and negations are evaluated separately;
+every declared decision stratum needs at least two independent components and
+a real denominator.
+
+```bash
+uv run python scripts/av_eval.py asr-score \
+  --observations /secure/calibration/asr-observations.v1.json
+```
+
+The output binds dataset, preregistration, ASR model, normalizer and strata
+plan digests. Unnormalized tokens, missing critical annotations, uncovered
+strata, pseudoreplicated clips or a changed bootstrap contract reject the
+complete measurement.
 
 ## D0 readiness package
 
