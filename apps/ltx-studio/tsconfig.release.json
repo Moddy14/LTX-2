@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "noEmitOnError": true,
+    "incremental": false,
+    "sourceMap": false,
+    "declaration": false,
+    "rootDir": ".",
+    "outDir": "build/release-root/apps/ltx-studio",
+    "types": ["node"]
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["tests", "src"]
+}

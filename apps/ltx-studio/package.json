@@ -10,6 +10,8 @@
     "build": "tsc -b && vite build",
     "bundle:report": "node scripts/bundle-report.mjs",
     "release:surface": "tsx scripts/generate-release-surface.ts --output release/candidate-release-surface.v1.json",
+    "release:emit": "tsc --project tsconfig.release.json",
+    "release:stage": "node scripts/prepare-release-root.mjs && npm run release:emit && vite build && node scripts/stage-release-assets.mjs",
     "startup:measure": "node scripts/measure-startup.mjs",
     "start": "tsx server/index.ts",
     "test": "vitest run",

@@ -86,7 +86,7 @@ export class PhonemeVisemeEvaluatorStateProvider {
     this.retryIntervalMs = options.retryIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS;
     this.verificationTimeoutMs = options.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS;
     this.workerFactory = options.workerFactory ?? (() => new Worker(
-      new URL("./evaluatorManifestWorker.ts", import.meta.url),
+      new URL("./evaluatorManifestWorker.js", import.meta.url),
       {
         resourceLimits: {
           maxOldGenerationSizeMb: 96,
