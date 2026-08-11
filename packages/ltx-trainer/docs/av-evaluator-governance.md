@@ -209,6 +209,29 @@ dimensions remain mandatory. Automatic selection stays disabled until it is
 noninferior to manual selection; an unclear result is an abstention, never an
 implicit win.
 
+## Q1 comparator matrix
+
+`anchor-landscape.v1.json` records every external candidate found by the
+cutoff-dated primary-source search. `comparator-matrix.v1.json` then considers
+every one of those candidates separately for native dialog generation,
+driving-audio portrait animation and both exact LipDub claims. Inputs,
+normalization, prompts, seeds, failure/ITT policy, inclusion criteria and
+applicable gates are digest commitments.
+
+```bash
+uv run python scripts/av_eval.py comparator-check \
+  --matrix configs/av_eval/comparator-matrix.v1.json \
+  --landscape configs/av_eval/anchor-landscape.v1.json
+```
+
+An included external arm must be input-compatible, rights-clear, technically
+functional and code/weight-identical to the landscape. An exclusion needs a
+machine-consistent reason limited to rights, input contract, reproducibility,
+resource fit or the preregistered technical minimum. The protocol requires
+`quality_evidence_seen=false`, so a poor pilot score cannot remove a strong
+opponent. A matrix with only `local-only` claims may be production-useful, but
+its `sota_status` remains `hold`.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory
 inspector, signed hash-chained access ledger, and machine-validated

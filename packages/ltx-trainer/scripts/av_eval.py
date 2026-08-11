@@ -13,12 +13,14 @@ from ltx_trainer import logger
 from ltx_trainer.av_eval import (
     AsrMeasurementError,
     CalibrationError,
+    ComparatorMatrixError,
     CrossShotProtocolError,
     DesignError,
     GovernanceError,
     ReadinessError,
     build_asr_measurements,
     build_calibration_gate_report,
+    build_comparator_matrix_report,
     build_cross_shot_protocol_report,
     build_power_report,
     build_product_readiness_report,
@@ -82,6 +84,18 @@ def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) 
     return 0 if report["status"] == "ready-to-freeze" else 2
 
 
+def _run_comparator_check(matrix_path: Path, landscape_path: Path) -> int:
+    try:
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+        landscape = json.loads(landscape_path.read_text(encoding="utf-8"))
+        report = build_comparator_matrix_report(matrix, landscape=landscape, as_of=datetime.now(UTC).date())
+    except (OSError, json.JSONDecodeError, ComparatorMatrixError) as error:
+        logger.error("Q1 comparator matrix rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "ready-to-freeze" else 2
+
+
 def _run_freeze(args: argparse.Namespace) -> int:
     try:
         root = freeze_dataset(
@@ -120,20 +134,22 @@ def main() -> int:
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
+    comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
+    comparator.add_argument("--matrix", type=Path, required=True)
+    comparator.add_argument("--landscape", type=Path, required=True)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "design-check":
-        return _run_design_check(args.design)
-    if args.command == "readiness-check":
-        return _run_readiness_check(args.package)
-    if args.command == "calibration-check":
-        return _run_calibration_check(args.catalog)
-    if args.command == "asr-score":
-        return _run_asr_score(args.observations)
-    if args.command == "cross-shot-check":
-        return _run_cross_shot_check(args.protocol, args.design_report)
-    return _run_freeze(args)
+    handlers = {
+        "asr-score": lambda: _run_asr_score(args.observations),
+        "calibration-check": lambda: _run_calibration_check(args.catalog),
+        "comparator-check": lambda: _run_comparator_check(args.matrix, args.landscape),
+        "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
+        "design-check": lambda: _run_design_check(args.design),
+        "freeze": lambda: _run_freeze(args),
+        "readiness-check": lambda: _run_readiness_check(args.package),
+    }
+    return handlers[args.command]()
 
 
 if __name__ == "__main__":

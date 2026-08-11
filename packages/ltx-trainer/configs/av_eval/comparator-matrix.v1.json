@@ -1,0 +1,69 @@
+{
+  "schema_version": "ltx-av-eval-comparator-matrix.v1",
+  "status": "draft",
+  "matrix_id": "ltx-local-video-comparators-01",
+  "landscape_sha256": null,
+  "commitments": [
+    {"artifact_id": "applicable_gates", "sha256": null},
+    {"artifact_id": "failure_policy", "sha256": null},
+    {"artifact_id": "inclusion_criteria", "sha256": null},
+    {"artifact_id": "input_normalization", "sha256": null},
+    {"artifact_id": "prompt_set", "sha256": null},
+    {"artifact_id": "seed_policy", "sha256": null}
+  ],
+  "target_sota_claim_ids": [],
+  "claims": [
+    {
+      "claim_id": "audio-driven-video.image-audio-to-video",
+      "task_type": "driving-audio-portrait",
+      "input_contract": ["driving-audio", "prompt", "reference-image"],
+      "claim_status": "undecided",
+      "sota_anchor_arm_id": null,
+      "arms": [
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-audio-driven", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+      ]
+    },
+    {
+      "claim_id": "native-generation.text-to-video",
+      "task_type": "native-dialog-generation",
+      "input_contract": ["prompt-with-dialogue"],
+      "claim_status": "undecided",
+      "sota_anchor_arm_id": null,
+      "arms": [
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-native-generation", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+      ]
+    },
+    {
+      "claim_id": "reference-video-redubbing.native-distilled",
+      "task_type": "reference-video-redubbing",
+      "input_contract": ["exact-target-dialogue", "reference-video", "single-speaker-acknowledgement", "target-language"],
+      "claim_status": "undecided",
+      "sota_anchor_arm_id": null,
+      "arms": [
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-lipdub-native-distilled", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+      ]
+    },
+    {
+      "claim_id": "reference-video-redubbing.official-comfy-hq",
+      "task_type": "reference-video-redubbing",
+      "input_contract": ["exact-target-dialogue", "reference-video", "single-speaker-acknowledgement", "target-language"],
+      "claim_status": "undecided",
+      "sota_anchor_arm_id": null,
+      "arms": [
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-lipdub-official-comfy-hq", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+      ]
+    }
+  ]
+}

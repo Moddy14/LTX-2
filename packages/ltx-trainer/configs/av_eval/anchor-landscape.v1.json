@@ -1,0 +1,34 @@
+{
+  "schema_version": "ltx-av-eval-anchor-landscape.v1",
+  "status": "draft",
+  "landscape_id": "ltx-local-video-anchor-landscape-01",
+  "cutoff_date": null,
+  "search_protocol_sha256": null,
+  "rights_policy_sha256": null,
+  "candidates": [
+    {
+      "candidate_id": "longcat-video-avatar-1.5",
+      "official_source": "https://github.com/meituan-longcat/LongCat-Video",
+      "code_sha256": null,
+      "weights_sha256": null,
+      "license_evidence_sha256": null,
+      "resource_profile_sha256": null
+    },
+    {
+      "candidate_id": "mova",
+      "official_source": "https://github.com/OpenMOSS/MOVA",
+      "code_sha256": null,
+      "weights_sha256": null,
+      "license_evidence_sha256": null,
+      "resource_profile_sha256": null
+    },
+    {
+      "candidate_id": "wan2.2-s2v-14b",
+      "official_source": "https://github.com/Wan-Video/Wan2.2",
+      "code_sha256": null,
+      "weights_sha256": null,
+      "license_evidence_sha256": null,
+      "resource_profile_sha256": null
+    }
+  ]
+}
