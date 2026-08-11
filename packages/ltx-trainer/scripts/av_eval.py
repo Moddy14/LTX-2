@@ -24,6 +24,7 @@ from ltx_trainer.av_eval import (
     OffsetMeasurementError,
     ReadinessError,
     SharpnessMeasurementError,
+    VBenchMeasurementError,
     build_artifact_measurements,
     build_asr_measurements,
     build_calibration_gate_report,
@@ -36,6 +37,7 @@ from ltx_trainer.av_eval import (
     build_power_report,
     build_product_readiness_report,
     build_sharpness_measurements,
+    build_vbench_measurements,
     freeze_dataset,
     load_split_seed,
 )
@@ -144,6 +146,18 @@ def _run_fixed_d1(bundle_path: Path, catalog_path: Path) -> int:
     return 0 if report["verdict"] == "pass" else 2
 
 
+def _run_vbench_score(observations_path: Path, design_path: Path) -> int:
+    try:
+        observations = json.loads(observations_path.read_text(encoding="utf-8"))
+        design = json.loads(design_path.read_text(encoding="utf-8"))
+        report = build_vbench_measurements(observations, design=design)
+    except (OSError, json.JSONDecodeError, VBenchMeasurementError) as error:
+        logger.error("VBench observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["verdict"] == "pass" else 2
+
+
 def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) -> int:
     try:
         protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
@@ -218,6 +232,9 @@ def main() -> int:
     offset_score.add_argument("--observations", type=Path, required=True)
     sharpness_score = subcommands.add_parser("sharpness-score", help="score normalized face-crop sharpness")
     sharpness_score.add_argument("--observations", type=Path, required=True)
+    vbench_score = subcommands.add_parser("vbench-score", help="score paired VBench observations with Holm control")
+    vbench_score.add_argument("--observations", type=Path, required=True)
+    vbench_score.add_argument("--design", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -241,6 +258,7 @@ def main() -> int:
         "offset-score": lambda: _run_offset_score(args.observations),
         "readiness-check": lambda: _run_readiness_check(args.package),
         "sharpness-score": lambda: _run_sharpness_score(args.observations),
+        "vbench-score": lambda: _run_vbench_score(args.observations, args.design),
     }
     return handlers[args.command]()
 

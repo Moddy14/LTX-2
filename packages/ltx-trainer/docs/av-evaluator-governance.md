@@ -213,6 +213,15 @@ recomputes each of the 37 fixed decisions from its registered estimate or
 confidence bound. The remaining 12 gates are intentionally not synthesized:
 they require the pinned official VBench runtime and Holm-corrected evidence.
 
+`vbench-score` supplies those twelve remaining measurements. It validates the
+frozen D0a catalog, official repository commit and config, runtime,
+comparator-matrix and release bindings. Candidate and anchor scores are paired
+within leakage components. Every claim/dimension must clear both its absolute
+minimum and its registered noninferiority/superiority margin. The resulting 24
+hypotheses share one Holm family; each effect retains its raw interval,
+adjusted p-value, rank-specific alpha and one-sided Holm lower bound. A metric
+passes only when both corrected lower bounds are positive.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory

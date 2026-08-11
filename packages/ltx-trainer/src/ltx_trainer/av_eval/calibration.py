@@ -194,6 +194,25 @@ def _validate_vbench_metric_ids(raw: object) -> list[str]:
     return identifiers
 
 
+def _validate_vbench_decision(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise CalibrationError("vbench_decision must be an object")
+    _exact_keys(
+        raw,
+        {"direction", "decision_value", "threshold", "multiplicity", "subtests"},
+        "vbench_decision",
+    )
+    if raw != {
+        "direction": "lower",
+        "decision_value": "estimate",
+        "threshold": 0.05,
+        "multiplicity": "holm",
+        "subtests": ["absolute", "relative"],
+    }:
+        raise CalibrationError("VBench decisions must use the fixed absolute-and-relative Holm contract")
+    return raw
+
+
 def build_calibration_gate_report(raw: object) -> dict[str, Any]:
     """Validate D1 gates and return the exact required measurement metric IDs."""
 
@@ -208,6 +227,7 @@ def build_calibration_gate_report(raw: object) -> dict[str, Any]:
             "design_digest",
             "preregistration_digest",
             "vbench_gate_catalog_digest",
+            "vbench_decision",
             "vbench_metric_ids",
             "evaluator_fingerprints",
             "gates",
@@ -223,6 +243,7 @@ def build_calibration_gate_report(raw: object) -> dict[str, Any]:
             blockers.append(f"{field.replace('_', '-')}-missing")
     metric_ids, gate_blockers = _validate_gates(raw["gates"])
     vbench_metric_ids = _validate_vbench_metric_ids(raw["vbench_metric_ids"])
+    vbench_decision = _validate_vbench_decision(raw["vbench_decision"])
     blockers.extend(gate_blockers)
     blockers = sorted(blockers)
     if raw["status"] == "frozen" and blockers:
@@ -234,5 +255,6 @@ def build_calibration_gate_report(raw: object) -> dict[str, Any]:
         "blockers": blockers,
         "required_metric_ids": sorted([*metric_ids, *vbench_metric_ids]),
         "required_metric_ids_digest": document_sha256(sorted([*metric_ids, *vbench_metric_ids])),
+        "vbench_decision_digest": document_sha256(vbench_decision),
         "evaluator_fingerprints_digest": document_sha256(raw["evaluator_fingerprints"]),
     }

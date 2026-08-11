@@ -5,6 +5,13 @@
   "design_digest": null,
   "preregistration_digest": null,
   "vbench_gate_catalog_digest": null,
+  "vbench_decision": {
+    "direction": "lower",
+    "decision_value": "estimate",
+    "threshold": 0.05,
+    "multiplicity": "holm",
+    "subtests": ["absolute", "relative"]
+  },
   "vbench_metric_ids": [
     "vbench.reference-video-redubbing.native-distilled.aesthetic-quality",
     "vbench.reference-video-redubbing.native-distilled.background-consistency",

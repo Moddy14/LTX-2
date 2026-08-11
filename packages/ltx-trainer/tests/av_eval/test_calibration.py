@@ -59,6 +59,7 @@ def test_complete_catalog_freezes_all_required_metrics_deterministically() -> No
     assert "asr-critical-name-accuracy-ci-lower" in first["required_metric_ids"]
     assert "asr-critical-negation-accuracy-ci-lower" in first["required_metric_ids"]
     assert "asr-critical-number-accuracy-ci-lower" in first["required_metric_ids"]
+    assert first["vbench_decision_digest"] == second["vbench_decision_digest"]
 
 
 def test_catalog_rejects_missing_gates_and_changed_plan_thresholds() -> None:
@@ -76,6 +77,11 @@ def test_catalog_rejects_missing_gates_and_changed_plan_thresholds() -> None:
     missing_vbench["vbench_metric_ids"] = missing_vbench["vbench_metric_ids"][:-1]  # type: ignore[index]
     with pytest.raises(CalibrationError, match="D0a claim/dimension matrix"):
         build_calibration_gate_report(missing_vbench)
+
+    changed_vbench_decision = _draft()
+    changed_vbench_decision["vbench_decision"]["threshold"] = 0.1  # type: ignore[index]
+    with pytest.raises(CalibrationError, match="absolute-and-relative Holm contract"):
+        build_calibration_gate_report(changed_vbench_decision)
 
 
 def test_calibration_cli_reports_hold_with_a_nonzero_exit(tmp_path: Path) -> None:
