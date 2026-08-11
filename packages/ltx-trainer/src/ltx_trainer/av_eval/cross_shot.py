@@ -83,6 +83,7 @@ DESIGN_REPORT_KEYS = {
     "status",
     "blockers",
     "familywise_alpha",
+    "planning_hypothesis_count",
     "per_endpoint_planning_alpha",
     "target_power",
     "endpoint_requirements",

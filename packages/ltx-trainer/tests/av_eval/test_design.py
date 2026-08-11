@@ -83,6 +83,8 @@ def test_frozen_design_computes_deterministic_power_and_precision_requirements()
     assert first["required_independent_units"] >= 30
     assert first["required_clips"] == first["required_independent_units"] * 3
     assert len(first["endpoint_requirements"]) == len(design["power_endpoints"])
+    assert first["planning_hypothesis_count"] == 157
+    assert first["per_endpoint_planning_alpha"] == 0.05 / 157
 
 
 def test_design_rejects_outcome_driven_or_vacuous_freezes() -> None:
@@ -115,6 +117,18 @@ def test_design_cannot_aggregate_critical_token_types() -> None:
     ]
     with pytest.raises(DesignError, match="names, numbers, and negations separately"):
         build_power_report(missing_endpoint)
+
+
+def test_design_cannot_omit_a_vbench_power_dimension() -> None:
+    design = _ready_design()
+    design["power_endpoints"] = [
+        endpoint
+        for endpoint in design["power_endpoints"]
+        if endpoint["endpoint_id"] != "vbench-motion-smoothness"
+    ]
+
+    with pytest.raises(DesignError, match="exactly cover every registered VBench dimension"):
+        build_power_report(design)
 
 
 def test_design_cli_reports_hold_with_a_nonzero_exit(tmp_path: Path) -> None:

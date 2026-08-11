@@ -28,6 +28,7 @@ def _design_report(required: int = 40) -> dict[str, object]:
         "status": "ready-to-freeze",
         "blockers": [],
         "familywise_alpha": 0.05,
+        "planning_hypothesis_count": 50,
         "per_endpoint_planning_alpha": 0.001,
         "target_power": 0.9,
         "endpoint_requirements": [],

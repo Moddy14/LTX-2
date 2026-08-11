@@ -22,6 +22,7 @@ VBench_DIMENSIONS = {
     "aesthetic-quality",
     "imaging-quality",
 }
+REQUIRED_VBENCH_ENDPOINT_IDS = {f"vbench-{dimension}" for dimension in VBench_DIMENSIONS}
 REQUIRED_CRITICAL_TOKEN_DELTA_IDS = {
     "asr-critical-name-accuracy",
     "asr-critical-negation-accuracy",
@@ -269,10 +270,21 @@ def _validate_power_endpoints(
     alpha: float,
     power: float,
     design_effect: float | None,
-) -> tuple[list[dict[str, Any]], list[str], float]:
+    vbench_gate_count: int,
+) -> tuple[list[dict[str, Any]], list[str], float, int]:
     if not isinstance(raw, list) or not raw:
         raise DesignError("power_endpoints must be a non-empty list")
-    per_endpoint_alpha = alpha / len(raw)
+    raw_endpoint_ids = [endpoint.get("endpoint_id") for endpoint in raw if isinstance(endpoint, dict)]
+    registered_vbench_endpoint_ids = {
+        endpoint_id
+        for endpoint_id in raw_endpoint_ids
+        if isinstance(endpoint_id, str) and endpoint_id.startswith("vbench-")
+    }
+    if registered_vbench_endpoint_ids != REQUIRED_VBENCH_ENDPOINT_IDS:
+        raise DesignError("power endpoints must exactly cover every registered VBench dimension")
+    non_vbench_endpoint_count = len(raw) - len(REQUIRED_VBENCH_ENDPOINT_IDS)
+    planning_hypothesis_count = non_vbench_endpoint_count + 2 * vbench_gate_count
+    per_endpoint_alpha = alpha / planning_hypothesis_count
     endpoint_ids: list[str] = []
     requirements: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -314,7 +326,7 @@ def _validate_power_endpoints(
         raise DesignError("power endpoints must cover names, numbers, and negations separately")
     if not REQUIRED_MOS_ENDPOINT_IDS.issubset(endpoint_ids):
         raise DesignError("power endpoints must cover audio quality, identity/mouth, and lip-sync MOS")
-    return requirements, blockers, per_endpoint_alpha
+    return requirements, blockers, per_endpoint_alpha, planning_hypothesis_count
 
 
 def _validate_strata_quotas(raw: object) -> list[str]:
@@ -349,11 +361,12 @@ def build_power_report(raw: object) -> dict[str, Any]:
     blockers.extend(vbench_blockers)
     if design_effect is None:
         blockers.append("design-effect-missing")
-    requirements, endpoint_blockers, per_endpoint_alpha = _validate_power_endpoints(
+    requirements, endpoint_blockers, per_endpoint_alpha, planning_hypothesis_count = _validate_power_endpoints(
         raw["power_endpoints"],
         alpha=alpha,
         power=power,
         design_effect=design_effect,
+        vbench_gate_count=len(vbench_catalog["gates"]),
     )
     blockers.extend(endpoint_blockers)
     quotas = raw["strata_quotas"]
@@ -372,6 +385,7 @@ def build_power_report(raw: object) -> dict[str, Any]:
         "status": "ready-to-freeze" if not blockers else "hold",
         "blockers": blockers,
         "familywise_alpha": alpha,
+        "planning_hypothesis_count": planning_hypothesis_count,
         "per_endpoint_planning_alpha": per_endpoint_alpha,
         "target_power": power,
         "endpoint_requirements": requirements,

@@ -142,6 +142,16 @@ evidence, or an unbound upstream catalog. Its output is the exact 109-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
 
+The D0a power report counts each of the 72 VBench gates as two planned
+hypotheses (absolute and anchor-relative) and every other registered power
+endpoint as one. With the current surface this is a 157-hypothesis planning
+family, so the conservative planning alpha is `0.05 / 157`, not `0.05 / 19`.
+The six VBench power profiles must exactly cover the registered dimensions;
+their effect and variability inputs are the conservative worst case across
+all claim-specific gates in that dimension. The report exposes the hypothesis
+count so a downstream freeze cannot silently reuse a pre-expansion sample
+size.
+
 Every executable D1 scorer binds the same dataset, preregistration, release
 candidate and strata-plan digests in both its input and output. This prevents
 calibration or output-quality evidence from a previous candidate or a

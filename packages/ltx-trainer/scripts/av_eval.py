@@ -377,7 +377,7 @@ def main() -> int:
     calibration_check.add_argument("--catalog", type=Path, required=True)
     content_score = subcommands.add_parser("content-score", help="score mouth-content and transition observations")
     content_score.add_argument("--observations", type=Path, required=True)
-    complete_d1 = subcommands.add_parser("complete-d1", help="assemble and revalidate all 49 D1 gates")
+    complete_d1 = subcommands.add_parser("complete-d1", help="assemble and revalidate all 109 D1 gates")
     complete_d1.add_argument("--bundle", type=Path, required=True)
     complete_d1.add_argument("--catalog", type=Path, required=True)
     complete_d1.add_argument("--design", type=Path, required=True)
