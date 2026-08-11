@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
@@ -17,6 +18,46 @@ function sizes(file) {
     brotliBytes: brotliCompressSync(content, {
       params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
     }).byteLength,
+    sha256: createHash("sha256").update(content).digest("hex"),
+  };
+}
+
+function argumentValue(name) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a path`);
+  return value;
+}
+
+function performanceEvidence(path, initialChunk) {
+  if (!path) {
+    return { gate: "pending-40-cold-context-runs" };
+  }
+
+  const bytes = readFileSync(path);
+  const evidence = JSON.parse(bytes.toString("utf8"));
+  const artifact = evidence.candidateArtifact;
+  const valid =
+    evidence.schemaVersion === "ltx-studio-startup-comparison.v1" &&
+    evidence.verdict === "pass" &&
+    evidence.protocol?.runsPerArm >= 40 &&
+    evidence.candidate?.interactiveMs?.p95 <= evidence.baseline?.interactiveMs?.p95 &&
+    artifact?.file === initialChunk.file &&
+    artifact?.rawBytes === initialChunk.rawBytes &&
+    artifact?.gzipBytes === initialChunk.gzipBytes &&
+    artifact?.brotliBytes === initialChunk.brotliBytes &&
+    artifact?.sha256 === initialChunk.sha256;
+  if (!valid) {
+    throw new Error(`Performance evidence ${path} does not match the current entry artifact or gate`);
+  }
+
+  return {
+    gate: "pass",
+    evidence: {
+      path,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
   };
 }
 
@@ -26,6 +67,10 @@ const chunks = readdirSync(assetsRoot)
   .map((file) => ({ file, initial: file === entry, ...sizes(file) }));
 const initial = chunks.find((chunk) => chunk.initial);
 if (!initial) throw new Error(`Entry chunk ${basename(entry)} is missing`);
+const measuredPerformance = performanceEvidence(
+  argumentValue("--performance-evidence"),
+  initial,
+);
 
 const report = {
   schemaVersion: "ltx-studio-bundle-report.v1",
@@ -43,7 +88,10 @@ const report = {
   },
   chunks,
   staticGate: initial.rawBytes <= 450_000 && initial.gzipBytes <= 140_000 ? "pass" : "fail",
-  performanceGate: "pending-40-cold-context-runs",
+  performanceGate: measuredPerformance.gate,
+  ...(measuredPerformance.evidence
+    ? { performanceEvidence: measuredPerformance.evidence }
+    : {}),
 };
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

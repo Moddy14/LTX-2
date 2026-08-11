@@ -16,7 +16,8 @@ bestanden. **R2 ist abgeschlossen.**
   einen sichtbaren, bedienbaren Aktualisierungspfad statt einer leeren UI.
 - Das Vite-Warnlimit wurde nicht verändert; es gibt keinen kosmetischen
   manuellen Vendor-Chunk.
-- `npm run bundle:report` erzeugt aus dem realen `dist` Raw-, gzip- und
+- `npm run bundle:report -- --performance-evidence docs/evidence/startup-r2-2026-08-11.json`
+  erzeugt aus dem realen `dist` Raw-, gzip- und
   Brotli-Größen sowie eine maschinenlesbare Gateentscheidung.
 
 ## Ergebnis

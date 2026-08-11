@@ -19,16 +19,20 @@
     "brotliBytes": 99656
   },
   "chunks": [
-    { "file": "Editor-C8_h0Iqu.js", "initial": false, "rawBytes": 59185, "gzipBytes": 14926, "brotliBytes": 13461 },
-    { "file": "ExperimentPanel-CdaBdvgg.js", "initial": false, "rawBytes": 13343, "gzipBytes": 4713, "brotliBytes": 4308 },
-    { "file": "ObjectiveAnalysisPanel-B1dK7b6i.js", "initial": false, "rawBytes": 18751, "gzipBytes": 5204, "brotliBytes": 4756 },
-    { "file": "ObjectiveComparisonPanel-Cm8pl5Yq.js", "initial": false, "rawBytes": 3487, "gzipBytes": 1017, "brotliBytes": 917 },
-    { "file": "QualityScorecard-pr97hXMJ.js", "initial": false, "rawBytes": 3315, "gzipBytes": 1493, "brotliBytes": 1365 },
-    { "file": "SynchronizedComparePreview-DzP6nC-n.js", "initial": false, "rawBytes": 3993, "gzipBytes": 1630, "brotliBytes": 1494 },
-    { "file": "circle-check-DCe0eKIk.js", "initial": false, "rawBytes": 169, "gzipBytes": 162, "brotliBytes": 157 },
-    { "file": "fieldHelp-Do0s1OP_.js", "initial": false, "rawBytes": 47968, "gzipBytes": 16199, "brotliBytes": 14933 },
-    { "file": "index-jtj3L-tt.js", "initial": true, "rawBytes": 388269, "gzipBytes": 115561, "brotliBytes": 99656 }
+    { "file": "Editor-C8_h0Iqu.js", "initial": false, "rawBytes": 59185, "gzipBytes": 14926, "brotliBytes": 13461, "sha256": "3085c8ea031553eca5e269783024c911a3cac3f12edefdfbf78dfaa28243a1ac" },
+    { "file": "ExperimentPanel-CdaBdvgg.js", "initial": false, "rawBytes": 13343, "gzipBytes": 4713, "brotliBytes": 4308, "sha256": "6d3906f4a2ea8c31c8143d9a3afb7c996a344cf9db5eee6036132793216bea23" },
+    { "file": "ObjectiveAnalysisPanel-B1dK7b6i.js", "initial": false, "rawBytes": 18751, "gzipBytes": 5204, "brotliBytes": 4756, "sha256": "481772f73d2dc12b89c7c5560b8ed3aa16745f03f261f78c8a7e626763475532" },
+    { "file": "ObjectiveComparisonPanel-Cm8pl5Yq.js", "initial": false, "rawBytes": 3487, "gzipBytes": 1017, "brotliBytes": 917, "sha256": "5eed5b3d64a47801d9976f4f45f7efe0db934f9b89df46d37fb502b9a5d42260" },
+    { "file": "QualityScorecard-pr97hXMJ.js", "initial": false, "rawBytes": 3315, "gzipBytes": 1493, "brotliBytes": 1365, "sha256": "7968b083b9a5cdbc25d987e466abc965717045a5001f2e12a0d60ab2bee667ec" },
+    { "file": "SynchronizedComparePreview-DzP6nC-n.js", "initial": false, "rawBytes": 3993, "gzipBytes": 1630, "brotliBytes": 1494, "sha256": "b5e84f0b92d25db5dc3f9aef6c1c7dd92f5965f5cd14ac7aa0ab0c7cf8ec4b8d" },
+    { "file": "circle-check-DCe0eKIk.js", "initial": false, "rawBytes": 169, "gzipBytes": 162, "brotliBytes": 157, "sha256": "2e34106187dd48d038d24eb89bd5ab8bad39e45fc26d79d30c23ade8c77b646e" },
+    { "file": "fieldHelp-Do0s1OP_.js", "initial": false, "rawBytes": 47968, "gzipBytes": 16199, "brotliBytes": 14933, "sha256": "64936d0f2c9b9ef2ede4be80743d7de4b86ab470a46fbf86e19b6cb5c880ef9a" },
+    { "file": "index-jtj3L-tt.js", "initial": true, "rawBytes": 388269, "gzipBytes": 115561, "brotliBytes": 99656, "sha256": "040a49f18e1d7a03ca2376f06d5038cd5831f02e3dd7ef25e8979f47367d2a18" }
   ],
   "staticGate": "pass",
-  "performanceGate": "pass"
+  "performanceGate": "pass",
+  "performanceEvidence": {
+    "path": "docs/evidence/startup-r2-2026-08-11.json",
+    "sha256": "e2ae3139978fa08d40f6aca7fb347b2973a905f95ea8b6b0c296979d26b8abc9"
+  }
 }

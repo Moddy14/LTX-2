@@ -18,6 +18,13 @@
     "cpuCount": 20,
     "totalMemoryBytes": 130663002112
   },
+  "candidateArtifact": {
+    "file": "index-jtj3L-tt.js",
+    "rawBytes": 388269,
+    "gzipBytes": 115561,
+    "brotliBytes": 99656,
+    "sha256": "040a49f18e1d7a03ca2376f06d5038cd5831f02e3dd7ef25e8979f47367d2a18"
+  },
   "baseline": {
     "interactiveMs": {
       "median": 138.19462400000157,
