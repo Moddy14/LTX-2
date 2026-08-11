@@ -29,6 +29,7 @@ from ltx_trainer.av_eval import (
     OffsetMeasurementError,
     ReadinessError,
     SharpnessMeasurementError,
+    TechnicalEvidenceError,
     VBenchMeasurementError,
     build_artifact_measurements,
     build_asr_measurements,
@@ -47,6 +48,7 @@ from ltx_trainer.av_eval import (
     build_product_readiness_report,
     build_q2_qualification_report,
     build_sharpness_measurements,
+    build_technical_evidence_bundle,
     build_vbench_measurements,
     freeze_dataset,
     load_split_seed,
@@ -310,6 +312,19 @@ def _run_q2_score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_technical_score(observations_path: Path, surface_path: Path) -> int:
+    try:
+        report = build_technical_evidence_bundle(
+            json.loads(observations_path.read_text(encoding="utf-8")),
+            surface=json.loads(surface_path.read_text(encoding="utf-8")),
+        )
+    except (OSError, json.JSONDecodeError, TechnicalEvidenceError) as error:
+        logger.error("R0/R3 technical observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
 def _add_comparator_commands(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
     comparator.add_argument("--matrix", type=Path, required=True)
@@ -357,7 +372,7 @@ def _add_q2_command(subcommands: argparse._SubParsersAction) -> None:  # type: i
     command.add_argument("--consumption-root", type=Path, required=True)
 
 
-def main() -> int:
+def main() -> int:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description="LTX AV evaluator governance")
     subcommands = parser.add_subparsers(dest="command", required=True)
     freeze = subcommands.add_parser("freeze", help="validate evidence and freeze leakage-safe splits")
@@ -406,6 +421,9 @@ def main() -> int:
     _add_q2_command(subcommands)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
+    technical_score = subcommands.add_parser("technical-score", help="assemble fail-closed R0/R3 live evidence")
+    technical_score.add_argument("--observations", type=Path, required=True)
+    technical_score.add_argument("--surface", type=Path, required=True)
     args = parser.parse_args()
     handlers = {
         "artifact-score": lambda: _run_artifact_score(args.observations),
@@ -426,6 +444,7 @@ def main() -> int:
         "q2-score": lambda: _run_q2_score(args),
         "readiness-check": lambda: _run_readiness_check(args.package),
         "sharpness-score": lambda: _run_sharpness_score(args.observations),
+        "technical-score": lambda: _run_technical_score(args.observations, args.surface),
         "vbench-score": lambda: _run_vbench_score(args.observations, args.design),
     }
     return handlers[args.command]()

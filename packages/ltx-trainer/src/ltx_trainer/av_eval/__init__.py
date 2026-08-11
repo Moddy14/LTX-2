@@ -44,6 +44,7 @@ from .product import (
 )
 from .readiness import ReadinessError, build_product_readiness_report
 from .sharpness import SharpnessMeasurementError, build_sharpness_measurements
+from .technical import TechnicalEvidenceError, build_technical_evidence_bundle
 from .vbench import VBenchMeasurementError, build_vbench_measurements
 
 __all__ = [
@@ -68,6 +69,7 @@ __all__ = [
     "ProductGovernanceError",
     "ReadinessError",
     "SharpnessMeasurementError",
+    "TechnicalEvidenceError",
     "VBenchMeasurementError",
     "append_signed_access_event",
     "build_artifact_measurements",
@@ -89,6 +91,7 @@ __all__ = [
     "build_product_readiness_report",
     "build_q2_qualification_report",
     "build_sharpness_measurements",
+    "build_technical_evidence_bundle",
     "build_vbench_measurements",
     "document_sha256",
     "freeze_dataset",

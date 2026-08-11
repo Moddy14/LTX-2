@@ -17,7 +17,7 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und nun auch den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 145/145, Studio 601/601 Tests; Lint und Build sind grün | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und nun auch den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 148/148, Studio 601/601 Tests; Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
@@ -252,7 +252,10 @@ bedienbare Moduswahl gegenüber dem vorab gespeicherten Basislauf.
 
 ### R3 — Releaseoberfläche, Canaries, Soak und Pause/Resume
 
-**Status: detaillierte F0-Belegbindung implementiert; reale Läufe offen.** F0
+**Status: detaillierte F0-Belegbindung und ausführbarer Assembler implementiert;
+reale Läufe offen.** `technical-score` validiert rohe Live-Zeilen gegen die
+digestgebundene Candidate-Surface und erzeugt daraus die vier noch unsignierten
+Qualification-Dokumente samt detaillierten Producer-Reports. F0
 akzeptiert die vier technischen Qualification-Atteste nur noch, wenn ihre
 `producerDigest`-Werte exakt auf detaillierte R0-, Canary-, Pause/Resume- und
 Soak-Reports zeigen. Diese Reports müssen alle Candidate-Einträge, alle vier

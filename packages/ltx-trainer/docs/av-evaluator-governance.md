@@ -396,6 +396,28 @@ output, foreign-service action, or recovery-SLO breach. The report digests are
 part of the signed F0 candidate and must equal each Studio qualification
 report's `producerDigest`.
 
+`technical-score` is the executable bridge from live rows to those artifacts:
+
+```bash
+uv run python scripts/av_eval.py technical-score \
+  --observations /secure/evidence/technical-observations.v1.json \
+  --surface ../../apps/ltx-studio/release/candidate-release-surface.v1.json
+```
+
+It accepts one cold, playable, provenance-bound canary per candidate entry,
+exactly 20 sorted pause/resume cycles, and exactly 50 sorted soak rows. The
+observation envelope binds the SHA-256 of the technical runner into every
+detailed report, so the later signed qualification cannot outlive its code.
+The cycles must cover every cooperative request mode and all early/middle/late
+boundary classes. Bitwise comparisons require equal output hashes; a
+non-bitwise result requires a preregistered equivalence-rule digest. Soak rows
+must cover the full candidate surface, match their registered terminal or
+recovered state, meet their per-row recovery SLO, and contain no lost,
+orphaned, duplicate, unbound, or foreign-service behavior. The command emits
+the four detailed reports plus unsigned Studio qualification documents; the
+independent qualification attestor signs those documents only after this
+validation succeeds.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory
 inspector, signed hash-chained access ledger, and machine-validated
