@@ -31,6 +31,10 @@ DETAILED_REPORT_IDS = {
     "d1-calibration",
     "q0-cross-shot",
     "q1-comparators",
+    "r0-control-plane",
+    "r3-canaries",
+    "r3-pause-resume",
+    "r3-soak",
 }
 PRE_Q2_QUALIFICATION_KINDS = {
     "d1-calibration",
@@ -321,7 +325,7 @@ def _validate_rights(
 
 def _validate_surface(  # noqa: PLR0912
     candidate: dict[str, Any], raw: object, rights_attestation: object
-) -> dict[str, set[str]]:
+) -> tuple[dict[str, set[str]], set[str]]:
     if not isinstance(raw, dict) or raw.get("schemaVersion") != "candidate-release-surface.v1":
         raise FreezePreflightError("candidate release surface schema mismatch")
     if studio_sha256_document(raw) != candidate["surface_digest"]:
@@ -331,6 +335,7 @@ def _validate_surface(  # noqa: PLR0912
         raise FreezePreflightError("candidate release surface entries must be a list")
     candidate_entries: dict[str, set[str]] = {}
     candidate_claims: set[str] = set()
+    cooperative_modes: set[str] = set()
     required_rights: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
@@ -339,6 +344,13 @@ def _validate_surface(  # noqa: PLR0912
             continue
         entry_id = _identifier(entry.get("id"), f"surface entry {index}.id")
         claim_id = _identifier(entry.get("claimId"), f"surface entry {entry_id}.claimId")
+        cooperative = entry.get("cooperativeCheckpoint")
+        request = entry.get("request")
+        if not isinstance(cooperative, bool) or not isinstance(request, dict):
+            raise FreezePreflightError(f"surface entry {entry_id} has no checkpoint capability contract")
+        mode = _identifier(request.get("mode"), f"surface entry {entry_id}.request.mode")
+        if cooperative:
+            cooperative_modes.add(mode)
         gates = entry.get("applicableGates")
         if (
             not isinstance(gates, list)
@@ -366,14 +378,16 @@ def _validate_surface(  # noqa: PLR0912
         raise FreezePreflightError("rights attestation must be an object")
     if not required_rights.issubset(set(rights_attestation.get("evidenceIds", []))):
         raise FreezePreflightError("rights attestation misses candidate surface evidence")
-    return candidate_entries
+    return candidate_entries, cooperative_modes
 
 
-def _validate_detailed_reports(  # noqa: PLR0912
+def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
     candidate: dict[str, Any],
     expected_digests: dict[str, str],
     reports: object,
     preregistration: dict[str, Any],
+    candidate_entries: dict[str, set[str]],
+    cooperative_modes: set[str],
 ) -> dict[str, str]:
     if not isinstance(reports, dict) or set(reports) != DETAILED_REPORT_IDS:
         raise FreezePreflightError("detailed report documents must exactly match the F0 inventory")
@@ -385,6 +399,10 @@ def _validate_detailed_reports(  # noqa: PLR0912
     d1 = reports["d1-calibration"]
     q0 = reports["q0-cross-shot"]
     q1 = reports["q1-comparators"]
+    r0 = reports["r0-control-plane"]
+    r3_canaries = reports["r3-canaries"]
+    r3_pause_resume = reports["r3-pause-resume"]
+    r3_soak = reports["r3-soak"]
     if not isinstance(d0, dict) or d0.get("schema_version") != READINESS_REPORT_SCHEMA:
         raise FreezePreflightError("D0 readiness report schema mismatch")
     if d0.get("status") != "ready-to-freeze" or d0.get("blockers") != []:
@@ -403,6 +421,66 @@ def _validate_detailed_reports(  # noqa: PLR0912
         raise FreezePreflightError("Q1 decision schema mismatch")
     if q1.get("status") != "ready-to-freeze" or q1.get("sota_status") != "anchor-pilot-pass":
         raise FreezePreflightError("Q1 target comparator pilot did not pass")
+    technical_reports = {
+        "r0-control-plane": (
+            r0,
+            "ltx-studio-r0-control-plane-evidence.v1",
+            {
+                "scheduler_actions": [
+                    "continue_current",
+                    "resume_current",
+                    "wait_for_successor",
+                    "yield_to_waiting_job",
+                ],
+                "running_transport_failure": "checkpoint-and-exit-75",
+                "paused_transport_failure": "remain-paused-and-retry",
+                "api_restart_reconciled": True,
+                "studio_restart_reconciled": True,
+            },
+        ),
+        "r3-canaries": (
+            r3_canaries,
+            "ltx-studio-r3-canary-evidence.v1",
+            {"candidate_entry_count": len(candidate_entries), "failures": 0},
+        ),
+        "r3-pause-resume": (
+            r3_pause_resume,
+            "ltx-studio-r3-pause-resume-evidence.v1",
+            {
+                "cycles": 20,
+                "boundary_positions": ["early", "middle", "late"],
+                "equivalence_failures": 0,
+                "orphaned_jobs": 0,
+            },
+        ),
+        "r3-soak": (
+            r3_soak,
+            "ltx-studio-r3-soak-evidence.v1",
+            {
+                "jobs": 50,
+                "lost_jobs": 0,
+                "orphaned_jobs": 0,
+                "duplicate_jobs": 0,
+                "unbound_outputs": 0,
+                "foreign_service_actions": 0,
+                "recovery_slo_breaches": 0,
+            },
+        ),
+    }
+    for report_id, (report, schema, required) in technical_reports.items():
+        if not isinstance(report, dict) or report.get("schema_version") != schema or report.get("verdict") != "pass":
+            raise FreezePreflightError(f"{report_id} detailed evidence is not a pass")
+        if report.get("release_digest") != candidate["release_digest"]:
+            raise FreezePreflightError(f"{report_id} detailed evidence release mismatch")
+        for field, expected in required.items():
+            if report.get(field) != expected:
+                raise FreezePreflightError(f"{report_id} detailed evidence fails {field}")
+    canary_ids = r3_canaries.get("candidate_entry_ids") if isinstance(r3_canaries, dict) else None
+    if canary_ids != sorted(candidate_entries):
+        raise FreezePreflightError("R3 canaries do not exactly cover the candidate surface")
+    mode_families = r3_pause_resume.get("mode_families") if isinstance(r3_pause_resume, dict) else None
+    if mode_families != sorted(cooperative_modes):
+        raise FreezePreflightError("R3 pause/resume does not exactly cover cooperative candidate modes")
     for report_id, report in (("D1", d1), ("Q0", q0), ("Q1", q1)):
         if report.get("release_digest") != candidate["release_digest"]:
             raise FreezePreflightError(f"{report_id} release digest mismatch")
@@ -427,6 +505,10 @@ def _validate_detailed_reports(  # noqa: PLR0912
         "d1-calibration": expected_digests["d1-calibration"],
         "q0-cross-shot": expected_digests["q0-cross-shot"],
         "q1-comparators": expected_digests["q1-comparators"],
+        "r0-control-plane": expected_digests["r0-control-plane"],
+        "r3-canaries": expected_digests["r3-canaries"],
+        "r3-pause-resume": expected_digests["r3-pause-resume"],
+        "r3-soak": expected_digests["r3-soak"],
     }
 
 
@@ -719,12 +801,14 @@ def build_f0_preflight_report(  # noqa: PLR0913
         now=now,
         required_until=complete_by,
     )
-    candidate_entries = _validate_surface(candidate, surface, rights_attestation)
+    candidate_entries, cooperative_modes = _validate_surface(candidate, surface, rights_attestation)
     detailed_producers = _validate_detailed_reports(
         candidate,
         detailed_digests,
         detailed_reports,
         prereg,
+        candidate_entries,
+        cooperative_modes,
     )
     _validate_qualification_reports(
         candidate,

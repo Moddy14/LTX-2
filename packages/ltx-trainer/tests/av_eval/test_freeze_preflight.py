@@ -73,6 +73,8 @@ def _fixture(
     holdout_signing_key: tuple[Ed25519PrivateKey, str] | None = None,
     include_holdout_scorer: bool = True,
     include_audio_candidate: bool = False,
+    soak_jobs: int = 50,
+    pause_mode_families: list[str] | None = None,
 ) -> dict[str, Any]:
     release_digest = "1" * 64
     holdout_digest = "3" * 64
@@ -106,6 +108,8 @@ def _fixture(
                 "id": f"surface-{index:02d}",
                 "claimId": claim_id,
                 "targetStatus": "candidate",
+                "request": {"mode": "lipdub"},
+                "cooperativeCheckpoint": True,
                 "applicableGates": [
                     "runtime-import",
                     "cold-canary",
@@ -132,6 +136,8 @@ def _fixture(
                 "id": "surface-audio",
                 "claimId": "native-generation.text-to-audio",
                 "targetStatus": "candidate",
+                "request": {"mode": "text-to-audio"},
+                "cooperativeCheckpoint": False,
                 "applicableGates": [
                     "runtime-import",
                     "cold-canary",
@@ -190,6 +196,51 @@ def _fixture(
             "calibration_dataset_digest": calibration_digest,
             "target_sota_claim_ids": TARGETS,
             "comparator_matrix_digest": commitments["baseline_matrix_sha256"],
+        },
+        "r0-control-plane": {
+            "schema_version": "ltx-studio-r0-control-plane-evidence.v1",
+            "verdict": "pass",
+            "release_digest": release_digest,
+            "scheduler_actions": [
+                "continue_current",
+                "resume_current",
+                "wait_for_successor",
+                "yield_to_waiting_job",
+            ],
+            "running_transport_failure": "checkpoint-and-exit-75",
+            "paused_transport_failure": "remain-paused-and-retry",
+            "api_restart_reconciled": True,
+            "studio_restart_reconciled": True,
+        },
+        "r3-canaries": {
+            "schema_version": "ltx-studio-r3-canary-evidence.v1",
+            "verdict": "pass",
+            "release_digest": release_digest,
+            "candidate_entry_count": len(surface["entries"]),
+            "candidate_entry_ids": sorted(entry["id"] for entry in surface["entries"]),
+            "failures": 0,
+        },
+        "r3-pause-resume": {
+            "schema_version": "ltx-studio-r3-pause-resume-evidence.v1",
+            "verdict": "pass",
+            "release_digest": release_digest,
+            "cycles": 20,
+            "mode_families": ["lipdub"] if pause_mode_families is None else pause_mode_families,
+            "boundary_positions": ["early", "middle", "late"],
+            "equivalence_failures": 0,
+            "orphaned_jobs": 0,
+        },
+        "r3-soak": {
+            "schema_version": "ltx-studio-r3-soak-evidence.v1",
+            "verdict": "pass",
+            "release_digest": release_digest,
+            "jobs": soak_jobs,
+            "lost_jobs": 0,
+            "orphaned_jobs": 0,
+            "duplicate_jobs": 0,
+            "unbound_outputs": 0,
+            "foreign_service_actions": 0,
+            "recovery_slo_breaches": 0,
         },
     }
     detailed_digests = {name: document_sha256(report) for name, report in detailed_reports.items()}
@@ -480,6 +531,20 @@ def test_complete_f0_preflight_binds_the_single_q2_authorization() -> None:
     assert first["q2_authorized"] is True
     assert first["production_authorized"] is False
     assert first["target_sota_claim_ids"] == TARGETS
+
+
+def test_f0_rejects_a_signed_technical_pass_without_the_full_soak() -> None:
+    fixture = _fixture(soak_jobs=49)
+
+    with pytest.raises(FreezePreflightError, match="r3-soak detailed evidence fails jobs"):
+        build_f0_preflight_report(**fixture)
+
+
+def test_f0_rejects_pause_resume_evidence_for_the_wrong_mode_family() -> None:
+    fixture = _fixture(pause_mode_families=["distilled"])
+
+    with pytest.raises(FreezePreflightError, match="exactly cover cooperative candidate modes"):
+        build_f0_preflight_report(**fixture)
 
 
 def test_f0_rejects_rights_that_expire_during_q2() -> None:

@@ -385,6 +385,17 @@ resource fit or the preregistered technical minimum. The protocol requires
 opponent. A matrix with only `local-only` claims may be production-useful, but
 its `sota_status` remains `hold`.
 
+F0 also binds every pre-Q2 technical attestation to a detailed producer
+report. A bare signed `pass` is insufficient: R0 must prove all four scheduler
+actions plus distinct running/paused transport-failure behavior and restart
+reconciliation; R3 canaries must exactly cover the candidate surface; the
+pause/resume report must contain exactly 20 cycles across early, middle, and
+late boundaries with no equivalence failure or orphan; and the soak report
+must contain exactly 50 jobs with zero loss, orphan, duplication, unbound
+output, foreign-service action, or recovery-SLO breach. The report digests are
+part of the signed F0 candidate and must equal each Studio qualification
+report's `producerDigest`.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory
 inspector, signed hash-chained access ledger, and machine-validated
