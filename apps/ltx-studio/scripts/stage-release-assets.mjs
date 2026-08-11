@@ -19,7 +19,12 @@ const dirty = execFileSync("git", ["status", "--porcelain=v1", "--untracked-file
 });
 if (dirty.trim()) throw new Error("A sealed release stage requires a clean tracked worktree");
 
-const allowedFiles = new Set(["LICENSE", "apps/ltx-studio/package-lock.json", "apps/ltx-studio/package.json"]);
+const allowedFiles = new Set([
+  "LICENSE",
+  "pyproject.toml",
+  "apps/ltx-studio/package-lock.json",
+  "apps/ltx-studio/package.json",
+]);
 const allowedPrefixes = [
   "apps/ltx-studio/deploy/",
   "apps/ltx-studio/evaluators/",
