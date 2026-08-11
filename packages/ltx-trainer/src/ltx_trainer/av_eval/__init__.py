@@ -12,6 +12,7 @@ from .authorization import (
 from .bundle import D1BundleError, build_fixed_d1_report
 from .calibration import CalibrationError, build_calibration_gate_report
 from .comparator import ComparatorMatrixError, build_comparator_matrix_report
+from .comparator_result import ComparatorResultError, build_comparator_decision
 from .complete import CompleteD1Error, build_complete_d1_report
 from .content import ContentMeasurementError, build_content_measurements
 from .cross_shot import CrossShotProtocolError, build_cross_shot_protocol_report
@@ -45,6 +46,7 @@ __all__ = [
     "AuthorizationError",
     "CalibrationError",
     "ComparatorMatrixError",
+    "ComparatorResultError",
     "CompleteD1Error",
     "ContentMeasurementError",
     "CrossShotProtocolError",
@@ -63,6 +65,7 @@ __all__ = [
     "build_artifact_measurements",
     "build_asr_measurements",
     "build_calibration_gate_report",
+    "build_comparator_decision",
     "build_comparator_matrix_report",
     "build_complete_d1_report",
     "build_content_measurements",

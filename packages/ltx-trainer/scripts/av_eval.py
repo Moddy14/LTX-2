@@ -15,6 +15,7 @@ from ltx_trainer.av_eval import (
     AsrMeasurementError,
     CalibrationError,
     ComparatorMatrixError,
+    ComparatorResultError,
     CompleteD1Error,
     ContentMeasurementError,
     CrossShotProtocolError,
@@ -30,6 +31,7 @@ from ltx_trainer.av_eval import (
     build_artifact_measurements,
     build_asr_measurements,
     build_calibration_gate_report,
+    build_comparator_decision,
     build_comparator_matrix_report,
     build_complete_d1_report,
     build_content_measurements,
@@ -214,6 +216,26 @@ def _run_comparator_check(matrix_path: Path, landscape_path: Path) -> int:
     return 0 if report["status"] == "ready-to-freeze" else 2
 
 
+def _run_comparator_score(results_path: Path, gates_path: Path, matrix_path: Path, landscape_path: Path) -> int:
+    try:
+        results = json.loads(results_path.read_text(encoding="utf-8"))
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+        landscape = json.loads(landscape_path.read_text(encoding="utf-8"))
+        report = build_comparator_decision(
+            results,
+            gates=gates,
+            matrix=matrix,
+            landscape=landscape,
+            as_of=datetime.now(UTC).date(),
+        )
+    except (OSError, json.JSONDecodeError, ComparatorResultError) as error:
+        logger.error("Q1 comparator results rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "ready-to-freeze" else 2
+
+
 def _run_freeze(args: argparse.Namespace) -> int:
     try:
         root = freeze_dataset(
@@ -230,6 +252,17 @@ def _run_freeze(args: argparse.Namespace) -> int:
         return 2
     sys.stdout.write(json.dumps({"status": "frozen", "path": str(root)}, sort_keys=True) + "\n")
     return 0
+
+
+def _add_comparator_commands(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
+    comparator.add_argument("--matrix", type=Path, required=True)
+    comparator.add_argument("--landscape", type=Path, required=True)
+    comparator_score = subcommands.add_parser("comparator-score", help="evaluate the frozen paired Q1 pilot")
+    comparator_score.add_argument("--results", type=Path, required=True)
+    comparator_score.add_argument("--gates", type=Path, required=True)
+    comparator_score.add_argument("--matrix", type=Path, required=True)
+    comparator_score.add_argument("--landscape", type=Path, required=True)
 
 
 def main() -> int:
@@ -276,9 +309,7 @@ def main() -> int:
     cross_shot_score.add_argument("--results", type=Path, required=True)
     cross_shot_score.add_argument("--protocol", type=Path, required=True)
     cross_shot_score.add_argument("--design", type=Path, required=True)
-    comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
-    comparator.add_argument("--matrix", type=Path, required=True)
-    comparator.add_argument("--landscape", type=Path, required=True)
+    _add_comparator_commands(subcommands)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
@@ -287,6 +318,7 @@ def main() -> int:
         "asr-score": lambda: _run_asr_score(args.observations),
         "calibration-check": lambda: _run_calibration_check(args.catalog),
         "comparator-check": lambda: _run_comparator_check(args.matrix, args.landscape),
+        "comparator-score": lambda: _run_comparator_score(args.results, args.gates, args.matrix, args.landscape),
         "content-score": lambda: _run_content_score(args.observations),
         "complete-d1": lambda: _run_complete_d1(args.bundle, args.catalog, args.design),
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
