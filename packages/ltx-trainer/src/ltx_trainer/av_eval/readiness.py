@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import copy
+import stat
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+from .authorization import AuthorizationError, validate_trust_policy_bindings
 from .design import document_sha256
+from .product import ProductGovernanceError, validate_sealed_directory, verify_access_log
 
 READINESS_SCHEMA = "ltx-av-eval-product-readiness.v1"
 READINESS_REPORT_SCHEMA = "ltx-av-eval-product-readiness-report.v1"
@@ -135,14 +140,16 @@ def _validate_principals(raw: dict[str, Any]) -> list[str]:
     scorer_gid = raw["blind_scorer_gid"]
     if scorer_uid is None:
         blockers.append("blind-scorer-uid-missing")
-    elif not isinstance(scorer_uid, int) or scorer_uid < 0:
+    elif isinstance(scorer_uid, bool) or not isinstance(scorer_uid, int) or scorer_uid < 0:
         raise ReadinessError("blind_scorer_uid must be a non-negative integer")
     if scorer_gid is None:
         blockers.append("blind-scorer-gid-missing")
-    elif not isinstance(scorer_gid, int) or scorer_gid < 0:
+    elif isinstance(scorer_gid, bool) or not isinstance(scorer_gid, int) or scorer_gid < 0:
         raise ReadinessError("blind_scorer_gid must be a non-negative integer")
     development_uids = raw["development_uids"]
-    if not isinstance(development_uids, list) or any(not isinstance(uid, int) or uid < 0 for uid in development_uids):
+    if not isinstance(development_uids, list) or any(
+        isinstance(uid, bool) or not isinstance(uid, int) or uid < 0 for uid in development_uids
+    ):
         raise ReadinessError("development_uids must be non-negative integers")
     if not development_uids:
         blockers.append("development-uids-missing")
@@ -221,6 +228,135 @@ def _validate_operational(raw: object, *, now: datetime) -> list[str]:
     blockers.extend(_validate_empty_access_log(raw))
     blockers.extend(_validate_rights_window(raw, now=now))
     return blockers
+
+
+def _utc_text(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_operational_readiness_evidence(
+    raw: object,
+    *,
+    holdout_root: Path,
+    access_log_root: Path,
+    access_log_path: Path,
+    trust_policy: object,
+    now: datetime,
+) -> dict[str, Any]:
+    """Inspect the live D0 boundary and emit hash-ready operational evidence."""
+
+    if now.tzinfo != UTC or now.microsecond:
+        raise ReadinessError("operational evidence time must use whole UTC seconds")
+    if not isinstance(raw, dict) or raw.get("schema_version") != READINESS_SCHEMA:
+        raise ReadinessError("operational evidence requires a product-readiness package")
+    operational = raw.get("operational")
+    role_bindings = raw.get("role_bindings")
+    if not isinstance(operational, dict):
+        raise ReadinessError("operational evidence must be an object")
+    _exact_keys(
+        operational,
+        {
+            "blind_scorer_uid",
+            "blind_scorer_gid",
+            "development_uids",
+            "acl_status",
+            "access_log_status",
+            "access_log_events",
+            "access_log_head_sha256",
+            "rights_valid_at",
+            "rights_expires_at",
+            "rights_revocation_state",
+            "tune_report_verdict",
+        },
+        "operational evidence",
+    )
+    principal_blockers = _validate_principals(operational)
+    role_blockers = _validate_roles(role_bindings)
+    if principal_blockers or role_blockers:
+        raise ReadinessError(
+            f"operational identity is incomplete: {sorted([*principal_blockers, *role_blockers])}"
+        )
+    scorer_uid = operational["blind_scorer_uid"]
+    scorer_gid = operational["blind_scorer_gid"]
+    development_uids = set(operational["development_uids"])
+    assert isinstance(scorer_uid, int)
+    assert isinstance(scorer_gid, int)
+    assert isinstance(role_bindings, list)
+    bindings = {binding["role"]: binding["key_id"] for binding in role_bindings}
+    try:
+        holdout_acl = validate_sealed_directory(
+            holdout_root,
+            owner_uid=scorer_uid,
+            owner_gid=scorer_gid,
+            development_uids=development_uids,
+        )
+        log_acl = validate_sealed_directory(
+            access_log_root,
+            owner_uid=scorer_uid,
+            owner_gid=scorer_gid,
+            development_uids=development_uids,
+        )
+        resolved_holdout = Path(holdout_acl["root"])
+        resolved_log_root = Path(log_acl["root"])
+        resolved_log = access_log_path.resolve(strict=True)
+        if (
+            resolved_holdout == resolved_log_root
+            or resolved_holdout.is_relative_to(resolved_log_root)
+            or resolved_log_root.is_relative_to(resolved_holdout)
+        ):
+            raise ReadinessError("holdout and access-log roots must be separate directories")
+        if resolved_log.parent != resolved_log_root:
+            raise ReadinessError("access log must be a direct child of its sealed log root")
+        log_metadata = resolved_log.lstat()
+        if (
+            stat.S_ISLNK(log_metadata.st_mode)
+            or not stat.S_ISREG(log_metadata.st_mode)
+            or log_metadata.st_uid != scorer_uid
+            or log_metadata.st_gid != scorer_gid
+        ):
+            raise ReadinessError("access log owner must match the independent scorer")
+        access_log = verify_access_log(resolved_log, trust_policy)
+        policy_digest = validate_trust_policy_bindings(trust_policy, bindings, now=now)
+    except (AuthorizationError, OSError, ProductGovernanceError) as error:
+        raise ReadinessError(f"live operational evidence rejected: {error}") from error
+    if access_log != {"status": "verified", "events": 0, "head_sha256": GENESIS_DIGEST}:
+        raise ReadinessError("D0 operational evidence requires an untouched access log")
+    checked_at = _utc_text(now)
+    policy_document = copy.deepcopy(trust_policy)
+    documents = {
+        "empty-access-log-report": {
+            "schema_version": "ltx-av-eval-empty-access-log-report.v1",
+            "checked_at": checked_at,
+            "log_path": str(resolved_log),
+            **access_log,
+        },
+        "sealed-acl-report": {
+            "schema_version": "ltx-av-eval-sealed-acl-report.v1",
+            "checked_at": checked_at,
+            "holdout_root": holdout_acl,
+            "access_log_root": log_acl,
+        },
+        "trusted-key-policy": policy_document,
+    }
+    return {
+        "schema_version": "ltx-av-eval-operational-readiness-evidence.v1",
+        "checked_at": checked_at,
+        "evidence": [
+            {"artifact_id": artifact_id, "sha256": document_sha256(document)}
+            for artifact_id, document in sorted(documents.items())
+        ],
+        "documents": documents,
+        "operational_updates": {
+            "blind_scorer_uid": scorer_uid,
+            "blind_scorer_gid": scorer_gid,
+            "development_uids": sorted(development_uids),
+            "acl_status": "sealed",
+            "access_log_status": "verified",
+            "access_log_events": 0,
+            "access_log_head_sha256": GENESIS_DIGEST,
+        },
+        "trusted_key_policy_digest": policy_digest,
+    }
 
 
 def build_product_readiness_report(raw: object, *, now: datetime) -> dict[str, Any]:

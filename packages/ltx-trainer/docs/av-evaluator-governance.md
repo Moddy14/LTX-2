@@ -441,6 +441,24 @@ runner using these interfaces. A development UID may never own the sealed
 root. The former numeric holdout checks remain defense in depth, not an active
 certification path.
 
+The operational part is executable and read-only once those resources exist:
+
+```bash
+uv run python scripts/av_eval.py operational-readiness-check \
+  --package configs/av_eval/product-readiness.v1.json \
+  --holdout-root /secure/holdout \
+  --access-log-root /secure/holdout-audit \
+  --access-log /secure/holdout-audit/access.jsonl \
+  --trust-policy /secure/policies/product-trusted-keys.v1.json
+```
+
+It re-inspects both roots, their independent UID/GID and `0700` modes, rejects
+extended ACLs and symlinks, verifies the owner-only audit file and its full
+signature chain, requires the log to remain at genesis, and validates current,
+distinct, single-role Ed25519 keys. The output contains the canonical documents
+and hashes for `sealed-acl-report`, `empty-access-log-report`, and
+`trusted-key-policy`; it does not fabricate the other six D0 evidence items.
+
 ## Command
 
 Run from `packages/ltx-trainer` in its managed environment:

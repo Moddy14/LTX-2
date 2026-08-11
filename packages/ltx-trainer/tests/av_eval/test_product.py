@@ -151,7 +151,9 @@ def _validate_report(
     )
 
 
-def test_sealed_directory_requires_an_independent_owner_only_acl(tmp_path: Path) -> None:
+def test_sealed_directory_requires_an_independent_owner_only_acl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path / "sealed"
     root.mkdir(mode=0o700)
     report = validate_sealed_directory(
@@ -171,6 +173,15 @@ def test_sealed_directory_requires_an_independent_owner_only_acl(tmp_path: Path)
         )
     root.chmod(0o750)
     with pytest.raises(ProductGovernanceError, match="0700"):
+        validate_sealed_directory(
+            root,
+            owner_uid=os.geteuid(),
+            owner_gid=os.getegid(),
+            development_uids=set(),
+        )
+    root.chmod(0o700)
+    monkeypatch.setattr(os, "listxattr", lambda *_args, **_kwargs: ["system.posix_acl_default"])
+    with pytest.raises(ProductGovernanceError, match="extended POSIX ACL"):
         validate_sealed_directory(
             root,
             owner_uid=os.geteuid(),
@@ -218,6 +229,32 @@ def test_access_log_rejects_skipped_states_and_transaction_changes(tmp_path: Pat
     changed["transaction_id"] = "q2-transaction-002"
     with pytest.raises(ProductGovernanceError, match="changes the transaction"):
         append_signed_access_event(log_path, changed, _signature(private_key, changed), policy, now=NOW)
+
+
+def test_access_log_rejects_extended_acl_and_boolean_actor_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "audit"
+    root.mkdir(mode=0o700)
+    log_path = root / "access.jsonl"
+    log_path.write_bytes(b"")
+    log_path.chmod(0o600)
+    _private_key, policy = _signing_material()
+    original_listxattr = os.listxattr
+
+    def fake_listxattr(path: object, *args: object, **kwargs: object) -> list[str]:
+        if isinstance(path, int):
+            return ["system.posix_acl_access"]
+        return original_listxattr(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "listxattr", fake_listxattr)
+    with pytest.raises(ProductGovernanceError, match="extended POSIX ACL"):
+        verify_access_log(log_path, policy)
+
+    event = _event("event-001", "authorization-verified")
+    event["actor_uid"] = True
+    with pytest.raises(ProductGovernanceError, match="non-negative integer"):
+        append_signed_access_event(log_path, event, {}, policy, now=NOW)
 
 
 def test_measurement_report_recomputes_confidence_bound_decisions() -> None:

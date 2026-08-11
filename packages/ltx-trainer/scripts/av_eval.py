@@ -44,6 +44,7 @@ from ltx_trainer.av_eval import (
     build_fixed_d1_report,
     build_identity_measurements,
     build_offset_measurements,
+    build_operational_readiness_evidence,
     build_power_report,
     build_product_readiness_report,
     build_q2_qualification_report,
@@ -74,6 +75,23 @@ def _run_readiness_check(path: Path) -> int:
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0 if report["status"] == "ready-to-freeze" else 2
+
+
+def _run_operational_readiness_check(args: argparse.Namespace) -> int:
+    try:
+        report = build_operational_readiness_evidence(
+            json.loads(args.package.read_text(encoding="utf-8")),
+            holdout_root=args.holdout_root,
+            access_log_root=args.access_log_root,
+            access_log_path=args.access_log,
+            trust_policy=json.loads(args.trust_policy.read_text(encoding="utf-8")),
+            now=datetime.now(UTC).replace(microsecond=0),
+        )
+    except (OSError, json.JSONDecodeError, ReadinessError) as error:
+        logger.error("D0 live operational boundary rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
 
 
 def _run_calibration_check(path: Path) -> int:
@@ -421,6 +439,15 @@ def main() -> int:  # noqa: PLR0915
     _add_q2_command(subcommands)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
+    operational_check = subcommands.add_parser(
+        "operational-readiness-check",
+        help="inspect sealed D0 roots, the untouched audit log and independent keys",
+    )
+    operational_check.add_argument("--package", type=Path, required=True)
+    operational_check.add_argument("--holdout-root", type=Path, required=True)
+    operational_check.add_argument("--access-log-root", type=Path, required=True)
+    operational_check.add_argument("--access-log", type=Path, required=True)
+    operational_check.add_argument("--trust-policy", type=Path, required=True)
     technical_score = subcommands.add_parser("technical-score", help="assemble fail-closed R0/R3 live evidence")
     technical_score.add_argument("--observations", type=Path, required=True)
     technical_score.add_argument("--surface", type=Path, required=True)
@@ -441,6 +468,7 @@ def main() -> int:  # noqa: PLR0915
         "f0-check": lambda: _run_f0_check(args),
         "identity-score": lambda: _run_identity_score(args.pairs),
         "offset-score": lambda: _run_offset_score(args.observations),
+        "operational-readiness-check": lambda: _run_operational_readiness_check(args),
         "q2-score": lambda: _run_q2_score(args),
         "readiness-check": lambda: _run_readiness_check(args.package),
         "sharpness-score": lambda: _run_sharpness_score(args.observations),

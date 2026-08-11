@@ -36,6 +36,15 @@ TrustRole = Literal[
     "release-authorizer",
     "rights-attestor",
 ]
+TRUST_ROLES = {
+    "audit-finalizer",
+    "evaluation-authorizer",
+    "holdout-scorer",
+    "preregistration-freezer",
+    "qualification-attestor",
+    "release-authorizer",
+    "rights-attestor",
+}
 
 
 class AuthorizationError(ValueError):
@@ -232,6 +241,32 @@ def _validate_trust_policy(policy: object, *, now: datetime, role: str, key_id: 
     if revoked_at is not None and _parse_time(revoked_at, "trusted key revoked_at") <= now:
         raise AuthorizationError("trusted key is revoked")
     return _decode_base64(key[fields["public_key"]], expected_bytes=32, context="trusted public key")
+
+
+def validate_trust_policy_bindings(
+    policy: object,
+    bindings: dict[str, str],
+    *,
+    now: datetime,
+) -> str:
+    """Validate current, distinct and least-privilege role-to-key bindings."""
+
+    if now.tzinfo != UTC or now.microsecond:
+        raise AuthorizationError("trusted-key policy validation time must use whole UTC seconds")
+    if not bindings:
+        raise AuthorizationError("trusted-key role bindings must not be empty")
+    if len(set(bindings.values())) != len(bindings):
+        raise AuthorizationError("trusted-key roles must use distinct key IDs")
+    _policy_id, keys, fields = _normalize_trust_policy(policy)
+    for role, key_id in sorted(bindings.items()):
+        if role not in TRUST_ROLES:
+            raise AuthorizationError(f"unsupported trusted-key role {role}")
+        _expect_identifier(key_id, f"trusted-key binding {role}")
+        _validate_trust_policy(policy, now=now, role=role, key_id=key_id)
+        matching = [key for key in keys if key.get(fields["key_id"]) == key_id]
+        if len(matching) != 1 or matching[0].get("roles") != [role]:
+            raise AuthorizationError(f"trusted key {key_id} must be exclusive to role {role}")
+    return sha256_document(policy)
 
 
 def _normalize_signature(signature: object) -> tuple[dict[str, Any], dict[str, str], bool]:

@@ -26,6 +26,7 @@ ACCESS_ACTIONS = {
     "scoring-completed",
     "scoring-failed",
 }
+POSIX_ACL_XATTRS = {"system.posix_acl_access", "system.posix_acl_default"}
 
 
 class ProductGovernanceError(ValueError):
@@ -84,7 +85,13 @@ def validate_sealed_directory(
 ) -> dict[str, Any]:
     """Prove the base POSIX ACL grants access only to the independent owner."""
 
-    if owner_uid < 0 or owner_gid < 0 or any(uid < 0 for uid in development_uids):
+    if (
+        isinstance(owner_uid, bool)
+        or isinstance(owner_gid, bool)
+        or owner_uid < 0
+        or owner_gid < 0
+        or any(isinstance(uid, bool) or uid < 0 for uid in development_uids)
+    ):
         raise ProductGovernanceError("UID and GID values must be non-negative")
     if owner_uid in development_uids:
         raise ProductGovernanceError("sealed owner must not be a development UID")
@@ -95,7 +102,7 @@ def validate_sealed_directory(
         raise ProductGovernanceError("sealed root owner does not match the independent scorer")
     if stat.S_IMODE(metadata.st_mode) != 0o700:
         raise ProductGovernanceError("sealed root must use mode 0700")
-    if "system.posix_acl_access" in os.listxattr(root, follow_symlinks=False):
+    if POSIX_ACL_XATTRS.intersection(os.listxattr(root, follow_symlinks=False)):
         raise ProductGovernanceError("sealed root must not contain an extended POSIX ACL")
     return {
         "status": "sealed",
@@ -130,7 +137,7 @@ def _validate_access_event(raw: object, *, now: datetime | None = None) -> dict[
     _identifier(raw["event_id"], "event_id")
     _identifier(raw["actor_id"], "actor_id")
     _identifier(raw["transaction_id"], "transaction_id")
-    if not isinstance(raw["actor_uid"], int) or raw["actor_uid"] < 0:
+    if isinstance(raw["actor_uid"], bool) or not isinstance(raw["actor_uid"], int) or raw["actor_uid"] < 0:
         raise ProductGovernanceError("actor_uid must be a non-negative integer")
     if raw["action"] not in ACCESS_ACTIONS:
         raise ProductGovernanceError("access action is unsupported")
@@ -261,6 +268,8 @@ def append_signed_access_event(
             or stat.S_IMODE(metadata.st_mode) != 0o600
         ):
             raise ProductGovernanceError("access log must be an owner-only, single-link regular file")
+        if POSIX_ACL_XATTRS.intersection(os.listxattr(descriptor)):
+            raise ProductGovernanceError("access log must not contain an extended POSIX ACL")
         envelopes = _parse_access_log(_read_locked_log(descriptor), trust_policy)
         if any(item["event"]["event_id"] == validated_event["event_id"] for item in envelopes):
             raise ProductGovernanceError("access event_id already exists")
@@ -308,6 +317,8 @@ def verify_access_log(log_path: Path, trust_policy: object) -> dict[str, Any]:
     descriptor = os.open(log_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     try:
         fcntl.flock(descriptor, fcntl.LOCK_SH)
+        if POSIX_ACL_XATTRS.intersection(os.listxattr(descriptor)):
+            raise ProductGovernanceError("access log must not contain an extended POSIX ACL")
         envelopes = _parse_access_log(_read_locked_log(descriptor), trust_policy)
     finally:
         os.close(descriptor)

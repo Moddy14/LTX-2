@@ -10,6 +10,7 @@ from .authorization import (
     validate_consumption_events,
     validate_evaluation_authorization,
     validate_release_authorization,
+    validate_trust_policy_bindings,
     verify_detached_signature,
 )
 from .bundle import D1BundleError, build_fixed_d1_report
@@ -42,7 +43,7 @@ from .product import (
     validate_sealed_directory,
     verify_access_log,
 )
-from .readiness import ReadinessError, build_product_readiness_report
+from .readiness import ReadinessError, build_operational_readiness_evidence, build_product_readiness_report
 from .sharpness import SharpnessMeasurementError, build_sharpness_measurements
 from .technical import TechnicalEvidenceError, build_technical_evidence_bundle
 from .vbench import VBenchMeasurementError, build_vbench_measurements
@@ -87,6 +88,7 @@ __all__ = [
     "build_holdout_comparator_decision",
     "build_identity_measurements",
     "build_offset_measurements",
+    "build_operational_readiness_evidence",
     "build_power_report",
     "build_product_readiness_report",
     "build_q2_qualification_report",
@@ -108,6 +110,7 @@ __all__ = [
     "validate_preregistration",
     "validate_release_authorization",
     "validate_sealed_directory",
+    "validate_trust_policy_bindings",
     "verify_access_log",
     "verify_detached_signature",
 ]
