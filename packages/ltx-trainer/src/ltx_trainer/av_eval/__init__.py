@@ -7,6 +7,7 @@ from .authorization import (
     validate_release_authorization,
     verify_detached_signature,
 )
+from .design import DesignError, build_power_report, document_sha256
 from .governance import (
     FrozenDatasetSession,
     GovernanceError,
@@ -19,8 +20,11 @@ from .governance import (
 
 __all__ = [
     "AuthorizationError",
+    "DesignError",
     "FrozenDatasetSession",
     "GovernanceError",
+    "build_power_report",
+    "document_sha256",
     "freeze_dataset",
     "load_frozen_split",
     "load_split_seed",

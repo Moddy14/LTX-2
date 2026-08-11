@@ -93,6 +93,31 @@ sorted, non-empty set before `status=frozen`; removing a target after that
 requires a new preregistration and a disjoint holdout. This prevents an empty
 claim set from satisfying the SOTA gate vacuously.
 
+## D0a design pilot
+
+`configs/av_eval/design-pilot.v1.json` is the machine-readable pre-acquisition
+contract for effect sizes, VBench gates, precision targets, power, and quoted
+strata. It intentionally remains `draft`: empirical design-effect,
+repeatability, clinically/perceptually meaningful deltas, VBench commit and
+configuration, per-endpoint alternatives/CI widths, and quota counts are
+`null`. They must come from the leakage-disjoint design pilot; filling them
+from calibration or holdout results is forbidden.
+
+```bash
+uv run python scripts/av_eval.py design-check \
+  --design configs/av_eval/design-pilot.v1.json
+```
+
+The checked-in draft exits with code 2 and a deterministic `hold` report that
+lists every missing input. A `frozen` document rejects any missing delta,
+basis-evidence digest, VBench gate, power input, or stratum quota. A complete
+document computes independent-unit and clip requirements with family-wise
+alpha 0.05, conservative per-endpoint planning alpha, at least 90% power, the
+pilot design effect, and the larger of the calculated requirement or 30 adult
+identities. Delta-, VBench-, quota-, and complete-design hashes are emitted
+separately so downstream D1/Q0/Q1/F0/Q2 evidence can bind them without changing
+the gates after results are visible.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier and monotonic consumption records now exist, but
 enabling the profile still requires an operator-owned trusted-key policy,
