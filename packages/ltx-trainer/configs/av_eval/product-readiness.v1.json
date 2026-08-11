@@ -6,6 +6,7 @@
     {"artifact_id": "blind-scorer-runner", "sha256": null},
     {"artifact_id": "dataset-freeze", "sha256": null},
     {"artifact_id": "dataset-rights-attestation", "sha256": null},
+    {"artifact_id": "design-pilot-binding", "sha256": null},
     {"artifact_id": "design-power-report", "sha256": null},
     {"artifact_id": "empty-access-log-report", "sha256": null},
     {"artifact_id": "sealed-acl-report", "sha256": null},

@@ -17,16 +17,16 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 152/152, Studio 612/612 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 159/159, Studio 612/612 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
 | Python HTTP-Stack | Die isolierte R1-Runtime besteht `uv lock --check`, `uv pip check`, `requests` unter `-W error` und den Runtime-Verifier; `chardet` ist dort verboten. Nur das nicht als Releasequelle zulässige Shared-ComfyUI-Environment enthält weiter `chardet 7.4.3` | Releasepfad gut; Shared-Env-Abweichung bleibt bewusst isoliert | abgeschlossen |
-| Frontend-Bundle | Der frühere R2-Digest bestand mit 388.269/115.561 Bytes raw/gzip und 40+40 kalten Chromium-Kontexten. Projektzustand, Polling und API liegen nun vollständig im Lazy-Chunk; der aktuelle Engineering-Build bleibt mit 391.361/116.122 Bytes unter 450/140 kB und ohne Vite-Warnung. Messung und Vergleich besitzen jetzt write-once CLIs; gemäß Invalidierungsmatrix muss der neue Finaldigest noch gebunden werden | statisches Gate grün; digestgebundene R2-Erneuerung offen | P1 |
+| Frontend-Bundle | Release-Digest `223ee31e…` bestand mit 391.361/116.122 Bytes raw/gzip und 40+40 paarigen kalten Chromium-Kontexten; Median/p95 wurden um 25,07/28,16 % besser. Projektzustand, Polling und API liegen vollständig im Lazy-Chunk. Die anschließende D0a-Implementierung erzeugt wieder einen neuen Inhaltsdigest und verlangt vor F0 die erneute Bindung | letztes R2 grün; Finaldigest nach Stabilisierung erneut binden | P1 |
 | Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 123 Einträge, davon 17 konditionale Kandidaten und 106 rechtlich/technisch gesperrt | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
 | Produktionsworkflow | Der persistente Projektkern speichert Shots, Request-Revisionen, konkrete Continuity-/Retake-Quellen sowie Output-, Sidecar- und Export-Digests in einer owner-only, monotonen Hashkette. API, Jobstart und v7-Sidecar binden den exakten Projekt-/Request-Stand; Restarts, Stale Writes, Kettenlücken, Legacy-Provenienz und verdeckte Mutationen bleiben fail-closed. Der lazy Desktop-/Mobile-Workspace bedient Anlage, Shot-/Continuity-Bindung, Start, Output-Erfassung/Freigabe, Edit/Retake, Kettenprüfung und Archivierung; Integritätswarnungen bleiben sichtbar | Engineering-Workflow gut; reale Cross-Shot-/P4-Evidenz offen | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten, Signatur-/Audit-/ACL-Prüfer, Blind-Scorer-Verträge und eine Draft-Preregistrierung existieren. `profile=product` bleibt absichtlich hart blockiert, bis getrennte UID/GID, versiegelte Roots, externe Schlüssel, aktuelle Rechte und reale disjunkte Daten provisioniert und belegt sind | technische Grundlage gut; unabhängige Provisionierung und Product-GO offen | P2 |
-| Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. Der D1-Katalog umfasst jetzt alle 37 festen und 72 claim-spezifischen VBench-Gates der zwölf visuellen Candidate-Claims; 144 Holm-Ränge werden dynamisch revalidiert. Es gibt weiterhin keinen rechtsgeprüften Kalibriersatz, keinen versiegelten Holdout und keine unabhängigen Signaturen; fünf Tune-Clips reichen nicht zur biometrischen Schwellenkalibrierung | Vertrag gut; reale Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
+| Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. D0a wertet jetzt gepaarte Rohpilotmessungen, Wiederholbarkeit, Clustereffekt und Binomialraten deterministisch aus und bindet sie fail-closed an Powerdesign, D0 und F0. Der D1-Katalog umfasst alle 37 festen und 72 claim-spezifischen VBench-Gates. Es gibt weiterhin keine reale rechtsgeprüfte Pilot-/Kalibrierstichprobe, keinen versiegelten Holdout und keine unabhängigen Signaturen | Auswertungsvertrag gut; reale Pilot-, Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
 | Video-Benchmark | VBench ist lokal nicht installiert. Für eigene I2V-Videos ist VBench++/VBench-I2V einschlägig; VBench 2.0 misst primär intrinsische Faithfulness und ersetzt weder Lip-Sync- noch Identitätsgates | alter Werkzeugname war zu pauschal | P2 |
 | Komparatoren | LongCat ist lokal vorhanden. MOVA und Wan2.2-S2V fehlen lokal. MOVA und Wan haben unterschiedliche Eingabeverträge und dürfen nicht in einen gemeinsamen Score gezwungen werden | lokaler Bake-off offen | P3 |
@@ -225,15 +225,19 @@ beziehungsweise Freigabe.
 
 ### R2 — Bundle-Hinweis durch reale Startkosten schließen
 
-**Status: früherer Digest abgeschlossen, aktueller Engineering-Digest neu zu
-qualifizieren.** Der reproduzierbare Bericht
-`docs/evidence/bundle-r2-2026-08-11.json` bindet den damaligen Entry-Chunk an
-die 40+40 Cold-Context-Messung in
-`docs/evidence/startup-r2-2026-08-11.json`. Diese Evidenz belegt den damaligen
-Digest; spätere Projektworkflow-Änderungen invalidieren sie gemäß Matrix. Der
-aktuelle unversiegelte Build liegt bei 391,361/116,122 kB raw/gzip und bleibt
-statisch grün. Der Projektworkspace lädt auch seine Zustandsabfrage, Polling-
-und Mutations-API erst nach ausdrücklichem Öffnen. `startup:measure` und
+**Status: letzter unveränderlicher Digest abgeschlossen, aktuelle
+Engineering-Quelle nach D0a erneut zu qualifizieren.** Der reproduzierbare
+Bericht `docs/evidence/bundle-r2-011a758-2026-08-11.json` bindet den
+Entry-Chunk `index-BinePci0.js` an Release-Digest
+`223ee31eb6b84b8e2992c85e809820977e1363f1561ba279bae0b81b01b51276`
+und die 40+40 paarige Cold-Context-Messung in
+`docs/evidence/startup-r2-011a758-2026-08-11.json`. Der Kandidat lag bei
+391.361/116.122 Bytes raw/gzip; Median und p95 der ersten bedienbaren
+Moduswahl verbesserten sich gegenüber Commit `2f900522…` um 25,07 % und
+28,16 %. Diese Evidenz belegt exakt Commit `011a758`; die nachfolgende
+D0a-Implementierung invalidiert sie gemäß Matrix. Der Projektworkspace lädt
+auch seine Zustandsabfrage, Polling- und Mutations-API erst nach ausdrücklichem
+Öffnen. `startup:measure` und
 `startup:compare` schreiben ihre Rohmessung beziehungsweise den
 artefaktgebundenen Vergleich write-once. Der finale Bundlebericht übernimmt
 einen R1-Digest nur nach vollständiger Manifest-/Artefaktprüfung. Bei
@@ -259,7 +263,8 @@ gebunden. Die folgenden Punkte bleiben als Reproduktionsvorgabe bestehen.
    40 kalte, cachefreie Browserkontexte auf Loopback. Bericht: N, Median, p95
    und Streuung für erste bedienbare Moduswahl.
 
-**Exit R2 (für den früheren Digest bestanden; für den neuen Digest offen):** Initiales JS höchstens 450 kB raw und 140 kB gzip, keine
+**Exit R2 (für Digest `223ee31e…` bestanden; für den späteren Finaldigest erneut
+auszuführen):** Initiales JS höchstens 450 kB raw und 140 kB gzip, keine
 Vite-Chunkwarnung, alle E2E grün und kein schlechterer p95-Wert für erste
 bedienbare Moduswahl gegenüber dem vorab gespeicherten Basislauf.
 
@@ -323,6 +328,18 @@ Release-Digest und neue betroffene Canaries.
 
 ### D0a — Design-Pilot und feste statistische Vorgaben
 
+**Status: Rohdaten- und Freeze-Bindung implementiert; reale Pilotdaten offen.**
+`pilot-score` verlangt kanonisch sortierte, vollständig gepaarte Candidate-/
+Referenzmessungen aus dem registrierten `design-pilot`-Split. Es schätzt je
+Power-Endpunkt Wiederholungsstreuung, ICC, variablen Clustereffekt,
+unabhängige-Einheiten-Streuung und bei Binomialendpunkten Rate plus
+Wilson-95-%-Intervall. `pilot-freeze-check` rekonstruiert den Report aus den
+Rohdaten und blockiert Designwerte, die Clustereffekt, Streuung oder erwartete
+Rate günstiger ansetzen. Der resultierende 157-Hypothesen-Bindingreport ist
+Pflichtevidenz in D0 und ein eigenes detailliertes F0-Dokument. Noch fehlt der
+rechtsgeprüfte, leakage-disjunkte reale Design-Pilot; der Status bleibt daher
+`hold`.
+
 Dieser Pilot verwendet ausschließlich eigene beziehungsweise ausdrücklich für
 Entwicklung freigegebene Daten und öffnet weder Kalibriersatz noch Holdout. Er
 ist als eigenes Split-Rollenkürzel registriert und auf Identitäts-, Sprecher-,
@@ -357,9 +374,9 @@ Session-, Quell- und transitiver Leakage-Komponentenebene disjunkt zu beiden.
    damit 157 Hypothesen (`alpha = 0,05 / 157`); die sechs Dimensionsprofile
    müssen dafür jeweils die ungünstigste registrierte Claim-Annahme verwenden.
 
-**Exit D0a:** Delta- und VBench-Gate-Katalog, Powerreport, feste N und
-Quotierung sind gehasht; kein nachfolgender Pilot darf sie anhand günstiger
-Ergebnisse ändern.
+**Exit D0a:** `pilot-freeze-check` steht auf `ready-to-freeze`; Delta- und
+VBench-Gate-Katalog, Powerreport, feste N und Quotierung sind gehasht; kein
+nachfolgender Pilot darf sie anhand günstiger Ergebnisse ändern.
 
 ### D0 — Produkt-Governance und statistisch ausreichende Datengrundlage
 

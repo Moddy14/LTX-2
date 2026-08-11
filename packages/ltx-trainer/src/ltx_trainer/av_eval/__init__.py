@@ -36,6 +36,13 @@ from .governance import (
 from .holdout import HoldoutDecisionError, build_q2_qualification_report
 from .identity import IdentityMeasurementError, build_identity_measurements
 from .offset import OffsetMeasurementError, build_offset_measurements
+from .pilot import (
+    PilotError,
+    build_design_pilot_binding_report,
+    build_design_pilot_report,
+    validate_design_pilot_binding_report,
+    validate_design_pilot_report,
+)
 from .product import (
     ProductGovernanceError,
     append_signed_access_event,
@@ -67,6 +74,7 @@ __all__ = [
     "HoldoutDecisionError",
     "IdentityMeasurementError",
     "OffsetMeasurementError",
+    "PilotError",
     "ProductGovernanceError",
     "ReadinessError",
     "SharpnessMeasurementError",
@@ -83,6 +91,8 @@ __all__ = [
     "build_content_measurements",
     "build_cross_shot_decision",
     "build_cross_shot_protocol_report",
+    "build_design_pilot_binding_report",
+    "build_design_pilot_report",
     "build_f0_preflight_report",
     "build_fixed_d1_report",
     "build_holdout_comparator_decision",
@@ -104,6 +114,8 @@ __all__ = [
     "record_consumption_event",
     "record_signed_consumption_event",
     "validate_consumption_events",
+    "validate_design_pilot_binding_report",
+    "validate_design_pilot_report",
     "validate_evaluation_authorization",
     "validate_f0_candidate",
     "validate_measurement_report",

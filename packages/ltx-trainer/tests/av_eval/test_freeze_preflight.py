@@ -168,6 +168,21 @@ def _fixture(
             "design_digest": design_digest,
             "required_independent_units": 30,
         },
+        "d0a-pilot-binding": {
+            "schema_version": "ltx-sota-design-pilot-binding.v1",
+            "status": "ready-to-freeze",
+            "blockers": [],
+            "pilot_report_digest": "1" * 64,
+            "pilot_evidence_digest": "2" * 64,
+            "frozen_dataset_digest": "3" * 64,
+            "leakage_audit_digest": "4" * 64,
+            "evaluator_bundle_digest": "5" * 64,
+            "design_digest": design_digest,
+            "power_report_digest": "pending",
+            "required_independent_units": 30,
+            "required_clips": 90,
+            "planning_hypothesis_count": 157,
+        },
         "d1-calibration": {
             "schema_version": "ltx-av-eval-complete-d1-report.v1",
             "verdict": "pass",
@@ -243,6 +258,9 @@ def _fixture(
             "recovery_slo_breaches": 0,
         },
     }
+    detailed_reports["d0a-pilot-binding"]["power_report_digest"] = document_sha256(
+        detailed_reports["d0a-design"]
+    )
     detailed_digests = {name: document_sha256(report) for name, report in detailed_reports.items()}
 
     keys: dict[str, Ed25519PrivateKey] = {}

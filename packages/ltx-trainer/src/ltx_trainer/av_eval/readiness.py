@@ -19,6 +19,7 @@ EVIDENCE_IDS = {
     "blind-scorer-runner",
     "dataset-freeze",
     "dataset-rights-attestation",
+    "design-pilot-binding",
     "design-power-report",
     "empty-access-log-report",
     "sealed-acl-report",

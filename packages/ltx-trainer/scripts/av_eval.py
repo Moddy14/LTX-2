@@ -27,6 +27,7 @@ from ltx_trainer.av_eval import (
     HoldoutDecisionError,
     IdentityMeasurementError,
     OffsetMeasurementError,
+    PilotError,
     ReadinessError,
     SharpnessMeasurementError,
     TechnicalEvidenceError,
@@ -40,6 +41,8 @@ from ltx_trainer.av_eval import (
     build_content_measurements,
     build_cross_shot_decision,
     build_cross_shot_protocol_report,
+    build_design_pilot_binding_report,
+    build_design_pilot_report,
     build_f0_preflight_report,
     build_fixed_d1_report,
     build_identity_measurements,
@@ -61,6 +64,29 @@ def _run_design_check(path: Path) -> int:
         report = build_power_report(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, DesignError) as error:
         logger.error("D0a design rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "ready-to-freeze" else 2
+
+
+def _run_pilot_score(path: Path) -> int:
+    try:
+        report = build_design_pilot_report(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, PilotError) as error:
+        logger.error("D0a pilot observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "evidence-complete" else 2
+
+
+def _run_pilot_freeze_check(observations_path: Path, design_path: Path) -> int:
+    try:
+        report = build_design_pilot_binding_report(
+            json.loads(observations_path.read_text(encoding="utf-8")),
+            json.loads(design_path.read_text(encoding="utf-8")),
+        )
+    except (OSError, json.JSONDecodeError, PilotError) as error:
+        logger.error("D0a pilot freeze rejected: %s", error)
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0 if report["status"] == "ready-to-freeze" else 2
@@ -448,6 +474,17 @@ def main() -> int:  # noqa: PLR0915
     fixed_d1.add_argument("--catalog", type=Path, required=True)
     design_check = subcommands.add_parser("design-check", help="validate D0a gates and compute fixed sample sizes")
     design_check.add_argument("--design", type=Path, required=True)
+    pilot_score = subcommands.add_parser(
+        "pilot-score",
+        help="estimate repeatability and cluster effects from paired D0a observations",
+    )
+    pilot_score.add_argument("--observations", type=Path, required=True)
+    pilot_freeze = subcommands.add_parser(
+        "pilot-freeze-check",
+        help="bind raw D0a pilot evidence to the frozen power design",
+    )
+    pilot_freeze.add_argument("--observations", type=Path, required=True)
+    pilot_freeze.add_argument("--design", type=Path, required=True)
     calibration_check = subcommands.add_parser("calibration-check", help="validate the complete D1 gate catalog")
     calibration_check.add_argument("--catalog", type=Path, required=True)
     content_score = subcommands.add_parser("content-score", help="score mouth-content and transition observations")
@@ -515,6 +552,8 @@ def main() -> int:  # noqa: PLR0915
         "f0-check": lambda: _run_f0_check(args),
         "identity-score": lambda: _run_identity_score(args.pairs),
         "offset-score": lambda: _run_offset_score(args.observations),
+        "pilot-score": lambda: _run_pilot_score(args.observations),
+        "pilot-freeze-check": lambda: _run_pilot_freeze_check(args.observations, args.design),
         "operational-readiness-check": lambda: _run_operational_readiness_check(args),
         "q2-score": lambda: _run_q2_score(args),
         "readiness-check": lambda: _run_readiness_check(args),

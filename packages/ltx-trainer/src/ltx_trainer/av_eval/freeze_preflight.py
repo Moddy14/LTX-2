@@ -17,6 +17,7 @@ from .cross_shot_result import CROSS_SHOT_DECISION_SCHEMA
 from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
 from .design import document_sha256
 from .governance import GovernanceError, validate_preregistration
+from .pilot import PilotError, validate_design_pilot_binding_report
 from .readiness import READINESS_REPORT_SCHEMA
 
 F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v1"
@@ -28,6 +29,7 @@ STUDIO_TRUST_SCHEMA = "ltx-studio-trusted-keys.v1"
 DETAILED_REPORT_IDS = {
     "d0-readiness",
     "d0a-design",
+    "d0a-pilot-binding",
     "d1-calibration",
     "q0-cross-shot",
     "q1-comparators",
@@ -396,6 +398,7 @@ def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
             raise FreezePreflightError(f"detailed report digest mismatch: {report_id}")
     d0 = reports["d0-readiness"]
     design = reports["d0a-design"]
+    pilot_binding = reports["d0a-pilot-binding"]
     d1 = reports["d1-calibration"]
     q0 = reports["q0-cross-shot"]
     q1 = reports["q1-comparators"]
@@ -411,6 +414,16 @@ def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
         raise FreezePreflightError("D0a design report schema mismatch")
     if design.get("status") != "ready-to-freeze" or design.get("blockers") != []:
         raise FreezePreflightError("D0a design report is not ready-to-freeze")
+    try:
+        validate_design_pilot_binding_report(pilot_binding)
+    except PilotError as error:
+        raise FreezePreflightError(f"D0a pilot binding is invalid: {error}") from error
+    if pilot_binding["design_digest"] != design.get("design_digest"):
+        raise FreezePreflightError("D0a pilot binding does not share the frozen design digest")
+    if pilot_binding["power_report_digest"] != document_sha256(design):
+        raise FreezePreflightError("D0a pilot binding does not bind the detailed power report")
+    if pilot_binding["required_independent_units"] != design.get("required_independent_units"):
+        raise FreezePreflightError("D0a pilot binding changes the required independent-unit count")
     if not isinstance(d1, dict) or d1.get("schema_version") != COMPLETE_D1_REPORT_SCHEMA or d1.get("verdict") != "pass":
         raise FreezePreflightError("D1 report is not a complete pass")
     if not isinstance(q0, dict) or q0.get("schema_version") != CROSS_SHOT_DECISION_SCHEMA:
