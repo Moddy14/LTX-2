@@ -195,6 +195,7 @@ describe("model discovery", () => {
 
   it("pins IC-LoRA jobs to the verified official Union-Control model", () => {
     const request = createDefaultRequest("ic-lora");
+    request.models.gemmaLora.enabled = true;
     request.icLora.lora.path = "/legacy/arbitrary-control.safetensors";
     const inventory = {
       roots: [],

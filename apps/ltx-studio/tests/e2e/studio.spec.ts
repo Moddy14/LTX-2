@@ -169,6 +169,10 @@ test("IC-LoRA switches between every published LTX-2.3 profile", async ({ page }
     "/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-fp8/ltx-2.3-22b-distilled-fp8.safetensors",
   );
   await expect(page.getByLabel("Distilled LoRA Pfad")).toHaveCount(0);
+  const optionalGemmaLora = page.getByLabel("Optionale Gemma Abliterated LoRA");
+  await expect(optionalGemmaLora).not.toBeChecked();
+  await expect(page.getByLabel("Gemma Abliterated LoRA Pfad")).toHaveCount(0);
+  await optionalGemmaLora.check();
   await expect(page.getByLabel("Gemma Abliterated LoRA Pfad")).toBeVisible();
   await expect(page.getByRole("spinbutton", { name: "FPS" })).toHaveValue("25");
   await page.screenshot({ path: testInfo.outputPath("ic-lora-union-control.png"), fullPage: true });
@@ -399,7 +403,7 @@ test("controlled experiments freeze one variable before either arm can run", asy
   request.outputName = "controlled-guidance.mp4";
   request.models.checkpointPath = "/models/checkpoint.safetensors";
   request.models.gemmaRoot = "/models/gemma";
-  request.models.gemmaLora = { path: "/models/gemma-lora.safetensors", strength: 1 };
+  request.models.gemmaLora = { enabled: true, path: "/models/gemma-lora.safetensors", strength: 1 };
   request.models.spatialUpscalerPath = "/models/upscaler.safetensors";
   request.models.distilledLora = { path: "/models/distilled-lora.safetensors", strength: 1 };
   request.audio.path = "/inputs/speech.wav";
@@ -1849,7 +1853,7 @@ test("API persists and freezes a controlled experiment before any render can sta
   baselineRequest.outputName = "api-controlled-guidance.mp4";
   baselineRequest.models.checkpointPath = "/models/checkpoint.safetensors";
   baselineRequest.models.gemmaRoot = "/models/gemma";
-  baselineRequest.models.gemmaLora = { path: "/models/gemma-lora.safetensors", strength: 1 };
+  baselineRequest.models.gemmaLora = { enabled: true, path: "/models/gemma-lora.safetensors", strength: 1 };
   baselineRequest.models.spatialUpscalerPath = "/models/upscaler.safetensors";
   baselineRequest.models.distilledLora = { path: "/models/distilled-lora.safetensors", strength: 1 };
   baselineRequest.audio.path = "/inputs/speech.wav";

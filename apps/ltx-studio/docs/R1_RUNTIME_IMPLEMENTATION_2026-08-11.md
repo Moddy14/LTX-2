@@ -83,17 +83,20 @@ Primärquellen, abgerufen am 11.08.2026:
 
 Die schema-validierte `candidate-release-surface.v1.json` wird jetzt
 deterministisch aus `shared/pipelines.ts` und `shared/releaseSurface.ts`
-erzeugt und bindet deren SHA-256. Ihre 123 Einträge werden in Tests auf reale,
+erzeugt und bindet deren SHA-256. Ihre 160 Einträge werden in Tests auf reale,
 schema-valide Requests abgebildet; alle 13 Gates sind je Eintrag exakt einmal
 als anwendbar oder mit Grund als nicht anwendbar klassifiziert. Der Stand hat
-17 konditionale Kandidaten und 106 gesperrte Kombinationen.
+26 konditionale Kandidaten und 134 gesperrte Kombinationen. Für jeden Modus,
+der die Gemma-Abliterated-LoRA optional unterstützt, sind `base-gemma` und
+`abliterated-lora` als getrennte, requestgebundene Profile ausgewiesen.
 
 Die Sperre ist absichtlich streng: Die lokalen LatentSync-, MuseTalk- und
 LipForcing-Pfade verwenden InsightFace-`buffalo_l`-Gewichte, deren
 Upstream-Policy sie auf nichtkommerzielle Forschung beschränkt. Im
 MuseTalk-Inventar ist außerdem das Face-Parsing-Gewicht ohne deklarierte
 Upstream-Lizenz erfasst. Zusätzlich sperrt die statische Prüfung alle Rezepte
-mit dem nicht deklarierten Comfy-Gemma-Abliterated-LoRA sowie den ID-LoRA-Arm,
+mit dem nicht deklarierten Comfy-Gemma-Abliterated-LoRA; Base-Gemma bleibt davon
+getrennt. Weiterhin gesperrt ist der ID-LoRA-Arm,
 dessen TalkVid-, Einwilligungs- und Biometrierechte nicht auditierbar belegt
 sind. LTX-/Gemma-/LongCat-Pfade ohne diese Komponenten bleiben nur
 konditionale Kandidaten und benötigen vor Aktivierung ein aktuelles signiertes

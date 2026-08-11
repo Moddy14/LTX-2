@@ -10,11 +10,11 @@ It executes the native `ltx_pipelines` implementation instead of importing a Com
 
 | Official workflow | Studio mode | Native execution contract |
 | --- | --- | --- |
-| Text to Video (T2V) | Official Text / Image to Video without an image | Dev FP8, Comfy dynamic-rank distilled 1.1 at `0.5`, Gemma LoRA at `1.0`, fixed 8-step first stage and Euler x2 stage at `0.85, 0.725, 0.421875, 0.0` |
+| Text to Video (T2V) | Official Text / Image to Video without an image | Dev FP8, Comfy dynamic-rank distilled 1.1 at `0.5`, Base-Gemma by default, optional official-template Gemma LoRA at `1.0`, fixed 8-step first stage and Euler x2 stage at `0.85, 0.725, 0.421875, 0.0` |
 | Image to Video (I2V) | Official Text / Image to Video with the first-frame image | Same model and sampler contract as T2V, with first-stage image strength `0.7` and second-stage strength `1.0` |
 | FLF2V | First / Last Frame | Distilled FP8, exactly two guides at frame `0` and the final frame, fixed 8-step single stage, no transformer LoRA or spatial upscaler |
 | Image Audio to Video (IA2V) | Image + Audio to Video | T2V/I2V model and sampler contract plus native reference-audio conditioning |
-| IC-LoRA Union Control | IC-LoRA Union Control | Distilled FP8, Union Control LoRA and Gemma LoRA at `1.0`, fixed 8-step single stage with Euler Ancestral RF, depth/MoGe, Canny, or prepared pose control, no spatial upscaler |
+| IC-LoRA Union Control | IC-LoRA Union Control | Distilled FP8, Union Control LoRA, Base-Gemma by default, optional official-template Gemma LoRA at `1.0`, fixed 8-step single stage with Euler Ancestral RF, depth/MoGe, Canny, or prepared pose control, no spatial upscaler |
 | ID-LoRA | ID-LoRA TalkVid | Dev FP8, Comfy dynamic-rank distilled 1.1 at `0.5`, TalkVid ID-LoRA at `1.0`, reference image at `0.7` in stage 1 and `1.0` in stage 2, reference audio, fixed 8-step first stage and 3-step x2 stage |
 
 This parity claim is deliberately limited to the six workflows on that ComfyUI
@@ -35,12 +35,14 @@ future pipeline implementations rather than a current pipeline.
 As in the current official graphs, T2V, I2V, IA2V, and ID-LoRA use the user-selected
 seed only for stage 1. Their x2 refinement uses a separate `RandomNoise` stream fixed
 to seed `42`; the native implementations create an independent generator for that stage.
-The Gemma abliterated LoRA is isolated to the optional prompt-generation pass; final
-diffusion conditioning is encoded again with the unmodified Gemma model. The official
-prompt pass uses seed `0`, a `2048`-token limit, temperature `0.7`, top-k `64`, top-p
-`0.95`, min-p `0.05`, and repetition penalty `1.05`. The current T2V, I2V, and IA2V
-graphs leave its image input disconnected, while IC-LoRA connects the reference image;
-Studio mirrors that distinction.
+Base-Gemma is the release-safe default. The separately selectable Gemma abliterated
+LoRA mirrors the official template but remains blocked from production and SOTA release
+claims until its license and provenance are attested. When enabled, it is isolated to
+the optional prompt-generation pass; final diffusion conditioning is encoded again with
+the unmodified Gemma model. The official prompt pass uses seed `0`, a `2048`-token limit,
+temperature `0.7`, top-k `64`, top-p `0.95`, min-p `0.05`, and repetition penalty `1.05`.
+The current T2V, I2V, and IA2V graphs leave its image input disconnected, while IC-LoRA
+connects the reference image; Studio mirrors that distinction.
 
 The linked official LipDub model page publishes a separate ComfyUI workflow. New Studio LipDub requests mirror that
 workflow with the BF16 dev checkpoint, distilled 1.1 LoRA at `0.5`, LipDub IC-LoRA at `1.0`, Euler/CFG `1.0`, the

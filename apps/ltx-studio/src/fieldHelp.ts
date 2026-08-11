@@ -200,7 +200,7 @@ export const fieldHelp = {
   quantization:
     "Wofür: Reduziert Speicherbedarf und kann die Inferenz beschleunigen. Empfehlung: FP8 Cast ausschließlich mit BF16-Checkpoint; FP8 Scaled ausschließlich mit einem vorquantisierten FP8-Checkpoint, dessen Skalen bereits in der Datei liegen.",
   gemmaLora:
-    "Wofür: Offizielle Gemma-Abliterated-LoRA der Comfy-LTX-2.3-Vorlagen. Sie wird nur in den Textencoder geladen und verbessert die uneingeschränkte Promptausführung. Gute Eingabe: die SHA-256-verifizierte Datei gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors.",
+    "Wofür: Optionaler Gemma-Abliterated-LoRA-Pfad der Comfy-LTX-2.3-Vorlagen. Der releasefähige Standard bleibt Base-Gemma ohne diese LoRA. Aktivierung lädt sie nur in den Textencoder; der Pfad bleibt für Produktions- und SOTA-Freigaben gesperrt, solange Lizenz und Herkunft nicht attestiert sind.",
   gemmaLoraStrength:
     "Wofür: Gewicht der Gemma-LoRA im Textencoder. Empfehlung: 1,0 wie in den offiziellen Comfy-LTX-2.3-Vorlagen.",
   hqLoraStage1:

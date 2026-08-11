@@ -2,6 +2,7 @@ import {
   hasDialogueIntent,
   isAudioConditionedMode,
   needsGemmaAbliteratedLoraForRequest,
+  supportsGemmaAbliteratedLoraForRequest,
   usesOfficialComfyLipDub,
   type GenerationRequest,
 } from "./pipelines.js";
@@ -468,7 +469,7 @@ export function usesOfficialSpeechStack(request: GenerationRequest): boolean {
 }
 
 function usesDocumentedLtx23Workflow(request: GenerationRequest): boolean {
-  return needsGemmaAbliteratedLoraForRequest(request)
+  return supportsGemmaAbliteratedLoraForRequest(request)
     || request.mode === "ic-lora"
     || request.mode === "keyframes"
     || request.mode === "id-lora"

@@ -40,11 +40,21 @@ export function needsGemmaAbliteratedLora(mode: PipelineMode): boolean {
   ].includes(mode);
 }
 
-export function needsGemmaAbliteratedLoraForRequest(
+export function supportsGemmaAbliteratedLoraForRequest(
   input: { mode: PipelineMode; icLora: { profile: ICLoraProfile } },
 ): boolean {
   return needsGemmaAbliteratedLora(input.mode)
     || (input.mode === "ic-lora" && input.icLora.profile === "union-control");
+}
+
+export function needsGemmaAbliteratedLoraForRequest(
+  input: {
+    mode: PipelineMode;
+    icLora: { profile: ICLoraProfile };
+    models: { gemmaLora: { enabled: boolean } };
+  },
+): boolean {
+  return supportsGemmaAbliteratedLoraForRequest(input) && input.models.gemmaLora.enabled;
 }
 
 export const sourceModes = ["text", "image"] as const;
@@ -367,7 +377,7 @@ export const generationRequestSchema = z
       checkpointPath: pathValue,
       distilledCheckpointPath: pathValue,
       gemmaRoot: pathValue,
-      gemmaLora: loraSchema,
+      gemmaLora: loraSchema.extend({ enabled: z.boolean() }),
       spatialUpscalerPath: pathValue,
       distilledLora: loraSchema,
       loras: z.array(loraSchema).max(16),
@@ -894,7 +904,7 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
       checkpointPath: "",
       distilledCheckpointPath: "",
       gemmaRoot: "",
-      gemmaLora: { path: "", strength: 1 },
+      gemmaLora: { enabled: false, path: "", strength: 1 },
       spatialUpscalerPath: "",
       distilledLora: { path: "", strength: mode === "lipdub" ? 0.5 : 1 },
       loras: [],
@@ -989,6 +999,18 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
   const storedLipDub = storedRecord.lipDub && typeof storedRecord.lipDub === "object"
     ? storedRecord.lipDub as Record<string, unknown>
     : null;
+  const storedModelsRecord = storedRecord.models && typeof storedRecord.models === "object"
+    && !Array.isArray(storedRecord.models)
+    ? storedRecord.models as Record<string, unknown>
+    : {};
+  const storedGemmaLoraRecord = storedModelsRecord.gemmaLora
+    && typeof storedModelsRecord.gemmaLora === "object"
+    && !Array.isArray(storedModelsRecord.gemmaLora)
+    ? storedModelsRecord.gemmaLora as Record<string, unknown>
+    : {};
+  const storedGemmaLoraEnabled = typeof storedGemmaLoraRecord.enabled === "boolean"
+    ? storedGemmaLoraRecord.enabled
+    : typeof storedGemmaLoraRecord.path === "string" && storedGemmaLoraRecord.path.trim().length > 0;
   const storedIdLoraRecord = storedRecord.idLora && typeof storedRecord.idLora === "object"
     ? storedRecord.idLora as Partial<GenerationRequest["idLora"]> & { stage2ImageStrength?: unknown }
     : {};
@@ -1017,7 +1039,11 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     models: {
       ...defaults.models,
       ...stored.models,
-      gemmaLora: { ...defaults.models.gemmaLora, ...stored.models?.gemmaLora },
+      gemmaLora: {
+        ...defaults.models.gemmaLora,
+        ...stored.models?.gemmaLora,
+        enabled: storedGemmaLoraEnabled,
+      },
       distilledLora: { ...defaults.models.distilledLora, ...stored.models?.distilledLora },
       loras: stored.models?.loras ?? defaults.models.loras,
     },

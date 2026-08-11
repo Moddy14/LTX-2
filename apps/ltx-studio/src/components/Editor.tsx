@@ -23,6 +23,7 @@ import {
   isAudioConditionedMode,
   needsGemmaAbliteratedLoraForRequest,
   PIPELINES,
+  supportsGemmaAbliteratedLoraForRequest,
   usesOfficialComfyLipDub,
   type GenerationRequest,
 } from "../../shared/pipelines";
@@ -1807,36 +1808,52 @@ export function Editor({
               onChange={(gemmaRoot) => onChange({ ...request, models: { ...request.models, gemmaRoot } })}
             />
           ) : null}
-          {needsGemmaAbliteratedLoraForRequest(request) ? (
-            <div className="paired-field">
-              <PathPicker
-                label="Gemma Abliterated LoRA"
+          {supportsGemmaAbliteratedLoraForRequest(request) ? (
+            <>
+              <Toggle
+                label="Optionale Gemma Abliterated LoRA"
                 hint={fieldHelp.gemmaLora}
-                value={request.models.gemmaLora.path}
-                options={loraOptions.filter((option) => option.label.toLowerCase().includes("gemma"))}
-                error={errors["models.gemmaLora.path"]}
-                placeholder="/absoluter/pfad/gemma-lora.safetensors"
-                onChange={(path) => onChange({
-                  ...request,
-                  models: { ...request.models, gemmaLora: { ...request.models.gemmaLora, path } },
-                })}
-              />
-              <NumberField
-                label="Stärke"
-                hint={fieldHelp.gemmaLoraStrength}
-                min={0}
-                max={2}
-                step={0.05}
-                value={request.models.gemmaLora.strength}
-                onChange={(strength) => onChange({
+                checked={request.models.gemmaLora.enabled}
+                onChange={(enabled) => onChange({
                   ...request,
                   models: {
                     ...request.models,
-                    gemmaLora: { ...request.models.gemmaLora, strength: strength ?? 1 },
+                    gemmaLora: { ...request.models.gemmaLora, enabled },
                   },
                 })}
               />
-            </div>
+              {needsGemmaAbliteratedLoraForRequest(request) ? (
+                <div className="paired-field">
+                  <PathPicker
+                    label="Gemma Abliterated LoRA"
+                    hint={fieldHelp.gemmaLora}
+                    value={request.models.gemmaLora.path}
+                    options={loraOptions.filter((option) => option.label.toLowerCase().includes("gemma"))}
+                    error={errors["models.gemmaLora.path"]}
+                    placeholder="/absoluter/pfad/gemma-lora.safetensors"
+                    onChange={(path) => onChange({
+                      ...request,
+                      models: { ...request.models, gemmaLora: { ...request.models.gemmaLora, path } },
+                    })}
+                  />
+                  <NumberField
+                    label="Stärke"
+                    hint={fieldHelp.gemmaLoraStrength}
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    value={request.models.gemmaLora.strength}
+                    onChange={(strength) => onChange({
+                      ...request,
+                      models: {
+                        ...request.models,
+                        gemmaLora: { ...request.models.gemmaLora, strength: strength ?? 1 },
+                      },
+                    })}
+                  />
+                </div>
+              ) : null}
+            </>
           ) : null}
           {definition.needsSpatialUpscaler
             || (request.mode === "ic-lora" && request.icLora.profile === "hdr") ? (

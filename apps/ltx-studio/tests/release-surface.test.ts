@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   candidateReleaseSurfaceSchema,
   deriveReleaseSurfaceEntries,
+  promptEncoderProfileForRequest,
   releaseGateIds,
 } from "../shared/releaseSurface.js";
 import { generationRequestSchema } from "../shared/pipelines.js";
@@ -14,6 +15,7 @@ import { validRequest } from "./fixtures.js";
 
 function requestFor(entry: ReturnType<typeof deriveReleaseSurfaceEntries>[number]) {
   const request = validRequest(entry.request.mode);
+  request.models.gemmaLora.enabled = entry.request.promptEncoderProfile === "abliterated-lora";
   if (entry.request.sourceMode !== "not-applicable") {
     request.sourceMode = entry.request.sourceMode;
     request.images = entry.request.sourceMode === "image"
@@ -82,6 +84,7 @@ describe("candidate release surface", () => {
     for (const entry of deriveReleaseSurfaceEntries()) {
       const request = requestFor(entry);
       expect(generationRequestSchema.safeParse(request), entry.id).toMatchObject({ success: true });
+      expect(promptEncoderProfileForRequest(request), entry.id).toBe(entry.request.promptEncoderProfile);
       expect(supportsCooperativeCheckpoint(request), entry.id).toBe(entry.cooperativeCheckpoint);
     }
   });
@@ -104,5 +107,39 @@ describe("candidate release surface", () => {
       || request.postprocessor.startsWith("lipforcing"));
     expect(refiners.length).toBeGreaterThan(0);
     expect(refiners.every(({ targetStatus }) => targetStatus === "blocked")).toBe(true);
+  });
+
+  it("separates release-safe Base-Gemma from the blocked optional abliterated LoRA", () => {
+    const entries = deriveReleaseSurfaceEntries();
+    const optionalModes = entries.filter(({ request }) =>
+      request.promptEncoderProfile !== "not-applicable");
+    const recipes = new Map<string, Set<string>>();
+    for (const entry of optionalModes) {
+      const recipe = [
+        entry.request.mode,
+        entry.request.sourceMode,
+        entry.request.icLoraProfile ?? "none",
+        entry.request.postprocessor,
+      ].join(":");
+      const profiles = recipes.get(recipe) ?? new Set<string>();
+      profiles.add(entry.request.promptEncoderProfile);
+      recipes.set(recipe, profiles);
+    }
+    for (const profiles of recipes.values()) {
+      expect(profiles).toEqual(new Set(["base-gemma", "abliterated-lora"]));
+    }
+
+    const baseEntries = optionalModes.filter(({ request }) =>
+      request.promptEncoderProfile === "base-gemma");
+    const abliteratedEntries = optionalModes.filter(({ request }) =>
+      request.promptEncoderProfile === "abliterated-lora");
+    expect(baseEntries.length).toBeGreaterThan(0);
+    expect(baseEntries.every(({ rights }) =>
+      !rights.evidenceIds.includes("comfy-ltx2-abliterated-lora-license-undeclared"))).toBe(true);
+    expect(abliteratedEntries.every(({ rights, targetStatus }) =>
+      targetStatus === "blocked"
+      && rights.evidenceIds.includes("comfy-ltx2-abliterated-lora-license-undeclared"))).toBe(true);
+    expect(baseEntries.some(({ request, targetStatus }) =>
+      request.postprocessor === "none" && targetStatus === "candidate")).toBe(true);
   });
 });

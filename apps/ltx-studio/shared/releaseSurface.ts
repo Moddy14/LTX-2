@@ -5,6 +5,8 @@ import {
   lipDubPipelineProfiles,
   needsGemmaAbliteratedLora,
   pipelineModes,
+  supportsGemmaAbliteratedLoraForRequest,
+  type GenerationRequest,
   type ICLoraProfile,
   type LipDubPipelineProfile,
   type PipelineMode,
@@ -37,6 +39,20 @@ export const postprocessorIds = [
 ] as const;
 export type PostprocessorId = (typeof postprocessorIds)[number];
 
+export const promptEncoderProfiles = [
+  "not-applicable",
+  "base-gemma",
+  "abliterated-lora",
+] as const;
+export type PromptEncoderProfile = (typeof promptEncoderProfiles)[number];
+
+export function promptEncoderProfileForRequest(
+  request: Pick<GenerationRequest, "mode" | "icLora" | "models">,
+): PromptEncoderProfile {
+  if (!supportsGemmaAbliteratedLoraForRequest(request)) return "not-applicable";
+  return request.models.gemmaLora.enabled ? "abliterated-lora" : "base-gemma";
+}
+
 const releaseGateSchema = z.enum(releaseGateIds);
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const nonApplicableGateSchema = z.object({
@@ -53,6 +69,7 @@ export const releaseSurfaceEntrySchema = z.object({
     icLoraProfile: z.enum(icLoraProfiles).nullable(),
     lipDubPipelineProfile: z.enum(lipDubPipelineProfiles).nullable(),
     retakeCheckpoint: z.enum(["dev", "distilled"]).nullable(),
+    promptEncoderProfile: z.enum(promptEncoderProfiles),
     dialogueIntent: z.enum(["required", "optional", "not-applicable"]),
     postprocessor: z.enum(postprocessorIds),
   }).strict(),
@@ -88,6 +105,17 @@ export const releaseSurfaceEntrySchema = z.object({
       code: "custom",
       path: ["targetStatus"],
       message: "blocked rights and blocked target status must agree",
+    });
+  }
+  const supportsOptionalLora = needsGemmaAbliteratedLora(entry.request.mode)
+    || (entry.request.mode === "ic-lora" && entry.request.icLoraProfile === "union-control");
+  if (supportsOptionalLora === (entry.request.promptEncoderProfile === "not-applicable")) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "promptEncoderProfile"],
+      message: supportsOptionalLora
+        ? "optional Gemma-LoRA modes require an explicit base-gemma or abliterated-lora profile"
+        : "prompt encoder profile must be not-applicable for this request",
     });
   }
 });
@@ -256,13 +284,26 @@ const blockedBaseEvidence = new Set([
   "ltx23-id-lora-talkvid-data-rights-undeclared",
 ]);
 
-function baseRightsFor(variant: BaseVariant): ReleaseSurfaceEntry["rights"] {
+function supportsOptionalGemmaLora(variant: BaseVariant): boolean {
+  return needsGemmaAbliteratedLora(variant.mode)
+    || (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control");
+}
+
+function promptEncoderProfilesFor(variant: BaseVariant): PromptEncoderProfile[] {
+  return supportsOptionalGemmaLora(variant)
+    ? ["base-gemma", "abliterated-lora"]
+    : ["not-applicable"];
+}
+
+function baseRightsFor(
+  variant: BaseVariant,
+  promptEncoderProfile: PromptEncoderProfile,
+): ReleaseSurfaceEntry["rights"] {
   const evidenceIds = ["ltx2-community-license-2026-01-05"];
   if (!(variant.mode === "ic-lora" && variant.icLoraProfile === "hdr")) {
     evidenceIds.push("gemma-terms-model-card");
   }
-  if (needsGemmaAbliteratedLora(variant.mode)
-    || (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control")) {
+  if (promptEncoderProfile === "abliterated-lora") {
     evidenceIds.push("comfy-ltx2-abliterated-lora-license-undeclared");
   }
   if (variant.mode === "id-lora") {
@@ -281,8 +322,12 @@ function baseRightsFor(variant: BaseVariant): ReleaseSurfaceEntry["rights"] {
   };
 }
 
-function rightsFor(variant: BaseVariant, postprocessor: PostprocessorId): ReleaseSurfaceEntry["rights"] {
-  const base = baseRightsFor(variant);
+function rightsFor(
+  variant: BaseVariant,
+  promptEncoderProfile: PromptEncoderProfile,
+  postprocessor: PostprocessorId,
+): ReleaseSurfaceEntry["rights"] {
+  const base = baseRightsFor(variant, promptEncoderProfile);
   if (postprocessor === "none") return base;
   if (postprocessor === "longcat-lipsync") {
     return {
@@ -356,10 +401,14 @@ function gatesFor(variant: BaseVariant, postprocessor: PostprocessorId): Pick<Re
   };
 }
 
-function entryFor(variant: BaseVariant, postprocessor: PostprocessorId): ReleaseSurfaceEntry {
-  const rights = rightsFor(variant, postprocessor);
+function entryFor(
+  variant: BaseVariant,
+  promptEncoderProfile: PromptEncoderProfile,
+  postprocessor: PostprocessorId,
+): ReleaseSurfaceEntry {
+  const rights = rightsFor(variant, promptEncoderProfile, postprocessor);
   return {
-    id: `${variant.id}.post.${postprocessor}`,
+    id: `${variant.id}.prompt.${promptEncoderProfile}.post.${postprocessor}`,
     claimId: postprocessor === "none" ? variant.claimId : `${variant.claimId}.refined.${postprocessor}`,
     request: {
       mode: variant.mode,
@@ -367,6 +416,7 @@ function entryFor(variant: BaseVariant, postprocessor: PostprocessorId): Release
       icLoraProfile: variant.icLoraProfile,
       lipDubPipelineProfile: variant.lipDubPipelineProfile,
       retakeCheckpoint: variant.retakeCheckpoint,
+      promptEncoderProfile,
       dialogueIntent: postprocessor === "none" ? variant.dialogueIntent : "required",
       postprocessor,
     },
@@ -389,15 +439,17 @@ function entryFor(variant: BaseVariant, postprocessor: PostprocessorId): Release
 export function deriveReleaseSurfaceEntries(): ReleaseSurfaceEntry[] {
   const entries: ReleaseSurfaceEntry[] = [];
   for (const variant of baseVariants()) {
-    entries.push(entryFor(variant, "none"));
-    if (variant.mode === "text-to-audio") continue;
-    if (["image-audio-to-video", "audio-to-video"].includes(variant.mode)) {
-      entries.push(entryFor(variant, "longcat-lipsync"));
+    for (const promptEncoderProfile of promptEncoderProfilesFor(variant)) {
+      entries.push(entryFor(variant, promptEncoderProfile, "none"));
+      if (variant.mode === "text-to-audio") continue;
+      if (["image-audio-to-video", "audio-to-video"].includes(variant.mode)) {
+        entries.push(entryFor(variant, promptEncoderProfile, "longcat-lipsync"));
+      }
+      entries.push(entryFor(variant, promptEncoderProfile, "latentsync-1.6"));
+      entries.push(entryFor(variant, promptEncoderProfile, "musetalk-1.5"));
+      entries.push(entryFor(variant, promptEncoderProfile, "lipforcing-14b-wan-vae"));
+      entries.push(entryFor(variant, promptEncoderProfile, "lipforcing-14b-streaming-taehv"));
     }
-    entries.push(entryFor(variant, "latentsync-1.6"));
-    entries.push(entryFor(variant, "musetalk-1.5"));
-    entries.push(entryFor(variant, "lipforcing-14b-wan-vae"));
-    entries.push(entryFor(variant, "lipforcing-14b-streaming-taehv"));
   }
   return entries.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 }

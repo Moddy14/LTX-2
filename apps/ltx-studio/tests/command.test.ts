@@ -106,6 +106,19 @@ describe("buildCommand", () => {
     expect(args).not.toContain("/models/ignored-amax.json");
   });
 
+  it("runs the release-safe Base-Gemma profile without the optional LoRA asset", () => {
+    const request = validRequest("image-audio-to-video");
+    request.models.gemmaLora.enabled = false;
+    request.models.gemmaLora.path = "";
+
+    const plan = buildCommand(request);
+
+    expect(plan.args).not.toContain("--gemma-lora");
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({
+      label: "Gemma Abliterated LoRA",
+    }));
+  });
+
   it("keeps prompt metacharacters in one argv element", () => {
     const request = validRequest();
     request.prompt = "camera's move; $(touch /tmp/not-run)";

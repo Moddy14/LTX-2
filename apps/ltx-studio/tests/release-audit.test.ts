@@ -136,6 +136,7 @@ function fixture(): Fixture {
           icLoraProfile: null,
           lipDubPipelineProfile: "official-comfy-hq",
           retakeCheckpoint: null,
+          promptEncoderProfile: "not-applicable",
           dialogueIntent: "required",
           postprocessor: "none",
         },

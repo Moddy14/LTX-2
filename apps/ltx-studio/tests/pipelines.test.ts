@@ -22,6 +22,27 @@ describe("generationRequestSchema", () => {
     expect(createDefaultRequest("text-to-audio").enhancePrompt).toBe(false);
     expect(createDefaultRequest("text-to-audio").outputName).toBe("ltx-text-to-audio.wav");
     expect(createDefaultRequest("text-to-audio").audioGuidance.cfgScale).toBe(1);
+    expect(createDefaultRequest("two-stage").models.gemmaLora.enabled).toBe(false);
+  });
+
+  it("keeps Base-Gemma as the default and preserves legacy LoRA intent", () => {
+    const base = validRequest("two-stage");
+    base.models.gemmaLora.enabled = false;
+    base.models.gemmaLora.path = "";
+    expect(generationRequestSchema.safeParse(base).success).toBe(true);
+
+    const legacy = structuredClone(validRequest("two-stage")) as unknown as {
+      models: { gemmaLora: { enabled?: boolean; path: string; strength: number } };
+    };
+    delete legacy.models.gemmaLora.enabled;
+    expect(mergeGenerationRequest(legacy).models.gemmaLora.enabled).toBe(true);
+
+    legacy.models.gemmaLora.path = "";
+    expect(mergeGenerationRequest(legacy).models.gemmaLora.enabled).toBe(false);
+
+    const explicitlyDisabled = validRequest("two-stage");
+    explicitlyDisabled.models.gemmaLora.enabled = false;
+    expect(mergeGenerationRequest(explicitlyDisabled).models.gemmaLora.enabled).toBe(false);
   });
 
   it("uses the current native Comfy workflow frame rates and durations", () => {

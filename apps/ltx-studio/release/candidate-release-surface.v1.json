@@ -20,7 +20,7 @@
       ],
       "claimId": "audio-driven-video.audio-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "audio-to-video.post.latentsync-1.6",
+      "id": "audio-to-video.prompt.abliterated-lora.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "driving-audio",
@@ -43,6 +43,7 @@
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -75,7 +76,7 @@
       ],
       "claimId": "audio-driven-video.audio-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "audio-to-video.post.lipforcing-14b-streaming-taehv",
+      "id": "audio-to-video.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "driving-audio",
@@ -98,6 +99,7 @@
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -130,7 +132,7 @@
       ],
       "claimId": "audio-driven-video.audio-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "audio-to-video.post.lipforcing-14b-wan-vae",
+      "id": "audio-to-video.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "driving-audio",
@@ -153,6 +155,7 @@
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -185,7 +188,7 @@
       ],
       "claimId": "audio-driven-video.audio-to-video.refined.longcat-lipsync",
       "cooperativeCheckpoint": true,
-      "id": "audio-to-video.post.longcat-lipsync",
+      "id": "audio-to-video.prompt.abliterated-lora.post.longcat-lipsync",
       "inputContract": [
         "prompt",
         "driving-audio",
@@ -208,6 +211,7 @@
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
         "postprocessor": "longcat-lipsync",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -239,7 +243,7 @@
       ],
       "claimId": "audio-driven-video.audio-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "audio-to-video.post.musetalk-1.5",
+      "id": "audio-to-video.prompt.abliterated-lora.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "driving-audio",
@@ -262,6 +266,7 @@
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -295,7 +300,7 @@
       ],
       "claimId": "audio-driven-video.audio-to-video",
       "cooperativeCheckpoint": true,
-      "id": "audio-to-video.post.none",
+      "id": "audio-to-video.prompt.abliterated-lora.post.none",
       "inputContract": [
         "prompt",
         "driving-audio"
@@ -317,6 +322,7 @@
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
         "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -340,6 +346,333 @@
         "av-sync",
         "phoneme-viseme",
         "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.audio-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "audio-to-video.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "audio-to-video",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.audio-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "audio-to-video.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "audio-to-video",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.audio-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "audio-to-video.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "audio-to-video",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.audio-to-video.refined.longcat-lipsync",
+      "cooperativeCheckpoint": true,
+      "id": "audio-to-video.prompt.base-gemma.post.longcat-lipsync",
+      "inputContract": [
+        "prompt",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "audio-to-video",
+        "postprocessor": "longcat-lipsync",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "longcat-video-mit-model-card"
+        ],
+        "reason": "LongCat is MIT-licensed, while activation still requires signed LTX-2, Gemma, and biometric-input attestations.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.audio-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "audio-to-video.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "audio-to-video",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.audio-to-video",
+      "cooperativeCheckpoint": true,
+      "id": "audio-to-video.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt",
+        "driving-audio"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "audio-to-video",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
         "identity",
         "sharpness",
         "vbench-i2v",
@@ -349,7 +682,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "distilled.image.post.latentsync-1.6",
+      "id": "distilled.image.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -363,6 +696,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -396,7 +730,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "distilled.image.post.lipforcing-14b-streaming-taehv",
+      "id": "distilled.image.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -410,6 +744,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -443,7 +778,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "distilled.image.post.lipforcing-14b-wan-vae",
+      "id": "distilled.image.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -457,6 +792,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -490,7 +826,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "distilled.image.post.musetalk-1.5",
+      "id": "distilled.image.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -504,6 +840,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -535,7 +872,7 @@
       ],
       "claimId": "native-generation.image-to-video",
       "cooperativeCheckpoint": true,
-      "id": "distilled.image.post.none",
+      "id": "distilled.image.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images"
@@ -561,6 +898,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -590,7 +928,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "distilled.text.post.latentsync-1.6",
+      "id": "distilled.text.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -612,6 +950,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -643,7 +982,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "distilled.text.post.lipforcing-14b-streaming-taehv",
+      "id": "distilled.text.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -665,6 +1004,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -696,7 +1036,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "distilled.text.post.lipforcing-14b-wan-vae",
+      "id": "distilled.text.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -718,6 +1058,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -749,7 +1090,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "distilled.text.post.musetalk-1.5",
+      "id": "distilled.text.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -771,6 +1112,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -800,7 +1142,7 @@
       ],
       "claimId": "native-generation.text-to-video",
       "cooperativeCheckpoint": true,
-      "id": "distilled.text.post.none",
+      "id": "distilled.text.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt"
       ],
@@ -833,6 +1175,7 @@
         "lipDubPipelineProfile": null,
         "mode": "distilled",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -864,7 +1207,7 @@
       ],
       "claimId": "controlled-video.ic-lora.hdr.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.hdr.post.latentsync-1.6",
+      "id": "ic-lora.hdr.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "control-video",
@@ -878,6 +1221,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -910,7 +1254,7 @@
       ],
       "claimId": "controlled-video.ic-lora.hdr.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.hdr.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.hdr.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "control-video",
@@ -924,6 +1268,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -956,7 +1301,7 @@
       ],
       "claimId": "controlled-video.ic-lora.hdr.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.hdr.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.hdr.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "control-video",
@@ -970,6 +1315,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1002,7 +1348,7 @@
       ],
       "claimId": "controlled-video.ic-lora.hdr.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.hdr.post.musetalk-1.5",
+      "id": "ic-lora.hdr.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1016,6 +1362,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1046,7 +1393,7 @@
       ],
       "claimId": "controlled-video.ic-lora.hdr",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.hdr.post.none",
+      "id": "ic-lora.hdr.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "control-video"
@@ -1072,6 +1419,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1102,7 +1450,7 @@
       ],
       "claimId": "controlled-video.ic-lora.ingredients.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.ingredients.post.latentsync-1.6",
+      "id": "ic-lora.ingredients.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1116,6 +1464,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1149,7 +1498,7 @@
       ],
       "claimId": "controlled-video.ic-lora.ingredients.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.ingredients.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.ingredients.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1163,6 +1512,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1196,7 +1546,7 @@
       ],
       "claimId": "controlled-video.ic-lora.ingredients.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.ingredients.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.ingredients.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1210,6 +1560,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1243,7 +1594,7 @@
       ],
       "claimId": "controlled-video.ic-lora.ingredients.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.ingredients.post.musetalk-1.5",
+      "id": "ic-lora.ingredients.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1257,6 +1608,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1288,7 +1640,7 @@
       ],
       "claimId": "controlled-video.ic-lora.ingredients",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.ingredients.post.none",
+      "id": "ic-lora.ingredients.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "reference-image"
@@ -1314,6 +1666,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1345,7 +1698,7 @@
       ],
       "claimId": "controlled-video.ic-lora.inpainting.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.inpainting.post.latentsync-1.6",
+      "id": "ic-lora.inpainting.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1359,6 +1712,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1392,7 +1746,7 @@
       ],
       "claimId": "controlled-video.ic-lora.inpainting.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.inpainting.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.inpainting.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1406,6 +1760,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1439,7 +1794,7 @@
       ],
       "claimId": "controlled-video.ic-lora.inpainting.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.inpainting.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.inpainting.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1453,6 +1808,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1486,7 +1842,7 @@
       ],
       "claimId": "controlled-video.ic-lora.inpainting.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.inpainting.post.musetalk-1.5",
+      "id": "ic-lora.inpainting.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1500,6 +1856,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1531,7 +1888,7 @@
       ],
       "claimId": "controlled-video.ic-lora.inpainting",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.inpainting.post.none",
+      "id": "ic-lora.inpainting.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "control-video"
@@ -1557,6 +1914,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1588,7 +1946,7 @@
       ],
       "claimId": "controlled-video.ic-lora.motion-track.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.motion-track.post.latentsync-1.6",
+      "id": "ic-lora.motion-track.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1603,6 +1961,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1636,7 +1995,7 @@
       ],
       "claimId": "controlled-video.ic-lora.motion-track.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.motion-track.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.motion-track.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1651,6 +2010,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1684,7 +2044,7 @@
       ],
       "claimId": "controlled-video.ic-lora.motion-track.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.motion-track.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.motion-track.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1699,6 +2059,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1732,7 +2093,7 @@
       ],
       "claimId": "controlled-video.ic-lora.motion-track.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.motion-track.post.musetalk-1.5",
+      "id": "ic-lora.motion-track.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1747,6 +2108,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1778,7 +2140,7 @@
       ],
       "claimId": "controlled-video.ic-lora.motion-track",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.motion-track.post.none",
+      "id": "ic-lora.motion-track.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -1805,6 +2167,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1836,7 +2199,7 @@
       ],
       "claimId": "controlled-video.ic-lora.outpainting.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.outpainting.post.latentsync-1.6",
+      "id": "ic-lora.outpainting.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1850,6 +2213,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1883,7 +2247,7 @@
       ],
       "claimId": "controlled-video.ic-lora.outpainting.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.outpainting.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.outpainting.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1897,6 +2261,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1930,7 +2295,7 @@
       ],
       "claimId": "controlled-video.ic-lora.outpainting.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.outpainting.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.outpainting.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1944,6 +2309,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -1977,7 +2343,7 @@
       ],
       "claimId": "controlled-video.ic-lora.outpainting.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.outpainting.post.musetalk-1.5",
+      "id": "ic-lora.outpainting.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "control-video",
@@ -1991,6 +2357,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2022,7 +2389,7 @@
       ],
       "claimId": "controlled-video.ic-lora.outpainting",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.outpainting.post.none",
+      "id": "ic-lora.outpainting.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "control-video"
@@ -2048,6 +2415,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2079,7 +2447,7 @@
       ],
       "claimId": "controlled-video.ic-lora.pixel-upscaler.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.pixel-upscaler.post.latentsync-1.6",
+      "id": "ic-lora.pixel-upscaler.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2093,6 +2461,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2126,7 +2495,7 @@
       ],
       "claimId": "controlled-video.ic-lora.pixel-upscaler.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.pixel-upscaler.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.pixel-upscaler.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2140,6 +2509,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2173,7 +2543,7 @@
       ],
       "claimId": "controlled-video.ic-lora.pixel-upscaler.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.pixel-upscaler.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.pixel-upscaler.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2187,6 +2557,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2220,7 +2591,7 @@
       ],
       "claimId": "controlled-video.ic-lora.pixel-upscaler.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.pixel-upscaler.post.musetalk-1.5",
+      "id": "ic-lora.pixel-upscaler.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2234,6 +2605,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2265,7 +2637,7 @@
       ],
       "claimId": "controlled-video.ic-lora.pixel-upscaler",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.pixel-upscaler.post.none",
+      "id": "ic-lora.pixel-upscaler.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "control-video"
@@ -2291,6 +2663,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2322,7 +2695,7 @@
       ],
       "claimId": "controlled-video.ic-lora.union-control.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.union-control.post.latentsync-1.6",
+      "id": "ic-lora.union-control.prompt.abliterated-lora.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -2337,6 +2710,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2372,7 +2746,7 @@
       ],
       "claimId": "controlled-video.ic-lora.union-control.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.union-control.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.union-control.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -2387,6 +2761,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2422,7 +2797,7 @@
       ],
       "claimId": "controlled-video.ic-lora.union-control.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.union-control.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.union-control.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -2437,6 +2812,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2472,7 +2848,7 @@
       ],
       "claimId": "controlled-video.ic-lora.union-control.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.union-control.post.musetalk-1.5",
+      "id": "ic-lora.union-control.prompt.abliterated-lora.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -2487,6 +2863,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2520,7 +2897,7 @@
       ],
       "claimId": "controlled-video.ic-lora.union-control",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.union-control.post.none",
+      "id": "ic-lora.union-control.prompt.abliterated-lora.post.none",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -2547,6 +2924,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2578,9 +2956,267 @@
         "audio-quality",
         "mos"
       ],
+      "claimId": "controlled-video.ic-lora.union-control.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "ic-lora.union-control.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "moge-mit-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ic-lora.union-control.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "ic-lora.union-control.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "moge-mit-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ic-lora.union-control.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "ic-lora.union-control.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "moge-mit-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ic-lora.union-control.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "ic-lora.union-control.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "moge-mit-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ic-lora.union-control",
+      "cooperativeCheckpoint": false,
+      "id": "ic-lora.union-control.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "moge-mit-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
       "claimId": "controlled-video.ic-lora.v2v-instant-shave.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.v2v-instant-shave.post.latentsync-1.6",
+      "id": "ic-lora.v2v-instant-shave.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2594,6 +3230,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2627,7 +3264,7 @@
       ],
       "claimId": "controlled-video.ic-lora.v2v-instant-shave.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.v2v-instant-shave.post.lipforcing-14b-streaming-taehv",
+      "id": "ic-lora.v2v-instant-shave.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2641,6 +3278,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2674,7 +3312,7 @@
       ],
       "claimId": "controlled-video.ic-lora.v2v-instant-shave.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.v2v-instant-shave.post.lipforcing-14b-wan-vae",
+      "id": "ic-lora.v2v-instant-shave.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2688,6 +3326,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2721,7 +3360,7 @@
       ],
       "claimId": "controlled-video.ic-lora.v2v-instant-shave.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.v2v-instant-shave.post.musetalk-1.5",
+      "id": "ic-lora.v2v-instant-shave.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "control-video",
@@ -2735,6 +3374,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2766,7 +3406,7 @@
       ],
       "claimId": "controlled-video.ic-lora.v2v-instant-shave",
       "cooperativeCheckpoint": false,
-      "id": "ic-lora.v2v-instant-shave.post.none",
+      "id": "ic-lora.v2v-instant-shave.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "control-video"
@@ -2792,6 +3432,7 @@
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2823,7 +3464,7 @@
       ],
       "claimId": "identity-video.id-lora.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "id-lora.post.latentsync-1.6",
+      "id": "id-lora.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt-with-exact-dialogue",
         "reference-image",
@@ -2838,6 +3479,7 @@
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2872,7 +3514,7 @@
       ],
       "claimId": "identity-video.id-lora.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "id-lora.post.lipforcing-14b-streaming-taehv",
+      "id": "id-lora.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt-with-exact-dialogue",
         "reference-image",
@@ -2887,6 +3529,7 @@
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2921,7 +3564,7 @@
       ],
       "claimId": "identity-video.id-lora.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "id-lora.post.lipforcing-14b-wan-vae",
+      "id": "id-lora.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt-with-exact-dialogue",
         "reference-image",
@@ -2936,6 +3579,7 @@
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -2970,7 +3614,7 @@
       ],
       "claimId": "identity-video.id-lora.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "id-lora.post.musetalk-1.5",
+      "id": "id-lora.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt-with-exact-dialogue",
         "reference-image",
@@ -2985,6 +3629,7 @@
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3020,7 +3665,7 @@
       ],
       "claimId": "identity-video.id-lora",
       "cooperativeCheckpoint": true,
-      "id": "id-lora.post.none",
+      "id": "id-lora.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt-with-exact-dialogue",
         "reference-image",
@@ -3034,6 +3679,7 @@
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3066,7 +3712,7 @@
       ],
       "claimId": "audio-driven-video.image-audio-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "image-audio-to-video.post.latentsync-1.6",
+      "id": "image-audio-to-video.prompt.abliterated-lora.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -3081,6 +3727,7 @@
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3115,7 +3762,7 @@
       ],
       "claimId": "audio-driven-video.image-audio-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "image-audio-to-video.post.lipforcing-14b-streaming-taehv",
+      "id": "image-audio-to-video.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -3130,6 +3777,7 @@
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3164,7 +3812,7 @@
       ],
       "claimId": "audio-driven-video.image-audio-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "image-audio-to-video.post.lipforcing-14b-wan-vae",
+      "id": "image-audio-to-video.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -3179,6 +3827,7 @@
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3213,7 +3862,7 @@
       ],
       "claimId": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
       "cooperativeCheckpoint": true,
-      "id": "image-audio-to-video.post.longcat-lipsync",
+      "id": "image-audio-to-video.prompt.abliterated-lora.post.longcat-lipsync",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -3228,6 +3877,7 @@
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
         "postprocessor": "longcat-lipsync",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3261,7 +3911,7 @@
       ],
       "claimId": "audio-driven-video.image-audio-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "image-audio-to-video.post.musetalk-1.5",
+      "id": "image-audio-to-video.prompt.abliterated-lora.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -3276,6 +3926,7 @@
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3311,7 +3962,7 @@
       ],
       "claimId": "audio-driven-video.image-audio-to-video",
       "cooperativeCheckpoint": true,
-      "id": "image-audio-to-video.post.none",
+      "id": "image-audio-to-video.prompt.abliterated-lora.post.none",
       "inputContract": [
         "prompt",
         "reference-image",
@@ -3325,6 +3976,7 @@
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
         "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3355,9 +4007,300 @@
         "audio-quality",
         "mos"
       ],
+      "claimId": "audio-driven-video.image-audio-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "image-audio-to-video.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.image-audio-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "image-audio-to-video.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.image-audio-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "image-audio-to-video.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+      "cooperativeCheckpoint": true,
+      "id": "image-audio-to-video.prompt.base-gemma.post.longcat-lipsync",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "postprocessor": "longcat-lipsync",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "longcat-video-mit-model-card"
+        ],
+        "reason": "LongCat is MIT-licensed, while activation still requires signed LTX-2, Gemma, and biometric-input attestations.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.image-audio-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "image-audio-to-video.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.image-audio-to-video",
+      "cooperativeCheckpoint": true,
+      "id": "image-audio-to-video.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
       "claimId": "controlled-video.first-last-frame.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "keyframes.post.latentsync-1.6",
+      "id": "keyframes.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "first-frame-image",
@@ -3372,6 +4315,7 @@
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3405,7 +4349,7 @@
       ],
       "claimId": "controlled-video.first-last-frame.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "keyframes.post.lipforcing-14b-streaming-taehv",
+      "id": "keyframes.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "first-frame-image",
@@ -3420,6 +4364,7 @@
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3453,7 +4398,7 @@
       ],
       "claimId": "controlled-video.first-last-frame.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "keyframes.post.lipforcing-14b-wan-vae",
+      "id": "keyframes.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "first-frame-image",
@@ -3468,6 +4413,7 @@
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3501,7 +4447,7 @@
       ],
       "claimId": "controlled-video.first-last-frame.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "keyframes.post.musetalk-1.5",
+      "id": "keyframes.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "first-frame-image",
@@ -3516,6 +4462,7 @@
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3547,7 +4494,7 @@
       ],
       "claimId": "controlled-video.first-last-frame",
       "cooperativeCheckpoint": true,
-      "id": "keyframes.post.none",
+      "id": "keyframes.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "first-frame-image",
@@ -3574,6 +4521,7 @@
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3605,7 +4553,7 @@
       ],
       "claimId": "reference-video-redubbing.native-distilled.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.native-distilled.post.latentsync-1.6",
+      "id": "lipdub.native-distilled.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3621,6 +4569,7 @@
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3654,7 +4603,7 @@
       ],
       "claimId": "reference-video-redubbing.native-distilled.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.native-distilled.post.lipforcing-14b-streaming-taehv",
+      "id": "lipdub.native-distilled.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3670,6 +4619,7 @@
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3703,7 +4653,7 @@
       ],
       "claimId": "reference-video-redubbing.native-distilled.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.native-distilled.post.lipforcing-14b-wan-vae",
+      "id": "lipdub.native-distilled.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3719,6 +4669,7 @@
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3752,7 +4703,7 @@
       ],
       "claimId": "reference-video-redubbing.native-distilled.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.native-distilled.post.musetalk-1.5",
+      "id": "lipdub.native-distilled.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3768,6 +4719,7 @@
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3802,7 +4754,7 @@
       ],
       "claimId": "reference-video-redubbing.native-distilled",
       "cooperativeCheckpoint": true,
-      "id": "lipdub.native-distilled.post.none",
+      "id": "lipdub.native-distilled.prompt.not-applicable.post.none",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3817,6 +4769,7 @@
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3848,7 +4801,7 @@
       ],
       "claimId": "reference-video-redubbing.official-comfy-hq.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.official-comfy-hq.post.latentsync-1.6",
+      "id": "lipdub.official-comfy-hq.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3864,6 +4817,7 @@
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3897,7 +4851,7 @@
       ],
       "claimId": "reference-video-redubbing.official-comfy-hq.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.official-comfy-hq.post.lipforcing-14b-streaming-taehv",
+      "id": "lipdub.official-comfy-hq.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3913,6 +4867,7 @@
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3946,7 +4901,7 @@
       ],
       "claimId": "reference-video-redubbing.official-comfy-hq.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.official-comfy-hq.post.lipforcing-14b-wan-vae",
+      "id": "lipdub.official-comfy-hq.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -3962,6 +4917,7 @@
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -3995,7 +4951,7 @@
       ],
       "claimId": "reference-video-redubbing.official-comfy-hq.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "lipdub.official-comfy-hq.post.musetalk-1.5",
+      "id": "lipdub.official-comfy-hq.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -4011,6 +4967,7 @@
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -4045,7 +5002,7 @@
       ],
       "claimId": "reference-video-redubbing.official-comfy-hq",
       "cooperativeCheckpoint": true,
-      "id": "lipdub.official-comfy-hq.post.none",
+      "id": "lipdub.official-comfy-hq.prompt.not-applicable.post.none",
       "inputContract": [
         "reference-video",
         "exact-target-dialogue",
@@ -4060,6 +5017,7 @@
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -4091,7 +5049,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.image.post.latentsync-1.6",
+      "id": "one-stage.image.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -4105,6 +5063,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -4138,7 +5097,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.image.post.lipforcing-14b-streaming-taehv",
+      "id": "one-stage.image.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -4152,6 +5111,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -4185,7 +5145,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.image.post.lipforcing-14b-wan-vae",
+      "id": "one-stage.image.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -4199,6 +5159,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -4232,7 +5193,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.image.post.musetalk-1.5",
+      "id": "one-stage.image.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -4246,6 +5207,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -4277,7 +5239,7 @@
       ],
       "claimId": "native-generation.image-to-video",
       "cooperativeCheckpoint": true,
-      "id": "one-stage.image.post.none",
+      "id": "one-stage.image.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images"
@@ -4303,6 +5265,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -4332,7 +5295,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.text.post.latentsync-1.6",
+      "id": "one-stage.text.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -4354,6 +5317,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -4385,7 +5349,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.text.post.lipforcing-14b-streaming-taehv",
+      "id": "one-stage.text.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -4407,6 +5371,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -4438,7 +5403,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.text.post.lipforcing-14b-wan-vae",
+      "id": "one-stage.text.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -4460,6 +5425,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -4491,7 +5457,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "one-stage.text.post.musetalk-1.5",
+      "id": "one-stage.text.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -4513,6 +5479,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -4542,7 +5509,7 @@
       ],
       "claimId": "native-generation.text-to-video",
       "cooperativeCheckpoint": true,
-      "id": "one-stage.text.post.none",
+      "id": "one-stage.text.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt"
       ],
@@ -4575,6 +5542,7 @@
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -4606,7 +5574,7 @@
       ],
       "claimId": "video-edit.retake.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "retake.dev.post.latentsync-1.6",
+      "id": "retake.dev.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4621,6 +5589,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
         "sourceMode": "not-applicable"
       },
@@ -4654,7 +5623,7 @@
       ],
       "claimId": "video-edit.retake.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "retake.dev.post.lipforcing-14b-streaming-taehv",
+      "id": "retake.dev.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4669,6 +5638,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
         "sourceMode": "not-applicable"
       },
@@ -4702,7 +5672,7 @@
       ],
       "claimId": "video-edit.retake.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "retake.dev.post.lipforcing-14b-wan-vae",
+      "id": "retake.dev.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4717,6 +5687,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
         "sourceMode": "not-applicable"
       },
@@ -4750,7 +5721,7 @@
       ],
       "claimId": "video-edit.retake.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "retake.dev.post.musetalk-1.5",
+      "id": "retake.dev.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4765,6 +5736,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
         "sourceMode": "not-applicable"
       },
@@ -4796,7 +5768,7 @@
       ],
       "claimId": "video-edit.retake",
       "cooperativeCheckpoint": true,
-      "id": "retake.dev.post.none",
+      "id": "retake.dev.prompt.not-applicable.post.none",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4823,6 +5795,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
         "sourceMode": "not-applicable"
       },
@@ -4854,7 +5827,7 @@
       ],
       "claimId": "video-edit.retake.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "retake.distilled.post.latentsync-1.6",
+      "id": "retake.distilled.prompt.not-applicable.post.latentsync-1.6",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4869,6 +5842,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
         "sourceMode": "not-applicable"
       },
@@ -4902,7 +5876,7 @@
       ],
       "claimId": "video-edit.retake.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "retake.distilled.post.lipforcing-14b-streaming-taehv",
+      "id": "retake.distilled.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4917,6 +5891,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
         "sourceMode": "not-applicable"
       },
@@ -4950,7 +5925,7 @@
       ],
       "claimId": "video-edit.retake.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "retake.distilled.post.lipforcing-14b-wan-vae",
+      "id": "retake.distilled.prompt.not-applicable.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "source-video",
         "time-range",
@@ -4965,6 +5940,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
         "sourceMode": "not-applicable"
       },
@@ -4998,7 +5974,7 @@
       ],
       "claimId": "video-edit.retake.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "retake.distilled.post.musetalk-1.5",
+      "id": "retake.distilled.prompt.not-applicable.post.musetalk-1.5",
       "inputContract": [
         "source-video",
         "time-range",
@@ -5013,6 +5989,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
         "sourceMode": "not-applicable"
       },
@@ -5044,7 +6021,7 @@
       ],
       "claimId": "video-edit.retake",
       "cooperativeCheckpoint": true,
-      "id": "retake.distilled.post.none",
+      "id": "retake.distilled.prompt.not-applicable.post.none",
       "inputContract": [
         "source-video",
         "time-range",
@@ -5071,6 +6048,7 @@
         "lipDubPipelineProfile": null,
         "mode": "retake",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
         "sourceMode": "not-applicable"
       },
@@ -5095,7 +6073,7 @@
       ],
       "claimId": "native-generation.text-to-audio",
       "cooperativeCheckpoint": false,
-      "id": "text-to-audio.post.none",
+      "id": "text-to-audio.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt"
       ],
@@ -5136,6 +6114,7 @@
         "lipDubPipelineProfile": null,
         "mode": "text-to-audio",
         "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
         "sourceMode": "not-applicable"
       },
@@ -5167,7 +6146,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.image.post.latentsync-1.6",
+      "id": "two-stage-hq.image.prompt.abliterated-lora.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5181,6 +6160,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5215,7 +6195,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.image.post.lipforcing-14b-streaming-taehv",
+      "id": "two-stage-hq.image.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5229,6 +6209,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5263,7 +6244,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.image.post.lipforcing-14b-wan-vae",
+      "id": "two-stage-hq.image.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5277,6 +6258,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5311,7 +6293,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.image.post.musetalk-1.5",
+      "id": "two-stage-hq.image.prompt.abliterated-lora.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5325,6 +6307,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5357,7 +6340,7 @@
       ],
       "claimId": "native-generation.image-to-video",
       "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.image.post.none",
+      "id": "two-stage-hq.image.prompt.abliterated-lora.post.none",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images"
@@ -5383,285 +6366,9 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
         "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
-      },
-      "rights": {
-        "evidenceIds": [
-          "ltx2-community-license-2026-01-05",
-          "gemma-terms-model-card",
-          "comfy-ltx2-abliterated-lora-license-undeclared"
-        ],
-        "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
-        "status": "blocked"
-      },
-      "targetStatus": "blocked"
-    },
-    {
-      "applicableGates": [
-        "runtime-import",
-        "cold-canary",
-        "playable-output",
-        "provenance",
-        "av-sync",
-        "phoneme-viseme",
-        "mouth-artifact",
-        "sharpness",
-        "asr-critical-token",
-        "audio-quality",
-        "mos"
-      ],
-      "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
-      "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.text.post.latentsync-1.6",
-      "inputContract": [
-        "prompt",
-        "speech-audio-or-native-dialogue-track"
-      ],
-      "notApplicable": [
-        {
-          "gate": "identity",
-          "reason": "This surface entry has no identity-bearing visual reference."
-        },
-        {
-          "gate": "vbench-i2v",
-          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
-        }
-      ],
-      "outputMedia": "video/mp4",
-      "request": {
-        "dialogueIntent": "required",
-        "icLoraProfile": null,
-        "lipDubPipelineProfile": null,
-        "mode": "two-stage-hq",
-        "postprocessor": "latentsync-1.6",
-        "retakeCheckpoint": null,
-        "sourceMode": "text"
-      },
-      "rights": {
-        "evidenceIds": [
-          "ltx2-community-license-2026-01-05",
-          "gemma-terms-model-card",
-          "comfy-ltx2-abliterated-lora-license-undeclared",
-          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
-          "latentsync-apache-2.0"
-        ],
-        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
-        "status": "blocked"
-      },
-      "targetStatus": "blocked"
-    },
-    {
-      "applicableGates": [
-        "runtime-import",
-        "cold-canary",
-        "playable-output",
-        "provenance",
-        "av-sync",
-        "phoneme-viseme",
-        "mouth-artifact",
-        "sharpness",
-        "asr-critical-token",
-        "audio-quality",
-        "mos"
-      ],
-      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
-      "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.text.post.lipforcing-14b-streaming-taehv",
-      "inputContract": [
-        "prompt",
-        "speech-audio-or-native-dialogue-track"
-      ],
-      "notApplicable": [
-        {
-          "gate": "identity",
-          "reason": "This surface entry has no identity-bearing visual reference."
-        },
-        {
-          "gate": "vbench-i2v",
-          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
-        }
-      ],
-      "outputMedia": "video/mp4",
-      "request": {
-        "dialogueIntent": "required",
-        "icLoraProfile": null,
-        "lipDubPipelineProfile": null,
-        "mode": "two-stage-hq",
-        "postprocessor": "lipforcing-14b-streaming-taehv",
-        "retakeCheckpoint": null,
-        "sourceMode": "text"
-      },
-      "rights": {
-        "evidenceIds": [
-          "ltx2-community-license-2026-01-05",
-          "gemma-terms-model-card",
-          "comfy-ltx2-abliterated-lora-license-undeclared",
-          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
-          "lipforcing-apache-2.0"
-        ],
-        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
-        "status": "blocked"
-      },
-      "targetStatus": "blocked"
-    },
-    {
-      "applicableGates": [
-        "runtime-import",
-        "cold-canary",
-        "playable-output",
-        "provenance",
-        "av-sync",
-        "phoneme-viseme",
-        "mouth-artifact",
-        "sharpness",
-        "asr-critical-token",
-        "audio-quality",
-        "mos"
-      ],
-      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
-      "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.text.post.lipforcing-14b-wan-vae",
-      "inputContract": [
-        "prompt",
-        "speech-audio-or-native-dialogue-track"
-      ],
-      "notApplicable": [
-        {
-          "gate": "identity",
-          "reason": "This surface entry has no identity-bearing visual reference."
-        },
-        {
-          "gate": "vbench-i2v",
-          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
-        }
-      ],
-      "outputMedia": "video/mp4",
-      "request": {
-        "dialogueIntent": "required",
-        "icLoraProfile": null,
-        "lipDubPipelineProfile": null,
-        "mode": "two-stage-hq",
-        "postprocessor": "lipforcing-14b-wan-vae",
-        "retakeCheckpoint": null,
-        "sourceMode": "text"
-      },
-      "rights": {
-        "evidenceIds": [
-          "ltx2-community-license-2026-01-05",
-          "gemma-terms-model-card",
-          "comfy-ltx2-abliterated-lora-license-undeclared",
-          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
-          "lipforcing-apache-2.0"
-        ],
-        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
-        "status": "blocked"
-      },
-      "targetStatus": "blocked"
-    },
-    {
-      "applicableGates": [
-        "runtime-import",
-        "cold-canary",
-        "playable-output",
-        "provenance",
-        "av-sync",
-        "phoneme-viseme",
-        "mouth-artifact",
-        "sharpness",
-        "asr-critical-token",
-        "audio-quality",
-        "mos"
-      ],
-      "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
-      "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.text.post.musetalk-1.5",
-      "inputContract": [
-        "prompt",
-        "speech-audio-or-native-dialogue-track"
-      ],
-      "notApplicable": [
-        {
-          "gate": "identity",
-          "reason": "This surface entry has no identity-bearing visual reference."
-        },
-        {
-          "gate": "vbench-i2v",
-          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
-        }
-      ],
-      "outputMedia": "video/mp4",
-      "request": {
-        "dialogueIntent": "required",
-        "icLoraProfile": null,
-        "lipDubPipelineProfile": null,
-        "mode": "two-stage-hq",
-        "postprocessor": "musetalk-1.5",
-        "retakeCheckpoint": null,
-        "sourceMode": "text"
-      },
-      "rights": {
-        "evidenceIds": [
-          "ltx2-community-license-2026-01-05",
-          "gemma-terms-model-card",
-          "comfy-ltx2-abliterated-lora-license-undeclared",
-          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
-          "musetalk-model-card",
-          "musetalk-face-parse-license-undeclared"
-        ],
-        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
-        "status": "blocked"
-      },
-      "targetStatus": "blocked"
-    },
-    {
-      "applicableGates": [
-        "runtime-import",
-        "cold-canary",
-        "playable-output",
-        "provenance",
-        "av-sync",
-        "sharpness",
-        "audio-quality",
-        "mos"
-      ],
-      "claimId": "native-generation.text-to-video",
-      "cooperativeCheckpoint": false,
-      "id": "two-stage-hq.text.post.none",
-      "inputContract": [
-        "prompt"
-      ],
-      "notApplicable": [
-        {
-          "gate": "phoneme-viseme",
-          "reason": "This surface entry makes no speech or lip-synchronization claim."
-        },
-        {
-          "gate": "mouth-artifact",
-          "reason": "This surface entry makes no mouth-rendering claim."
-        },
-        {
-          "gate": "identity",
-          "reason": "This surface entry has no identity-bearing visual reference."
-        },
-        {
-          "gate": "vbench-i2v",
-          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
-        },
-        {
-          "gate": "asr-critical-token",
-          "reason": "This surface entry makes no intelligible-speech claim."
-        }
-      ],
-      "outputMedia": "video/mp4",
-      "request": {
-        "dialogueIntent": "optional",
-        "icLoraProfile": null,
-        "lipDubPipelineProfile": null,
-        "mode": "two-stage-hq",
-        "postprocessor": "none",
-        "retakeCheckpoint": null,
-        "sourceMode": "text"
       },
       "rights": {
         "evidenceIds": [
@@ -5692,7 +6399,814 @@
       ],
       "claimId": "native-generation.image-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.image.post.latentsync-1.6",
+      "id": "two-stage-hq.image.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.image.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.image.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.image.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.image.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.abliterated-lora.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "comfy-ltx2-abliterated-lora-license-undeclared",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "comfy-ltx2-abliterated-lora-license-undeclared",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "comfy-ltx2-abliterated-lora-license-undeclared",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.abliterated-lora.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "comfy-ltx2-abliterated-lora-license-undeclared",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.abliterated-lora.post.none",
+      "inputContract": [
+        "prompt"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "comfy-ltx2-abliterated-lora-license-undeclared"
+        ],
+        "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage-hq.text.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage-hq",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.image.prompt.abliterated-lora.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5706,6 +7220,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5740,7 +7255,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.image.post.lipforcing-14b-streaming-taehv",
+      "id": "two-stage.image.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5754,6 +7269,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5788,7 +7304,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.image.post.lipforcing-14b-wan-vae",
+      "id": "two-stage.image.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5802,6 +7318,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5836,7 +7353,7 @@
       ],
       "claimId": "native-generation.image-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.image.post.musetalk-1.5",
+      "id": "two-stage.image.prompt.abliterated-lora.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images",
@@ -5850,6 +7367,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5882,7 +7400,7 @@
       ],
       "claimId": "native-generation.image-to-video",
       "cooperativeCheckpoint": true,
-      "id": "two-stage.image.post.none",
+      "id": "two-stage.image.prompt.abliterated-lora.post.none",
       "inputContract": [
         "prompt",
         "one-or-more-reference-images"
@@ -5908,6 +7426,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "image"
       },
@@ -5931,6 +7450,254 @@
         "av-sync",
         "phoneme-viseme",
         "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.image.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.image.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.image.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.image.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.image-to-video",
+      "cooperativeCheckpoint": true,
+      "id": "two-stage.image.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "image"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
         "sharpness",
         "asr-critical-token",
         "audio-quality",
@@ -5938,7 +7705,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.text.post.latentsync-1.6",
+      "id": "two-stage.text.prompt.abliterated-lora.post.latentsync-1.6",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -5960,6 +7727,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -5992,7 +7760,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.text.post.lipforcing-14b-streaming-taehv",
+      "id": "two-stage.text.prompt.abliterated-lora.post.lipforcing-14b-streaming-taehv",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -6014,6 +7782,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -6046,7 +7815,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.text.post.lipforcing-14b-wan-vae",
+      "id": "two-stage.text.prompt.abliterated-lora.post.lipforcing-14b-wan-vae",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -6068,6 +7837,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -6100,7 +7870,7 @@
       ],
       "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
       "cooperativeCheckpoint": false,
-      "id": "two-stage.text.post.musetalk-1.5",
+      "id": "two-stage.text.prompt.abliterated-lora.post.musetalk-1.5",
       "inputContract": [
         "prompt",
         "speech-audio-or-native-dialogue-track"
@@ -6122,6 +7892,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -6152,7 +7923,7 @@
       ],
       "claimId": "native-generation.text-to-video",
       "cooperativeCheckpoint": true,
-      "id": "two-stage.text.post.none",
+      "id": "two-stage.text.prompt.abliterated-lora.post.none",
       "inputContract": [
         "prompt"
       ],
@@ -6185,6 +7956,7 @@
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
         "postprocessor": "none",
+        "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
         "sourceMode": "text"
       },
@@ -6198,16 +7970,293 @@
         "status": "blocked"
       },
       "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.latentsync-1.6",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.text.prompt.base-gemma.post.latentsync-1.6",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "latentsync-1.6",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "latentsync-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.text.prompt.base-gemma.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.text.prompt.base-gemma.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "sharpness",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video.refined.musetalk-1.5",
+      "cooperativeCheckpoint": false,
+      "id": "two-stage.text.prompt.base-gemma.post.musetalk-1.5",
+      "inputContract": [
+        "prompt",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "musetalk-1.5",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "musetalk-model-card",
+          "musetalk-face-parse-license-undeclared"
+        ],
+        "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.text-to-video",
+      "cooperativeCheckpoint": true,
+      "id": "two-stage.text.prompt.base-gemma.post.none",
+      "inputContract": [
+        "prompt"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "two-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "base-gemma",
+        "retakeCheckpoint": null,
+        "sourceMode": "text"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx2-community-license-2026-01-05",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
     }
   ],
   "inputs": {
     "capabilityMatrix": {
       "path": "shared/releaseSurface.ts",
-      "sha256": "5329492839ca151d1bb59dd67ca7cb4f2f0d2aa62be1096ab603c2b3a219c16e"
+      "sha256": "4a1a3bd228398a0d54159b1e1289f37a9e979192165ddfecc51547736027fd86"
     },
     "requestSchema": {
       "path": "shared/pipelines.ts",
-      "sha256": "01d232df7e0a9cdf2d9f39311d2c84449bbbffe57608a3de71c368ba92e850ff"
+      "sha256": "3649f6d67383563a6e8b3281a3ab5bff87c4d8b06475c894a86d2ccc503c7801"
     }
   },
   "policyVersion": "ltx-studio-release-rights.v1",

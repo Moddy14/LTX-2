@@ -11,7 +11,11 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
   request.models.checkpointPath = "/models/ltx/checkpoint.safetensors";
   request.models.distilledCheckpointPath = "/models/ltx/distilled.safetensors";
   request.models.gemmaRoot = "/models/gemma";
-  request.models.gemmaLora = { path: "/models/gemma/gemma-abliterated-lora.safetensors", strength: 1 };
+  request.models.gemmaLora = {
+    enabled: true,
+    path: "/models/gemma/gemma-abliterated-lora.safetensors",
+    strength: 1,
+  };
   request.models.spatialUpscalerPath = "/models/ltx/upscaler.safetensors";
   request.models.distilledLora = { path: "/models/ltx/distilled-lora.safetensors", strength: 1 };
   if (
