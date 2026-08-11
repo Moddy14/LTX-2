@@ -280,10 +280,11 @@ Every later read revalidates canonical JSON, sequence, signatures, event IDs,
 and the complete SHA-256 chain. Measurement reports bind dataset,
 preregistration, release (holdout only), D0a design, runner, evaluator,
 thresholds and strata; their overall verdict is recomputed from the registered
-direction and confidence bound of every sorted metric. The caller must supply
-the complete metric-ID set from the frozen threshold catalog; missing or
-unexpected metrics reject the report, so an empty or partial pass cannot be
-used as evidence.
+direction, decision value (`estimate`, `ci-lower` or `ci-upper`) and threshold
+of every sorted metric. The caller must supply the complete gate map from the
+frozen threshold catalog. A report cannot silently substitute a confidence
+bound for an estimate or vice versa; missing, changed or unexpected gates
+reject the report, so an empty or partial pass cannot be used as evidence.
 
 The Product-HOLD remains correct until an operator provisions a separate
 blind-scorer UID/GID, owner-only `0700` holdout and log roots, an externally

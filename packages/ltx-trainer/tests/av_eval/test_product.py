@@ -105,6 +105,7 @@ def _report(kind: str = "holdout") -> dict[str, object]:
                 "ci_upper": 0.009,
                 "threshold": 0.01,
                 "direction": "lower",
+                "decision_value": "ci-upper",
                 "decision": "pass",
                 "independent_units": 40,
                 "clips": 120,
@@ -117,6 +118,7 @@ def _report(kind: str = "holdout") -> dict[str, object]:
                 "ci_upper": 0.93,
                 "threshold": 0.88,
                 "direction": "higher",
+                "decision_value": "ci-lower",
                 "decision": "pass",
                 "independent_units": 40,
                 "clips": 120,
@@ -126,7 +128,11 @@ def _report(kind: str = "holdout") -> dict[str, object]:
     }
 
 
-def _validate_report(report: object, kind: str = "holdout") -> dict[str, object]:
+def _validate_report(
+    report: object,
+    kind: str = "holdout",
+    required_gates: dict[str, tuple[str, str, float]] | None = None,
+) -> dict[str, object]:
     return validate_measurement_report(
         report,
         expected_kind=kind,  # type: ignore[arg-type]
@@ -137,7 +143,11 @@ def _validate_report(report: object, kind: str = "holdout") -> dict[str, object]
         runner_digest=DIGESTS["runner"],
         evaluator_digest=DIGESTS["evaluator"],
         thresholds_digest=DIGESTS["thresholds"],
-        required_metric_ids={"artifact-far", "identity-similarity"},
+        required_gates=required_gates
+        or {
+            "artifact-far": ("lower", "ci-upper", 0.01),
+            "identity-similarity": ("higher", "ci-lower", 0.88),
+        },
     )
 
 
@@ -223,6 +233,27 @@ def test_measurement_report_recomputes_confidence_bound_decisions() -> None:
     wrong_release["release_digest"] = "f" * 64
     with pytest.raises(ProductGovernanceError, match="release_digest mismatch"):
         _validate_report(wrong_release)
+
+
+def test_measurement_report_uses_the_frozen_decision_value() -> None:
+    estimate_gate = _report()
+    estimate_gate["metrics"][0]["decision_value"] = "estimate"  # type: ignore[index]
+    estimate_gate["metrics"][0]["ci_upper"] = 0.02  # type: ignore[index]
+    assert (
+        _validate_report(
+            estimate_gate,
+            required_gates={
+                "artifact-far": ("lower", "estimate", 0.01),
+                "identity-similarity": ("higher", "ci-lower", 0.88),
+            },
+        )
+        == estimate_gate
+    )
+
+    tampered_semantics = _report()
+    tampered_semantics["metrics"][0]["decision_value"] = "estimate"  # type: ignore[index]
+    with pytest.raises(ProductGovernanceError, match="gate semantics do not match"):
+        _validate_report(tampered_semantics)
 
 
 def test_tune_report_cannot_bind_a_release_or_hide_a_failed_metric() -> None:

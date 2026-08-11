@@ -378,7 +378,11 @@ def _validate_report_header(
         raise ProductGovernanceError("measurement report must contain metrics")
 
 
-def _validate_metric(metric: object, index: int) -> tuple[str, str]:
+def _validate_metric(
+    metric: object,
+    index: int,
+    required_gates: dict[str, tuple[str, str, float]],
+) -> tuple[str, str]:
     if not isinstance(metric, dict):
         raise ProductGovernanceError(f"metric {index} must be an object")
     _exact_keys(
@@ -390,6 +394,7 @@ def _validate_metric(metric: object, index: int) -> tuple[str, str]:
             "ci_upper",
             "threshold",
             "direction",
+            "decision_value",
             "decision",
             "independent_units",
             "clips",
@@ -398,16 +403,29 @@ def _validate_metric(metric: object, index: int) -> tuple[str, str]:
         f"metric {index}",
     )
     metric_id = _identifier(metric["metric_id"], f"metric {index}.metric_id")
+    if metric_id not in required_gates:
+        raise ProductGovernanceError(f"measurement report contains unknown metric {metric_id}")
     estimate = _number(metric["estimate"], f"metric {metric_id}.estimate")
     lower = _number(metric["ci_lower"], f"metric {metric_id}.ci_lower")
     upper = _number(metric["ci_upper"], f"metric {metric_id}.ci_upper")
     threshold = _number(metric["threshold"], f"metric {metric_id}.threshold")
     if not lower <= estimate <= upper:
         raise ProductGovernanceError(f"metric {metric_id} has inconsistent confidence bounds")
-    if metric["direction"] == "higher":
-        expected_decision = "pass" if lower >= threshold else "fail"
-    elif metric["direction"] == "lower":
-        expected_decision = "pass" if upper <= threshold else "fail"
+    required_direction, required_decision_value, required_threshold = required_gates[metric_id]
+    if (metric["direction"], metric["decision_value"], threshold) != (
+        required_direction,
+        required_decision_value,
+        required_threshold,
+    ):
+        raise ProductGovernanceError(f"metric {metric_id} gate semantics do not match the frozen catalog")
+    decision_values = {"estimate": estimate, "ci-lower": lower, "ci-upper": upper}
+    if required_decision_value not in decision_values:
+        raise ProductGovernanceError(f"metric {metric_id} decision_value is invalid")
+    decision_value = decision_values[required_decision_value]
+    if required_direction == "higher":
+        expected_decision = "pass" if decision_value >= threshold else "fail"
+    elif required_direction == "lower":
+        expected_decision = "pass" if decision_value <= threshold else "fail"
     else:
         raise ProductGovernanceError(f"metric {metric_id} direction is invalid")
     if metric["decision"] != expected_decision:
@@ -434,7 +452,7 @@ def validate_measurement_report(
     runner_digest: str,
     evaluator_digest: str,
     thresholds_digest: str,
-    required_metric_ids: set[str],
+    required_gates: dict[str, tuple[str, str, float]],
 ) -> dict[str, Any]:
     """Validate exact bindings and recompute every confidence-bound decision."""
 
@@ -451,14 +469,18 @@ def validate_measurement_report(
         evaluator_digest=evaluator_digest,
         thresholds_digest=thresholds_digest,
     )
-    if not required_metric_ids:
-        raise ProductGovernanceError("required metric IDs must not be empty")
-    for metric_id in required_metric_ids:
+    if not required_gates:
+        raise ProductGovernanceError("required gates must not be empty")
+    for metric_id, (direction, decision_value, threshold) in required_gates.items():
         _identifier(metric_id, "required metric_id")
-    validated_metrics = [_validate_metric(metric, index) for index, metric in enumerate(raw["metrics"])]
+        if direction not in {"higher", "lower"} or decision_value not in {"estimate", "ci-lower", "ci-upper"}:
+            raise ProductGovernanceError(f"required gate semantics are invalid for {metric_id}")
+        _number(threshold, f"required gate {metric_id}.threshold")
+    validated_metrics = [_validate_metric(metric, index, required_gates) for index, metric in enumerate(raw["metrics"])]
     metric_ids = [metric_id for metric_id, _decision in validated_metrics]
     if metric_ids != sorted(set(metric_ids)):
         raise ProductGovernanceError("measurement metric IDs must be unique and sorted")
+    required_metric_ids = set(required_gates)
     if set(metric_ids) != required_metric_ids:
         missing = sorted(required_metric_ids - set(metric_ids))
         unknown = sorted(set(metric_ids) - required_metric_ids)
