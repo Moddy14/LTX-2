@@ -159,7 +159,9 @@ Noch offen:
    erzeugen; der Manifeststatus bleibt bis dahin `hold`.
 2. Den schmutzigen externen LongCat-Runtimebaum durch einen eigenen sauberen,
    digestgebundenen Runtime-Release ersetzen, ohne Benutzeränderungen zu
-   verwerfen.
+   verwerfen. Der Manifest-Check wertet dabei auch nicht ignorierte ungetrackte
+   Dateien als Drift und bindet Commit sowie Git-Tree; eine nur scheinbar saubere
+   Tracked-Dateiliste reicht nicht.
 3. Erst nach leerem Job-Preflight und Betreiberfreigabe atomar umschalten,
    Cold-Canary und absichtlichen Manipulations-Negativtest ausführen.
 

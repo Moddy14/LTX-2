@@ -72,7 +72,8 @@ try {
   longcat = {
     repository: "meituan-longcat/LongCat-Video",
     commit: command("git", ["rev-parse", "HEAD"], { cwd: longcatRoot }),
-    clean: command("git", ["status", "--porcelain=v1", "--untracked-files=no"], { cwd: longcatRoot }) === "",
+    tree: command("git", ["rev-parse", "HEAD^{tree}"], { cwd: longcatRoot }),
+    clean: command("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: longcatRoot }) === "",
     licenseSha256: sha256File(join(longcatRoot, "vendor", "LongCat-Video", "LICENSE")),
   };
 } catch (error) {
