@@ -13,6 +13,8 @@ import type {
   ProjectOutputApprovalRequest,
   ProjectOutputCaptureRequest,
   ProjectRevisionEnvelope,
+  ProjectRunBinding,
+  ProjectRunRequest,
   ProjectShotCreateRequest,
   ProjectShotRevisionRequest,
 } from "../shared/projects";
@@ -140,6 +142,20 @@ export async function captureProjectShotOutput(
     }),
   );
   return body.project;
+}
+
+export async function launchProjectShot(
+  id: string,
+  shotId: string,
+  input: ProjectRunRequest,
+): Promise<{ project: ProjectRunBinding; job: StudioJob }> {
+  return decode<{ project: ProjectRunBinding; job: StudioJob }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/shots/${encodeURIComponent(shotId)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 export async function approveProjectShotOutput(

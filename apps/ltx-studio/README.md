@@ -183,9 +183,11 @@ Every mutation appends an owner-only canonical revision that binds its predecess
 hash. Shots retain every request revision, concrete continuity/retake source,
 output provenance fingerprint, settings-sidecar digest, and exported-media digest.
 The project API derives the actor from server configuration and hashes artifacts
-itself; browser-supplied actors or digests are rejected. The Studio project UI and
-job-start binding are still under development, so this backend contract does not
-yet constitute the complete P4 workflow.
+itself; browser-supplied actors or digests are rejected. Project-launched jobs and
+their v7 output sidecars retain the exact project, shot, project-revision, and
+request-revision binding across restart. The Studio project UI is still under
+development, so this backend contract does not yet constitute the complete P4
+workflow.
 
 ## Runtime Settings
 

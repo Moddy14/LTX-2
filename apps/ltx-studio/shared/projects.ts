@@ -27,6 +27,17 @@ export const projectContinuityBindingSchema = z.object({
   referenceOutputId: z.string().uuid(),
 }).strict();
 
+export const projectRunBindingSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-project-run.v1"),
+  projectId: z.string().uuid(),
+  projectRevision: z.number().int().positive(),
+  projectRevisionSha256: sha256Schema,
+  shotId: z.string().uuid(),
+  requestRevisionId: z.string().uuid(),
+  requestSha256: sha256Schema,
+  continuity: projectContinuityBindingSchema.nullable(),
+}).strict();
+
 export const projectShotCreateInputSchema = z.object({
   expectedRevision: z.number().int().positive(),
   title: safeText(120),
@@ -54,6 +65,7 @@ export const projectShotRevisionInputSchema = z.object({
 
 export const projectOutputEvidenceSchema = z.object({
   id: z.string().uuid(),
+  projectRun: projectRunBindingSchema,
   requestRevisionId: z.string().uuid(),
   requestSha256: sha256Schema,
   jobId: z.string().uuid(),
@@ -66,6 +78,16 @@ export const projectOutputEvidenceSchema = z.object({
   exportSha256: sha256Schema,
   recordedAt: timestampSchema,
 }).strict().superRefine((value, context) => {
+  if (
+    value.projectRun.requestRevisionId !== value.requestRevisionId
+    || value.projectRun.requestSha256 !== value.requestSha256
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["projectRun"],
+      message: "Projekt-Run und Output müssen dieselbe Request-Revision binden.",
+    });
+  }
   if (value.changedAt > value.recordedAt) {
     context.addIssue({
       code: "custom",
@@ -114,6 +136,9 @@ export const projectOutputCaptureRequestSchema = z.object({
   expectedRevision: z.number().int().positive(),
   requestRevisionId: z.string().uuid(),
   outputName: outputNameSchema,
+}).strict();
+export const projectRunRequestSchema = z.object({
+  expectedRevision: z.number().int().positive(),
 }).strict();
 export const projectOutputApprovalRequestSchema = projectOutputApprovalInputSchema.omit({
   shotId: true,
@@ -317,9 +342,11 @@ export type ProjectShotRevisionRequest = z.infer<typeof projectShotRevisionReque
 export type ProjectOutputRecordInput = z.infer<typeof projectOutputRecordInputSchema>;
 export type ProjectOutputEvidence = z.infer<typeof projectOutputEvidenceSchema>;
 export type ProjectOutputCaptureRequest = z.infer<typeof projectOutputCaptureRequestSchema>;
+export type ProjectRunRequest = z.infer<typeof projectRunRequestSchema>;
 export type ProjectOutputApprovalInput = z.infer<typeof projectOutputApprovalInputSchema>;
 export type ProjectOutputApprovalRequest = z.infer<typeof projectOutputApprovalRequestSchema>;
 export type ProjectArchiveInput = z.infer<typeof projectArchiveInputSchema>;
 export type ProjectArchiveRequest = z.infer<typeof projectArchiveRequestSchema>;
+export type ProjectRunBinding = z.infer<typeof projectRunBindingSchema>;
 export type StudioProject = z.infer<typeof studioProjectSchema>;
 export type ProjectRevisionEnvelope = z.infer<typeof projectRevisionEnvelopeSchema>;

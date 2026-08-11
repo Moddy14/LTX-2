@@ -23,6 +23,7 @@ import {
   projectCreateInputSchema,
   projectOutputApprovalInputSchema,
   projectOutputRecordInputSchema,
+  projectRunBindingSchema,
   projectRevisionEnvelopeSchema,
   projectShotCreateInputSchema,
   projectShotRevisionInputSchema,
@@ -32,6 +33,7 @@ import {
   type ProjectOutputApprovalInput,
   type ProjectOutputRecordInput,
   type ProjectRevisionEnvelope,
+  type ProjectRunBinding,
   type ProjectShotCreateInput,
   type ProjectShotRevisionInput,
   type StudioProject,
@@ -285,6 +287,39 @@ export class ProjectStore {
     return revision.requestSha256;
   }
 
+  bindingForRun(
+    id: string,
+    expectedRevision: number,
+    shotId: string,
+  ): { request: StudioProject["shots"][number]["requestRevisions"][number]["request"]; binding: ProjectRunBinding } {
+    const current = this.get(id);
+    if (!current) throw new ProjectConflictError("Projekt nicht gefunden.");
+    if (current.revision !== expectedRevision) {
+      throw new ProjectConflictError(
+        `Stale Write: erwartet Revision ${expectedRevision}, aktuell ist ${current.revision}.`,
+      );
+    }
+    assertActive(current.project);
+    const shot = findShot(current.project, shotId);
+    const revision = shot.requestRevisions.at(-1);
+    if (!revision || revision.id !== shot.currentRequestRevisionId) {
+      throw new ProjectConflictError("Aktuelle Shot-Request-Revision ist nicht hashkonsistent.");
+    }
+    return {
+      request: structuredClone(revision.request),
+      binding: projectRunBindingSchema.parse({
+        schemaVersion: "ltx-studio-project-run.v1",
+        projectId: current.projectId,
+        projectRevision: current.revision,
+        projectRevisionSha256: projectValueSha256(current),
+        shotId: shot.id,
+        requestRevisionId: revision.id,
+        requestSha256: revision.requestSha256,
+        continuity: shot.continuity,
+      }),
+    };
+  }
+
   history(id: string): ProjectRevisionEnvelope[] {
     if (!PROJECT_ID_PATTERN.test(id)) throw new ProjectConflictError("Ungültige Projekt-ID.");
     const directory = join(this.root, id);
@@ -456,6 +491,24 @@ export class ProjectStore {
       const project = structuredClone(current.project);
       assertActive(project);
       const shot = findShot(project, parsed.shotId);
+      const projectRun = parsed.evidence.projectRun;
+      const boundEnvelope = this.history(id)[projectRun.projectRevision - 1];
+      const boundShot = boundEnvelope?.project.shots.find(({ id: shotId }) => shotId === projectRun.shotId);
+      const boundRequest = boundShot?.requestRevisions.find(
+        ({ id: revisionId }) => revisionId === projectRun.requestRevisionId,
+      );
+      if (
+        projectRun.projectId !== id
+        || projectRun.shotId !== shot.id
+        || !boundEnvelope
+        || projectValueSha256(boundEnvelope) !== projectRun.projectRevisionSha256
+        || !boundShot
+        || !boundRequest
+        || boundRequest.requestSha256 !== projectRun.requestSha256
+        || canonicalJson(boundShot.continuity) !== canonicalJson(projectRun.continuity)
+      ) {
+        throw new ProjectConflictError("Output bindet keinen verifizierbaren historischen Projekt-Run.");
+      }
       const requestRevision = shot.requestRevisions.find(({ id }) => id === parsed.evidence.requestRevisionId);
       if (!requestRevision || requestRevision.requestSha256 !== parsed.evidence.requestSha256) {
         throw new ProjectConflictError("Output bindet keine exakte Request-Revision dieses Shots.");

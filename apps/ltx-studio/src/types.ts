@@ -2,6 +2,7 @@ import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines.
 import type { StudioAsset } from "../shared/assets.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import type { ExperimentRunBinding } from "../shared/experiments.js";
+import type { ProjectRunBinding } from "../shared/projects.js";
 export type { StudioOutput } from "../shared/outputs.js";
 export type { ResourceEstimate } from "../shared/estimates.js";
 export type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models.js";
@@ -59,6 +60,7 @@ export type StudioJob = {
   favorite: boolean;
   variantOf: string | null;
   experiment: ExperimentRunBinding | null;
+  project: ProjectRunBinding | null;
   runtimeMs: number | null;
   cancelledBy: "studio" | null;
   dgxJobId: string | null;

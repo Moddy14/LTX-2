@@ -50,6 +50,7 @@ function adoptedOutput(overrides: Partial<StudioOutput> = {}): StudioOutput {
     name: "adopted-baseline.mp4",
     jobId: BASELINE_JOB_ID,
     experiment: null,
+    project: null,
     experimentRequestVerified: false,
     provenance: { verifiedAt: new Date(0).toISOString(), fingerprint: FINGERPRINT },
     ...overrides,

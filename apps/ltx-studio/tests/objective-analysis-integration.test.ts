@@ -173,6 +173,7 @@ function job(
     favorite: false,
     variantOf: null,
     experiment: null,
+    project: null,
     runtimeMs: 1_000,
     cancelledBy: null,
     dgxJobId: null,

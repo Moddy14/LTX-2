@@ -1721,6 +1721,7 @@ test("terminal jobs can be removed from persistent history", async ({ page }) =>
     favorite: false,
     variantOf: null,
     experiment: null,
+    project: null,
     runtimeMs: 1_000,
     cancelledBy: null,
     thermalProfile: null,

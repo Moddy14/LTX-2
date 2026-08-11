@@ -17,6 +17,7 @@ import {
   projectCreateRequestSchema,
   projectOutputApprovalRequestSchema,
   projectOutputCaptureRequestSchema,
+  projectRunRequestSchema,
   projectShotCreateRequestSchema,
   projectShotRevisionRequestSchema,
 } from "../shared/projects.js";
@@ -678,6 +679,7 @@ app.post("/api/projects/:id/shots", (request, response) => {
   response.status(201).json({
     project: projects.addShot(routeParam(request.params.id), {
       ...payload,
+      request: withOfficialSpeechModelPaths(payload.request),
       actorId: projectActorId,
     }),
   });
@@ -688,6 +690,7 @@ app.post("/api/projects/:id/shots/:shotId/revisions", (request, response) => {
   response.status(201).json({
     project: projects.reviseShot(routeParam(request.params.id), {
       ...payload,
+      request: withOfficialSpeechModelPaths(payload.request),
       shotId: routeParam(request.params.shotId),
       actorId: projectActorId,
     }),
@@ -707,7 +710,11 @@ app.post("/api/projects/:id/shots/:shotId/outputs", async (request, response) =>
   const recordedAt = new Date().toISOString();
   const evidence = await outputs.captureProjectOutputEvidence(
     payload.outputName,
-    payload.requestRevisionId,
+    {
+      projectId,
+      shotId,
+      requestRevisionId: payload.requestRevisionId,
+    },
     jobs.list(),
     recordedAt,
   );
@@ -721,6 +728,17 @@ app.post("/api/projects/:id/shots/:shotId/outputs", async (request, response) =>
       evidence,
       actorId: projectActorId,
     }, recordedAt),
+  });
+});
+
+app.post("/api/projects/:id/shots/:shotId/run", (request, response) => {
+  const payload = projectRunRequestSchema.parse(request.body);
+  const projectId = routeParam(request.params.id);
+  const shotId = routeParam(request.params.shotId);
+  const run = projects.bindingForRun(projectId, payload.expectedRevision, shotId);
+  response.status(202).json({
+    project: run.binding,
+    job: jobs.create(run.request, { project: run.binding }),
   });
 });
 

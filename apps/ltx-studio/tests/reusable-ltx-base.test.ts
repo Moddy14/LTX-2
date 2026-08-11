@@ -113,6 +113,7 @@ function completedBaseJob(outputName: string): StudioJob {
     favorite: false,
     variantOf: null,
     experiment: null,
+    project: null,
     runtimeMs: 1000,
     cancelledBy: null,
     dgxJobId: null,

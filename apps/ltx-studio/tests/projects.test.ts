@@ -14,6 +14,7 @@ import { canonicalJson } from "../shared/canonicalJson.js";
 import {
   projectCreateRequestSchema,
   projectOutputCaptureRequestSchema,
+  type ProjectRunBinding,
 } from "../shared/projects.js";
 import { validRequest } from "./fixtures.js";
 
@@ -31,14 +32,14 @@ async function projectRoot(): Promise<string> {
 }
 
 function outputEvidence(
-  requestRevisionId: string,
-  requestSha256: string,
+  projectRun: ProjectRunBinding,
   recordedAt: string,
 ) {
   return {
     id: randomUUID(),
-    requestRevisionId,
-    requestSha256,
+    projectRun,
+    requestRevisionId: projectRun.requestRevisionId,
+    requestSha256: projectRun.requestSha256,
     jobId: randomUUID(),
     outputName: `project-shot-${randomUUID().slice(0, 8)}.mp4`,
     sizeBytes: 1_024,
@@ -73,9 +74,9 @@ describe("persistent project history", () => {
     const firstRequestRevision = firstShot?.requestRevisions[0];
     expect(firstRequestRevision?.requestSha256).toBe(projectValueSha256(firstRequest));
 
+    const firstRun = store.bindingForRun(created.projectId, 2, firstShot?.id ?? "").binding;
     const firstOutput = outputEvidence(
-      firstRequestRevision?.id ?? "",
-      firstRequestRevision?.requestSha256 ?? "",
+      firstRun,
       "2026-08-11T18:02:00.000Z",
     );
     const rendered = store.recordOutput(created.projectId, {
@@ -196,9 +197,12 @@ describe("persistent project history", () => {
       actorId,
     })).toThrow("Continuity-Ausgabe existiert nicht");
 
+    const forgedRun = structuredClone(
+      store.bindingForRun(created.projectId, 2, shot?.id ?? "").binding,
+    );
+    forgedRun.requestSha256 = "f".repeat(64);
     const evidence = outputEvidence(
-      requestRevision?.id ?? "",
-      "f".repeat(64),
+      forgedRun,
       "2026-08-11T19:00:00.000Z",
     );
     expect(() => store.recordOutput(created.projectId, {
@@ -206,7 +210,7 @@ describe("persistent project history", () => {
       shotId: shot?.id ?? "",
       evidence,
       actorId,
-    }, evidence.recordedAt)).toThrow("keine exakte Request-Revision");
+    }, evidence.recordedAt)).toThrow("historischen Projekt-Run");
 
     expect(() => store.reviseShot(created.projectId, {
       expectedRevision: 2,
@@ -304,10 +308,13 @@ describe("persistent project history", () => {
       sourceOutputId: randomUUID(),
       actorId,
     })).toThrow("Retake-Revision");
-    const requestRevision = added.project.shots[0]?.requestRevisions[0];
+    const projectRun = store.bindingForRun(
+      created.projectId,
+      2,
+      added.project.shots[0]?.id ?? "",
+    ).binding;
     const futureChangedAt = outputEvidence(
-      requestRevision?.id ?? "",
-      requestRevision?.requestSha256 ?? "",
+      projectRun,
       "2026-08-11T20:00:00.000Z",
     );
     futureChangedAt.changedAt = "2026-08-11T20:00:01.000Z";

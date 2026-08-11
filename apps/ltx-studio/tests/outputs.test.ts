@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { StudioJob } from "../server/jobs.js";
 import type { RunProvenance } from "../shared/provenance.js";
+import type { ProjectRunBinding } from "../shared/projects.js";
 import { writeOutputAnalysis } from "../server/analysisStore.js";
 import { sha256Json } from "../server/experimentStore.js";
 import { OutputLibrary } from "../server/outputs.js";
@@ -49,6 +50,7 @@ function completedJob(
     favorite: false,
     variantOf: null,
     experiment: null,
+    project: null,
     runtimeMs: 1000,
     cancelledBy: null,
     dgxJobId: null,
@@ -109,6 +111,19 @@ function v2RunProvenance(): RunProvenance {
       manifestSha256: null,
       sourceCommit: null,
     },
+  };
+}
+
+function projectRunBinding(requestSha256: string): ProjectRunBinding {
+  return {
+    schemaVersion: "ltx-studio-project-run.v1",
+    projectId: "11111111-1111-4111-8111-111111111111",
+    projectRevision: 2,
+    projectRevisionSha256: "1".repeat(64),
+    shotId: "22222222-2222-4222-8222-222222222222",
+    requestRevisionId: "55555555-5555-4555-8555-555555555555",
+    requestSha256,
+    continuity: null,
   };
 }
 
@@ -189,7 +204,7 @@ describe("generated output library", () => {
     expect(output.qualityReview).toBeNull();
     const migrated = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(migrated).toMatchObject({
-      schemaVersion: "ltx-studio-output.v6",
+      schemaVersion: "ltx-studio-output.v7",
       changedAtMs: expect.any(Number),
       fileId: expect.stringMatching(/^\d+$/),
       identityEvidence: null,
@@ -235,7 +250,41 @@ describe("generated output library", () => {
     expect(() => library.resolveAnalysisTarget(outputName)).toThrow("inhaltsgebundene Studio-Provenienz");
   });
 
-  it("upgrades a strong v3 speech sidecar to v6 without inventing evidence", async () => {
+  it("reads v6 sidecars as explicitly project-unbound instead of inventing a run binding", async () => {
+    const root = await outputRoot();
+    const outputName = "v6-project-unbound.mp4";
+    const completedAt = "2026-07-24T07:40:00.000Z";
+    await writeFile(join(root, outputName), "video");
+    const stats = await stat(join(root, outputName));
+    const job = completedJob(outputName, completedAt, "audio-to-video");
+    await writeFile(join(root, `${outputName}.ltx-settings.json`), JSON.stringify({
+      schemaVersion: "ltx-studio-output.v6",
+      outputName,
+      jobId: job.id,
+      completedAt,
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      changedAtMs: stats.ctimeMs,
+      fileId: String(stats.ino),
+      request: job.request,
+      qualityReview: null,
+      identityEvidence: null,
+      runProvenance: v2RunProvenance(),
+      experiment: null,
+    }));
+
+    const output = new OutputLibrary(root).list([]).find((candidate) => candidate.name === outputName);
+
+    expect(output?.settingsAvailable).toBe(true);
+    expect(output?.project).toBeNull();
+    await expect(new OutputLibrary(root).captureProjectOutputEvidence(
+      outputName,
+      projectRunBinding(sha256Json(job.request)),
+      [],
+    )).rejects.toThrow("Projekt- und v2-Laufprovenienz");
+  });
+
+  it("upgrades a strong v3 speech sidecar to v7 without inventing evidence", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T07:45:00.000Z");
     const outputName = "v3-speech.mp4";
@@ -271,7 +320,7 @@ describe("generated output library", () => {
 
     const upgraded = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
     expect(upgraded).toMatchObject({
-      schemaVersion: "ltx-studio-output.v6",
+      schemaVersion: "ltx-studio-output.v7",
       identityEvidence: null,
       runProvenance: null,
     });
@@ -293,7 +342,7 @@ describe("generated output library", () => {
     expect(historic.settingsAvailable).toBe(true);
   });
 
-  it("persists a validated speech quality scorecard in a revision-bound v6 sidecar", async () => {
+  it("persists a validated speech quality scorecard in a revision-bound v7 sidecar", async () => {
     const root = await outputRoot();
     const completedAt = new Date("2026-07-24T09:00:00.000Z");
     const outputName = "speech-scorecard.mp4";
@@ -327,7 +376,7 @@ describe("generated output library", () => {
     });
     expect(Number.isFinite(Date.parse(updated.qualityReview!.updatedAt))).toBe(true);
     const sidecar = JSON.parse(await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8"));
-    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v6");
+    expect(sidecar.schemaVersion).toBe("ltx-studio-output.v7");
     expect(sidecar.changedAtMs).toEqual(expect.any(Number));
     expect(sidecar.fileId).toMatch(/^\d+$/);
     expect(sidecar.request).toEqual(job.request);
@@ -465,19 +514,20 @@ describe("generated output library", () => {
     const library = new OutputLibrary(root);
     const job = completedJob(outputName, "2026-07-24T09:36:00.000Z", "audio-to-video");
     job.runProvenance = v2RunProvenance();
+    job.project = projectRunBinding(sha256Json(job.request));
     library.recordCompleted([job]);
-    const requestRevisionId = "55555555-5555-4555-8555-555555555555";
     const recordedAt = new Date().toISOString();
 
     const evidence = await library.captureProjectOutputEvidence(
       outputName,
-      requestRevisionId,
+      job.project,
       [job],
       recordedAt,
     );
 
     expect(evidence).toMatchObject({
-      requestRevisionId,
+      requestRevisionId: job.project.requestRevisionId,
+      projectRun: job.project,
       requestSha256: sha256Json(job.request),
       jobId: job.id,
       outputName,
@@ -490,11 +540,15 @@ describe("generated output library", () => {
     expect(evidence.settingsSidecarSha256).toBe(
       createHash("sha256").update(await readFile(sidecarPath)).digest("hex"),
     );
+    expect(JSON.parse(await readFile(sidecarPath, "utf8"))).toMatchObject({
+      schemaVersion: "ltx-studio-output.v7",
+      project: job.project,
+    });
 
     await appendFile(outputPath, "changed");
     await expect(library.captureProjectOutputEvidence(
       outputName,
-      requestRevisionId,
+      job.project,
       [job],
     )).rejects.toThrow("unveränderte Datei");
   });
@@ -506,11 +560,12 @@ describe("generated output library", () => {
     const library = new OutputLibrary(root);
     const job = completedJob(outputName, "2026-07-24T09:37:00.000Z", "audio-to-video");
     job.runProvenance = runProvenance();
+    job.project = projectRunBinding(sha256Json(job.request));
     library.recordCompleted([job]);
 
     await expect(library.captureProjectOutputEvidence(
       outputName,
-      "66666666-6666-4666-8666-666666666666",
+      job.project,
       [job],
     )).rejects.toThrow("v2-Laufprovenienz");
   });
@@ -545,7 +600,7 @@ describe("generated output library", () => {
     expect(output?.experiment).toEqual(job.experiment);
     expect(output?.experimentRequestVerified).toBe(true);
     expect(sidecar).toMatchObject({
-      schemaVersion: "ltx-studio-output.v6",
+      schemaVersion: "ltx-studio-output.v7",
       experiment: job.experiment,
     });
   });

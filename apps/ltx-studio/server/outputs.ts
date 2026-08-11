@@ -32,7 +32,9 @@ import {
 } from "../shared/experiments.js";
 import {
   projectOutputEvidenceSchema,
+  projectRunBindingSchema,
   type ProjectOutputEvidence,
+  type ProjectRunBinding,
 } from "../shared/projects.js";
 import type { ReusableLtxBaseCandidate, StudioJob } from "./jobs.js";
 import {
@@ -80,7 +82,7 @@ async function hashUnchangedRegularFile(path: string): Promise<{
 }
 
 type OutputSettingsRecord = {
-  schemaVersion: "ltx-studio-output.v6";
+  schemaVersion: "ltx-studio-output.v7";
   outputName: string;
   jobId: string;
   completedAt: string;
@@ -93,6 +95,7 @@ type OutputSettingsRecord = {
   identityEvidence: IdentityInputEvidence | null;
   runProvenance: RunProvenance | null;
   experiment: ExperimentRunBinding | null;
+  project: ProjectRunBinding | null;
 };
 
 type StrongOutputSettingsRecord = OutputSettingsRecord & {
@@ -151,6 +154,7 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
       "ltx-studio-output.v4",
       "ltx-studio-output.v5",
       "ltx-studio-output.v6",
+      "ltx-studio-output.v7",
     ].includes(schemaVersion)
       || parsed.outputName !== outputName
       || typeof parsed.jobId !== "string"
@@ -161,23 +165,23 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
       || !Number.isFinite(parsed.sizeBytes)
       || typeof parsed.modifiedAtMs !== "number"
       || !Number.isFinite(parsed.modifiedAtMs)
-      || (["ltx-studio-output.v3", "ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6"].includes(schemaVersion)
+      || (["ltx-studio-output.v3", "ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6", "ltx-studio-output.v7"].includes(schemaVersion)
         && (typeof parsed.changedAtMs !== "number"
           || !Number.isFinite(parsed.changedAtMs)
           || typeof parsed.fileId !== "string"
           || !/^\d{1,64}$/.test(parsed.fileId)))
       || !request) return null;
     return {
-      schemaVersion: "ltx-studio-output.v6",
+      schemaVersion: "ltx-studio-output.v7",
       outputName,
       jobId: parsed.jobId,
       completedAt: parsed.completedAt,
       sizeBytes: parsed.sizeBytes,
       modifiedAtMs: parsed.modifiedAtMs,
-      changedAtMs: ["ltx-studio-output.v3", "ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6"].includes(schemaVersion)
+      changedAtMs: ["ltx-studio-output.v3", "ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6", "ltx-studio-output.v7"].includes(schemaVersion)
         ? parsed.changedAtMs ?? null
         : null,
-      fileId: ["ltx-studio-output.v3", "ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6"].includes(schemaVersion)
+      fileId: ["ltx-studio-output.v3", "ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6", "ltx-studio-output.v7"].includes(schemaVersion)
         ? parsed.fileId ?? null
         : null,
       request,
@@ -187,19 +191,26 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
         "ltx-studio-output.v4",
         "ltx-studio-output.v5",
         "ltx-studio-output.v6",
+        "ltx-studio-output.v7",
       ].includes(schemaVersion)
         ? normalizeJobQualityReview(parsed.qualityReview)
         : null,
-      identityEvidence: ["ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6"].includes(schemaVersion)
+      identityEvidence: ["ltx-studio-output.v4", "ltx-studio-output.v5", "ltx-studio-output.v6", "ltx-studio-output.v7"].includes(schemaVersion)
         ? normalizeIdentityInputEvidence(parsed.identityEvidence)
         : null,
-      runProvenance: ["ltx-studio-output.v5", "ltx-studio-output.v6"].includes(schemaVersion)
+      runProvenance: ["ltx-studio-output.v5", "ltx-studio-output.v6", "ltx-studio-output.v7"].includes(schemaVersion)
         ? normalizeRunProvenance(parsed.runProvenance)
         : null,
-      experiment: schemaVersion === "ltx-studio-output.v6"
+      experiment: ["ltx-studio-output.v6", "ltx-studio-output.v7"].includes(schemaVersion)
         ? (() => {
             const experiment = experimentRunBindingSchema.safeParse(parsed.experiment);
             return experiment.success ? experiment.data : null;
+          })()
+        : null,
+      project: schemaVersion === "ltx-studio-output.v7"
+        ? (() => {
+            const project = projectRunBindingSchema.safeParse(parsed.project);
+            return project.success ? project.data : null;
           })()
         : null,
     };
@@ -302,19 +313,20 @@ export class OutputLibrary {
           && recordMatchesFile(existing, stats)) {
           writeRecord(this.root, {
             ...existing,
-            schemaVersion: "ltx-studio-output.v6",
+            schemaVersion: "ltx-studio-output.v7",
             changedAtMs: stats.ctimeMs,
             fileId: String(stats.ino),
             identityEvidence: null,
             runProvenance: null,
             experiment: null,
+            project: null,
           });
         }
         continue;
       }
       if (existsSync(settingsPath(this.root, job.outputName))) continue;
       const record: StrongOutputSettingsRecord = {
-        schemaVersion: "ltx-studio-output.v6",
+        schemaVersion: "ltx-studio-output.v7",
         outputName: job.outputName,
         jobId: job.id,
         completedAt: job.finishedAt,
@@ -327,6 +339,7 @@ export class OutputLibrary {
         identityEvidence: job.identityEvidence,
         runProvenance: job.runProvenance,
         experiment: job.experiment,
+        project: job.project,
       };
       writeRecord(this.root, record);
     }
@@ -358,7 +371,7 @@ export class OutputLibrary {
     }
     writeRecord(this.root, {
       ...record,
-      schemaVersion: "ltx-studio-output.v6",
+      schemaVersion: "ltx-studio-output.v7",
       qualityReview: {
         scores: { ...validated.scores },
         note: validated.note,
@@ -437,7 +450,7 @@ export class OutputLibrary {
 
   async captureProjectOutputEvidence(
     outputName: string,
-    requestRevisionId: string,
+    expectedProject: Pick<ProjectRunBinding, "projectId" | "shotId" | "requestRevisionId">,
     jobs: readonly StudioJob[],
     recordedAt = new Date().toISOString(),
   ): Promise<ProjectOutputEvidence> {
@@ -462,9 +475,12 @@ export class OutputLibrary {
       || record.runProvenance?.schemaVersion !== "ltx-studio-run-provenance.v2"
       || !record.runProvenance.verifiedAt
       || !/^[0-9a-f]{64}$/.test(record.runProvenance.fingerprint)
+      || record.project?.projectId !== expectedProject.projectId
+      || record.project.shotId !== expectedProject.shotId
+      || record.project.requestRevisionId !== expectedProject.requestRevisionId
     ) {
       throw new OutputQualityError(
-        "Die Projektausgabe benötigt unveränderte Datei-, Sidecar- und v2-Laufprovenienz.",
+        "Die Projektausgabe benötigt unveränderte Datei-, Sidecar-, Projekt- und v2-Laufprovenienz.",
         409,
       );
     }
@@ -499,7 +515,8 @@ export class OutputLibrary {
     }
     return projectOutputEvidenceSchema.parse({
       id: randomUUID(),
-      requestRevisionId,
+      projectRun: record.project,
+      requestRevisionId: expectedProject.requestRevisionId,
       requestSha256: sha256Json(record.request),
       jobId: record.jobId,
       outputName,
@@ -546,6 +563,7 @@ export class OutputLibrary {
             : null,
           provenance: settingsMatch ? record?.runProvenance ?? null : null,
           experiment: settingsMatch ? record?.experiment ?? null : null,
+          project: settingsMatch ? record?.project ?? null : null,
           experimentRequestVerified: Boolean(
             settingsMatch
             && record?.experiment

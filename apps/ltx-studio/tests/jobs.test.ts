@@ -29,6 +29,7 @@ import {
   type ModelInventory,
 } from "../shared/models.js";
 import { RuntimeApiError } from "../server/runtimeApi.js";
+import { projectValueSha256 } from "../server/projectStore.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -335,6 +336,7 @@ describe("job persistence and reservations", () => {
       favorite: false,
       variantOf: null,
       experiment: null,
+      project: null,
       runtimeMs: null,
       cancelledBy: null,
       thermalProfile: null,
@@ -2095,6 +2097,69 @@ describe("job persistence and reservations", () => {
     expect(restored.get(created.id)?.experiment).toEqual(binding);
   });
 
+  it("persists an exact project binding and rejects request drift or mixed authority", async () => {
+    const path = await statePath();
+    const request = validRequest("id-lora");
+    request.models.distilledLora.path = "/models/project-bound-distilled-lora.safetensors";
+    const binding = {
+      schemaVersion: "ltx-studio-project-run.v1" as const,
+      projectId: "44444444-4444-4444-8444-444444444444",
+      projectRevision: 7,
+      projectRevisionSha256: "a".repeat(64),
+      shotId: "55555555-5555-4555-8555-555555555555",
+      requestRevisionId: "66666666-6666-4666-8666-666666666666",
+      requestSha256: projectValueSha256(request),
+      continuity: null,
+    };
+    const manager = new JobManager(path, false);
+
+    const created = manager.create(request, { project: binding });
+    const restored = new JobManager(path, false);
+
+    expect(created.project).toEqual(binding);
+    expect(created.request.models.distilledLora.path).toBe(
+      "/models/project-bound-distilled-lora.safetensors",
+    );
+    expect(restored.get(created.id)?.project).toEqual(binding);
+    expect(restored.get(created.id)?.request.models.distilledLora.path).toBe(
+      "/models/project-bound-distilled-lora.safetensors",
+    );
+    expect(restored.get(created.id)?.status).toBe("queued");
+
+    const drifted = structuredClone(request);
+    drifted.seed += 1;
+    drifted.outputName = "project-drifted.mp4";
+    expect(() => manager.create(drifted, { project: binding })).toThrow(
+      "gebundenen Request-Revision",
+    );
+    expect(() => manager.create(request, {
+      experiment: {
+        schemaVersion: "ltx-studio-experiment-run.v1",
+        experimentId: "77777777-7777-4777-8777-777777777777",
+        protocolSha256: "b".repeat(64),
+        arm: "baseline",
+        kind: "ablation",
+        variableId: "a2v-guidance",
+        changedRequestPaths: ["videoGuidance.modalityScale"],
+        baselineRequestSha256: "c".repeat(64),
+        requestSha256: "c".repeat(64),
+        baselineJobId: null,
+        baselineOutputName: request.outputName,
+      },
+      project: binding,
+    })).toThrow("gleichzeitig Experiment- und Projektlauf");
+
+    const persisted = JSON.parse(await readFile(path, "utf8"));
+    persisted[0].request.seed += 1;
+    await writeFile(path, JSON.stringify(persisted));
+    const broken = new JobManager(path, false);
+    expect(broken.get(created.id)).toMatchObject({
+      status: "interrupted",
+      error: expect.stringContaining("Projektbindung"),
+    });
+    expect(Reflect.get(broken, "queue")).not.toContain(created.id);
+  });
+
   it("bounds the persisted active queue", async () => {
     const manager = new JobManager(await statePath(), false);
     for (let index = 0; index < MAX_ACTIVE_JOBS; index += 1) {
@@ -2193,6 +2258,7 @@ describe("job persistence and reservations", () => {
       favorite: false,
       variantOf: null,
       experiment: null,
+      project: null,
       runtimeMs: null,
       cancelledBy: null,
       thermalProfile: null,

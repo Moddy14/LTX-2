@@ -226,8 +226,9 @@ Framezahl Qualitätsvoraussetzungen.
   ungebunden; ein terminal unterbrochener Arm darf erst erneut gestartet
   werden, nachdem die Runtime-Queue unter dieser ID keinen aktiven Job mehr
   meldet. Alle Versuchs-IDs bleiben als Attempt-Historie erhalten.
-- Experimentbindung und Request-Hash-Integrität liegen im revisionsgebundenen
-  Output-Sidecar Version 6. Baselinefreigabe und A/B-Vergleich funktionieren
+- Experiment-/Projektbindung und Request-Hash-Integrität liegen im
+  revisionsgebundenen Output-Sidecar Version 7. Baselinefreigabe und
+  A/B-Vergleich funktionieren
   deshalb auch nach Bereinigung der auf 100 Einträge begrenzten Jobhistorie.
 - Ein objektiver Vergleich gilt nur für Baseline plus Kandidat desselben
   eingefrorenen Protokolls, exakt den registrierten Request-Diff, identische
@@ -490,7 +491,7 @@ Jedes Ergebnis erhält getrennte Bewertungen:
 - Audio: verständlich, sauber und ohne Versatz oder Aussetzer.
 
 Die persistente Scorecard liegt im revisionsgebundenen
-MP4-Einstellungs-Sidecar Version 6; ältere Versionen werden bei belegbarer
+MP4-Einstellungs-Sidecar Version 7; ältere Versionen werden bei belegbarer
 Job-Provenienz kompatibel gelesen. Der objektive CPU-Evaluatorblock ist
 umgesetzt:
 

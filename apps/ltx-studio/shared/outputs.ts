@@ -3,6 +3,7 @@ import type { JobQualityReview } from "./quality.js";
 import type { OutputAnalysisRecord } from "./objectiveQuality.js";
 import type { RunProvenance } from "./provenance.js";
 import type { ExperimentRunBinding } from "./experiments.js";
+import type { ProjectRunBinding } from "./projects.js";
 
 export type StudioOutput = {
   name: string;
@@ -19,6 +20,7 @@ export type StudioOutput = {
   analysis: OutputAnalysisRecord | null;
   provenance?: RunProvenance | null;
   experiment?: ExperimentRunBinding | null;
+  project?: ProjectRunBinding | null;
   experimentRequestVerified?: boolean;
 };
 

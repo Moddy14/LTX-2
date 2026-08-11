@@ -14,7 +14,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { randomInt, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -24,6 +24,11 @@ import {
   isAdoptedLipForcingCandidate,
   type ExperimentRunBinding,
 } from "../shared/experiments.js";
+import {
+  projectRunBindingSchema,
+  type ProjectRunBinding,
+} from "../shared/projects.js";
+import { canonicalJson } from "../shared/canonicalJson.js";
 import { refinerAdmissionMemoryGiB } from "../shared/admissionPreflight.js";
 import {
   isAudioConditionedMode,
@@ -144,6 +149,7 @@ export type StudioJob = {
   favorite: boolean;
   variantOf: string | null;
   experiment: ExperimentRunBinding | null;
+  project: ProjectRunBinding | null;
   runtimeMs: number | null;
   cancelledBy: "studio" | null;
   thermalProfile: ThermalProfile | null;
@@ -960,15 +966,25 @@ export class JobManager extends EventEmitter {
     metadata: {
       variantOf?: string | null;
       experiment?: ExperimentRunBinding | null;
+      project?: ProjectRunBinding | null;
       deferStart?: boolean;
     } = {},
   ): StudioJob {
-    // The frozen experiment request is the authority for an A/B run. Normal
-    // jobs are still canonicalized here; experiment requests are canonicalized
-    // before freeze or are bound to an exact, verified historical output.
-    request = metadata.experiment
+    if (metadata.experiment && metadata.project) {
+      throw new JobConflictError("Ein Job darf nicht gleichzeitig Experiment- und Projektlauf sein.");
+    }
+    // Frozen experiment and revision-bound project requests are authoritative.
+    // Normal jobs are still canonicalized here; bound requests were canonicalized
+    // before persistence and must retain their exact digest.
+    request = metadata.experiment || metadata.project
       ? structuredClone(request)
       : withOfficialSpeechModelPaths(request);
+    if (
+      metadata.project
+      && createHash("sha256").update(canonicalJson(request)).digest("hex") !== metadata.project.requestSha256
+    ) {
+      throw new JobConflictError("Projektlauf stimmt nicht mit seiner gebundenen Request-Revision überein.");
+    }
     if (this.shuttingDown) {
       throw new JobConflictError("LTX Studio wird beendet und nimmt keine neuen Aufträge mehr an.");
     }
@@ -1001,6 +1017,7 @@ export class JobManager extends EventEmitter {
       favorite: false,
       variantOf: metadata.variantOf ?? null,
       experiment: metadata.experiment ? experimentRunBindingSchema.parse(metadata.experiment) : null,
+      project: metadata.project ? projectRunBindingSchema.parse(metadata.project) : null,
       runtimeMs: null,
       cancelledBy: null,
       thermalProfile: null,
@@ -3782,12 +3799,27 @@ export class JobManager extends EventEmitter {
           ? entry.dgxJobId
           : null;
         const recoverableLocalQueue = storedStatus === "queued" && dgxJobId === null;
-        if (recoverableLocalQueue) {
+        const experimentBindingResult = experimentRunBindingSchema.safeParse(entry.experiment);
+        const projectBindingResult = projectRunBindingSchema.safeParse(entry.project);
+        const experimentBinding = experimentBindingResult.success ? experimentBindingResult.data : null;
+        const projectBinding = projectBindingResult.success ? projectBindingResult.data : null;
+        const projectBindingInvalid = entry.project !== undefined
+          && entry.project !== null
+          && !projectBindingResult.success;
+        if (recoverableLocalQueue && !experimentBinding && !projectBinding && !projectBindingInvalid) {
           migratedRequest = withOfficialSpeechModelPaths(migratedRequest);
         }
+        const projectBindingMismatch = Boolean(
+          projectBinding
+          && createHash("sha256").update(canonicalJson(migratedRequest)).digest("hex")
+            !== projectBinding.requestSha256,
+        );
+        const authorityConflict = Boolean(experimentBinding && projectBinding);
+        const brokenProjectAuthority = projectBindingInvalid || projectBindingMismatch || authorityConflict;
         let status: JobStatus = recoverableLocalQueue
           ? "queued"
           : isActiveJobStatus(storedStatus) ? "interrupted" : storedStatus;
+        if (brokenProjectAuthority) status = "interrupted";
         const plan = buildCommand(migratedRequest);
         let outputReady = false;
         if (status === "completed") {
@@ -3831,11 +3863,16 @@ export class JobManager extends EventEmitter {
           : [];
         if (interruptedRemoteDelivery) {
           restoredLogs.push("Studio-Neustart: Remote-Queue-Lease wird als cancelled abgemeldet.");
-        } else if (recoverableLocalQueue) {
+        } else if (recoverableLocalQueue && status === "queued") {
           restoredLogs.push(
             entry.dgxSubmitPending === true
               ? "Studio-Neustart: unklarer Queue-Submit wird vor jeder Fortsetzung autoritativ abgeglichen."
               : "Studio-Neustart: rein lokal wartender Job wird automatisch fortgesetzt.",
+          );
+        }
+        if (brokenProjectAuthority) {
+          restoredLogs.push(
+            "Studio-Neustart: ungültige oder widersprüchliche Projektbindung; Job bleibt fail-closed unterbrochen.",
           );
         }
         if (entry.localProcessGroupPending === true) {
@@ -3860,8 +3897,10 @@ export class JobManager extends EventEmitter {
           progress: status === "completed"
             ? 100
             : storedProgress === null ? null : Math.min(MAX_RUNNING_PROCESS_PROGRESS, storedProgress),
-          error: interrupted
-            ? "Studio wurde während des Jobs neu gestartet."
+          error: brokenProjectAuthority
+            ? "Persistierte Projektbindung ist ungültig oder stimmt nicht mit dem Request überein."
+            : interrupted
+              ? "Studio wurde während des Jobs neu gestartet."
             : missingOutput
               ? "Die gespeicherte Ausgabedatei ist nicht mehr vorhanden."
               : typeof entry.error === "string" ? entry.error : null,
@@ -3871,9 +3910,8 @@ export class JobManager extends EventEmitter {
           variantOf: typeof entry.variantOf === "string" && /^[0-9a-f-]{36}$/i.test(entry.variantOf)
             ? entry.variantOf
             : null,
-          experiment: experimentRunBindingSchema.safeParse(entry.experiment).success
-            ? experimentRunBindingSchema.parse(entry.experiment)
-            : null,
+          experiment: experimentBinding,
+          project: projectBinding,
           runtimeMs: typeof entry.runtimeMs === "number" && Number.isFinite(entry.runtimeMs) && entry.runtimeMs >= 0
             ? entry.runtimeMs
             : null,
@@ -3919,7 +3957,7 @@ export class JobManager extends EventEmitter {
           runProvenance: normalizeRunProvenance(entry.runProvenance),
           plan,
         });
-        if (recoverableLocalQueue) this.queue.push(entry.id);
+        if (status === "queued") this.queue.push(entry.id);
       }
     } catch {
       // Invalid history never blocks a fresh local studio session.
