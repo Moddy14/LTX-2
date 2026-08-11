@@ -137,6 +137,7 @@ def _validate_report(report: object, kind: str = "holdout") -> dict[str, object]
         runner_digest=DIGESTS["runner"],
         evaluator_digest=DIGESTS["evaluator"],
         thresholds_digest=DIGESTS["thresholds"],
+        required_metric_ids={"artifact-far", "identity-similarity"},
     )
 
 
@@ -233,3 +234,10 @@ def test_tune_report_cannot_bind_a_release_or_hide_a_failed_metric() -> None:
     failed["metrics"][1]["decision"] = "fail"  # type: ignore[index]
     with pytest.raises(ProductGovernanceError, match="verdict does not match"):
         _validate_report(failed, "tune")
+
+
+def test_measurement_report_cannot_pass_with_omitted_required_metrics() -> None:
+    report = _report()
+    report["metrics"] = report["metrics"][:1]  # type: ignore[index]
+    with pytest.raises(ProductGovernanceError, match="coverage mismatch"):
+        _validate_report(report)

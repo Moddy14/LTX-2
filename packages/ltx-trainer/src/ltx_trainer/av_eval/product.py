@@ -434,6 +434,7 @@ def validate_measurement_report(
     runner_digest: str,
     evaluator_digest: str,
     thresholds_digest: str,
+    required_metric_ids: set[str],
 ) -> dict[str, Any]:
     """Validate exact bindings and recompute every confidence-bound decision."""
 
@@ -450,10 +451,18 @@ def validate_measurement_report(
         evaluator_digest=evaluator_digest,
         thresholds_digest=thresholds_digest,
     )
+    if not required_metric_ids:
+        raise ProductGovernanceError("required metric IDs must not be empty")
+    for metric_id in required_metric_ids:
+        _identifier(metric_id, "required metric_id")
     validated_metrics = [_validate_metric(metric, index) for index, metric in enumerate(raw["metrics"])]
     metric_ids = [metric_id for metric_id, _decision in validated_metrics]
     if metric_ids != sorted(set(metric_ids)):
         raise ProductGovernanceError("measurement metric IDs must be unique and sorted")
+    if set(metric_ids) != required_metric_ids:
+        missing = sorted(required_metric_ids - set(metric_ids))
+        unknown = sorted(set(metric_ids) - required_metric_ids)
+        raise ProductGovernanceError(f"measurement metric coverage mismatch: missing={missing}, unknown={unknown}")
     decisions = [decision for _metric_id, decision in validated_metrics]
     expected_verdict = "pass" if all(decision == "pass" for decision in decisions) else "fail"
     if raw["verdict"] != expected_verdict:
