@@ -33,6 +33,7 @@ from .product import (
     verify_access_log,
 )
 from .readiness import ReadinessError, build_product_readiness_report
+from .sharpness import SharpnessMeasurementError, build_sharpness_measurements
 
 __all__ = [
     "ArtifactMeasurementError",
@@ -49,6 +50,7 @@ __all__ = [
     "OffsetMeasurementError",
     "ProductGovernanceError",
     "ReadinessError",
+    "SharpnessMeasurementError",
     "append_signed_access_event",
     "build_artifact_measurements",
     "build_asr_measurements",
@@ -60,6 +62,7 @@ __all__ = [
     "build_offset_measurements",
     "build_power_report",
     "build_product_readiness_report",
+    "build_sharpness_measurements",
     "document_sha256",
     "freeze_dataset",
     "load_frozen_split",

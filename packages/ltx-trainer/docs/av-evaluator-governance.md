@@ -191,6 +191,14 @@ Every leakage component in every registered stratum must contain every frame
 class plus positive and negative transition controls. Overall and worst-stratum
 estimates and lower confidence bounds remain distinct gates.
 
+`sharpness-score` removes the old resolution-dependent raw-value ambiguity.
+It accepts only Laplacian variance measured after the fingerprinted alignment
+policy has produced a fixed 256×256 grayscale-linear face crop with area
+interpolation. Each leakage component contributes its median; the reported
+statistic is the p10 across component medians, and the gate uses the lower
+bootstrap bound of the worst registered stratum. Its numerical threshold
+remains a D1 calibration output with mandatory basis evidence.
+
 ## D0 readiness package
 
 `configs/av_eval/product-readiness.v1.json` is the fail-closed D0 inventory

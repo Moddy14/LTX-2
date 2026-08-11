@@ -22,6 +22,7 @@ from ltx_trainer.av_eval import (
     IdentityMeasurementError,
     OffsetMeasurementError,
     ReadinessError,
+    SharpnessMeasurementError,
     build_artifact_measurements,
     build_asr_measurements,
     build_calibration_gate_report,
@@ -32,6 +33,7 @@ from ltx_trainer.av_eval import (
     build_offset_measurements,
     build_power_report,
     build_product_readiness_report,
+    build_sharpness_measurements,
     freeze_dataset,
     load_split_seed,
 )
@@ -118,6 +120,16 @@ def _run_content_score(path: Path) -> int:
     return 0
 
 
+def _run_sharpness_score(path: Path) -> int:
+    try:
+        report = build_sharpness_measurements(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, SharpnessMeasurementError) as error:
+        logger.error("Sharpness observations rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
 def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) -> int:
     try:
         protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
@@ -187,6 +199,8 @@ def main() -> int:
     identity_score.add_argument("--pairs", type=Path, required=True)
     offset_score = subcommands.add_parser("offset-score", help="score AV offset and abstention observations")
     offset_score.add_argument("--observations", type=Path, required=True)
+    sharpness_score = subcommands.add_parser("sharpness-score", help="score normalized face-crop sharpness")
+    sharpness_score.add_argument("--observations", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -208,6 +222,7 @@ def main() -> int:
         "identity-score": lambda: _run_identity_score(args.pairs),
         "offset-score": lambda: _run_offset_score(args.observations),
         "readiness-check": lambda: _run_readiness_check(args.package),
+        "sharpness-score": lambda: _run_sharpness_score(args.observations),
     }
     return handlers[args.command]()
 
