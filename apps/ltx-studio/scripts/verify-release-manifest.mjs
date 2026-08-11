@@ -11,7 +11,14 @@ import {
 } from "./release-manifest-lib.mjs";
 
 const appRoot = resolve(import.meta.dirname, "..");
-const releaseRoot = resolve(appRoot, "build", "release-root");
+const rootIndex = process.argv.indexOf("--root");
+const rootArgument = rootIndex === -1 ? undefined : process.argv[rootIndex + 1];
+if (rootIndex !== -1 && (!rootArgument || rootArgument.startsWith("--"))) {
+  throw new Error("--root requires a path");
+}
+const releaseRoot = rootArgument
+  ? resolve(process.cwd(), rootArgument)
+  : resolve(appRoot, "build", "release-root");
 const manifestBytes = readFileSync(join(releaseRoot, MANIFEST_NAME));
 const manifest = JSON.parse(manifestBytes.toString("utf8"));
 if (manifest.schemaVersion !== "ltx-studio-release-manifest.v1") {
