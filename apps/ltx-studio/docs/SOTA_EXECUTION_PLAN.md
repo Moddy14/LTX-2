@@ -21,7 +21,7 @@ lautet der ehrliche Status **nicht 10/10**.
 | DGX-Control-Plane | Der read-only Snapshot ist `overall=ok` und die Queue leer. `dgx-runtime-api.service` ist seit 07:42 jedoch inaktiv; Studio meldet deshalb `orchestrator=missing`, `runtimeOverall=unknown` | aktuelle Betriebsabweichung, Operator-Schritt nötig | P0 |
 | Scheduler-Vertrag | Orchestrator hat den haltbaren LTX-Segment-Waiter, Heartbeat und `/dgx/scheduler/segment-boundary/decide`. Studio sendet Heartbeats, entscheidet das Yield aber weiterhin nur über den alten Qwen-Demand-Wächter | sicher fail-closed, aber fachlich unvollständig: andere wartende Jobs sind unsichtbar | P0 |
 | Releasebasis | Dienst startet per `npm start`/`tsx` aus `/home/moddy/LTX-2`; Python fällt auf die gemeinsame `~/comfyui-env` zurück | veränderlich, nicht reproduzierbar | P0 |
-| Python HTTP-Stack | `requests 2.32.5`, `urllib3 2.6.3`, `charset-normalizer 3.4.5`, zusätzlich `chardet 7.4.3`. Requests akzeptiert in dieser Version nur `chardet < 6`; Import mit Warnungen als Fehler schlägt fehl. `pip check` übersieht den optionalen Konflikt | realer Umgebungsfehler, durch Shared-Env verursacht | P0 |
+| Python HTTP-Stack | Die isolierte R1-Runtime besteht `uv lock --check`, `uv pip check`, `requests` unter `-W error` und den Runtime-Verifier; `chardet` ist dort verboten. Nur das nicht als Releasequelle zulässige Shared-ComfyUI-Environment enthält weiter `chardet 7.4.3` | Releasepfad gut; Shared-Env-Abweichung bleibt bewusst isoliert | abgeschlossen |
 | Frontend-Bundle | R2 ist mit artefaktgebundener Evidenz bestanden: 388.269/115.561 Bytes raw/gzip, keine Vite-Chunkwarnung, echte Lazy-Chunks und 40+40 kalte Chromium-Kontexte; p95 175,42 ms -> 131,58 ms | gut; kein offener Bundle-Defekt | abgeschlossen |
 | Releaseoberfläche | `PIPELINES` veröffentlicht 12 Modi; IC-LoRA und LipDub besitzen zusätzliche Profile. Der alte Plan zählte nur fünf sichtbare Modi | alte Canary-Matrix unvollständig | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten und eine Draft-Preregistrierung existieren bereits. `profile=product` ist absichtlich hart blockiert, weil Signatur-, ACL-, Blind-Scorer- und Attestierungspfad fehlen | starke Grundlage, Product-GO offen | P2 |
@@ -30,10 +30,12 @@ lautet der ehrliche Status **nicht 10/10**.
 | Video-Benchmark | VBench ist lokal nicht installiert. Für eigene I2V-Videos ist VBench++/VBench-I2V einschlägig; VBench 2.0 misst primär intrinsische Faithfulness und ersetzt weder Lip-Sync- noch Identitätsgates | alter Werkzeugname war zu pauschal | P2 |
 | Komparatoren | LongCat ist lokal vorhanden. MOVA und Wan2.2-S2V fehlen lokal. MOVA und Wan haben unterschiedliche Eingabeverträge und dürfen nicht in einen gemeinsamen Score gezwungen werden | lokaler Bake-off offen | P3 |
 
-Die frühere 533-kB-Warnung ist durch R2 geschlossen. Der `requests`-Konflikt
-ist ein Symptom der fehlenden Releaseumgebung. Die eigentlichen 10/10-Blocker
-sind Product-Governance, kalibrierte Daten, Cross-Shot-Nichtunterlegenheit,
-Release-Canaries und der verblindete lokale Bake-off.
+Die frühere 533-kB-Warnung ist durch R2 geschlossen. Auch der frühere
+`requests`-Konflikt ist im Releasepfad durch die eigene gelockte R1-Runtime
+geschlossen; er besteht nur im ausdrücklich ausgeschlossenen Shared-
+Environment. Die eigentlichen 10/10-Blocker sind Product-Governance,
+kalibrierte Daten, Cross-Shot-Nichtunterlegenheit, Release-Canaries und der
+verblindete lokale Bake-off.
 
 ## 2. Definition des finalen Gates
 
@@ -149,6 +151,12 @@ werden über normale APIs bereinigt; keine Qwen-, Queue- oder State-Datei wird
 künstlich manipuliert.
 
 ### R1 — Unveränderliche Releasebasis und eigener Python-Stack
+
+**Status: teilweise abgeschlossen.** Isolierte Python-Runtime,
+Release-Surface, deterministischer Doppelbuild, versiegelte Installation,
+Manifestdrift-Sperre sowie digestgebundene Health-/Provenienzpfade sind
+implementiert und CPU-seitig bestanden. R1 bleibt bis zum aktuellen externen
+Rights-Attest und zum Betreiber-genehmigten Cold-GPU-Canary auf `hold`.
 
 Die Releasebasis wird content-addressed statt arbeitsbaumgebunden. Ein kompletter
 OCI-Umbau des nativen Renderers ist nicht der erste Weg: Er würde CUDA-,
