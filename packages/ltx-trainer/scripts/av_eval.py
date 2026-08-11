@@ -22,6 +22,7 @@ from ltx_trainer.av_eval import (
     CrossShotResultError,
     D1BundleError,
     DesignError,
+    FreezePreflightError,
     GovernanceError,
     IdentityMeasurementError,
     OffsetMeasurementError,
@@ -37,6 +38,7 @@ from ltx_trainer.av_eval import (
     build_content_measurements,
     build_cross_shot_decision,
     build_cross_shot_protocol_report,
+    build_f0_preflight_report,
     build_fixed_d1_report,
     build_identity_measurements,
     build_offset_measurements,
@@ -254,6 +256,30 @@ def _run_freeze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_f0_check(args: argparse.Namespace) -> int:
+    try:
+        report = build_f0_preflight_report(
+            json.loads(args.candidate.read_text(encoding="utf-8")),
+            candidate_signature=json.loads(args.candidate_signature.read_text(encoding="utf-8")),
+            preregistration=json.loads(args.preregistration.read_text(encoding="utf-8")),
+            preregistration_signature=json.loads(args.preregistration_signature.read_text(encoding="utf-8")),
+            rights_attestation=json.loads(args.rights_attestation.read_text(encoding="utf-8")),
+            rights_signature=json.loads(args.rights_signature.read_text(encoding="utf-8")),
+            evaluation_authorization=json.loads(args.evaluation_authorization.read_text(encoding="utf-8")),
+            evaluation_signature=json.loads(args.evaluation_signature.read_text(encoding="utf-8")),
+            trust_policy=json.loads(args.trust_policy.read_text(encoding="utf-8")),
+            surface=json.loads(args.surface.read_text(encoding="utf-8")),
+            detailed_reports=json.loads(args.detailed_reports.read_text(encoding="utf-8")),
+            qualification_bundle=json.loads(args.qualifications.read_text(encoding="utf-8")),
+            now=datetime.now(UTC).replace(microsecond=0),
+        )
+    except (OSError, json.JSONDecodeError, FreezePreflightError) as error:
+        logger.error("F0 preflight rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
 def _add_comparator_commands(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
     comparator.add_argument("--matrix", type=Path, required=True)
@@ -263,6 +289,22 @@ def _add_comparator_commands(subcommands: argparse._SubParsersAction) -> None:  
     comparator_score.add_argument("--gates", type=Path, required=True)
     comparator_score.add_argument("--matrix", type=Path, required=True)
     comparator_score.add_argument("--landscape", type=Path, required=True)
+
+
+def _add_f0_command(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    command = subcommands.add_parser("f0-check", help="verify the complete signed pre-Q2 freeze candidate")
+    command.add_argument("--candidate", type=Path, required=True)
+    command.add_argument("--candidate-signature", type=Path, required=True)
+    command.add_argument("--preregistration", type=Path, required=True)
+    command.add_argument("--preregistration-signature", type=Path, required=True)
+    command.add_argument("--rights-attestation", type=Path, required=True)
+    command.add_argument("--rights-signature", type=Path, required=True)
+    command.add_argument("--evaluation-authorization", type=Path, required=True)
+    command.add_argument("--evaluation-signature", type=Path, required=True)
+    command.add_argument("--trust-policy", type=Path, required=True)
+    command.add_argument("--surface", type=Path, required=True)
+    command.add_argument("--detailed-reports", type=Path, required=True)
+    command.add_argument("--qualifications", type=Path, required=True)
 
 
 def main() -> int:
@@ -310,6 +352,7 @@ def main() -> int:
     cross_shot_score.add_argument("--protocol", type=Path, required=True)
     cross_shot_score.add_argument("--design", type=Path, required=True)
     _add_comparator_commands(subcommands)
+    _add_f0_command(subcommands)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
@@ -326,6 +369,7 @@ def main() -> int:
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),
         "fixed-d1": lambda: _run_fixed_d1(args.bundle, args.catalog),
+        "f0-check": lambda: _run_f0_check(args),
         "identity-score": lambda: _run_identity_score(args.pairs),
         "offset-score": lambda: _run_offset_score(args.observations),
         "readiness-check": lambda: _run_readiness_check(args.package),

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from ltx_trainer.av_eval.authorization import (
     canonical_json,
     record_consumption_event,
     sha256_document,
+    studio_canonical_json,
     validate_evaluation_authorization,
     validate_release_authorization,
     verify_detached_signature,
@@ -30,6 +33,11 @@ NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
 def _timestamp(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _studio_payload(document: object) -> bytes:
+    encoded = json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2, separators=(",", ": "))
+    return f"{encoded}\n".encode()
 
 
 def _evaluation_document() -> dict[str, object]:
@@ -86,6 +94,38 @@ def _signed(document: object, *, role: str = "evaluation-authorizer") -> tuple[d
                 "not_before": _timestamp(NOW - timedelta(days=1)),
                 "not_after": _timestamp(NOW + timedelta(days=1)),
                 "revoked_at": None,
+            }
+        ],
+    }
+    return signature, policy
+
+
+def _studio_signed(document: object, *, role: str) -> tuple[dict[str, object], dict[str, object]]:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    payload = _studio_payload(document)
+    signature = {
+        "schemaVersion": "ltx-studio-detached-signature.v1",
+        "algorithm": "ed25519",
+        "keyId": "studio-independent-key-01",
+        "payloadSha256": hashlib.sha256(payload).hexdigest(),
+        "signatureBase64": base64.b64encode(private_key.sign(payload)).decode(),
+    }
+    policy = {
+        "schemaVersion": "ltx-studio-trusted-keys.v1",
+        "policyId": "studio-release-policy-01",
+        "keys": [
+            {
+                "keyId": "studio-independent-key-01",
+                "algorithm": "ed25519",
+                "publicKeyBase64": base64.b64encode(public_key).decode(),
+                "roles": [role],
+                "notBefore": _timestamp(NOW - timedelta(days=1)),
+                "notAfter": _timestamp(NOW + timedelta(days=1)),
+                "revokedAt": None,
             }
         ],
     }
@@ -182,6 +222,61 @@ def test_release_authorization_is_a_different_schema_and_binding() -> None:
     )
     with pytest.raises(AuthorizationError, match="unsupported evaluation"):
         _validate_evaluation(document)
+
+
+def test_q2_accepts_the_canonical_studio_trust_and_signature_envelope() -> None:
+    document = _evaluation_document()
+    signature, policy = _studio_signed(document, role="evaluation-authorizer")
+
+    assert verify_detached_signature(
+        document,
+        signature,
+        policy,
+        required_role="evaluation-authorizer",
+        now=NOW,
+    ) == hashlib.sha256(_studio_payload(document)).hexdigest()
+    assert _validate_evaluation(document) == document
+
+
+def test_studio_canonical_json_matches_json_stringify_number_semantics() -> None:
+    document = {"a": [9.0, 1e-7, 1e-6, 1e20, 1e21, -0.0, 1.2345678901234567]}
+
+    assert studio_canonical_json(document).decode() == (
+        "{\n"
+        '  "a": [\n'
+        "    9,\n"
+        "    1e-7,\n"
+        "    0.000001,\n"
+        "    100000000000000000000,\n"
+        "    1e+21,\n"
+        "    0,\n"
+        "    1.2345678901234567\n"
+        "  ]\n"
+        "}\n"
+    )
+
+
+def test_python_release_check_accepts_the_studio_p4_authorization() -> None:
+    document = {
+        "schemaVersion": "ltx-studio-release-authorization.v1",
+        "releaseDigest": DIGESTS["release"],
+        "preregistrationDigest": DIGESTS["preregistration"],
+        "q2ReportDigest": DIGESTS["q2"],
+        "releaseEvidenceDigest": DIGESTS["evidence"],
+        "rightsAttestationDigest": DIGESTS["rights"],
+        "notBefore": _timestamp(NOW - timedelta(minutes=5)),
+        "expiresAt": _timestamp(NOW + timedelta(hours=2)),
+    }
+
+    assert validate_release_authorization(
+        document,
+        now=NOW,
+        release_digest=DIGESTS["release"],
+        preregistration_digest=DIGESTS["preregistration"],
+        q2_report_digest=DIGESTS["q2"],
+        release_evidence_digest=DIGESTS["evidence"],
+        rights_attestation_digest=DIGESTS["rights"],
+    ) == document
 
 
 def test_consumption_events_are_monotonic_write_once_and_idempotent(tmp_path: Path) -> None:

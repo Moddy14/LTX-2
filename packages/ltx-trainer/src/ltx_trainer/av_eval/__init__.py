@@ -18,6 +18,7 @@ from .content import ContentMeasurementError, build_content_measurements
 from .cross_shot import CrossShotProtocolError, build_cross_shot_protocol_report
 from .cross_shot_result import CrossShotResultError, build_cross_shot_decision
 from .design import DesignError, build_power_report, document_sha256
+from .freeze_preflight import FreezePreflightError, build_f0_preflight_report
 from .governance import (
     FrozenDatasetSession,
     GovernanceError,
@@ -26,6 +27,7 @@ from .governance import (
     load_split_seed,
     open_frozen_artifact,
     open_frozen_dataset,
+    validate_preregistration,
 )
 from .identity import IdentityMeasurementError, build_identity_measurements
 from .offset import OffsetMeasurementError, build_offset_measurements
@@ -53,6 +55,7 @@ __all__ = [
     "CrossShotResultError",
     "D1BundleError",
     "DesignError",
+    "FreezePreflightError",
     "FrozenDatasetSession",
     "GovernanceError",
     "IdentityMeasurementError",
@@ -71,6 +74,7 @@ __all__ = [
     "build_content_measurements",
     "build_cross_shot_decision",
     "build_cross_shot_protocol_report",
+    "build_f0_preflight_report",
     "build_fixed_d1_report",
     "build_identity_measurements",
     "build_offset_measurements",
@@ -87,6 +91,7 @@ __all__ = [
     "record_consumption_event",
     "validate_evaluation_authorization",
     "validate_measurement_report",
+    "validate_preregistration",
     "validate_release_authorization",
     "validate_sealed_directory",
     "verify_access_log",

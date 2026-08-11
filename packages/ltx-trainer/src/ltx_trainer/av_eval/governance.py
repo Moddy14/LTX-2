@@ -1452,6 +1452,13 @@ def _validate_preregistration(preregistration: object, mapping_sha256: str) -> d
     return preregistration
 
 
+def validate_preregistration(preregistration: object, *, mapping_sha256: str) -> dict[str, Any]:
+    """Validate a complete preregistration against its separately hashed mapping."""
+
+    _expect_sha256(mapping_sha256, "mapping_sha256")
+    return _validate_preregistration(preregistration, mapping_sha256)
+
+
 def _union_shared_value(
     union_find: _UnionFind,
     owners: dict[tuple[str, str], str],

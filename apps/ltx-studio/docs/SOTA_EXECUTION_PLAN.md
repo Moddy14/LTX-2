@@ -18,12 +18,12 @@ lautet der ehrliche Status **nicht 10/10**.
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
 | Implementierungsbasis | Vor dieser Planrevision war Commit `41e4166` sauber; zuletzt 570/570 Studio-Tests, 60/60 native Tests, 53 E2E bestanden | gut, aber noch kein Release | P0 |
-| DGX-Control-Plane | Der read-only Snapshot ist `overall=ok` und die Queue leer. `dgx-runtime-api.service` ist seit 07:42 jedoch inaktiv; Studio meldet deshalb `orchestrator=missing`, `runtimeOverall=unknown` | aktuelle Betriebsabweichung, Operator-Schritt nötig | P0 |
-| Scheduler-Vertrag | Orchestrator hat den haltbaren LTX-Segment-Waiter, Heartbeat und `/dgx/scheduler/segment-boundary/decide`. Studio sendet Heartbeats, entscheidet das Yield aber weiterhin nur über den alten Qwen-Demand-Wächter | sicher fail-closed, aber fachlich unvollständig: andere wartende Jobs sind unsichtbar | P0 |
-| Releasebasis | Dienst startet per `npm start`/`tsx` aus `/home/moddy/LTX-2`; Python fällt auf die gemeinsame `~/comfyui-env` zurück | veränderlich, nicht reproduzierbar | P0 |
+| DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
+| Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
+| Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
 | Python HTTP-Stack | Die isolierte R1-Runtime besteht `uv lock --check`, `uv pip check`, `requests` unter `-W error` und den Runtime-Verifier; `chardet` ist dort verboten. Nur das nicht als Releasequelle zulässige Shared-ComfyUI-Environment enthält weiter `chardet 7.4.3` | Releasepfad gut; Shared-Env-Abweichung bleibt bewusst isoliert | abgeschlossen |
 | Frontend-Bundle | R2 ist mit artefaktgebundener Evidenz bestanden: 388.269/115.561 Bytes raw/gzip, keine Vite-Chunkwarnung, echte Lazy-Chunks und 40+40 kalte Chromium-Kontexte; p95 175,42 ms -> 131,58 ms | gut; kein offener Bundle-Defekt | abgeschlossen |
-| Releaseoberfläche | `PIPELINES` veröffentlicht 12 Modi; IC-LoRA und LipDub besitzen zusätzliche Profile. Der alte Plan zählte nur fünf sichtbare Modi | alte Canary-Matrix unvollständig | P1 |
+| Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 123 Einträge, davon 17 konditionale Kandidaten und 106 rechtlich/technisch gesperrt | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten und eine Draft-Preregistrierung existieren bereits. `profile=product` ist absichtlich hart blockiert, weil Signatur-, ACL-, Blind-Scorer- und Attestierungspfad fehlen | starke Grundlage, Product-GO offen | P2 |
 | Tune/Holdout | Es gibt noch keinen rechtsgeprüften Kalibriersatz und keinen versiegelten Holdout. Fünf funktionale Tune-Clips reichen nicht zur biometrischen Schwellenkalibrierung | zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
@@ -472,6 +472,12 @@ wird die Siegerstrategie in die Holdout-Baseline-Matrix aufgenommen.
 
 ### Q1 — Lokaler Comparator-Pilot auf Kalibrierdaten
 
+**Status: Auswertungsmaschine implementiert, Evidenz offen.** Der gepaarte
+Q1-Entscheider erzwingt die vor Ergebnisansicht gebundene Matrix, vollständige
+claim-spezifische Gate-Familien, ITT, unabhängige Leakage-Komponenten und eine
+globale Holm-Korrektur. Ohne reale, rechtsklare Comparator-Installationen und
+Kalibrierruns bleibt Q1 `hold`; `local-only` kann niemals SOTA vortäuschen.
+
 1. Mit dokumentiertem Cutoff-Datum eine reproduzierbare Landschaftssuche in
    Primärpapieren, offiziellen Repositories und anwendbaren Leaderboards
    durchführen. `anchor-landscape.v1` protokolliert Suchraum, Ein-/Ausschlüsse,
@@ -516,6 +522,14 @@ Inputs, Normalisierung, Failure-Regeln und Comparator-Digests sind vollständig
 und auf Kalibrierdaten ausführbar.
 
 ### F0 — Stabiler Finalkandidat und signierter Freeze
+
+**Status: fail-closed Preflight implementiert, reale Signaturen offen.**
+`f0-check` verbindet den signierten Kandidatenindex, die vollständige
+Preregistrierung, Surface, Rechte, D0/D0a/D1/Q0/Q1, alle Pre-Q2-
+Qualification-Atteste und die einmalige Evaluation-Autorisierung. Der Pass
+lautet ausschließlich `f0-pass-ready-for-q2` mit
+`production_authorized=false`. Der eingecheckte Projektstand enthält keine
+echten unabhängigen F0-Signaturen und bleibt daher `hold`.
 
 1. Q0-Sieger/Abstention und Q1-Comparator-Matrix in das
    `ready-to-freeze`-Paket übernehmen. Kein Holdoutwert ist bekannt.

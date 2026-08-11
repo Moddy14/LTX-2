@@ -10,6 +10,7 @@ import {
   qualificationKinds,
   type QualificationKind,
   type ReleaseEvidenceInput,
+  trustedKeyPolicySchema,
 } from "../shared/releaseAudit.js";
 import { releaseGateIds } from "../shared/releaseSurface.js";
 
@@ -241,6 +242,20 @@ function report(input: ReleaseEvidenceInput, kind: QualificationKind) {
 }
 
 describe("release evidence collector", () => {
+  it("accepts a dedicated evaluation-authorizer but rejects role collapse", () => {
+    const input = fixture();
+    const policy = structuredClone(input.trustPolicy) as {
+      keys: Array<{ roles: string[] }>;
+    };
+    policy.keys[0].roles = ["evaluation-authorizer"];
+    expect(trustedKeyPolicySchema.safeParse(policy).success).toBe(true);
+    policy.keys[0].roles = [
+      "evaluation-authorizer",
+      "release-authorizer",
+    ];
+    expect(trustedKeyPolicySchema.safeParse(policy).success).toBe(false);
+  });
+
   it("becomes ready only after every signed and bound gate passes", () => {
     const evidence = collectReleaseEvidence(fixture());
     expect(evidence.ready_for_release_authorization).toBe(true);

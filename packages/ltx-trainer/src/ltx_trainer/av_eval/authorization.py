@@ -6,9 +6,11 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 import os
 import stat
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -21,8 +23,19 @@ EVALUATION_SCHEMA = "ltx-av-eval-evaluation-authorization.v1"
 RELEASE_SCHEMA = "ltx-av-eval-release-authorization.v2"
 SIGNATURE_SCHEMA = "ltx-av-eval-detached-signature.v1"
 TRUST_POLICY_SCHEMA = "ltx-av-eval-trusted-keys.v1"
+STUDIO_RELEASE_SCHEMA = "ltx-studio-release-authorization.v1"
+STUDIO_SIGNATURE_SCHEMA = "ltx-studio-detached-signature.v1"
+STUDIO_TRUST_POLICY_SCHEMA = "ltx-studio-trusted-keys.v1"
 CONSUMPTION_SCHEMA = "ltx-av-eval-holdout-consumption.v1"
-TrustRole = Literal["evaluation-authorizer", "release-authorizer", "holdout-scorer"]
+TrustRole = Literal[
+    "audit-finalizer",
+    "evaluation-authorizer",
+    "holdout-scorer",
+    "preregistration-freezer",
+    "qualification-attestor",
+    "release-authorizer",
+    "rights-attestor",
+]
 
 
 class AuthorizationError(ValueError):
@@ -33,8 +46,69 @@ def canonical_json(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def _javascript_number(value: float) -> str:
+    if not math.isfinite(value):
+        raise AuthorizationError("Studio canonical JSON rejects non-finite numbers")
+    if value == 0:
+        return "0"
+    magnitude = abs(value)
+    shortest = repr(value).lower()
+    if 1e-6 <= magnitude < 1e21:
+        fixed = format(Decimal(shortest), "f")
+        return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
+    mantissa, exponent = shortest.split("e")
+    mantissa = mantissa.removesuffix(".0")
+    exponent_value = int(exponent)
+    exponent_text = f"+{exponent_value}" if exponent_value >= 0 else str(exponent_value)
+    return f"{mantissa}e{exponent_text}"
+
+
+def _studio_json_text(value: object, *, level: int = 0) -> str:  # noqa: PLR0911
+    indentation = "  " * level
+    child_indentation = "  " * (level + 1)
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _javascript_number(value)
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        items = [f"{child_indentation}{_studio_json_text(item, level=level + 1)}" for item in value]
+        return "[\n" + ",\n".join(items) + f"\n{indentation}]"
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise AuthorizationError("Studio canonical JSON requires string object keys")
+        if not value:
+            return "{}"
+        items = [
+            f"{child_indentation}{json.dumps(key, ensure_ascii=False)}: "
+            f"{_studio_json_text(value[key], level=level + 1)}"
+            for key in sorted(value)
+        ]
+        return "{\n" + ",\n".join(items) + f"\n{indentation}}}"
+    raise AuthorizationError(f"Studio canonical JSON does not support {type(value).__name__}")
+
+
+def studio_canonical_json(value: object) -> bytes:
+    """Match apps/ltx-studio/shared/canonicalJson.ts byte-for-byte for JSON data."""
+
+    return f"{_studio_json_text(value)}\n".encode()
+
+
 def sha256_document(value: object) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def studio_sha256_document(value: object) -> str:
+    return hashlib.sha256(studio_canonical_json(value)).hexdigest()
 
 
 def _expect_exact_keys(value: dict[str, Any], expected: set[str], context: str) -> None:
@@ -86,26 +160,58 @@ def _decode_base64(value: object, *, expected_bytes: int, context: str) -> bytes
     return decoded
 
 
-def _validate_trust_policy(policy: object, *, now: datetime, role: str, key_id: str) -> bytes:
+def _normalize_trust_policy(policy: object) -> tuple[str, list[dict[str, Any]], dict[str, str]]:
     if not isinstance(policy, dict):
         raise AuthorizationError("trusted-key policy must be an object")
-    _expect_exact_keys(policy, {"schema_version", "policy_id", "keys"}, "trusted-key policy")
-    if policy["schema_version"] != TRUST_POLICY_SCHEMA:
+    if policy.get("schema_version") == TRUST_POLICY_SCHEMA:
+        _expect_exact_keys(policy, {"schema_version", "policy_id", "keys"}, "trusted-key policy")
+        fields = {
+            "key_id": "key_id",
+            "public_key": "public_key_base64",
+            "not_before": "not_before",
+            "not_after": "not_after",
+            "revoked_at": "revoked_at",
+        }
+        policy_id = policy["policy_id"]
+    elif policy.get("schemaVersion") == STUDIO_TRUST_POLICY_SCHEMA:
+        _expect_exact_keys(policy, {"schemaVersion", "policyId", "keys"}, "trusted-key policy")
+        fields = {
+            "key_id": "keyId",
+            "public_key": "publicKeyBase64",
+            "not_before": "notBefore",
+            "not_after": "notAfter",
+            "revoked_at": "revokedAt",
+        }
+        policy_id = policy["policyId"]
+    else:
         raise AuthorizationError("unsupported trusted-key policy schema")
-    _expect_identifier(policy["policy_id"], "policy_id")
+    _expect_identifier(policy_id, "policy_id")
     if not isinstance(policy["keys"], list) or not policy["keys"]:
         raise AuthorizationError("trusted-key policy must contain keys")
+    return policy_id, policy["keys"], fields
+
+
+def _validate_trust_policy(policy: object, *, now: datetime, role: str, key_id: str) -> bytes:
+    _policy_id, keys, fields = _normalize_trust_policy(policy)
     matches: list[dict[str, Any]] = []
     observed_ids: set[str] = set()
-    for index, key in enumerate(policy["keys"]):
+    for index, key in enumerate(keys):
         if not isinstance(key, dict):
             raise AuthorizationError(f"trusted key {index} must be an object")
         _expect_exact_keys(
             key,
-            {"key_id", "algorithm", "public_key_base64", "roles", "not_before", "not_after", "revoked_at"},
+            {
+                fields["key_id"],
+                "algorithm",
+                fields["public_key"],
+                "roles",
+                fields["not_before"],
+                fields["not_after"],
+                fields["revoked_at"],
+            },
             f"trusted key {index}",
         )
-        current_id = _expect_identifier(key["key_id"], f"trusted key {index}.key_id")
+        current_id = _expect_identifier(key[fields["key_id"]], f"trusted key {index}.key_id")
         if current_id in observed_ids:
             raise AuthorizationError("trusted-key policy contains a duplicate key id")
         observed_ids.add(current_id)
@@ -118,13 +224,48 @@ def _validate_trust_policy(policy: object, *, now: datetime, role: str, key_id: 
         raise AuthorizationError("trusted key algorithm must be ed25519")
     if not isinstance(key["roles"], list) or role not in key["roles"] or len(set(key["roles"])) != len(key["roles"]):
         raise AuthorizationError("trusted key does not hold the required unique role")
-    not_before = _parse_time(key["not_before"], "trusted key not_before")
-    not_after = _parse_time(key["not_after"], "trusted key not_after")
+    not_before = _parse_time(key[fields["not_before"]], "trusted key not_before")
+    not_after = _parse_time(key[fields["not_after"]], "trusted key not_after")
     if not not_before <= now <= not_after:
         raise AuthorizationError("trusted key is outside its validity window")
-    if key["revoked_at"] is not None and _parse_time(key["revoked_at"], "trusted key revoked_at") <= now:
+    revoked_at = key[fields["revoked_at"]]
+    if revoked_at is not None and _parse_time(revoked_at, "trusted key revoked_at") <= now:
         raise AuthorizationError("trusted key is revoked")
-    return _decode_base64(key["public_key_base64"], expected_bytes=32, context="trusted public key")
+    return _decode_base64(key[fields["public_key"]], expected_bytes=32, context="trusted public key")
+
+
+def _normalize_signature(signature: object) -> tuple[dict[str, Any], dict[str, str], bool]:
+    if not isinstance(signature, dict):
+        raise AuthorizationError("detached signature must be an object")
+    if signature.get("schema_version") == SIGNATURE_SCHEMA:
+        _expect_exact_keys(
+            signature,
+            {"schema_version", "algorithm", "key_id", "payload_sha256", "signature_base64"},
+            "detached signature",
+        )
+        fields = {
+            "key_id": "key_id",
+            "payload": "payload_sha256",
+            "signature": "signature_base64",
+        }
+        studio_dialect = False
+    elif signature.get("schemaVersion") == STUDIO_SIGNATURE_SCHEMA:
+        _expect_exact_keys(
+            signature,
+            {"schemaVersion", "algorithm", "keyId", "payloadSha256", "signatureBase64"},
+            "detached signature",
+        )
+        fields = {
+            "key_id": "keyId",
+            "payload": "payloadSha256",
+            "signature": "signatureBase64",
+        }
+        studio_dialect = True
+    else:
+        raise AuthorizationError("unsupported detached signature schema or algorithm")
+    if signature["algorithm"] != "ed25519":
+        raise AuthorizationError("unsupported detached signature schema or algorithm")
+    return signature, fields, studio_dialect
 
 
 def verify_detached_signature(
@@ -139,23 +280,19 @@ def verify_detached_signature(
 
     if now.tzinfo != UTC:
         raise AuthorizationError("verification time must be UTC")
-    if not isinstance(signature, dict):
-        raise AuthorizationError("detached signature must be an object")
-    _expect_exact_keys(
-        signature,
-        {"schema_version", "algorithm", "key_id", "payload_sha256", "signature_base64"},
-        "detached signature",
-    )
-    if signature["schema_version"] != SIGNATURE_SCHEMA or signature["algorithm"] != "ed25519":
-        raise AuthorizationError("unsupported detached signature schema or algorithm")
-    key_id = _expect_identifier(signature["key_id"], "signature key_id")
-    expected_digest = _expect_sha256(signature["payload_sha256"], "signature payload_sha256")
-    document_bytes = canonical_json(document)
+    normalized_signature, fields, studio_dialect = _normalize_signature(signature)
+    key_id = _expect_identifier(normalized_signature[fields["key_id"]], "signature key_id")
+    expected_digest = _expect_sha256(normalized_signature[fields["payload"]], "signature payload_sha256")
+    document_bytes = studio_canonical_json(document) if studio_dialect else canonical_json(document)
     actual_digest = hashlib.sha256(document_bytes).hexdigest()
     if actual_digest != expected_digest:
         raise AuthorizationError("detached signature does not bind this payload")
     public_key = _validate_trust_policy(trust_policy, now=now, role=required_role, key_id=key_id)
-    signature_bytes = _decode_base64(signature["signature_base64"], expected_bytes=64, context="signature")
+    signature_bytes = _decode_base64(
+        normalized_signature[fields["signature"]],
+        expected_bytes=64,
+        context="signature",
+    )
     try:
         Ed25519PublicKey.from_public_bytes(public_key).verify(signature_bytes, document_bytes)
     except InvalidSignature as error:
@@ -240,22 +377,31 @@ def validate_release_authorization(
 
     if not isinstance(document, dict):
         raise AuthorizationError("release authorization must be an object")
-    if document.get("schema_version") != RELEASE_SCHEMA:
+    if document.get("schema_version") == RELEASE_SCHEMA:
+        fields = {
+            "release_digest": "release_digest",
+            "preregistration_digest": "preregistration_digest",
+            "q2_report_digest": "q2_report_digest",
+            "release_evidence_digest": "release_evidence_digest",
+            "rights_attestation_digest": "rights_attestation_digest",
+            "not_before": "not_before",
+            "expires_at": "expires_at",
+        }
+        expected_keys = {"schema_version", *fields.values()}
+    elif document.get("schemaVersion") == STUDIO_RELEASE_SCHEMA:
+        fields = {
+            "release_digest": "releaseDigest",
+            "preregistration_digest": "preregistrationDigest",
+            "q2_report_digest": "q2ReportDigest",
+            "release_evidence_digest": "releaseEvidenceDigest",
+            "rights_attestation_digest": "rightsAttestationDigest",
+            "not_before": "notBefore",
+            "expires_at": "expiresAt",
+        }
+        expected_keys = {"schemaVersion", *fields.values()}
+    else:
         raise AuthorizationError("unsupported release authorization schema")
-    _expect_exact_keys(
-        document,
-        {
-            "schema_version",
-            "release_digest",
-            "preregistration_digest",
-            "q2_report_digest",
-            "release_evidence_digest",
-            "rights_attestation_digest",
-            "not_before",
-            "expires_at",
-        },
-        "release authorization",
-    )
+    _expect_exact_keys(document, expected_keys, "release authorization")
     for field, value in {
         "release_digest": release_digest,
         "preregistration_digest": preregistration_digest,
@@ -263,10 +409,10 @@ def validate_release_authorization(
         "release_evidence_digest": release_evidence_digest,
         "rights_attestation_digest": rights_attestation_digest,
     }.items():
-        if document[field] != _expect_sha256(value, field):
+        if document[fields[field]] != _expect_sha256(value, field):
             raise AuthorizationError(f"release authorization {field} mismatch")
-    not_before = _parse_time(document["not_before"], "not_before")
-    expires_at = _parse_time(document["expires_at"], "expires_at")
+    not_before = _parse_time(document[fields["not_before"]], "not_before")
+    expires_at = _parse_time(document[fields["expires_at"]], "expires_at")
     if now.tzinfo != UTC or not not_before <= now <= expires_at:
         raise AuthorizationError("release authorization is outside its validity window")
     return document

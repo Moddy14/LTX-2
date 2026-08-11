@@ -98,6 +98,7 @@ export const trustRoles = [
   "preregistration-freezer",
   "rights-attestor",
   "qualification-attestor",
+  "evaluation-authorizer",
   "holdout-scorer",
   "release-authorizer",
   "audit-finalizer",
@@ -226,6 +227,18 @@ export const trustedKeyPolicySchema = z
           path: ["keys", index, "roles"],
           message:
             "release authorization and audit finalization require separate keys",
+        });
+      }
+      if (
+        key.roles.includes("evaluation-authorizer") &&
+        (key.roles.includes("release-authorizer") ||
+          key.roles.includes("audit-finalizer"))
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["keys", index, "roles"],
+          message:
+            "evaluation authorization requires a key separate from release authorization and audit finalization",
         });
       }
     }

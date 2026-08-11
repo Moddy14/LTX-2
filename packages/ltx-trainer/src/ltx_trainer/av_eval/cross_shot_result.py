@@ -446,6 +446,7 @@ def build_cross_shot_decision(raw: object, *, protocol: object, design: object) 
     _validate_factorial(rows, protocol)
     absolute = _validate_absolute_evidence(raw["absolute_gate_evidence"])
     comparisons, decisions = _comparison_reports(rows, deltas=_delta_map(design), absolute=absolute, seed=seed)
+    binding_index = {binding["artifact_id"]: binding["sha256"] for binding in protocol["bindings"]}
     selections: list[dict[str, Any]] = []
     for claim_id in CLAIM_IDS:
         manual = decisions[(claim_id, "manual-vs-none")]
@@ -464,6 +465,15 @@ def build_cross_shot_decision(raw: object, *, protocol: object, design: object) 
         "input_digest": document_sha256(raw),
         "protocol_digest": raw["protocol_digest"],
         "design_digest": raw["design_digest"],
+        "release_digest": binding_index["release"],
+        "preregistration_digest": binding_index["preregistration"],
+        "dataset_digest": binding_index["dataset"],
+        "calibration_catalog_digest": binding_index["calibration_catalog"],
+        "calibration_report_digest": binding_index["calibration_report"],
+        "evaluator_bundle_digest": binding_index["evaluator_bundle"],
+        "generation_runner_digest": binding_index["generation_runner"],
+        "prompt_set_digest": binding_index["prompt_set"],
+        "rating_protocol_digest": binding_index["rating_protocol"],
         "bindings_digest": protocol_report["bindings_digest"],
         "comparisons_digest": protocol_report["comparisons_digest"],
         "bootstrap": raw["bootstrap"],
