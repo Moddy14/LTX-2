@@ -18,6 +18,7 @@ from ltx_trainer.av_eval import (
     CompleteD1Error,
     ContentMeasurementError,
     CrossShotProtocolError,
+    CrossShotResultError,
     D1BundleError,
     DesignError,
     GovernanceError,
@@ -32,6 +33,7 @@ from ltx_trainer.av_eval import (
     build_comparator_matrix_report,
     build_complete_d1_report,
     build_content_measurements,
+    build_cross_shot_decision,
     build_cross_shot_protocol_report,
     build_fixed_d1_report,
     build_identity_measurements,
@@ -173,6 +175,19 @@ def _run_complete_d1(bundle_path: Path, catalog_path: Path, design_path: Path) -
     return 0 if report["verdict"] == "pass" else 2
 
 
+def _run_cross_shot_score(results_path: Path, protocol_path: Path, design_path: Path) -> int:
+    try:
+        results = json.loads(results_path.read_text(encoding="utf-8"))
+        protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+        design = json.loads(design_path.read_text(encoding="utf-8"))
+        report = build_cross_shot_decision(results, protocol=protocol, design=design)
+    except (OSError, json.JSONDecodeError, CrossShotResultError) as error:
+        logger.error("Q0 cross-shot results rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["verdict"] == "winner" else 2
+
+
 def _run_cross_shot_check(protocol_path: Path, design_report_path: Path | None) -> int:
     try:
         protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
@@ -257,6 +272,10 @@ def main() -> int:
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
+    cross_shot_score = subcommands.add_parser("cross-shot-score", help="evaluate the frozen paired Q0 factorial")
+    cross_shot_score.add_argument("--results", type=Path, required=True)
+    cross_shot_score.add_argument("--protocol", type=Path, required=True)
+    cross_shot_score.add_argument("--design", type=Path, required=True)
     comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
     comparator.add_argument("--matrix", type=Path, required=True)
     comparator.add_argument("--landscape", type=Path, required=True)
@@ -271,6 +290,7 @@ def main() -> int:
         "content-score": lambda: _run_content_score(args.observations),
         "complete-d1": lambda: _run_complete_d1(args.bundle, args.catalog, args.design),
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
+        "cross-shot-score": lambda: _run_cross_shot_score(args.results, args.protocol, args.design),
         "design-check": lambda: _run_design_check(args.design),
         "freeze": lambda: _run_freeze(args),
         "fixed-d1": lambda: _run_fixed_d1(args.bundle, args.catalog),

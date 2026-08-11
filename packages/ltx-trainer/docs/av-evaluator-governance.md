@@ -283,6 +283,14 @@ dimensions remain mandatory. Automatic selection stays disabled until it is
 noninferior to manual selection; an unclear result is an abstention, never an
 implicit win.
 
+`cross-shot-score` consumes the complete claim × identity × shot × seed × arm
+factorial. It rejects missing or duplicate cells, enforces exact measurement
+coverage, treats render failures by intention-to-treat, clusters paired
+differences by leakage component and controls all 36 claim/comparison/endpoint
+hypotheses as one Holm family. Automatic reference selection requires passing
+both automatic comparisons; otherwise a passing manual-versus-none result
+remains the winner, and unresolved claims abstain.
+
 ## Q1 comparator matrix
 
 `anchor-landscape.v1.json` records every external candidate found by the
