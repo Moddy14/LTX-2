@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import stat
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,12 @@ ROLE_IDS = {
     "holdout-scorer",
     "release-authorizer",
 }
+LIVE_OPERATIONAL_EVIDENCE_IDS = {
+    "empty-access-log-report",
+    "sealed-acl-report",
+    "trusted-key-policy",
+}
+LIVE_OPERATIONAL_MAX_AGE = timedelta(minutes=5)
 
 
 class ReadinessError(ValueError):
@@ -359,7 +365,167 @@ def build_operational_readiness_evidence(
     }
 
 
-def build_product_readiness_report(raw: object, *, now: datetime) -> dict[str, Any]:
+def _validate_live_inventory(raw: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    documents = evidence["documents"]
+    if not isinstance(documents, dict) or set(documents) != LIVE_OPERATIONAL_EVIDENCE_IDS:
+        raise ReadinessError("live operational documents must match the exact required inventory")
+    rows = evidence["evidence"]
+    if not isinstance(rows, list):
+        raise ReadinessError("live operational evidence inventory must be a list")
+    observed_ids: list[str] = []
+    observed_digests: dict[str, str] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ReadinessError(f"live operational evidence row {index} must be an object")
+        _exact_keys(row, {"artifact_id", "sha256"}, f"live operational evidence row {index}")
+        artifact_id = _identifier(row["artifact_id"], f"live operational evidence row {index}.artifact_id")
+        assert artifact_id is not None
+        digest = _sha256(row["sha256"], f"live operational evidence {artifact_id}.sha256")
+        assert digest is not None
+        observed_ids.append(artifact_id)
+        observed_digests[artifact_id] = digest
+    if observed_ids != sorted(LIVE_OPERATIONAL_EVIDENCE_IDS):
+        raise ReadinessError("live operational evidence rows must be sorted and complete")
+    package_digests = {entry["artifact_id"]: entry["sha256"] for entry in raw["evidence"]}
+    for artifact_id, document in documents.items():
+        digest = document_sha256(document)
+        if observed_digests[artifact_id] != digest or package_digests[artifact_id] != digest:
+            raise ReadinessError(f"live operational evidence digest mismatch: {artifact_id}")
+    return documents
+
+
+def _validate_empty_access_proof(access: object, *, checked_at: str) -> Path:
+    if not isinstance(access, dict):
+        raise ReadinessError("empty access-log report must be an object")
+    _exact_keys(
+        access,
+        {"schema_version", "checked_at", "log_path", "status", "events", "head_sha256"},
+        "empty access-log report",
+    )
+    if (
+        access["schema_version"] != "ltx-av-eval-empty-access-log-report.v1"
+        or access["checked_at"] != checked_at
+        or access["status"] != "verified"
+        or access["events"] != 0
+        or access["head_sha256"] != GENESIS_DIGEST
+        or not isinstance(access["log_path"], str)
+        or not Path(access["log_path"]).is_absolute()
+    ):
+        raise ReadinessError("empty access-log report is not a current genesis proof")
+    return Path(access["log_path"])
+
+
+def _validate_live_updates(operational: dict[str, Any], updates: object) -> None:
+    expected_update_fields = {
+        "blind_scorer_uid",
+        "blind_scorer_gid",
+        "development_uids",
+        "acl_status",
+        "access_log_status",
+        "access_log_events",
+        "access_log_head_sha256",
+    }
+    if not isinstance(updates, dict):
+        raise ReadinessError("live operational updates must be an object")
+    _exact_keys(updates, expected_update_fields, "live operational updates")
+    if any(updates[field] != operational[field] for field in expected_update_fields):
+        raise ReadinessError("live operational updates do not match the readiness package")
+
+
+def _validate_sealed_acl_proof(
+    acl: object, operational: dict[str, Any], *, checked_at: str
+) -> tuple[Path, Path]:
+    if not isinstance(acl, dict):
+        raise ReadinessError("sealed ACL report must be an object")
+    _exact_keys(
+        acl,
+        {"schema_version", "checked_at", "holdout_root", "access_log_root"},
+        "sealed ACL report",
+    )
+    if (
+        acl["schema_version"] != "ltx-av-eval-sealed-acl-report.v1"
+        or acl["checked_at"] != checked_at
+    ):
+        raise ReadinessError("sealed ACL report schema or timestamp mismatch")
+    root_paths: list[Path] = []
+    for field in ("holdout_root", "access_log_root"):
+        root = acl[field]
+        if not isinstance(root, dict):
+            raise ReadinessError(f"sealed ACL report {field} must be an object")
+        _exact_keys(
+            root,
+            {"status", "root", "owner_uid", "owner_gid", "mode", "development_uids"},
+            f"sealed ACL report {field}",
+        )
+        if (
+            root["status"] != "sealed"
+            or root["mode"] != "0700"
+            or root["owner_uid"] != operational["blind_scorer_uid"]
+            or root["owner_gid"] != operational["blind_scorer_gid"]
+            or root["development_uids"] != operational["development_uids"]
+            or not isinstance(root["root"], str)
+            or not Path(root["root"]).is_absolute()
+        ):
+            raise ReadinessError(f"sealed ACL report {field} does not match the independent boundary")
+        root_paths.append(Path(root["root"]))
+    if (
+        root_paths[0] == root_paths[1]
+        or root_paths[0].is_relative_to(root_paths[1])
+        or root_paths[1].is_relative_to(root_paths[0])
+    ):
+        raise ReadinessError("sealed holdout and audit roots are not separate")
+    return root_paths[0], root_paths[1]
+
+
+def _validate_live_operational_binding(
+    raw: dict[str, Any],
+    evidence: object,
+    *,
+    now: datetime,
+) -> str:
+    if not isinstance(evidence, dict):
+        raise ReadinessError("ready-to-freeze requires live operational evidence")
+    _exact_keys(
+        evidence,
+        {
+            "schema_version",
+            "checked_at",
+            "evidence",
+            "documents",
+            "operational_updates",
+            "trusted_key_policy_digest",
+        },
+        "live operational evidence",
+    )
+    if evidence["schema_version"] != "ltx-av-eval-operational-readiness-evidence.v1":
+        raise ReadinessError("unsupported live operational evidence schema")
+    checked_at = _timestamp(evidence["checked_at"], "live operational evidence.checked_at")
+    assert checked_at is not None
+    if checked_at > now or now - checked_at > LIVE_OPERATIONAL_MAX_AGE:
+        raise ReadinessError("live operational evidence is stale or from the future")
+    documents = _validate_live_inventory(raw, evidence)
+    operational = raw["operational"]
+    access_log_path = _validate_empty_access_proof(
+        documents["empty-access-log-report"], checked_at=evidence["checked_at"]
+    )
+    _validate_live_updates(operational, evidence["operational_updates"])
+    _holdout_root, access_log_root = _validate_sealed_acl_proof(
+        documents["sealed-acl-report"], operational, checked_at=evidence["checked_at"]
+    )
+    if access_log_path.parent != access_log_root:
+        raise ReadinessError("bound access log is not a direct child of the sealed audit root")
+    policy_digest = document_sha256(documents["trusted-key-policy"])
+    if evidence["trusted_key_policy_digest"] != policy_digest:
+        raise ReadinessError("trusted-key policy digest mismatch")
+    return document_sha256(evidence)
+
+
+def build_product_readiness_report(
+    raw: object,
+    *,
+    now: datetime,
+    operational_evidence: object | None = None,
+) -> dict[str, Any]:
     """Validate the complete D0 package without granting F0/Q2/P4 authority."""
 
     if now.tzinfo != UTC:
@@ -389,6 +555,9 @@ def build_product_readiness_report(raw: object, *, now: datetime) -> dict[str, A
     blockers = sorted(blockers)
     if raw["status"] == "ready-to-freeze" and blockers:
         raise ReadinessError(f"ready-to-freeze package is incomplete: {blockers}")
+    live_operational_digest = None
+    if raw["status"] == "ready-to-freeze":
+        live_operational_digest = _validate_live_operational_binding(raw, operational_evidence, now=now)
     return {
         "schema_version": READINESS_REPORT_SCHEMA,
         "package_digest": document_sha256(raw),
@@ -398,4 +567,5 @@ def build_product_readiness_report(raw: object, *, now: datetime) -> dict[str, A
         "artifact_commitments_digest": document_sha256(raw["artifact_commitments"]),
         "role_bindings_digest": document_sha256(raw["role_bindings"]),
         "operational_evidence_digest": document_sha256(raw["operational"]),
+        "live_operational_evidence_digest": live_operational_digest,
     }

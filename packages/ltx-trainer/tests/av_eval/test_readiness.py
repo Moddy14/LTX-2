@@ -87,6 +87,36 @@ def _trust_policy(now: datetime = NOW) -> dict[str, object]:
     }
 
 
+def _live_ready(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]]:
+    package = _ready()
+    operational = package["operational"]
+    assert isinstance(operational, dict)
+    operational["blind_scorer_uid"] = os.geteuid()
+    operational["blind_scorer_gid"] = os.getegid()
+    operational["development_uids"] = [os.geteuid() + 1]
+    holdout_root = tmp_path / "holdout"
+    access_log_root = tmp_path / "audit"
+    holdout_root.mkdir(mode=0o700)
+    access_log_root.mkdir(mode=0o700)
+    access_log = access_log_root / "access.jsonl"
+    access_log.write_bytes(b"")
+    access_log.chmod(0o600)
+    evidence = build_operational_readiness_evidence(
+        package,
+        holdout_root=holdout_root,
+        access_log_root=access_log_root,
+        access_log_path=access_log,
+        trust_policy=_trust_policy(),
+        now=NOW,
+    )
+    operational.update(evidence["operational_updates"])
+    digests = {entry["artifact_id"]: entry["sha256"] for entry in evidence["evidence"]}
+    for entry in package["evidence"]:  # type: ignore[union-attr]
+        if entry["artifact_id"] in digests:
+            entry["sha256"] = digests[entry["artifact_id"]]
+    return package, evidence
+
+
 def test_checked_in_readiness_package_is_an_explicit_hold() -> None:
     report = build_product_readiness_report(_draft(), now=NOW)
 
@@ -97,13 +127,53 @@ def test_checked_in_readiness_package_is_an_explicit_hold() -> None:
     assert "rights-expires-at-missing" in report["blockers"]
 
 
-def test_complete_readiness_package_is_stable_and_ready_to_freeze() -> None:
-    first = build_product_readiness_report(_ready(), now=NOW)
-    second = build_product_readiness_report(copy.deepcopy(_ready()), now=NOW)
+def test_complete_readiness_package_is_stable_and_ready_to_freeze(tmp_path: Path) -> None:
+    package, operational_evidence = _live_ready(tmp_path)
+    first = build_product_readiness_report(package, now=NOW, operational_evidence=operational_evidence)
+    second = build_product_readiness_report(
+        copy.deepcopy(package),
+        now=NOW,
+        operational_evidence=copy.deepcopy(operational_evidence),
+    )
 
     assert first == second
     assert first["status"] == "ready-to-freeze"
     assert first["blockers"] == []
+    assert first["live_operational_evidence_digest"] == document_sha256(operational_evidence)
+
+
+def test_ready_to_freeze_rejects_missing_stale_or_unbound_live_evidence(tmp_path: Path) -> None:
+    package, operational_evidence = _live_ready(tmp_path)
+    with pytest.raises(ReadinessError, match="requires live operational evidence"):
+        build_product_readiness_report(package, now=NOW)
+
+    stale = copy.deepcopy(operational_evidence)
+    stale["checked_at"] = "2026-08-11T13:54:59Z"
+    with pytest.raises(ReadinessError, match="stale or from the future"):
+        build_product_readiness_report(package, now=NOW, operational_evidence=stale)
+
+    unbound = copy.deepcopy(operational_evidence)
+    unbound["documents"]["empty-access-log-report"]["log_path"] = "/forged/access.jsonl"
+    with pytest.raises(ReadinessError, match="digest mismatch"):
+        build_product_readiness_report(package, now=NOW, operational_evidence=unbound)
+
+    misplaced_package = copy.deepcopy(package)
+    misplaced = copy.deepcopy(operational_evidence)
+    misplaced_document = misplaced["documents"]["empty-access-log-report"]
+    misplaced_document["log_path"] = str((tmp_path / "separate" / "access.jsonl").resolve())
+    misplaced_digest = document_sha256(misplaced_document)
+    for entry in misplaced["evidence"]:
+        if entry["artifact_id"] == "empty-access-log-report":
+            entry["sha256"] = misplaced_digest
+    for entry in misplaced_package["evidence"]:
+        if entry["artifact_id"] == "empty-access-log-report":
+            entry["sha256"] = misplaced_digest
+    with pytest.raises(ReadinessError, match="direct child"):
+        build_product_readiness_report(
+            misplaced_package,
+            now=NOW,
+            operational_evidence=misplaced,
+        )
 
 
 def test_readiness_rejects_shared_roles_and_scorer_access() -> None:
@@ -244,9 +314,10 @@ def test_operational_readiness_cli_emits_live_evidence(tmp_path: Path) -> None:
     operational["development_uids"] = [os.geteuid() + 1]
     package_path = tmp_path / "readiness.json"
     trust_path = tmp_path / "trust.json"
+    current_now = datetime.now(UTC).replace(microsecond=0)
     package_path.write_text(json.dumps(package), encoding="utf-8")
     trust_path.write_text(
-        json.dumps(_trust_policy(datetime.now(UTC).replace(microsecond=0))),
+        json.dumps(_trust_policy(current_now)),
         encoding="utf-8",
     )
     holdout_root = tmp_path / "holdout"
@@ -284,4 +355,46 @@ def test_operational_readiness_cli_emits_live_evidence(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert len(result.stdout.splitlines()) == 1
-    assert json.loads(result.stdout)["schema_version"] == "ltx-av-eval-operational-readiness-evidence.v1"
+    operational_evidence = json.loads(result.stdout)
+    assert operational_evidence["schema_version"] == "ltx-av-eval-operational-readiness-evidence.v1"
+
+    operational.update(operational_evidence["operational_updates"])
+    operational["rights_valid_at"] = (current_now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    operational["rights_expires_at"] = (current_now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    evidence_digests = {
+        entry["artifact_id"]: entry["sha256"] for entry in operational_evidence["evidence"]
+    }
+    for entry in package["evidence"]:  # type: ignore[union-attr]
+        if entry["artifact_id"] in evidence_digests:
+            entry["sha256"] = evidence_digests[entry["artifact_id"]]
+    evidence_path = tmp_path / "operational-evidence.json"
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    evidence_path.write_text(json.dumps(operational_evidence), encoding="utf-8")
+
+    ready = subprocess.run(
+        [
+            sys.executable,
+            str(REPOSITORY_ROOT / "packages" / "ltx-trainer" / "scripts" / "av_eval.py"),
+            "readiness-check",
+            "--package",
+            str(package_path),
+            "--operational-evidence",
+            str(evidence_path),
+            "--holdout-root",
+            str(holdout_root),
+            "--access-log-root",
+            str(access_log_root),
+            "--access-log",
+            str(access_log),
+            "--trust-policy",
+            str(trust_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+        cwd=tmp_path,
+    )
+
+    assert ready.returncode == 0, ready.stderr
+    assert json.loads(ready.stdout)["status"] == "ready-to-freeze"

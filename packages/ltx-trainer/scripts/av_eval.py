@@ -66,10 +66,52 @@ def _run_design_check(path: Path) -> int:
     return 0 if report["status"] == "ready-to-freeze" else 2
 
 
-def _run_readiness_check(path: Path) -> int:
+def _run_readiness_check(args: argparse.Namespace) -> int:
     try:
-        package = json.loads(path.read_text(encoding="utf-8"))
-        report = build_product_readiness_report(package, now=datetime.now(UTC).replace(microsecond=0))
+        package = json.loads(args.package.read_text(encoding="utf-8"))
+        now = datetime.now(UTC).replace(microsecond=0)
+        live_arguments = (
+            args.operational_evidence,
+            args.holdout_root,
+            args.access_log_root,
+            args.access_log,
+            args.trust_policy,
+        )
+        if any(value is not None for value in live_arguments) and not all(
+            value is not None for value in live_arguments
+        ):
+            raise ReadinessError("readiness-check live boundary arguments must be supplied together")
+        operational_evidence = None
+        if all(value is not None for value in live_arguments):
+            operational_evidence = json.loads(args.operational_evidence.read_text(encoding="utf-8"))
+            fresh_evidence = build_operational_readiness_evidence(
+                package,
+                holdout_root=args.holdout_root,
+                access_log_root=args.access_log_root,
+                access_log_path=args.access_log,
+                trust_policy=json.loads(args.trust_policy.read_text(encoding="utf-8")),
+                now=now,
+            )
+            if not isinstance(operational_evidence, dict):
+                raise ReadinessError("operational evidence bundle must be an object")
+            supplied_documents = operational_evidence.get("documents")
+            fresh_documents = fresh_evidence["documents"]
+            if not isinstance(supplied_documents, dict):
+                raise ReadinessError("operational evidence bundle has no documents")
+            for artifact_id in ("empty-access-log-report", "sealed-acl-report"):
+                supplied = supplied_documents.get(artifact_id)
+                fresh = fresh_documents[artifact_id]
+                if not isinstance(supplied, dict) or {
+                    key: value for key, value in supplied.items() if key != "checked_at"
+                } != {key: value for key, value in fresh.items() if key != "checked_at"}:
+                    raise ReadinessError(f"live operational boundary drifted: {artifact_id}")
+            if (
+                operational_evidence.get("operational_updates") != fresh_evidence["operational_updates"]
+                or operational_evidence.get("trusted_key_policy_digest")
+                != fresh_evidence["trusted_key_policy_digest"]
+            ):
+                raise ReadinessError("live operational identities or trusted keys drifted")
+        report = build_product_readiness_report(package, now=now, operational_evidence=operational_evidence)
     except (OSError, json.JSONDecodeError, ReadinessError) as error:
         logger.error("D0 readiness package rejected: %s", error)
         return 2
@@ -439,6 +481,11 @@ def main() -> int:  # noqa: PLR0915
     _add_q2_command(subcommands)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
+    readiness_check.add_argument("--operational-evidence", type=Path)
+    readiness_check.add_argument("--holdout-root", type=Path)
+    readiness_check.add_argument("--access-log-root", type=Path)
+    readiness_check.add_argument("--access-log", type=Path)
+    readiness_check.add_argument("--trust-policy", type=Path)
     operational_check = subcommands.add_parser(
         "operational-readiness-check",
         help="inspect sealed D0 roots, the untouched audit log and independent keys",
@@ -470,7 +517,7 @@ def main() -> int:  # noqa: PLR0915
         "offset-score": lambda: _run_offset_score(args.observations),
         "operational-readiness-check": lambda: _run_operational_readiness_check(args),
         "q2-score": lambda: _run_q2_score(args),
-        "readiness-check": lambda: _run_readiness_check(args.package),
+        "readiness-check": lambda: _run_readiness_check(args),
         "sharpness-score": lambda: _run_sharpness_score(args.observations),
         "technical-score": lambda: _run_technical_score(args.observations, args.surface),
         "vbench-score": lambda: _run_vbench_score(args.observations, args.design),

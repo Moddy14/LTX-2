@@ -449,7 +449,8 @@ uv run python scripts/av_eval.py operational-readiness-check \
   --holdout-root /secure/holdout \
   --access-log-root /secure/holdout-audit \
   --access-log /secure/holdout-audit/access.jsonl \
-  --trust-policy /secure/policies/product-trusted-keys.v1.json
+  --trust-policy /secure/policies/product-trusted-keys.v1.json \
+  > /secure/evidence/operational-readiness.v1.json
 ```
 
 It re-inspects both roots, their independent UID/GID and `0700` modes, rejects
@@ -458,6 +459,23 @@ signature chain, requires the log to remain at genesis, and validates current,
 distinct, single-role Ed25519 keys. The output contains the canonical documents
 and hashes for `sealed-acl-report`, `empty-access-log-report`, and
 `trusted-key-policy`; it does not fabricate the other six D0 evidence items.
+After those three hashes have been copied into the readiness inventory, the
+final check must bind the saved bundle and repeat the live inspection:
+
+```bash
+uv run python scripts/av_eval.py readiness-check \
+  --package configs/av_eval/product-readiness.v1.json \
+  --operational-evidence /secure/evidence/operational-readiness.v1.json \
+  --holdout-root /secure/holdout \
+  --access-log-root /secure/holdout-audit \
+  --access-log /secure/holdout-audit/access.jsonl \
+  --trust-policy /secure/policies/product-trusted-keys.v1.json
+```
+
+`ready-to-freeze` rejects a missing, older-than-five-minutes, future-dated or
+hash-unbound bundle. It also fails when the repeated live inspection finds a
+different root, owner, ACL, log state, role binding or trust policy. A draft
+package can still report its blockers without access to the sealed roots.
 
 ## Command
 
