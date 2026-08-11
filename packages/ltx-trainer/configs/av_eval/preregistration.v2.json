@@ -45,6 +45,7 @@
       }
     ],
     "human_mos_gates": {
+      "audio_quality_min": 9.0,
       "lip_sync_min": 9.0,
       "identity_and_mouth_naturalness_min": 9.0,
       "candidate_lip_sync_margin_min": 0.5,

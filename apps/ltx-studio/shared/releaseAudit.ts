@@ -241,6 +241,23 @@ export const trustedKeyPolicySchema = z
             "evaluation authorization requires a key separate from release authorization and audit finalization",
         });
       }
+      if (key.roles.includes("holdout-scorer") && key.roles.length !== 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["keys", index, "roles"],
+          message: "holdout scoring requires a dedicated signing key",
+        });
+      }
+    }
+    if (
+      policy.keys.filter(({ roles }) => roles.includes("holdout-scorer"))
+        .length !== 1
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["keys"],
+        message: "exactly one holdout-scorer key is required",
+      });
     }
   });
 
@@ -612,6 +629,7 @@ export function collectReleaseEvidence(
   if (candidateEntries.length === 0)
     throw new Error("Release surface has no candidate entries");
   const candidateIds = new Set(candidateEntries.map(({ id }) => id));
+  const candidateById = new Map(candidateEntries.map((entry) => [entry.id, entry]));
   const requiredRights = new Set(
     candidateEntries.flatMap(
       ({ rights: entryRights }) => entryRights.evidenceIds,
@@ -663,6 +681,13 @@ export function collectReleaseEvidence(
       if (!candidateIds.has(entry.surfaceEntryId))
         throw new Error(
           `Report covers non-candidate entry: ${entry.surfaceEntryId}`,
+        );
+      const applicable = new Set(
+        candidateById.get(entry.surfaceEntryId)?.applicableGates ?? [],
+      );
+      if (entry.gates.some((gate) => !applicable.has(gate)))
+        throw new Error(
+          `Report claims a non-applicable gate: ${entry.surfaceEntryId}`,
         );
       const gateSet =
         coverage.get(entry.surfaceEntryId) ?? new Set<ReleaseGateId>();

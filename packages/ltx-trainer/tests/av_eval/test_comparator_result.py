@@ -11,14 +11,19 @@ from typing import Any
 
 import pytest
 
-from ltx_trainer.av_eval import ComparatorResultError, build_comparator_decision, document_sha256
+from ltx_trainer.av_eval import (
+    ComparatorResultError,
+    build_comparator_decision,
+    build_holdout_comparator_decision,
+    document_sha256,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 CONFIG_ROOT = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval"
 MATRIX_PATH = CONFIG_ROOT / "comparator-matrix.v1.json"
 LANDSCAPE_PATH = CONFIG_ROOT / "anchor-landscape.v1.json"
 AS_OF = date(2026, 8, 11)
-BASE_FAMILIES = ["artifact", "asr", "av-sync", "mouth-content", "mos", "sharpness", "vbench"]
+BASE_FAMILIES = ["artifact", "asr", "audio-quality", "av-sync", "mouth-content", "mos", "sharpness", "vbench"]
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -194,7 +199,7 @@ def test_paired_q1_pilot_passes_registered_holm_gates() -> None:
     assert first["failed_rows"] == 0
     assert {claim["status"] for claim in first["claims"]} == {"sota-pilot-pass"}
     ranks = sorted(gate["holm_rank"] for claim in first["claims"] for gate in claim["gates"])
-    assert ranks == list(range(1, 40))
+    assert ranks == list(range(1, 45))
 
 
 def test_q1_itt_failure_and_material_shortfall_hold_the_freeze() -> None:
@@ -224,6 +229,27 @@ def test_q1_itt_failure_and_material_shortfall_hold_the_freeze() -> None:
     )
     assert shortfall_report["status"] == "hold"
     assert all(claim["status"] == "sota-pilot-fail" for claim in shortfall_report["claims"])
+
+
+def test_q2_reuses_the_frozen_paired_rule_on_the_holdout_without_q1_schema_aliasing() -> None:
+    matrix, landscape, gates = _contracts()
+    results = _results(matrix)
+    results["schema_version"] = "ltx-av-eval-holdout-comparator-results.v1"
+    results["holdout_digest"] = results.pop("calibration_dataset_digest")
+    results["q2_runner_digest"] = results.pop("q1_runner_digest")
+
+    report = build_holdout_comparator_decision(
+        results,
+        gates=gates,
+        matrix=matrix,
+        landscape=landscape,
+        as_of=AS_OF,
+    )
+
+    assert report["schema_version"] == "ltx-av-eval-holdout-comparator-decision.v1"
+    assert report["status"] == "pass"
+    assert report["sota_status"] == "anchor-holdout-pass"
+    assert {claim["status"] for claim in report["claims"]} == {"sota-holdout-pass"}
 
 
 def test_q1_rejects_unpaired_rows_and_post_commitment_gate_drift() -> None:

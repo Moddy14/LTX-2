@@ -12,10 +12,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from ltx_trainer.av_eval.authorization import (
     AuthorizationError,
+    build_consumption_event,
     canonical_json,
     record_consumption_event,
+    record_signed_consumption_event,
     sha256_document,
     studio_canonical_json,
+    validate_consumption_events,
     validate_evaluation_authorization,
     validate_release_authorization,
     verify_detached_signature,
@@ -288,19 +291,89 @@ def test_consumption_events_are_monotonic_write_once_and_idempotent(tmp_path: Pa
         "nonce_sha256": DIGESTS["nonce"],
         "writer_id": "independent-q2-runner",
     }
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    policy = {
+        "schema_version": "ltx-av-eval-trusted-keys.v1",
+        "policy_id": "holdout-consumption-policy-01",
+        "keys": [
+            {
+                "key_id": "holdout-scorer-key-01",
+                "algorithm": "ed25519",
+                "public_key_base64": base64.b64encode(public_key).decode(),
+                "roles": ["holdout-scorer"],
+                "not_before": _timestamp(NOW - timedelta(days=1)),
+                "not_after": _timestamp(NOW + timedelta(days=1)),
+                "revoked_at": None,
+            }
+        ],
+    }
+
+    def signed(event: str, occurred_at: datetime) -> dict[str, object]:
+        document = build_consumption_event(event=event, occurred_at=occurred_at, **arguments)  # type: ignore[arg-type]
+        return {
+            "schema_version": "ltx-av-eval-detached-signature.v1",
+            "algorithm": "ed25519",
+            "key_id": "holdout-scorer-key-01",
+            "payload_sha256": sha256_document(document),
+            "signature_base64": base64.b64encode(private_key.sign(canonical_json(document))).decode(),
+        }
 
     with pytest.raises(AuthorizationError, match="before the started"):
         record_consumption_event(root, event="consumed", occurred_at=NOW, **arguments)
-    started = record_consumption_event(root, event="started", occurred_at=NOW, **arguments)
+    started = record_signed_consumption_event(
+        root,
+        event="started",
+        occurred_at=NOW,
+        signature=signed("started", NOW),
+        trust_policy=policy,
+        **arguments,
+    )
     assert started.stat().st_mode & 0o777 == 0o600
     assert record_consumption_event(root, event="started", occurred_at=NOW, **arguments) == started
-    consumed = record_consumption_event(
+    consumed_at = NOW + timedelta(seconds=1)
+    consumed = record_signed_consumption_event(
         root,
         event="consumed",
-        occurred_at=NOW + timedelta(seconds=1),
+        occurred_at=consumed_at,
+        signature=signed("consumed", consumed_at),
+        trust_policy=policy,
         **arguments,
     )
     assert consumed.is_file()
+    started_digest = sha256_document(
+        build_consumption_event(event="started", occurred_at=NOW, **arguments),  # type: ignore[arg-type]
+    )
+    consumed_digest = sha256_document(
+        build_consumption_event(event="consumed", occurred_at=consumed_at, **arguments),  # type: ignore[arg-type]
+    )
+    assert validate_consumption_events(
+        root,
+        complete_by=NOW + timedelta(hours=1),
+        trust_policy=policy,
+        now=NOW + timedelta(seconds=2),
+        **arguments,
+    ) == {
+        "schema_version": "ltx-av-eval-holdout-consumption-report.v1",
+        **arguments,
+        "started_at": _timestamp(NOW),
+        "consumed_at": _timestamp(NOW + timedelta(seconds=1)),
+        "started_signature_digest": started_digest,
+        "consumed_signature_digest": consumed_digest,
+        "status": "consumed",
+    }
+
+    with pytest.raises(AuthorizationError, match="exceeded complete_by"):
+        validate_consumption_events(
+            root,
+            complete_by=NOW,
+            trust_policy=policy,
+            now=NOW + timedelta(seconds=2),
+            **arguments,
+        )
 
     with pytest.raises(AuthorizationError, match="different content"):
         record_consumption_event(

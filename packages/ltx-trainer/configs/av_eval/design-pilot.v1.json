@@ -57,6 +57,7 @@
     {"endpoint_id": "asr-critical-number", "model": "binomial-lower", "effect": null, "variability": null, "null_value": 0.99, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "asr-wer", "model": "binomial-upper", "effect": null, "variability": null, "null_value": 0.05, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "identity-superiority", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},
+    {"endpoint_id": "mos-audio-quality", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "mos-identity-mouth", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "mos-lip-sync", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},
     {"endpoint_id": "q0-sharpness-ni", "model": "paired-mean", "effect": null, "variability": null, "null_value": null, "alternative": null, "max_ci_width": null},

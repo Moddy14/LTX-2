@@ -15,12 +15,15 @@ from .design import document_sha256
 RESULTS_SCHEMA = "ltx-av-eval-comparator-results.v1"
 GATES_SCHEMA = "ltx-av-eval-comparator-gates.v1"
 DECISION_SCHEMA = "ltx-av-eval-comparator-decision.v1"
+HOLDOUT_RESULTS_SCHEMA = "ltx-av-eval-holdout-comparator-results.v1"
+HOLDOUT_DECISION_SCHEMA = "ltx-av-eval-holdout-comparator-decision.v1"
 BOOTSTRAP_REPLICATES = 10_000
 CONFIDENCE_LEVEL = 0.95
 FAMILYWISE_ALPHA = 0.05
 BASE_GATE_FAMILIES = {
     "artifact",
     "asr",
+    "audio-quality",
     "av-sync",
     "mouth-content",
     "mos",
@@ -521,4 +524,83 @@ def build_comparator_decision(
         "blockers": blockers,
         "status": "ready-to-freeze" if not blockers else "hold",
         "sota_status": "anchor-pilot-pass" if not blockers and sota_ready else "hold",
+    }
+
+
+def build_holdout_comparator_decision(
+    raw: object,
+    *,
+    gates: object,
+    matrix: object,
+    landscape: object,
+    as_of: date,
+) -> dict[str, Any]:
+    """Re-run the frozen paired Q1 decision rule on the sealed Q2 holdout."""
+
+    if not isinstance(raw, dict) or not isinstance(matrix, dict):
+        raise ComparatorResultError("Q2 results and comparator matrix must be objects")
+    _exact_keys(
+        raw,
+        {
+            "schema_version",
+            "release_digest",
+            "holdout_digest",
+            "preregistration_digest",
+            "comparator_matrix_digest",
+            "q2_runner_digest",
+            "bootstrap",
+            "rows",
+        },
+        "Q2 comparator results",
+    )
+    if raw["schema_version"] != HOLDOUT_RESULTS_SCHEMA:
+        raise ComparatorResultError("unsupported Q2 comparator result schema")
+    for field in (
+        "release_digest",
+        "holdout_digest",
+        "preregistration_digest",
+        "comparator_matrix_digest",
+        "q2_runner_digest",
+    ):
+        _sha256(raw[field], field)
+    try:
+        matrix_report = build_comparator_matrix_report(matrix, landscape=landscape, as_of=as_of)
+    except ComparatorMatrixError as error:
+        raise ComparatorResultError(f"frozen Q2 matrix rejected: {error}") from error
+    if matrix["status"] != "frozen" or matrix_report["status"] != "ready-to-freeze":
+        raise ComparatorResultError("Q2 matrix must be frozen and ready-to-freeze")
+    if raw["comparator_matrix_digest"] != matrix_report["matrix_digest"]:
+        raise ComparatorResultError("Q2 comparator matrix digest mismatch")
+    target_claims = set(matrix_report["target_sota_claim_ids"])
+    validated_gates, gates_digest = _validate_gates(gates, target_claims=target_claims)
+    if gates_digest != _matrix_commitment(matrix, "applicable_gates"):
+        raise ComparatorResultError("Q2 gates do not match the pre-result matrix commitment")
+    seed = _validate_bootstrap(raw["bootstrap"])
+    rows = _validate_rows(raw["rows"], matrix=matrix, gates=validated_gates)
+    _validate_factorial(rows, matrix=matrix)
+    claims, blockers = _decision_reports(rows, matrix=matrix, gates=validated_gates, seed=seed)
+    for claim in claims:
+        if claim["status"] == "sota-pilot-pass":
+            claim["status"] = "sota-holdout-pass"
+        elif claim["status"] == "sota-pilot-fail":
+            claim["status"] = "sota-holdout-fail"
+    target_reports = [claim for claim in claims if claim["claim_status"] == "sota-target"]
+    sota_ready = bool(target_reports) and all(claim["status"] == "sota-holdout-pass" for claim in target_reports)
+    return {
+        "schema_version": HOLDOUT_DECISION_SCHEMA,
+        "input_digest": document_sha256(raw),
+        "release_digest": raw["release_digest"],
+        "holdout_digest": raw["holdout_digest"],
+        "preregistration_digest": raw["preregistration_digest"],
+        "comparator_matrix_digest": raw["comparator_matrix_digest"],
+        "gates_digest": gates_digest,
+        "q2_runner_digest": raw["q2_runner_digest"],
+        "bootstrap": raw["bootstrap"],
+        "rows": len(rows),
+        "failed_rows": sum(row.status == "failed" for row in rows),
+        "target_sota_claim_ids": matrix_report["target_sota_claim_ids"],
+        "claims": claims,
+        "blockers": blockers,
+        "status": "pass" if not blockers else "hold",
+        "sota_status": "anchor-holdout-pass" if not blockers and sota_ready else "hold",
     }

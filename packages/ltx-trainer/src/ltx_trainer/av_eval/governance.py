@@ -38,7 +38,7 @@ FFPROBE_PATH = Path("/usr/bin/ffprobe")
 FFPROBE_SHA256 = "b98cabc72a01bf522a3eb85cae3cf7a8843817bfb0315ff14d8699cef5413f7d"
 # This digest is updated only by reviewed code changes after the preregistration is
 # externally approved. The corresponding split seed is intentionally absent here.
-TRUSTED_PREREGISTRATION_SHA256 = "ab95c00f6c1a365262dbb43805166f59a85eb1f2dccbf44f78c9b54ad5419363"
+TRUSTED_PREREGISTRATION_SHA256 = "9e54bf253621576ecc3caf6617183e2d4ff89d521c04d6078e15374f79f80c6e"
 SPLITS = ("train", "tune", "design-pilot", "calibration", "test")
 OOD_KINDS = (
     "silence",
@@ -1376,6 +1376,7 @@ def _validate_holdout_commitments(raw: object, status: str) -> None:
         raise GovernanceError("Unbekannter FAR/FRR-Arbeitspunkt.")
     _validate_comparator_arms(raw["comparator_arms"], status)
     expected_mos = {
+        "audio_quality_min": 9.0,
         "lip_sync_min": 9.0,
         "identity_and_mouth_naturalness_min": 9.0,
         "candidate_lip_sync_margin_min": 0.5,

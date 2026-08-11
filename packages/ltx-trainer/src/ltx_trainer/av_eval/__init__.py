@@ -4,7 +4,10 @@ from .artifact import ArtifactMeasurementError, build_artifact_measurements
 from .asr import AsrMeasurementError, build_asr_measurements
 from .authorization import (
     AuthorizationError,
+    build_consumption_event,
     record_consumption_event,
+    record_signed_consumption_event,
+    validate_consumption_events,
     validate_evaluation_authorization,
     validate_release_authorization,
     verify_detached_signature,
@@ -12,13 +15,13 @@ from .authorization import (
 from .bundle import D1BundleError, build_fixed_d1_report
 from .calibration import CalibrationError, build_calibration_gate_report
 from .comparator import ComparatorMatrixError, build_comparator_matrix_report
-from .comparator_result import ComparatorResultError, build_comparator_decision
+from .comparator_result import ComparatorResultError, build_comparator_decision, build_holdout_comparator_decision
 from .complete import CompleteD1Error, build_complete_d1_report
 from .content import ContentMeasurementError, build_content_measurements
 from .cross_shot import CrossShotProtocolError, build_cross_shot_protocol_report
 from .cross_shot_result import CrossShotResultError, build_cross_shot_decision
 from .design import DesignError, build_power_report, document_sha256
-from .freeze_preflight import FreezePreflightError, build_f0_preflight_report
+from .freeze_preflight import FreezePreflightError, build_f0_preflight_report, validate_f0_candidate
 from .governance import (
     FrozenDatasetSession,
     GovernanceError,
@@ -29,6 +32,7 @@ from .governance import (
     open_frozen_dataset,
     validate_preregistration,
 )
+from .holdout import HoldoutDecisionError, build_q2_qualification_report
 from .identity import IdentityMeasurementError, build_identity_measurements
 from .offset import OffsetMeasurementError, build_offset_measurements
 from .product import (
@@ -58,6 +62,7 @@ __all__ = [
     "FreezePreflightError",
     "FrozenDatasetSession",
     "GovernanceError",
+    "HoldoutDecisionError",
     "IdentityMeasurementError",
     "OffsetMeasurementError",
     "ProductGovernanceError",
@@ -71,15 +76,18 @@ __all__ = [
     "build_comparator_decision",
     "build_comparator_matrix_report",
     "build_complete_d1_report",
+    "build_consumption_event",
     "build_content_measurements",
     "build_cross_shot_decision",
     "build_cross_shot_protocol_report",
     "build_f0_preflight_report",
     "build_fixed_d1_report",
+    "build_holdout_comparator_decision",
     "build_identity_measurements",
     "build_offset_measurements",
     "build_power_report",
     "build_product_readiness_report",
+    "build_q2_qualification_report",
     "build_sharpness_measurements",
     "build_vbench_measurements",
     "document_sha256",
@@ -89,7 +97,10 @@ __all__ = [
     "open_frozen_artifact",
     "open_frozen_dataset",
     "record_consumption_event",
+    "record_signed_consumption_event",
+    "validate_consumption_events",
     "validate_evaluation_authorization",
+    "validate_f0_candidate",
     "validate_measurement_report",
     "validate_preregistration",
     "validate_release_authorization",

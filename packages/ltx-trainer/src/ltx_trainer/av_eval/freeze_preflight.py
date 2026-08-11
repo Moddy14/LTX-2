@@ -222,6 +222,13 @@ def _validate_candidate(raw: object) -> tuple[dict[str, Any], dict[str, str], di
     return raw, detailed, qualifications
 
 
+def validate_f0_candidate(raw: object) -> dict[str, Any]:
+    """Validate and normalize the signed F0 candidate index for downstream Q2 tooling."""
+
+    candidate, _detailed, _qualifications = _validate_candidate(raw)
+    return candidate
+
+
 def _validate_preregistration_binding(
     candidate: dict[str, Any],
     preregistration: object,
@@ -506,6 +513,8 @@ def _validate_qualification_reports(  # noqa: PLR0912
                 raise FreezePreflightError(f"qualification report {kind} covers a non-candidate entry")
             if not gates.issubset(allowed_gates):
                 raise FreezePreflightError(f"qualification report {kind} claims gates it does not own")
+            if not gates.issubset(candidate_entries[entry_id]):
+                raise FreezePreflightError(f"qualification report {kind} claims non-applicable gates")
             passed_coverage[entry_id].update(gates)
         digest = studio_sha256_document(report)
         if digest != expected_digests[kind]:
@@ -574,6 +583,8 @@ def _validate_studio_trust_policy(raw: dict[str, Any]) -> None:
             raise FreezePreflightError("release authorization and audit finalization require separate keys")
         if "evaluation-authorizer" in roles and ({"release-authorizer", "audit-finalizer"} & set(roles)):
             raise FreezePreflightError("evaluation and release/finalization authorization require separate keys")
+        if "holdout-scorer" in roles and len(roles) != 1:
+            raise FreezePreflightError("holdout scoring requires a dedicated signing key")
     if len(key_ids) != len(set(key_ids)):
         raise FreezePreflightError("trusted-key policy keys must be unique")
 
@@ -588,6 +599,26 @@ def _require_key_valid_until(raw: dict[str, Any], *, key_id: str, required_until
     revoked_at = key["revokedAt"]
     if revoked_at is not None and _timestamp(revoked_at, f"{context} key revokedAt") <= required_until:
         raise FreezePreflightError(f"{context} signing key is revoked before Q2 complete_by")
+
+
+def _require_unique_role_valid_until(
+    raw: dict[str, Any],
+    *,
+    role: str,
+    required_from: datetime,
+    required_until: datetime,
+) -> None:
+    matches = [key for key in raw["keys"] if role in key["roles"]]
+    if len(matches) != 1:
+        raise FreezePreflightError(f"F0 requires exactly one trusted {role} key")
+    if _timestamp(matches[0]["notBefore"], f"{role} key notBefore") > required_from:
+        raise FreezePreflightError(f"{role} signing key is not active at F0")
+    _require_key_valid_until(
+        raw,
+        key_id=matches[0]["keyId"],
+        required_until=required_until,
+        context=role,
+    )
 
 
 def build_f0_preflight_report(  # noqa: PLR0913
@@ -673,6 +704,12 @@ def build_f0_preflight_report(  # noqa: PLR0913
         key_id=_signature_key_id(rights_signature, "rights signature"),
         required_until=complete_by,
         context="rights attestation",
+    )
+    _require_unique_role_valid_until(
+        trust_policy,
+        role="holdout-scorer",
+        required_from=now,
+        required_until=complete_by,
     )
     _validate_rights(
         candidate,

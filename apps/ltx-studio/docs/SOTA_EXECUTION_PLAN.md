@@ -17,7 +17,7 @@ lautet der ehrliche Status **nicht 10/10**.
 
 | Bereich | Stand am 11.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Vor dieser Planrevision war Commit `41e4166` sauber; zuletzt 570/570 Studio-Tests, 60/60 native Tests, 53 E2E bestanden | gut, aber noch kein Release | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und nun auch den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 141/141, Studio 598/598 Tests; Lint und Build sind grün | gut, aber noch kein Release | P0 |
 | DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
@@ -25,7 +25,7 @@ lautet der ehrliche Status **nicht 10/10**.
 | Frontend-Bundle | R2 ist mit artefaktgebundener Evidenz bestanden: 388.269/115.561 Bytes raw/gzip, keine Vite-Chunkwarnung, echte Lazy-Chunks und 40+40 kalte Chromium-Kontexte; p95 175,42 ms -> 131,58 ms | gut; kein offener Bundle-Defekt | abgeschlossen |
 | Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 123 Einträge, davon 17 konditionale Kandidaten und 106 rechtlich/technisch gesperrt | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten und eine Draft-Preregistrierung existieren bereits. `profile=product` ist absichtlich hart blockiert, weil Signatur-, ACL-, Blind-Scorer- und Attestierungspfad fehlen | starke Grundlage, Product-GO offen | P2 |
-| Tune/Holdout | Es gibt noch keinen rechtsgeprüften Kalibriersatz und keinen versiegelten Holdout. Fünf funktionale Tune-Clips reichen nicht zur biometrischen Schwellenkalibrierung | zentraler 10/10-Blocker | P2 |
+| Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. Es gibt weiterhin keinen rechtsgeprüften Kalibriersatz, keinen versiegelten Holdout und keine unabhängigen Signaturen; fünf Tune-Clips reichen nicht zur biometrischen Schwellenkalibrierung | Vertrag gut; reale Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
 | Video-Benchmark | VBench ist lokal nicht installiert. Für eigene I2V-Videos ist VBench++/VBench-I2V einschlägig; VBench 2.0 misst primär intrinsische Faithfulness und ersetzt weder Lip-Sync- noch Identitätsgates | alter Werkzeugname war zu pauschal | P2 |
 | Komparatoren | LongCat ist lokal vorhanden. MOVA und Wan2.2-S2V fehlen lokal. MOVA und Wan haben unterschiedliche Eingabeverträge und dürfen nicht in einen gemeinsamen Score gezwungen werden | lokaler Bake-off offen | P3 |
@@ -565,6 +565,19 @@ autorisiert.
 
 ### Q2 — Einmaliger Holdout und blinde MOS
 
+**Status: fail-closed Auswertungs- und Reportvertrag implementiert; reale
+versiegelte Ausführung offen.** `q2-score` prüft F0-/Prereg-/Trust-/
+Autorisierungsbindungen, den irreversiblen Consumption-State, alle
+claim-spezifischen objektiven Holdout-Gates, die gepaarte ITT-Auswertung gegen
+den eingefrorenen externen Anker und global Holm-korrigierte Blind-MOS-Gates.
+Audioqualität ist nun ein eigener 9/10-MOS- und Comparator-Endpunkt statt ein
+ASR-Alias. Objektive und MOS-Berichte werden pro Release-Surface-Eintrag gegen
+dessen tatsächliche `applicableGates` und die F0-gebundene D0a-Mindeststichprobe
+geprüft; Text-to-Audio erbt keine visuellen Gates und kein Video-Claim darf
+VBench-Evidenz eines anderen Claims übernehmen. Der eingecheckte Stand enthält
+weder echte Holdoutwerte noch eine unabhängige Q2-Signatur und bleibt deshalb
+`hold`.
+
 1. Vor Entschlüsselung die `evaluation_authorization` und das finale
    Rights-Attest frisch gegen Digest, Ablauf und Widerruf prüfen. Der
    unabhängige Writer setzt dann atomar einen signierten append-only
@@ -590,9 +603,10 @@ autorisiert.
    Grenzen müssen bestehen.
 3. MOS verblindet, zufällige Armreihenfolge, identische Lautheit/Zeitachse,
    Rater-QC und identitätsweises Bootstrap. Gates laut Preregistrierung:
-   Lip-Sync sowie Minimum aus Identität/Mundnatur jeweils mindestens 9/10;
-   Kandidatenmargen mindestens +0,50 beziehungsweise +0,30, jeweils mit
-   95-%-Konfidenz und Holm-Korrektur.
+   Lip-Sync, Audioqualität sowie Minimum aus Identität/Mundnatur jeweils
+   mindestens 9/10; Kandidatenmargen mindestens +0,50 beziehungsweise +0,30,
+   jeweils mit 95-%-Konfidenz und Holm-Korrektur. Die relative Audioqualität
+   bleibt zusätzlich eine eigene Comparator-Gate-Familie.
 
 **Exit Q2:** Pro Claim-Domäne existiert ein statistisch belegter lokaler
 Gewinner oder eine vorregistrierte Abstention. `sota_qualified` ist nur ein

@@ -165,6 +165,58 @@ plan digests. Unnormalized tokens, missing critical annotations, uncovered
 strata, pseudoreplicated clips or a changed bootstrap contract reject the
 complete measurement.
 
+## Q2 sealed-holdout qualification
+
+`q2-score` is the fail-closed bridge from the frozen evaluator evidence to the
+only `q2-holdout` report accepted by the Studio release audit. It verifies the
+Studio-canonical F0 candidate, frozen preregistration and independent
+evaluation authorization; the trusted-key policy itself must match the F0
+digest. The owner-only consumption directory must contain canonical,
+write-once `started.json` and `consumed.json` records for the exact
+authorization, transaction, nonce and writer, with consumption and report
+generation completed before `complete_by`.
+
+For every candidate surface entry the command revalidates a holdout
+measurement report against exactly that entry's applicable gates in the
+F0-bound D1 catalog. Text-to-audio therefore needs no visual report, while
+claim-specific VBench metrics can never be borrowed from another claim. The
+F0-bound D0a power report supplies the minimum independent-unit count for every
+objective, MOS and relative comparator result. The command reruns the frozen
+paired comparator rule with 10,000 leakage-component bootstrap replicates and
+global Holm control; ITT failures, unpaired cells, underpowered evidence,
+anchor drift or baseline-matrix drift stop the report. Blind MOS is likewise
+surface-entry-specific and covers lip sync, identity/mouth naturalness, and
+audio quality. All absolute scores require a Holm-corrected lower confidence
+bound of at least 9/10; the registered lip-sync and identity/mouth margins must
+also pass. Audio quality is an explicit powered endpoint and comparator family,
+not an alias for ASR word accuracy.
+
+```bash
+uv run python scripts/av_eval.py q2-score \
+  --results /sealed/q2/results.json \
+  --candidate /sealed/f0/candidate.json \
+  --candidate-signature /sealed/f0/candidate.sig.json \
+  --preregistration /sealed/f0/preregistration.json \
+  --preregistration-signature /sealed/f0/preregistration.sig.json \
+  --evaluation-authorization /sealed/f0/evaluation-authorization.json \
+  --evaluation-signature /sealed/f0/evaluation-authorization.sig.json \
+  --trust-policy /sealed/f0/trusted-keys.json \
+  --surface /sealed/f0/candidate-release-surface.json \
+  --d1-report /sealed/f0/d1-complete.json \
+  --design-report /sealed/f0/d0a-power-report.json \
+  --calibration-catalog /sealed/f0/calibration-gates.json \
+  --comparator-gates /sealed/f0/comparator-gates.json \
+  --comparator-matrix /sealed/f0/comparator-matrix.json \
+  --landscape /sealed/f0/anchor-landscape.json \
+  --consumption-root /sealed/q2/consumption
+```
+
+The command emits a Studio `ltx-studio-qualification-report.v1` only when all
+candidate gates pass. Every frozen target claim is `sota-qualified` and binds
+the exact external anchor artifact digest; non-target candidates can only be
+`local-only`. It never emits production authorization and never opens or
+decrypts holdout media itself.
+
 `artifact-score` provides the corresponding D1 path for annotated mouth/skin
 events and motion-compensated skin-ring residuals. FAR, FRR and the proportion
 of frames under the 0.04 residual limit use 10,000 leakage-component bootstrap

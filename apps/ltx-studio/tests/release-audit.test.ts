@@ -38,6 +38,7 @@ type Fixture = ReleaseEvidenceInput & {
 
 function fixture(): Fixture {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const holdout = generateKeyPairSync("ed25519");
   const finalizer = generateKeyPairSync("ed25519");
   const rawPublicKey = publicKey
     .export({ format: "der", type: "spki" })
@@ -54,9 +55,20 @@ function fixture(): Fixture {
           "preregistration-freezer",
           "rights-attestor",
           "qualification-attestor",
-          "holdout-scorer",
           "release-authorizer",
         ],
+        notBefore: timestamp(-24),
+        notAfter: timestamp(24),
+        revokedAt: null,
+      },
+      {
+        keyId: "holdout-scorer-key-01",
+        algorithm: "ed25519",
+        publicKeyBase64: holdout.publicKey
+          .export({ format: "der", type: "spki" })
+          .subarray(-32)
+          .toString("base64"),
+        roles: ["holdout-scorer"],
         notBefore: timestamp(-24),
         notAfter: timestamp(24),
         revokedAt: null,
@@ -84,6 +96,17 @@ function fixture(): Fixture {
       null,
       Buffer.from(canonicalJson(document)),
       privateKey,
+    ).toString("base64"),
+  });
+  const holdoutSignature = (document: unknown) => ({
+    schemaVersion: "ltx-studio-detached-signature.v1",
+    algorithm: "ed25519",
+    keyId: "holdout-scorer-key-01",
+    payloadSha256: hash(document),
+    signatureBase64: sign(
+      null,
+      Buffer.from(canonicalJson(document)),
+      holdout.privateKey,
     ).toString("base64"),
   });
   const surface = {
@@ -182,7 +205,8 @@ function fixture(): Fixture {
       kind,
       sha256: hash(report),
       document: report,
-      signature: signature(report),
+      signature:
+        kind === "q2-holdout" ? holdoutSignature(report) : signature(report),
     };
   });
   const reportReferences = reports.map(({ kind, sha256: reportSha }) => ({
@@ -254,6 +278,14 @@ describe("release evidence collector", () => {
       "release-authorizer",
     ];
     expect(trustedKeyPolicySchema.safeParse(policy).success).toBe(false);
+
+    const collapsedHoldout = structuredClone(input.trustPolicy) as {
+      keys: Array<{ roles: string[] }>;
+    };
+    collapsedHoldout.keys[1].roles.push("release-authorizer");
+    expect(trustedKeyPolicySchema.safeParse(collapsedHoldout).success).toBe(
+      false,
+    );
   });
 
   it("becomes ready only after every signed and bound gate passes", () => {

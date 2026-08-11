@@ -32,6 +32,11 @@ REQUIRED_CRITICAL_TOKEN_ENDPOINT_IDS = {
     "asr-critical-negation",
     "asr-critical-number",
 }
+REQUIRED_MOS_ENDPOINT_IDS = {
+    "mos-audio-quality",
+    "mos-identity-mouth",
+    "mos-lip-sync",
+}
 
 
 class DesignError(ValueError):
@@ -307,6 +312,8 @@ def _validate_power_endpoints(
         raise DesignError("power endpoints must be unique and sorted")
     if not REQUIRED_CRITICAL_TOKEN_ENDPOINT_IDS.issubset(endpoint_ids):
         raise DesignError("power endpoints must cover names, numbers, and negations separately")
+    if not REQUIRED_MOS_ENDPOINT_IDS.issubset(endpoint_ids):
+        raise DesignError("power endpoints must cover audio quality, identity/mouth, and lip-sync MOS")
     return requirements, blockers, per_endpoint_alpha
 
 

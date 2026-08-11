@@ -510,23 +510,17 @@ def record_consumption_event(
     """Persist monotonic started -> consumed events using immutable O_EXCL files."""
 
     _secure_directory(root)
-    authorization_digest = _expect_sha256(authorization_digest, "authorization_digest")
-    nonce_sha256 = _expect_sha256(nonce_sha256, "nonce_sha256")
-    transaction_id = _expect_identifier(transaction_id, "transaction_id")
-    writer_id = _expect_identifier(writer_id, "writer_id")
-    occurred = _parse_time(occurred_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "occurred_at")
+    document = build_consumption_event(
+        event=event,
+        authorization_digest=authorization_digest,
+        transaction_id=transaction_id,
+        nonce_sha256=nonce_sha256,
+        occurred_at=occurred_at,
+        writer_id=writer_id,
+    )
     started_path = root / "started.json"
     if event == "consumed" and not started_path.is_file():
         raise AuthorizationError("holdout cannot be consumed before the started event is durable")
-    document = {
-        "schema_version": CONSUMPTION_SCHEMA,
-        "event": event,
-        "authorization_digest": authorization_digest,
-        "transaction_id": transaction_id,
-        "nonce_sha256": nonce_sha256,
-        "occurred_at": occurred.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "writer_id": writer_id,
-    }
     if event == "consumed":
         started = _read_owner_event(started_path)
         _expect_exact_keys(started, set(document), "started consumption event")
@@ -535,8 +529,156 @@ def record_consumption_event(
         for field in ("authorization_digest", "transaction_id", "nonce_sha256", "writer_id"):
             if started.get(field) != document[field]:
                 raise AuthorizationError(f"consumed event does not continue the started {field}")
-        if _parse_time(started.get("occurred_at"), "started.occurred_at") > occurred:
+        if _parse_time(started.get("occurred_at"), "started.occurred_at") > _parse_time(
+            document["occurred_at"], "consumed.occurred_at"
+        ):
             raise AuthorizationError("consumed event predates started event")
     path = root / f"{event}.json"
     _write_once(path, document)
     return path
+
+
+def build_consumption_event(
+    *,
+    event: Literal["started", "consumed"],
+    authorization_digest: str,
+    transaction_id: str,
+    nonce_sha256: str,
+    occurred_at: datetime,
+    writer_id: str,
+) -> dict[str, Any]:
+    """Build the canonical Q2 state transition payload before external signing."""
+
+    if event not in {"started", "consumed"}:
+        raise AuthorizationError("unsupported holdout consumption event")
+    if occurred_at.tzinfo != UTC or occurred_at.microsecond:
+        raise AuthorizationError("occurred_at must be a whole-second UTC timestamp")
+    authorization_digest = _expect_sha256(authorization_digest, "authorization_digest")
+    nonce_sha256 = _expect_sha256(nonce_sha256, "nonce_sha256")
+    transaction_id = _expect_identifier(transaction_id, "transaction_id")
+    writer_id = _expect_identifier(writer_id, "writer_id")
+    occurred = _parse_time(occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"), "occurred_at")
+    return {
+        "schema_version": CONSUMPTION_SCHEMA,
+        "event": event,
+        "authorization_digest": authorization_digest,
+        "transaction_id": transaction_id,
+        "nonce_sha256": nonce_sha256,
+        "occurred_at": occurred.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "writer_id": writer_id,
+    }
+
+
+def record_signed_consumption_event(
+    root: Path,
+    *,
+    event: Literal["started", "consumed"],
+    authorization_digest: str,
+    transaction_id: str,
+    nonce_sha256: str,
+    occurred_at: datetime,
+    writer_id: str,
+    signature: object,
+    trust_policy: object,
+) -> Path:
+    """Verify and durably record a holdout-scorer-signed consumption transition."""
+
+    document = build_consumption_event(
+        event=event,
+        authorization_digest=authorization_digest,
+        transaction_id=transaction_id,
+        nonce_sha256=nonce_sha256,
+        occurred_at=occurred_at,
+        writer_id=writer_id,
+    )
+    verify_detached_signature(
+        document,
+        signature,
+        trust_policy,
+        required_role="holdout-scorer",
+        now=occurred_at,
+    )
+    path = record_consumption_event(
+        root,
+        event=event,
+        authorization_digest=authorization_digest,
+        transaction_id=transaction_id,
+        nonce_sha256=nonce_sha256,
+        occurred_at=occurred_at,
+        writer_id=writer_id,
+    )
+    if not isinstance(signature, dict):
+        raise AuthorizationError("consumption signature must be an object")
+    _write_once(root / f"{event}.signature.json", signature)
+    return path
+
+
+def validate_consumption_events(
+    root: Path,
+    *,
+    authorization_digest: str,
+    transaction_id: str,
+    nonce_sha256: str,
+    writer_id: str,
+    complete_by: datetime,
+    trust_policy: object,
+    now: datetime,
+) -> dict[str, Any]:
+    """Validate the durable, irreversible Q2 ``started -> consumed`` state."""
+
+    _secure_directory(root)
+    expected = {
+        "authorization_digest": _expect_sha256(authorization_digest, "authorization_digest"),
+        "transaction_id": _expect_identifier(transaction_id, "transaction_id"),
+        "nonce_sha256": _expect_sha256(nonce_sha256, "nonce_sha256"),
+        "writer_id": _expect_identifier(writer_id, "writer_id"),
+    }
+    if complete_by.tzinfo != UTC or complete_by.microsecond:
+        raise AuthorizationError("complete_by must be a whole-second UTC timestamp")
+    documents: dict[str, dict[str, Any]] = {}
+    signature_digests: dict[str, str] = {}
+    for event in ("started", "consumed"):
+        document = _read_owner_event(root / f"{event}.json")
+        _expect_exact_keys(
+            document,
+            {
+                "schema_version",
+                "event",
+                "authorization_digest",
+                "transaction_id",
+                "nonce_sha256",
+                "occurred_at",
+                "writer_id",
+            },
+            f"{event} consumption event",
+        )
+        if document["schema_version"] != CONSUMPTION_SCHEMA or document["event"] != event:
+            raise AuthorizationError(f"{event} consumption event has an invalid schema or state")
+        for field, value in expected.items():
+            if document[field] != value:
+                raise AuthorizationError(f"{event} consumption event {field} mismatch")
+        documents[event] = document
+        signature = _read_owner_event(root / f"{event}.signature.json")
+        signature_digests[event] = verify_detached_signature(
+            document,
+            signature,
+            trust_policy,
+            required_role="holdout-scorer",
+            now=now,
+        )
+    started_at = _parse_time(documents["started"]["occurred_at"], "started.occurred_at")
+    consumed_at = _parse_time(documents["consumed"]["occurred_at"], "consumed.occurred_at")
+    if not started_at <= consumed_at <= complete_by:
+        raise AuthorizationError("holdout consumption is non-monotonic or exceeded complete_by")
+    return {
+        "schema_version": "ltx-av-eval-holdout-consumption-report.v1",
+        "authorization_digest": expected["authorization_digest"],
+        "transaction_id": expected["transaction_id"],
+        "nonce_sha256": expected["nonce_sha256"],
+        "writer_id": expected["writer_id"],
+        "started_at": documents["started"]["occurred_at"],
+        "consumed_at": documents["consumed"]["occurred_at"],
+        "started_signature_digest": signature_digests["started"],
+        "consumed_signature_digest": signature_digests["consumed"],
+        "status": "consumed",
+    }

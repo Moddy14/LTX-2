@@ -24,6 +24,7 @@ from ltx_trainer.av_eval import (
     DesignError,
     FreezePreflightError,
     GovernanceError,
+    HoldoutDecisionError,
     IdentityMeasurementError,
     OffsetMeasurementError,
     ReadinessError,
@@ -44,6 +45,7 @@ from ltx_trainer.av_eval import (
     build_offset_measurements,
     build_power_report,
     build_product_readiness_report,
+    build_q2_qualification_report,
     build_sharpness_measurements,
     build_vbench_measurements,
     freeze_dataset,
@@ -280,6 +282,34 @@ def _run_f0_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_q2_score(args: argparse.Namespace) -> int:
+    try:
+        report = build_q2_qualification_report(
+            json.loads(args.results.read_text(encoding="utf-8")),
+            f0_candidate=json.loads(args.candidate.read_text(encoding="utf-8")),
+            candidate_signature=json.loads(args.candidate_signature.read_text(encoding="utf-8")),
+            preregistration=json.loads(args.preregistration.read_text(encoding="utf-8")),
+            preregistration_signature=json.loads(args.preregistration_signature.read_text(encoding="utf-8")),
+            evaluation_authorization=json.loads(args.evaluation_authorization.read_text(encoding="utf-8")),
+            evaluation_signature=json.loads(args.evaluation_signature.read_text(encoding="utf-8")),
+            trust_policy=json.loads(args.trust_policy.read_text(encoding="utf-8")),
+            surface=json.loads(args.surface.read_text(encoding="utf-8")),
+            d1_report=json.loads(args.d1_report.read_text(encoding="utf-8")),
+            design_report=json.loads(args.design_report.read_text(encoding="utf-8")),
+            calibration_catalog=json.loads(args.calibration_catalog.read_text(encoding="utf-8")),
+            comparator_gates=json.loads(args.comparator_gates.read_text(encoding="utf-8")),
+            comparator_matrix=json.loads(args.comparator_matrix.read_text(encoding="utf-8")),
+            landscape=json.loads(args.landscape.read_text(encoding="utf-8")),
+            consumption_root=args.consumption_root,
+            now=datetime.now(UTC).replace(microsecond=0),
+        )
+    except (OSError, json.JSONDecodeError, HoldoutDecisionError) as error:
+        logger.error("Q2 holdout results rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
 def _add_comparator_commands(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     comparator = subcommands.add_parser("comparator-check", help="validate the Q1 anchor and task matrix")
     comparator.add_argument("--matrix", type=Path, required=True)
@@ -305,6 +335,26 @@ def _add_f0_command(subcommands: argparse._SubParsersAction) -> None:  # type: i
     command.add_argument("--surface", type=Path, required=True)
     command.add_argument("--detailed-reports", type=Path, required=True)
     command.add_argument("--qualifications", type=Path, required=True)
+
+
+def _add_q2_command(subcommands: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    command = subcommands.add_parser("q2-score", help="assemble the one-shot signed-holdout qualification")
+    command.add_argument("--results", type=Path, required=True)
+    command.add_argument("--candidate", type=Path, required=True)
+    command.add_argument("--candidate-signature", type=Path, required=True)
+    command.add_argument("--preregistration", type=Path, required=True)
+    command.add_argument("--preregistration-signature", type=Path, required=True)
+    command.add_argument("--evaluation-authorization", type=Path, required=True)
+    command.add_argument("--evaluation-signature", type=Path, required=True)
+    command.add_argument("--trust-policy", type=Path, required=True)
+    command.add_argument("--surface", type=Path, required=True)
+    command.add_argument("--d1-report", type=Path, required=True)
+    command.add_argument("--design-report", type=Path, required=True)
+    command.add_argument("--calibration-catalog", type=Path, required=True)
+    command.add_argument("--comparator-gates", type=Path, required=True)
+    command.add_argument("--comparator-matrix", type=Path, required=True)
+    command.add_argument("--landscape", type=Path, required=True)
+    command.add_argument("--consumption-root", type=Path, required=True)
 
 
 def main() -> int:
@@ -353,6 +403,7 @@ def main() -> int:
     cross_shot_score.add_argument("--design", type=Path, required=True)
     _add_comparator_commands(subcommands)
     _add_f0_command(subcommands)
+    _add_q2_command(subcommands)
     readiness_check = subcommands.add_parser("readiness-check", help="validate the complete D0 ready-to-freeze package")
     readiness_check.add_argument("--package", type=Path, required=True)
     args = parser.parse_args()
@@ -372,6 +423,7 @@ def main() -> int:
         "f0-check": lambda: _run_f0_check(args),
         "identity-score": lambda: _run_identity_score(args.pairs),
         "offset-score": lambda: _run_offset_score(args.observations),
+        "q2-score": lambda: _run_q2_score(args),
         "readiness-check": lambda: _run_readiness_check(args.package),
         "sharpness-score": lambda: _run_sharpness_score(args.observations),
         "vbench-score": lambda: _run_vbench_score(args.observations, args.design),
