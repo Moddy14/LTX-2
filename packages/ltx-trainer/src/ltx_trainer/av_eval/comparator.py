@@ -21,6 +21,11 @@ CLAIM_SPECS = {
         ["prompt-with-dialogue"],
         "ltx-native-generation",
     ),
+    "native-generation.image-to-video": (
+        "native-dialog-generation",
+        ["one-or-more-reference-images", "prompt-with-dialogue"],
+        "ltx-native-image-generation",
+    ),
     "reference-video-redubbing.native-distilled": (
         "reference-video-redubbing",
         ["exact-target-dialogue", "reference-video", "single-speaker-acknowledgement", "target-language"],
@@ -70,6 +75,18 @@ def _sha256(value: object, context: str, *, nullable: bool = False) -> str | Non
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise ComparatorMatrixError(f"{context} must be a lowercase SHA-256")
+    return value
+
+
+def _revision(value: object, context: str, *, nullable: bool = False) -> str | None:
+    if nullable and value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ComparatorMatrixError(f"{context} must be a lowercase 40-character content revision")
     return value
 
 
@@ -125,9 +142,10 @@ def _validate_landscape(  # noqa: PLR0912
             {
                 "candidate_id",
                 "official_source",
-                "code_sha256",
-                "weights_sha256",
-                "license_evidence_sha256",
+                "code_revision",
+                "weights_revision",
+                "code_license_sha256",
+                "weights_license_sha256",
                 "resource_profile_sha256",
             },
             f"landscape candidate {index}",
@@ -137,7 +155,10 @@ def _validate_landscape(  # noqa: PLR0912
         source = candidate["official_source"]
         if not isinstance(source, str) or not source.startswith("https://"):
             raise ComparatorMatrixError(f"landscape candidate {candidate_id} needs an HTTPS official source")
-        for field in ("code_sha256", "weights_sha256", "license_evidence_sha256", "resource_profile_sha256"):
+        for field in ("code_revision", "weights_revision"):
+            if _revision(candidate[field], f"candidate {candidate_id}.{field}", nullable=True) is None:
+                blockers.append(f"candidate-artifact-missing:{candidate_id}:{field}")
+        for field in ("code_license_sha256", "weights_license_sha256", "resource_profile_sha256"):
             if _sha256(candidate[field], f"candidate {candidate_id}.{field}", nullable=True) is None:
                 blockers.append(f"candidate-artifact-missing:{candidate_id}:{field}")
         indexed[candidate_id] = candidate
@@ -192,8 +213,8 @@ def _validate_arm(  # noqa: PLR0912
             "input_compatibility",
             "rights_status",
             "technical_status",
-            "code_sha256",
-            "weights_sha256",
+            "code_revision",
+            "weights_revision",
             "exclusion_reason",
             "quality_evidence_seen",
         },
@@ -217,8 +238,8 @@ def _validate_arm(  # noqa: PLR0912
     ):
         if raw[field] not in allowed:
             raise ComparatorMatrixError(f"{context}.{field} is unsupported")
-    code = _sha256(raw["code_sha256"], f"{context}.code_sha256", nullable=True)
-    weights = _sha256(raw["weights_sha256"], f"{context}.weights_sha256", nullable=True)
+    code = _revision(raw["code_revision"], f"{context}.code_revision", nullable=True)
+    weights = _revision(raw["weights_revision"], f"{context}.weights_revision", nullable=True)
     blockers: list[str] = []
     if inclusion == "pending":
         blockers.append(f"arm-pending:{arm_id}")
@@ -246,9 +267,9 @@ def _validate_arm(  # noqa: PLR0912
             and raw["technical_status"] != "fail"
         ):
             raise ComparatorMatrixError(f"excluded arm {arm_id} does not prove its technical failure")
-    if external and code is not None and code != landscape[arm_id]["code_sha256"]:
+    if external and code is not None and code != landscape[arm_id]["code_revision"]:
         raise ComparatorMatrixError(f"arm {arm_id} code does not match the anchor landscape")
-    if external and weights is not None and weights != landscape[arm_id]["weights_sha256"]:
+    if external and weights is not None and weights != landscape[arm_id]["weights_revision"]:
         raise ComparatorMatrixError(f"arm {arm_id} weights do not match the anchor landscape")
     return blockers
 

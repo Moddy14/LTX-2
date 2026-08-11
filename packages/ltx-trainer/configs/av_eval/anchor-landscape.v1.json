@@ -2,32 +2,35 @@
   "schema_version": "ltx-av-eval-anchor-landscape.v1",
   "status": "draft",
   "landscape_id": "ltx-local-video-anchor-landscape-01",
-  "cutoff_date": null,
-  "search_protocol_sha256": null,
-  "rights_policy_sha256": null,
+  "cutoff_date": "2026-08-11",
+  "search_protocol_sha256": "c9d27826c33c06abf7ccc9d562b3a2edd798bea9586ab3a0805dbe6c9ad6af51",
+  "rights_policy_sha256": "7c0ca5df8054cecd8db35cf313568d45ec5567fb298b260ebcb2da81f3c182f9",
   "candidates": [
     {
       "candidate_id": "longcat-video-avatar-1.5",
       "official_source": "https://github.com/meituan-longcat/LongCat-Video",
-      "code_sha256": null,
-      "weights_sha256": null,
-      "license_evidence_sha256": null,
+      "code_revision": "6b3f4b8582a8bc3f20f795735f5383716c4ba794",
+      "weights_revision": "92016c71d5d318d0f5d84e4db30015a571484ab6",
+      "code_license_sha256": "dfdbf36556065706ef8b26e5866acb85209b6465af0395578d38b63470e0bed0",
+      "weights_license_sha256": "d4b5dc706d13a511cc1aac623f75c10ac1dff902ffd915a411e398218b675cb4",
       "resource_profile_sha256": null
     },
     {
       "candidate_id": "mova",
       "official_source": "https://github.com/OpenMOSS/MOVA",
-      "code_sha256": null,
-      "weights_sha256": null,
-      "license_evidence_sha256": null,
+      "code_revision": "9b39667838a7c7ff2c367f5c5189d35c422878bd",
+      "weights_revision": "eab4aa91d6d5eb515e259a0c8533c90062b117a5",
+      "code_license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "weights_license_sha256": "facf3856a51fdb8fdb096946af952a63254eb3078eb49a7fcdd178ae67575a89",
       "resource_profile_sha256": null
     },
     {
       "candidate_id": "wan2.2-s2v-14b",
       "official_source": "https://github.com/Wan-Video/Wan2.2",
-      "code_sha256": null,
-      "weights_sha256": null,
-      "license_evidence_sha256": null,
+      "code_revision": "42bf4cfaa384bc21833865abc2f9e6c0e67233dc",
+      "weights_revision": "dab4e9c55bbe4c8c4d03db1c2c98c7f0ac9c454b",
+      "code_license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "weights_license_sha256": "b8361d366abbf2b0d211a20ecb0e721e6879a63f2c3bb66dd4bfc153ed870530",
       "resource_profile_sha256": null
     }
   ]

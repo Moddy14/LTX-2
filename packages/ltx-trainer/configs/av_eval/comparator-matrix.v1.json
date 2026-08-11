@@ -20,10 +20,23 @@
       "claim_status": "undecided",
       "sota_anchor_arm_id": null,
       "arms": [
-        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "ltx-audio-driven", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-audio-driven", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false}
+      ]
+    },
+    {
+      "claim_id": "native-generation.image-to-video",
+      "task_type": "native-dialog-generation",
+      "input_contract": ["one-or-more-reference-images", "prompt-with-dialogue"],
+      "claim_status": "undecided",
+      "sota_anchor_arm_id": null,
+      "arms": [
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-native-image-generation", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false}
       ]
     },
     {
@@ -33,10 +46,10 @@
       "claim_status": "undecided",
       "sota_anchor_arm_id": null,
       "arms": [
-        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "ltx-native-generation", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-native-generation", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false}
       ]
     },
     {
@@ -46,10 +59,10 @@
       "claim_status": "undecided",
       "sota_anchor_arm_id": null,
       "arms": [
-        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "ltx-lipdub-native-distilled", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-lipdub-native-distilled", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false}
       ]
     },
     {
@@ -59,10 +72,10 @@
       "claim_status": "undecided",
       "sota_anchor_arm_id": null,
       "arms": [
-        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "ltx-lipdub-official-comfy-hq", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false},
-        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_sha256": null, "weights_sha256": null, "exclusion_reason": null, "quality_evidence_seen": false}
+        {"arm_id": "longcat-video-avatar-1.5", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "ltx-lipdub-official-comfy-hq", "provider": "owned", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "mova", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false},
+        {"arm_id": "wan2.2-s2v-14b", "provider": "external", "inclusion_status": "pending", "input_compatibility": "pending", "rights_status": "pending", "technical_status": "pending", "code_revision": null, "weights_revision": null, "exclusion_reason": null, "quality_evidence_seen": false}
       ]
     }
   ]

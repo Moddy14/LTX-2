@@ -218,6 +218,13 @@ driving-audio portrait animation and both exact LipDub claims. Inputs,
 normalization, prompts, seeds, failure/ITT policy, inclusion criteria and
 applicable gates are digest commitments.
 
+The current cutoff record is
+`apps/ltx-studio/docs/ANCHOR_LANDSCAPE_2026-08-11.md`. It pins official Git and
+Hugging Face revisions plus separate code- and weight-license evidence. The
+landscape remains `draft` because MOVA/Wan resource profiles and reproducible
+local starts are not yet measured; repository licenses alone do not clear
+training-data or biometric-use rights.
+
 ```bash
 uv run python scripts/av_eval.py comparator-check \
   --matrix configs/av_eval/comparator-matrix.v1.json \

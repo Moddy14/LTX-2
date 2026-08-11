@@ -33,7 +33,9 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
     assert isinstance(candidates, list)
     for index, candidate in enumerate(candidates):
         character = str(index + 1)
-        for field in ("code_sha256", "weights_sha256", "license_evidence_sha256", "resource_profile_sha256"):
+        candidate["code_revision"] = character * 40
+        candidate["weights_revision"] = character * 40
+        for field in ("code_license_sha256", "weights_license_sha256", "resource_profile_sha256"):
             candidate[field] = character * 64
 
     matrix = copy.deepcopy(_load(MATRIX_PATH))
@@ -60,8 +62,8 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
                         "input_compatibility": "compatible",
                         "rights_status": "clear",
                         "technical_status": "pass",
-                        "code_sha256": "d" * 64,
-                        "weights_sha256": "e" * 64,
+                        "code_revision": "d" * 40,
+                        "weights_revision": "e" * 40,
                     }
                 )
             elif targets and arm["arm_id"] == "mova":
@@ -72,8 +74,8 @@ def _ready(*, targets: bool = True) -> tuple[dict[str, object], dict[str, object
                         "input_compatibility": "compatible",
                         "rights_status": "clear",
                         "technical_status": "pass",
-                        "code_sha256": candidate["code_sha256"],
-                        "weights_sha256": candidate["weights_sha256"],
+                        "code_revision": candidate["code_revision"],
+                        "weights_revision": candidate["weights_revision"],
                     }
                 )
             else:
@@ -95,7 +97,7 @@ def test_checked_in_comparator_matrix_is_an_explicit_hold() -> None:
 
     assert report["status"] == "hold"
     assert report["sota_status"] == "hold"
-    assert "landscape-cutoff-missing" in report["blockers"]
+    assert "candidate-artifact-missing:mova:resource_profile_sha256" in report["blockers"]
     assert "anchor-landscape-not-verified" in report["blockers"]
     assert "claim-undecided:audio-driven-video.image-audio-to-video" in report["blockers"]
     assert "arm-pending:mova" in report["blockers"]
@@ -109,7 +111,7 @@ def test_complete_matrix_is_anchor_ready_and_deterministic() -> None:
     assert first == second
     assert first["status"] == "ready-to-freeze"
     assert first["sota_status"] == "anchor-ready"
-    assert len(first["target_sota_claim_ids"]) == 4
+    assert len(first["target_sota_claim_ids"]) == 5
 
 
 def test_honest_local_only_matrix_cannot_be_sota_ready() -> None:
@@ -140,7 +142,7 @@ def test_matrix_rejects_unproven_exclusion_and_anchor_drift() -> None:
         build_comparator_matrix_report(unproven, landscape=landscape, as_of=AS_OF)
 
     drift, landscape = _ready()
-    drift["claims"][0]["arms"][2]["code_sha256"] = "f" * 64  # type: ignore[index]
+    drift["claims"][0]["arms"][2]["code_revision"] = "f" * 40  # type: ignore[index]
     with pytest.raises(ComparatorMatrixError, match="does not match the anchor landscape"):
         build_comparator_matrix_report(drift, landscape=landscape, as_of=AS_OF)
 
