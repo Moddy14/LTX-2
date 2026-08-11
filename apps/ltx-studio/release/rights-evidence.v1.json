@@ -45,8 +45,17 @@
         "weights": "blocked"
       },
       "evidenceId": "evaluator-vbench-amt-noncommercial",
-      "reason": "Official VBench motion smoothness imports the vendored AMT implementation and amt-s checkpoint; both upstream sources restrict use to noncommercial purposes, so they cannot support a commercial product qualification without a separate commercial license.",
+      "reason": "Official VBench motion smoothness imports the vendored AMT implementation and amt-s checkpoint; both upstream sources restrict use to noncommercial purposes, so they cannot support a commercial product qualification without a separate commercial license. The pinned AMT README documents the upstream commercial-licensing contact.",
       "sources": [
+        {
+          "authority": "upstream-git",
+          "path": "README.md",
+          "repository": "MCG-NKU/AMT",
+          "revision": "70f988fbfc0d3d458beba1ee49caf876e57968fe",
+          "sha256": "0c5199ad0569d9be04133731920f074e1aad2360ba540df64597959250e33876",
+          "sizeBytes": 7560,
+          "url": "https://raw.githubusercontent.com/MCG-NKU/AMT/70f988fbfc0d3d458beba1ee49caf876e57968fe/README.md"
+        },
         {
           "authority": "upstream-git",
           "path": "vbench/third_party/amt/LICENSE",
@@ -147,7 +156,7 @@
         "weights": "blocked"
       },
       "evidenceId": "evaluator-vbench-pyiqa-noncommercial",
-      "reason": "Official VBench imaging quality depends on IQA-PyTorch and the MUSIQ-SPAQ checkpoint; the upstream project is PolyForm Noncommercial and therefore cannot support a commercial product qualification without separate rights.",
+      "reason": "Official VBench imaging quality depends on IQA-PyTorch and the MUSIQ-SPAQ checkpoint; the upstream project is PolyForm Noncommercial and therefore cannot support a commercial product qualification without separate rights. The pinned upstream README documents the project contact for rights clarification.",
       "sources": [
         {
           "authority": "upstream-git",
@@ -157,6 +166,15 @@
           "sha256": "7cfe4165a261b8f7fb71331f68da011c583e28c3dc3208e934ae7ccc4441cc46",
           "sizeBytes": 4659,
           "url": "https://raw.githubusercontent.com/chaofengc/IQA-PyTorch/18dd7a19694e94aac21019170e3f5e63d6b4e19e/LICENSE"
+        },
+        {
+          "authority": "upstream-git",
+          "path": "README.md",
+          "repository": "chaofengc/IQA-PyTorch",
+          "revision": "18dd7a19694e94aac21019170e3f5e63d6b4e19e",
+          "sha256": "ad7bbdfaf1e34ac60844bc29eb0e4a080776353edb2aa38407e5b9604b6b6989",
+          "sizeBytes": 18928,
+          "url": "https://raw.githubusercontent.com/chaofengc/IQA-PyTorch/18dd7a19694e94aac21019170e3f5e63d6b4e19e/README.md"
         }
       ]
     },

@@ -51,4 +51,20 @@ describe("release rights evidence", () => {
       }
     }
   });
+
+  it("binds an upstream contact source for every remediable VBench license block", () => {
+    const expectedContacts = new Map([
+      ["evaluator-vbench-amt-noncommercial", "MCG-NKU/AMT"],
+      ["evaluator-vbench-pyiqa-noncommercial", "chaofengc/IQA-PyTorch"],
+    ]);
+    for (const [evidenceId, repository] of expectedContacts) {
+      const evidence = catalog.evidence.find((entry) => entry.evidenceId === evidenceId);
+      expect(evidence?.decision, evidenceId).toBe("blocked");
+      expect(evidence?.sources, evidenceId).toContainEqual(expect.objectContaining({
+        authority: "upstream-git",
+        repository,
+        path: "README.md",
+      }));
+    }
+  });
 });
