@@ -1,7 +1,7 @@
 {
-  "schema_version": "ltx-av-eval-preregistration.v1",
+  "schema_version": "ltx-av-eval-preregistration.v2",
   "status": "draft",
-  "mapping_sha256": "9ef0f073f76a1fd60b5ad10e15231d648100c349f05b88639940d5bc06e35376",
+  "mapping_sha256": "97f14cc467ddbc2296ff634f7b5d315a1e02553c3527a911b6438569daf25760",
   "preprocessing_version": "mouth-npz-rgb96-audio-wav16k-cfr.v2",
   "split_algorithm": "transitive-components-sha256.v1",
   "split_seed_sha256": "f9952d9e9418a55240951daf7d3d23f697e67e8e6259862b65c69215dac4bf0e",
@@ -53,7 +53,11 @@
       "multiplicity_correction": "holm"
     }
   },
-  "release_authorization": null,
+  "authorization_contract": {
+    "evaluation_authorization": "external-ed25519-after-f0-before-q2.v1",
+    "release_authorization": "external-ed25519-after-q2-before-product-go.v1",
+    "evaluation_is_not_release": true
+  },
   "claim_domain": {
     "languages": ["de", "en"],
     "duration_seconds": {

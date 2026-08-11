@@ -3,7 +3,7 @@
 Stand: 2026-08-11. Dieses Dokument ist die kanonische Reihenfolge für die
 noch offenen Arbeiten. Die Messdefinitionen in
 `QUALITY_AUDIT_2026-08-03.md`, `LIPDUB_SOTA_PLAN.md` und
-`packages/ltx-trainer/configs/av_eval/preregistration.v1.json` bleiben
+`packages/ltx-trainer/configs/av_eval/preregistration.v2.json` bleiben
 maßgeblich. Widerspricht ein älterer Statussatz dem hier belegten Stand, gilt
 dieser Plan.
 

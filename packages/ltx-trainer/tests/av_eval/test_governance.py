@@ -33,7 +33,7 @@ from ltx_trainer.av_eval.governance import TRUSTED_PREREGISTRATION_SHA256, _free
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 MAPPING_PATH = REPOSITORY_ROOT / "apps" / "ltx-studio" / "evaluators" / "phoneme-viseme" / "viseme-mapping.v1.json"
-PREREGISTRATION_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "preregistration.v1.json"
+PREREGISTRATION_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "preregistration.v2.json"
 TEST_SPLIT_SEED = "test-only-split-seed-v2"
 
 

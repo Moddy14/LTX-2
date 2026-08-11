@@ -13,7 +13,7 @@ The freeze command accepts four versioned inputs:
 - a JSONL sample manifest using `ltx-av-eval-sample.v1`;
 - a JSONL rights ledger using `ltx-av-eval-rights.v1`;
 - the Studio viseme map `ltx-studio-viseme-mapping.v1`;
-- a preregistration using `ltx-av-eval-preregistration.v1`.
+- a preregistration using `ltx-av-eval-preregistration.v2`.
 
 Every sample binds the original media plus actual decoded-audio, mouth-frame,
 and perceptual-fingerprint artifacts by SHA-256, a human-verified phoneme
@@ -69,19 +69,32 @@ owner-only, non-symlink file with mode `0600`.
 
 ## Product Freeze
 
-The checked-in preregistration remains `draft`. It already binds the split
-seed, three generation seeds, model family, selection metric, calibration
-method, FAR/FRR operating point, MOS gates, and the native LTX, LongCat, and
-Wan2.2-S2V comparator arms. Model recipe, initial weights, training/evaluation
-runner, search space, prompt set, rating protocol, and baseline matrix remain
-null until concrete artifacts exist. `frozen` rejects every missing hash,
-unpinned comparator revision, or missing release authorization.
+The checked-in preregistration remains `draft`. It already binds the five
+leakage-disjoint roles `train`, `tune`, `design-pilot`, `calibration`, and
+`test`, plus three generation seeds, model family, selection metric,
+calibration method, FAR/FRR operating point, MOS gates, and the native LTX,
+LongCat, and Wan2.2-S2V comparator arms. Model recipe, initial weights,
+training/evaluation runner, search space, prompt set, rating protocol, and
+baseline matrix remain null until concrete artifacts exist. `frozen` rejects
+every missing hash or unpinned comparator revision.
 
-`profile=product` is currently hard-blocked before dataset access. Enabling it
-requires a reviewed detached-signature verifier, trusted-key policy, sealed
-test ACL and access log, independent blind scorer, expiration/revocation
-recheck, and machine-validated tune/holdout report schemas. The former numeric
-holdout checks remain defense in depth, not an active certification path.
+Dataset freeze, holdout evaluation, and product release are separate
+authorities. After F0, an independent role may issue a detached Ed25519
+`evaluation_authorization` bound to the exact release, preregistration,
+holdout, Q2 runner, transaction, nonce, and start/completion window. The Q2
+runner persists owner-only, write-once `started -> consumed` records before
+and at first holdout disclosure. Only after Q2 may a distinct release role
+issue a `release_authorization` bound to the Q2 report and release evidence.
+Neither authorization is embedded in, or allowed to change, the frozen
+preregistration.
+
+`profile=product` is currently hard-blocked before dataset access. The
+detached-signature verifier and monotonic consumption records now exist, but
+enabling the profile still requires an operator-owned trusted-key policy,
+sealed test ACL and access log, integration with an independent blind scorer,
+expiration/revocation rechecks at every boundary, and machine-validated
+tune/holdout report schemas. The former numeric holdout checks remain defense
+in depth, not an active certification path.
 
 ## Command
 
@@ -92,7 +105,7 @@ uv run python scripts/av_eval.py freeze \
   --manifest /secure/dataset/manifest.jsonl \
   --rights /secure/dataset/rights.jsonl \
   --mapping ../../apps/ltx-studio/evaluators/phoneme-viseme/viseme-mapping.v1.json \
-  --preregistration configs/av_eval/preregistration.v1.json \
+  --preregistration configs/av_eval/preregistration.v2.json \
   --output-root /secure/freezes \
   --split-seed-file ~/.config/ltx-studio/av-eval-split-seed \
   --profile development

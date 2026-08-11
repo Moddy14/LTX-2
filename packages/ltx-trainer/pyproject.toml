@@ -12,6 +12,7 @@ dependencies = [
     "accelerate>=1.2.1",
     "av>=14.2.1",
     "bitsandbytes >=0.45.2; sys_platform == 'linux'",
+    "cryptography>=41,<47",
     "google-genai>=2.0",
     "huggingface-hub[hf-xet]>=0.31.4",
     "imageio>=2.37.0",

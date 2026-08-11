@@ -27,7 +27,7 @@ from typing import Any, BinaryIO, Literal
 SCHEMA_VERSION = "ltx-av-eval-dataset-freeze.v2"
 SAMPLE_SCHEMA_VERSION = "ltx-av-eval-sample.v1"
 RIGHTS_SCHEMA_VERSION = "ltx-av-eval-rights.v1"
-PREREGISTRATION_SCHEMA_VERSION = "ltx-av-eval-preregistration.v1"
+PREREGISTRATION_SCHEMA_VERSION = "ltx-av-eval-preregistration.v2"
 TIMELINE_SCHEMA_VERSION = "ltx-av-eval-phoneme-timeline.v1"
 MAPPING_SCHEMA_VERSION = "ltx-studio-viseme-mapping.v1"
 RIGHTS_ATTESTATION_SCHEMA_VERSION = "ltx-av-eval-rights-attestation.v1"
@@ -38,8 +38,8 @@ FFPROBE_PATH = Path("/usr/bin/ffprobe")
 FFPROBE_SHA256 = "b98cabc72a01bf522a3eb85cae3cf7a8843817bfb0315ff14d8699cef5413f7d"
 # This digest is updated only by reviewed code changes after the preregistration is
 # externally approved. The corresponding split seed is intentionally absent here.
-TRUSTED_PREREGISTRATION_SHA256 = "8ae786f2ab5bf4cb67d1321029c8bd7e80155467b83718f76eb210aba274a288"
-SPLITS = ("train", "tune", "calibration", "test")
+TRUSTED_PREREGISTRATION_SHA256 = "a55cb74d7ce80e27425c76f7d5f8c30247bf1c89e030b0fdf4b5f9e5c02c1591"
+SPLITS = ("train", "tune", "design-pilot", "calibration", "test")
 OOD_KINDS = (
     "silence",
     "mouth-occluded",
@@ -103,7 +103,12 @@ ARTIFACT_PATH_FIELDS = (
     ("perceptual_fingerprint_path", "perceptual_fingerprint_sha256", MAX_EVIDENCE_BYTES),
     ("phoneme_timeline_path", "phoneme_timeline_sha256", MAX_EVIDENCE_BYTES),
 )
-SPLIT_RATIOS = {"train": 0.70, "tune": 0.10, "calibration": 0.10, "test": 0.10}
+SPLIT_RATIOS = {"train": 0.60, "tune": 0.10, "design-pilot": 0.10, "calibration": 0.10, "test": 0.10}
+AUTHORIZATION_CONTRACT = {
+    "evaluation_authorization": "external-ed25519-after-f0-before-q2.v1",
+    "release_authorization": "external-ed25519-after-q2-before-product-go.v1",
+    "evaluation_is_not_release": True,
+}
 RELEASE_GATES = {
     "offset": {
         "median_absolute_error_ms_max": 20,
@@ -1265,7 +1270,7 @@ def _validate_mapping(mapping: object) -> dict[str, Any]:
         "unicodeForm": "NFC",
         "stripPrimaryAndSecondaryStress": True,
         "stripVowelLength": True,
-        "expandAffricatesBeforeMapping": True,
+        "mapAffricatesAtomically": True,
         "frameAssignment": "phoneme active at video-frame center",
         "transitionDefinition": "class id changes between adjacent non-silence frame centers",
         "unknownPolicy": "quarantine",
@@ -1382,31 +1387,12 @@ def _validate_holdout_commitments(raw: object, status: str) -> None:
         raise GovernanceError("Preregistration muss die vollständigen menschlichen MOS-Gates binden.")
 
 
-def _validate_release_authorization(raw: object, status: str) -> None:
-    if status == "draft":
-        if raw is not None:
-            raise GovernanceError("Draft-Preregistration darf keine Release-Autorisierung behaupten.")
-        return
-    if not isinstance(raw, dict):
-        raise GovernanceError("Eingefrorene Preregistration benötigt eine signierte Release-Autorisierung.")
-    _expect_exact_keys(
-        raw,
-        {
-            "approval_id",
-            "approved_at",
-            "approver_id",
-            "approval_record_sha256",
-            "detached_signature_sha256",
-            "trusted_key_id",
-        },
-        "release_authorization",
-    )
-    _expect_identifier(raw["approval_id"], "approval_id")
-    _expect_identifier(raw["approver_id"], "approver_id")
-    _expect_identifier(raw["trusted_key_id"], "trusted_key_id")
-    _parse_datetime(raw["approved_at"], "approved_at")
-    _expect_sha256(raw["approval_record_sha256"], "approval_record_sha256")
-    _expect_sha256(raw["detached_signature_sha256"], "detached_signature_sha256")
+def _validate_authorization_contract(raw: object) -> None:
+    if raw != AUTHORIZATION_CONTRACT:
+        raise GovernanceError(
+            "Preregistration muss Auswertungs- und Release-Autorisierung extern, "
+            "zeitlich getrennt und rollenfest binden."
+        )
 
 
 def _validate_preregistration(preregistration: object, mapping_sha256: str) -> dict[str, Any]:
@@ -1422,7 +1408,7 @@ def _validate_preregistration(preregistration: object, mapping_sha256: str) -> d
         "bootstrap_replicates",
         "bootstrap_unit",
         "holdout_commitments",
-        "release_authorization",
+        "authorization_contract",
         "claim_domain",
         "release_gates",
     }
@@ -1443,7 +1429,7 @@ def _validate_preregistration(preregistration: object, mapping_sha256: str) -> d
     if preregistration["bootstrap_unit"] != "voice-speaker-and-leakage-component":
         raise GovernanceError("Bootstrap-Einheit muss unabhängige Sprecher/Leakage-Komponenten verwenden.")
     _validate_holdout_commitments(preregistration["holdout_commitments"], preregistration["status"])
-    _validate_release_authorization(preregistration["release_authorization"], preregistration["status"])
+    _validate_authorization_contract(preregistration["authorization_contract"])
     if preregistration["claim_domain"] != CLAIM_DOMAIN:
         raise GovernanceError("Preregistration muss die vollständige Claim-Domain unverändert binden.")
     if preregistration["release_gates"] != RELEASE_GATES:
@@ -1598,7 +1584,7 @@ def _enforce_evaluation_split_coverage(
         ("skin_tone_fitzpatrick", set(CLAIM_DOMAIN["skin_tone_fitzpatrick"])),
         ("source_domain", set(CLAIM_DOMAIN["source_domains"])),
     )
-    for split in ("tune", "calibration", "test"):
+    for split in ("tune", "design-pilot", "calibration", "test"):
         split_samples = [
             sample
             for sample in samples
