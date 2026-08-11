@@ -32,10 +32,10 @@ import {
 } from "./analysisStore.js";
 import {
   analysisTempRoot as defaultAnalysisTempRoot,
+  analysisPythonExecutable as defaultPythonExecutable,
   appRoot,
   outputRoot,
   phonemeVisemePythonExecutable as defaultPhonemeVisemePythonExecutable,
-  pythonExecutable as defaultPythonExecutable,
 } from "./config.js";
 import {
   type IdentityInputEvidence,

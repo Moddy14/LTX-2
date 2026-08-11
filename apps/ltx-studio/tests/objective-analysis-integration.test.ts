@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, expect, it } from "vitest";
 
-import { analysisTempRoot, appRoot, pythonExecutable } from "../server/config.js";
+import { analysisPythonExecutable as pythonExecutable, analysisTempRoot, appRoot } from "../server/config.js";
 import { capturePinnedPathRevision } from "../server/evaluatorBindings.js";
 import type { PhonemeVisemeEvaluatorState } from "../server/evaluatorManifest.js";
 import { writeOutputAnalysis } from "../server/analysisStore.js";

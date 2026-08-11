@@ -12,6 +12,7 @@ from pathlib import Path
 EXPECTED_DISTRIBUTIONS = (
     "ltx-core",
     "ltx-pipelines",
+    "openai-whisper",
     "requests",
     "torch",
     "torchaudio",
@@ -53,7 +54,9 @@ def main() -> None:
         warnings.simplefilter("error")
         import requests  # noqa: F401, PLC0415
 
+    import cv2  # noqa: F401, PLC0415
     import torch  # noqa: PLC0415
+    import whisper  # noqa: F401, PLC0415
 
     import ltx_core  # noqa: F401, PLC0415
     import ltx_pipelines  # noqa: F401, PLC0415

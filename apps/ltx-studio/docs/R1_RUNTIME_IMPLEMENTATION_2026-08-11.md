@@ -12,13 +12,20 @@ inzwischen implementiert und CPU/HTTP-seitig abgenommen.
 ## Implementierter Vertrag
 
 - `apps/ltx-studio/runtime/pyproject.toml` und das eigene `uv.lock` binden
-  Python 3.12, Linux/AArch64, CUDA 13.0, Torch/Torchaudio 2.11 und alle 59
+  Python 3.12, Linux/AArch64, CUDA 13.0, Torch/Torchaudio 2.11 und alle 64
   installierten Distributionen. Produktionssyncs verwenden zwingend
   `--locked --no-dev --no-editable --compile-bytecode`.
 - Der native Renderer bevorzugt diese Runtime, startet immer mit `python -I`
   und erhält weder `PYTHONPATH`, `PYTHONHOME` noch User-Site-Pakete. Das
   allgemeine Analyse-Python bleibt ein eigener, im Health-Endpunkt separat
   sichtbarer Pfad.
+- Die objektive OpenCV-/Whisper-Analyse besitzt einen getrennten Interpretervertrag.
+  Ein versiegelter Release akzeptiert dafür ausschließlich dieselbe isolierte
+  Native-Runtime; Entwicklungs-Fallbacks können den Render-/Pipeline-Interpreter
+  daher nicht mehr versehentlich als vollständigen Analyse-Stack ausgeben.
+- `openai-whisper==20250625` ist im Native-Runtime-Lock explizit gebunden. Der
+  Verifier importiert Whisper und OpenCV offline; der Dialog-Evaluator prüft die
+  Laufzeit mit `python -I` und ohne geerbtes `PYTHONPATH`.
 - Run-Provenienz erfasst und revalidiert den Interpreter aus dem tatsächlichen
   Command-Plan statt eines globalen Shared-Environment-Interpreters.
 - `requests==2.32.5` importiert mit Warnungen als Fehler; `chardet` ist nicht
@@ -53,11 +60,11 @@ Waiver.
   (`eb4d89dd195f208d32084f63bd4d51b353932eac8ed7150d22a14f340679f99c`)
   und identische sortierte Paketinventare
   (`c2ab83115bf5a1b73d4938cf1bfff2688c5490603e45bd86f41787dc80bb8693`).
-- `uv pip check`: 59 Pakete geprüft, keine Inkompatibilität.
+- `uv pip check`: 64 Pakete geprüft, keine Inkompatibilität.
 - 13/13 native CLI-Einstiege bestanden `python -I -m <modul> --help` mit
   ausgeblendeter CUDA-Sichtbarkeit, einschließlich HDR und In/Outpainting.
 - `npm run lint`: bestanden.
-- `npm test`: 59 Dateien, 573 Tests bestanden.
+- `npm test`: 65 Dateien, 616 Tests bestanden.
 - `npm run build`: bestanden. Der getrennte R2-Bundle- und Kaltstart-Gate ist
   inzwischen geschlossen; siehe `R2_BUNDLE_IMPLEMENTATION_2026-08-11.md`.
 - Ruff 0.14.3 und `git diff --check`: bestanden.

@@ -200,6 +200,7 @@ itself.
 | --- | --- | --- |
 | `LTX_STUDIO_PORT` | `4318` | Local API and production UI port |
 | `LTX_STUDIO_PYTHON` | `.venv/bin/python`, then `~/comfyui-env/bin/python`, then `python3` | Python executable used for LTX pipelines; health requires the complete PyTorch/LTX runtime |
+| `LTX_STUDIO_ANALYSIS_PYTHON` | sealed native runtime; during development native runtime, then `~/comfyui-env/bin/python`, `.venv/bin/python`, `python3` | Separate interpreter for objective OpenCV/Whisper analysis; sealed releases reject paths outside their native runtime |
 | `LTX_STUDIO_ADMISSION_PYTHON` | `python3` | Python executable providing `dgx_admission_client` |
 | `LTX_STUDIO_MIN_AVAILABLE_GIB` | `48` | Conservative UI planning marker; does not override Orchestrator admission |
 | `LTX_STUDIO_MIN_RESIDUAL_MEMORY_GIB` | `24` | Additional UI planning margin shown beside the estimate |

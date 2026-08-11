@@ -10,6 +10,7 @@ dependencies = [
     "ltx-core",
     "ltx-pipelines",
     "opencv-python-headless==4.13.0.92",
+    "openai-whisper==20250625",
     "openimageio==3.1.15.0",
     "requests==2.32.5",
     "torch==2.11.0+cu130",

@@ -37,6 +37,8 @@ import { buildCommand, suggestRequestPlan, validateRequestPlan, warnRequestPlan 
 import {
   appRoot,
   admissionRequired,
+  analysisPythonExecutable,
+  analysisRuntimeAvailable,
   analysisTempRoot,
   devUiPort,
   ensureRuntimeDirectories,
@@ -48,7 +50,6 @@ import {
   projectActorId,
   projectRoot,
   pythonRuntimeAvailable,
-  pythonExecutable,
   rendererPythonExecutable,
   sealedRelease,
   serverHost,
@@ -317,7 +318,9 @@ app.get("/api/health", async (_request, response) => {
     release: releaseIdentity,
     resources,
     engine: pythonRuntimeAvailable(rendererPythonExecutable, { isolated: true }) ? "available" : "missing",
-    analysisEngine: pythonRuntimeAvailable(pythonExecutable, { isolated: sealedRelease }) ? "available" : "missing",
+    analysisEngine: analysisRuntimeAvailable(analysisPythonExecutable, { isolated: sealedRelease })
+      ? "available"
+      : "missing",
     orchestrator: admissionRequired && orchestratorReachable && admissionClientAvailable() ? "available" : admissionRequired ? "missing" : "disabled",
     qwen: runtimeStatus.qwen,
     runtimeOverall: runtimeStatus.overall,

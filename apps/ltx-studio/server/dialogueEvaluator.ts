@@ -12,7 +12,8 @@ import { join } from "node:path";
 
 import {
   appRoot,
-  pythonExecutable as defaultPythonExecutable,
+  analysisPythonExecutable as defaultPythonExecutable,
+  isolatedPythonEnvironment,
   whisperModelPath as defaultWhisperModelPath,
 } from "./config.js";
 
@@ -100,6 +101,7 @@ function evaluatorRunnerSha256(): string {
 
 function whisperRuntimeState(pythonExecutable: string): RuntimeState | null {
   const result = spawnSync(pythonExecutable, [
+    "-I",
     "-c",
     [
       "import importlib.metadata, json, platform",
@@ -112,12 +114,11 @@ function whisperRuntimeState(pythonExecutable: string): RuntimeState | null {
     ].join("\n"),
   ], {
     encoding: "utf8",
-    env: {
-      ...process.env,
+    env: isolatedPythonEnvironment({
       CUDA_VISIBLE_DEVICES: "",
       HF_HUB_OFFLINE: "1",
       TRANSFORMERS_OFFLINE: "1",
-    },
+    }),
     shell: false,
     timeout: 10_000,
   });

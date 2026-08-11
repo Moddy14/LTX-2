@@ -180,13 +180,14 @@ export function selectRendererPythonExecutable(options: {
   explicit: string | undefined;
   sealedCandidate: string;
   developmentCandidates: readonly string[];
+  settingName?: string;
 }): string {
   if (!options.sealed) {
     return selectPythonExecutable(options.explicit, options.developmentCandidates);
   }
   const sealedCandidate = resolve(options.sealedCandidate);
   if (options.explicit?.trim() && resolve(options.explicit.trim()) !== sealedCandidate) {
-    throw new Error("LTX_STUDIO_RENDER_PYTHON must point inside the sealed release runtime");
+    throw new Error(`${options.settingName ?? "LTX_STUDIO_RENDER_PYTHON"} must point inside the sealed release runtime`);
   }
   if (!executableAvailable(sealedCandidate)) {
     throw new Error(`Sealed renderer runtime is missing or not executable: ${sealedCandidate}`);
@@ -200,14 +201,27 @@ export const pythonExecutable = selectPythonExecutable(process.env.LTX_STUDIO_PY
   "python3",
 ]);
 export const sealedRelease = process.env.LTX_STUDIO_SEALED_RELEASE === "1";
+const nativeRuntimePython = join(appRoot, "runtime", ".venv", "bin", "python");
 export const rendererPythonExecutable = selectRendererPythonExecutable({
   sealed: sealedRelease,
   explicit: process.env.LTX_STUDIO_RENDER_PYTHON,
-  sealedCandidate: join(appRoot, "runtime", ".venv", "bin", "python"),
-  developmentCandidates: [join(appRoot, "runtime", ".venv", "bin", "python"), pythonExecutable],
+  sealedCandidate: nativeRuntimePython,
+  developmentCandidates: [nativeRuntimePython, pythonExecutable],
+});
+export const analysisPythonExecutable = selectRendererPythonExecutable({
+  sealed: sealedRelease,
+  explicit: process.env.LTX_STUDIO_ANALYSIS_PYTHON,
+  sealedCandidate: nativeRuntimePython,
+  settingName: "LTX_STUDIO_ANALYSIS_PYTHON",
+  developmentCandidates: [
+    nativeRuntimePython,
+    join(homedir(), "comfyui-env", "bin", "python"),
+    join(repoRoot, ".venv", "bin", "python"),
+    "python3",
+  ],
 });
 export const phonemeVisemePythonExecutable =
-  process.env.LTX_STUDIO_PHONEME_VISEME_PYTHON?.trim() || pythonExecutable;
+  process.env.LTX_STUDIO_PHONEME_VISEME_PYTHON?.trim() || analysisPythonExecutable;
 
 const pythonRuntimeCache = new Map<string, boolean>();
 
@@ -255,6 +269,33 @@ export function pythonRuntimeAvailable(
     env: isolated
       ? isolatedPythonEnvironment()
       : { ...process.env, PYTHONPATH: pythonPath },
+    shell: false,
+    stdio: "ignore",
+    timeout: 30_000,
+  });
+  const available = result.status === 0 && !result.error;
+  pythonRuntimeCache.set(cacheKey, available);
+  return available;
+}
+
+export function analysisRuntimeAvailable(
+  executable: string,
+  { isolated = false }: { isolated?: boolean } = {},
+): boolean {
+  const cacheKey = `${isolated ? "isolated" : "development"}:analysis:${executable}`;
+  const cached = pythonRuntimeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  if (!executableAvailable(executable)) {
+    pythonRuntimeCache.set(cacheKey, false);
+    return false;
+  }
+  const result = spawnSync(executable, [
+    ...(isolated ? ["-I"] : []),
+    "-c",
+    "import cv2, numpy, torch, whisper",
+  ], {
+    cwd: repoRoot,
+    env: isolated ? isolatedPythonEnvironment() : process.env,
     shell: false,
     stdio: "ignore",
     timeout: 30_000,

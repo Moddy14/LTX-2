@@ -10,7 +10,7 @@ import {
   resolveDialogueEvaluatorState,
   WHISPER_SMALL_SHA256,
 } from "../server/dialogueEvaluator.js";
-import { appRoot, pythonExecutable, whisperModelPath } from "../server/config.js";
+import { analysisPythonExecutable, appRoot, whisperModelPath } from "../server/config.js";
 import {
   dialogueEvaluationSchema,
   type DialogueEvaluation,
@@ -100,7 +100,7 @@ describe("Whisper dialogue evaluator contract", () => {
       "  'insertion': word_error_counts(expected, normalized_words('grüße schöne welt')),",
       "}, ensure_ascii=False))",
     ].join("\n");
-    const result = spawnSync(pythonExecutable, ["-c", code], {
+    const result = spawnSync(analysisPythonExecutable, ["-I", "-c", code], {
       encoding: "utf8",
       timeout: 15_000,
       env: { ...process.env, CUDA_VISIBLE_DEVICES: "" },
@@ -136,7 +136,7 @@ describe("Whisper dialogue evaluator contract", () => {
       "        continue",
       "    raise AssertionError('token limit was not enforced')",
     ].join("\n");
-    const result = spawnSync(pythonExecutable, ["-c", code], {
+    const result = spawnSync(analysisPythonExecutable, ["-I", "-c", code], {
       encoding: "utf8",
       timeout: 15_000,
       env: { ...process.env, CUDA_VISIBLE_DEVICES: "" },
@@ -179,7 +179,7 @@ describe("Whisper dialogue evaluator contract", () => {
   });
 
   it("resolves only the official local checkpoint and fingerprints code plus runtime", async () => {
-    const ready = resolveDialogueEvaluatorState(whisperModelPath, pythonExecutable);
+    const ready = resolveDialogueEvaluatorState(whisperModelPath, analysisPythonExecutable);
     expect(ready).toMatchObject({
       status: "ready",
       blockerCode: "none",
@@ -188,7 +188,7 @@ describe("Whisper dialogue evaluator contract", () => {
     });
     expect(ready.runnerSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(ready.runtimeFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    expect(resolveDialogueEvaluatorState(whisperModelPath, pythonExecutable).fingerprint)
+    expect(resolveDialogueEvaluatorState(whisperModelPath, analysisPythonExecutable).fingerprint)
       .toBe(ready.fingerprint);
 
     const root = await mkdtemp(join(tmpdir(), "ltx-dialogue-state-"));
@@ -197,19 +197,19 @@ describe("Whisper dialogue evaluator contract", () => {
     const link = join(root, "linked.pt");
     await writeFile(wrong, "not-a-whisper-checkpoint");
     await symlink(whisperModelPath, link);
-    expect(resolveDialogueEvaluatorState(wrong, pythonExecutable)).toMatchObject({
+    expect(resolveDialogueEvaluatorState(wrong, analysisPythonExecutable)).toMatchObject({
       status: "not-available",
       blockerCode: "model-invalid",
       modelSha256: null,
       runnerSha256: ready.runnerSha256,
     });
-    expect(resolveDialogueEvaluatorState(link, pythonExecutable)).toMatchObject({
+    expect(resolveDialogueEvaluatorState(link, analysisPythonExecutable)).toMatchObject({
       status: "not-available",
       blockerCode: "model-invalid",
       modelSha256: null,
       runnerSha256: ready.runnerSha256,
     });
-    expect(resolveDialogueEvaluatorState(join(root, "missing.pt"), pythonExecutable)).toMatchObject({
+    expect(resolveDialogueEvaluatorState(join(root, "missing.pt"), analysisPythonExecutable)).toMatchObject({
       status: "not-available",
       blockerCode: "model-missing",
       runnerSha256: ready.runnerSha256,
