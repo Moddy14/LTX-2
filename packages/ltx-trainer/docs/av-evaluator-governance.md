@@ -121,6 +121,31 @@ uv run python scripts/av_eval.py vbench-runtime-check \
   --checkout /path/to/official/VBench
 ```
 
+`configs/av_eval/vbench-i2v-runtime.v1.json` is the separate installed-runtime
+contract. It pins the source-contract digest, Python binary and version, full
+normalized distribution inventory, dependency lock, offline-network policy,
+the exact import surface and eight required local artifacts: both CLIP
+checkpoints, LAION aesthetic head, AMT-S, RAFT-Things, MUSIQ-SPAQ, DINO weights
+and the complete local DINO source tree. Files, directories and the runtime
+root may not be symlinked or group/world writable; no unexpected file is
+accepted. The isolated import smoke hides GPUs, sets the official VBench cache
+root and offline flags, then revalidates the complete source and artifact trees
+to reject downloads, bytecode or any other mutation.
+
+```bash
+uv run python scripts/av_eval.py vbench-environment-check \
+  --runtime-config configs/av_eval/vbench-i2v-runtime.v1.json \
+  --source-config configs/av_eval/vbench-i2v-source.v1.json \
+  --checkout /sealed/vbench/source \
+  --runtime-root /sealed/vbench/cache \
+  --python /sealed/vbench/venv/bin/python
+```
+
+The checked-in runtime stays `draft` and returns `hold`; hashes are never
+invented from the shared trainer environment. Only the emitted
+`runtime_digest` may fill the calibration catalog's `vbench-runtime`
+fingerprint and the D1 observation binding.
+
 The checked-in draft exits with code 2 and a deterministic `hold` report that
 lists every missing input. A `frozen` document rejects any missing delta,
 basis-evidence digest, VBench gate, power input, or stratum quota. A complete

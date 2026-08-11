@@ -55,6 +55,7 @@ from .readiness import ReadinessError, build_operational_readiness_evidence, bui
 from .sharpness import SharpnessMeasurementError, build_sharpness_measurements
 from .technical import TechnicalEvidenceError, build_technical_evidence_bundle
 from .vbench import VBenchMeasurementError, build_vbench_measurements
+from .vbench_environment import VBenchEnvironmentError, build_vbench_runtime_report
 from .vbench_runtime import VBenchRuntimeError, build_vbench_source_report
 
 __all__ = [
@@ -82,6 +83,7 @@ __all__ = [
     "ReadinessError",
     "SharpnessMeasurementError",
     "TechnicalEvidenceError",
+    "VBenchEnvironmentError",
     "VBenchMeasurementError",
     "VBenchRuntimeError",
     "append_signed_access_event",
@@ -110,6 +112,7 @@ __all__ = [
     "build_sharpness_measurements",
     "build_technical_evidence_bundle",
     "build_vbench_measurements",
+    "build_vbench_runtime_report",
     "build_vbench_source_report",
     "document_sha256",
     "freeze_dataset",

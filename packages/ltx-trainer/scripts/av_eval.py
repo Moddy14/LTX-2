@@ -32,6 +32,7 @@ from ltx_trainer.av_eval import (
     ReadinessError,
     SharpnessMeasurementError,
     TechnicalEvidenceError,
+    VBenchEnvironmentError,
     VBenchMeasurementError,
     VBenchRuntimeError,
     build_artifact_measurements,
@@ -57,6 +58,7 @@ from ltx_trainer.av_eval import (
     build_sharpness_measurements,
     build_technical_evidence_bundle,
     build_vbench_measurements,
+    build_vbench_runtime_report,
     build_vbench_source_report,
     freeze_dataset,
     load_split_seed,
@@ -84,6 +86,22 @@ def _run_vbench_runtime_check(config_path: Path, checkout: Path) -> int:
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
     return 0
+
+
+def _run_vbench_environment_check(args: argparse.Namespace) -> int:
+    try:
+        report = build_vbench_runtime_report(
+            json.loads(args.runtime_config.read_text(encoding="utf-8")),
+            source_contract=json.loads(args.source_config.read_text(encoding="utf-8")),
+            checkout=args.checkout,
+            runtime_root=args.runtime_root,
+            python=args.python,
+        )
+    except (OSError, json.JSONDecodeError, VBenchEnvironmentError) as error:
+        logger.error("VBench-I2V environment rejected: %s", error)
+        return 2
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0 if report["status"] == "runtime-verified" else 2
 
 
 def _run_comparator_resource_check(profile_path: Path, landscape_path: Path) -> int:
@@ -548,6 +566,15 @@ def main() -> int:  # noqa: PLR0915
     )
     vbench_runtime.add_argument("--config", type=Path, required=True)
     vbench_runtime.add_argument("--checkout", type=Path, required=True)
+    vbench_environment = subcommands.add_parser(
+        "vbench-environment-check",
+        help="verify the sealed VBench dependency and checkpoint runtime",
+    )
+    vbench_environment.add_argument("--runtime-config", type=Path, required=True)
+    vbench_environment.add_argument("--source-config", type=Path, required=True)
+    vbench_environment.add_argument("--checkout", type=Path, required=True)
+    vbench_environment.add_argument("--runtime-root", type=Path, required=True)
+    vbench_environment.add_argument("--python", type=Path, required=True)
     cross_shot = subcommands.add_parser("cross-shot-check", help="validate the paired Q0 cross-shot protocol")
     cross_shot.add_argument("--protocol", type=Path, required=True)
     cross_shot.add_argument("--design-report", type=Path)
@@ -604,6 +631,7 @@ def main() -> int:  # noqa: PLR0915
         "technical-score": lambda: _run_technical_score(args.observations, args.surface),
         "vbench-score": lambda: _run_vbench_score(args.observations, args.design),
         "vbench-runtime-check": lambda: _run_vbench_runtime_check(args.config, args.checkout),
+        "vbench-environment-check": lambda: _run_vbench_environment_check(args),
     }
     return handlers[args.command]()
 

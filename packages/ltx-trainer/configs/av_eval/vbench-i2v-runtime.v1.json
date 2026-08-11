@@ -1,0 +1,43 @@
+{
+  "schema_version": "ltx-av-eval-vbench-i2v-runtime.v1",
+  "status": "draft",
+  "source_contract_sha256": "718b1fd43a2605569424de0bcf776ede9dcb7fc4e2835dfeeac4faee99181158",
+  "python_version": null,
+  "python_executable_sha256": null,
+  "dependency_lock": {
+    "path": "_runtime/requirements.lock",
+    "sha256": null
+  },
+  "network_policy_sha256": null,
+  "import_modules": [
+    "clip",
+    "cv2",
+    "decord",
+    "numpy",
+    "omegaconf",
+    "pyiqa",
+    "skimage",
+    "torch",
+    "torchvision",
+    "transformers",
+    "vbench.aesthetic_quality",
+    "vbench.background_consistency",
+    "vbench.dynamic_degree",
+    "vbench.imaging_quality",
+    "vbench.motion_smoothness",
+    "vbench.subject_consistency",
+    "vbench.utils",
+    "yaml"
+  ],
+  "distributions": [],
+  "artifacts": [
+    {"artifact_id": "aesthetic-linear", "kind": "file", "path": "aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth", "sha256": null},
+    {"artifact_id": "amt-s", "kind": "file", "path": "amt_model/amt-s.pth", "sha256": null},
+    {"artifact_id": "clip-vit-b-32", "kind": "file", "path": "clip_model/ViT-B-32.pt", "sha256": null},
+    {"artifact_id": "clip-vit-l-14", "kind": "file", "path": "clip_model/ViT-L-14.pt", "sha256": null},
+    {"artifact_id": "dino-source", "kind": "directory", "path": "dino_model/facebookresearch_dino_main", "sha256": null},
+    {"artifact_id": "dino-vitbase16", "kind": "file", "path": "dino_model/dino_vitbase16_pretrain.pth", "sha256": null},
+    {"artifact_id": "musiq-spaq", "kind": "file", "path": "pyiqa_model/musiq_spaq_ckpt-358bb6af.pth", "sha256": null},
+    {"artifact_id": "raft-things", "kind": "file", "path": "raft_model/models/raft-things.pth", "sha256": null}
+  ]
+}
