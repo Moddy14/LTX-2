@@ -89,7 +89,10 @@ const productionPackage = {
   version: sourcePackage.version,
   private: true,
   type: "module",
-  scripts: { start: "node server/index.js" },
+  scripts: {
+    start: "node server/index.js",
+    "audit:release": "node scripts/audit-release.mjs",
+  },
   dependencies: sourcePackage.dependencies,
 };
 writeFileSync(packagePath, `${JSON.stringify(productionPackage, null, 2)}\n`, { mode: 0o644 });

@@ -88,6 +88,11 @@ issue a `release_authorization` bound to the Q2 report and release evidence.
 Neither authorization is embedded in, or allowed to change, the frozen
 preregistration.
 
+The draft keeps `target_sota_claim_ids` empty. F0 must replace it with a
+sorted, non-empty set before `status=frozen`; removing a target after that
+requires a new preregistration and a disjoint holdout. This prevents an empty
+claim set from satisfying the SOTA gate vacuously.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier and monotonic consumption records now exist, but
 enabling the profile still requires an operator-owned trusted-key policy,

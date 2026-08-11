@@ -407,6 +407,16 @@ def test_checked_in_preregistration_matches_trust_anchor_and_hides_real_seed() -
     assert preregistration["split_seed_sha256"] != _sha256(TEST_SPLIT_SEED.encode())
 
 
+def test_sota_target_claims_are_empty_in_draft_and_nonempty_at_freeze() -> None:
+    governance_module._validate_target_sota_claims([], "draft")
+    governance_module._validate_target_sota_claims(["reference-video-redubbing.native"], "frozen")
+
+    with pytest.raises(GovernanceError, match="mindestens einen SOTA-Zielclaim"):
+        governance_module._validate_target_sota_claims([], "frozen")
+    with pytest.raises(GovernanceError, match="eindeutig und sortiert"):
+        governance_module._validate_target_sota_claims(["z.claim", "a.claim"], "frozen")
+
+
 def stat_mode(path: Path) -> int:
     return path.stat().st_mode & 0o777
 

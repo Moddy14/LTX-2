@@ -38,7 +38,7 @@ FFPROBE_PATH = Path("/usr/bin/ffprobe")
 FFPROBE_SHA256 = "b98cabc72a01bf522a3eb85cae3cf7a8843817bfb0315ff14d8699cef5413f7d"
 # This digest is updated only by reviewed code changes after the preregistration is
 # externally approved. The corresponding split seed is intentionally absent here.
-TRUSTED_PREREGISTRATION_SHA256 = "a55cb74d7ce80e27425c76f7d5f8c30247bf1c89e030b0fdf4b5f9e5c02c1591"
+TRUSTED_PREREGISTRATION_SHA256 = "4233921b01d426689ffc1036371191ae869431f6186261421b2268992efe3e46"
 SPLITS = ("train", "tune", "design-pilot", "calibration", "test")
 OOD_KINDS = (
     "silence",
@@ -1395,6 +1395,19 @@ def _validate_authorization_contract(raw: object) -> None:
         )
 
 
+def _validate_target_sota_claims(raw: object, status: str) -> None:
+    if not isinstance(raw, list):
+        raise GovernanceError("target_sota_claim_ids muss eine sortierte Liste sein.")
+    for index, target_claim in enumerate(raw):
+        _expect_identifier(target_claim, f"target_sota_claim_ids[{index}]")
+    if raw != sorted(set(raw)):
+        raise GovernanceError("target_sota_claim_ids muss eindeutig und sortiert sein.")
+    if status == "draft" and raw:
+        raise GovernanceError("Draft-Preregistration darf noch keine SOTA-Zielclaims einfrieren.")
+    if status == "frozen" and not raw:
+        raise GovernanceError("Frozen-Preregistration benötigt mindestens einen SOTA-Zielclaim.")
+
+
 def _validate_preregistration(preregistration: object, mapping_sha256: str) -> dict[str, Any]:
     if not isinstance(preregistration, dict):
         raise GovernanceError("Preregistration muss ein JSON-Objekt sein.")
@@ -1409,6 +1422,7 @@ def _validate_preregistration(preregistration: object, mapping_sha256: str) -> d
         "bootstrap_unit",
         "holdout_commitments",
         "authorization_contract",
+        "target_sota_claim_ids",
         "claim_domain",
         "release_gates",
     }
@@ -1430,6 +1444,7 @@ def _validate_preregistration(preregistration: object, mapping_sha256: str) -> d
         raise GovernanceError("Bootstrap-Einheit muss unabhängige Sprecher/Leakage-Komponenten verwenden.")
     _validate_holdout_commitments(preregistration["holdout_commitments"], preregistration["status"])
     _validate_authorization_contract(preregistration["authorization_contract"])
+    _validate_target_sota_claims(preregistration["target_sota_claim_ids"], preregistration["status"])
     if preregistration["claim_domain"] != CLAIM_DOMAIN:
         raise GovernanceError("Preregistration muss die vollständige Claim-Domain unverändert binden.")
     if preregistration["release_gates"] != RELEASE_GATES:

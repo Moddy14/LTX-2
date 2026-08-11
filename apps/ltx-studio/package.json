@@ -14,6 +14,7 @@
     "release:stage": "node scripts/prepare-release-root.mjs && npm run release:emit && vite build && node scripts/stage-release-assets.mjs",
     "release:manifest": "node scripts/generate-release-manifest.mjs",
     "release:verify": "node scripts/verify-release-manifest.mjs",
+    "audit:release": "node scripts/audit-release.mjs",
     "release:install": "node scripts/install-release.mjs",
     "startup:measure": "node scripts/measure-startup.mjs",
     "start": "tsx server/index.ts",
