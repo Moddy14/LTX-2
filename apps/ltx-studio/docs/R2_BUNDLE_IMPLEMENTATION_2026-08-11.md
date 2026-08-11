@@ -2,8 +2,8 @@
 
 ## Urteil
 
-Das statische R2-Gate ist bestanden; R2 insgesamt bleibt **hold**, bis der
-vorregistrierte 40×-Cold-Browservergleich samt p95 ausgewertet ist.
+Das statische R2-Gate und der vorregistrierte Cold-Browser-Vergleich sind
+bestanden. **R2 ist abgeschlossen.**
 
 ## Änderung
 
@@ -30,9 +30,16 @@ Playwright belegt sowohl den Lazy-Load-Erfolg als auch den zweistufigen
 Deployfehlerpfad (ein Reload, danach sichtbarer Fehler mit Aktualisierungs-
 Schaltfläche).
 
-## Noch offen
+## Performance-Abnahme
 
-Der belastbare Performance-Exit braucht weiterhin je Basis und Kandidat
-mindestens 40 neue, cachefreie Chromium-Kontexte auf demselben Hostprofil,
-tatsächlich übertragene Bytes sowie Median, p95 und Streuung bis zur ersten
-bedienbaren Moduswahl. Ohne diesen Vergleich bleibt **R2 = hold**.
+Basis und Kandidat liefen jeweils in 40 neuen cachefreien Chromium-Kontexten
+auf demselben Host mit identischer API-Abbruch-, Viewport- und Readiness-Regel.
+Der p95 bis zur ersten sichtbaren Moduswahl sank von 175,42 ms auf 131,58 ms
+(-24,99 %), der Median von 138,19 ms auf 117,00 ms (-15,34 %). Tatsächlich
+übertragene Bytes sanken von 165.594 auf 158.408 (-4,34 %). Kandidatenstreuung
+und Maximum sind ebenfalls kleiner. Browser, Node, Kernel, Hostprofil, N,
+Min/Max, Mittelwert, Standardabweichung, Median und p95 sind in
+`docs/evidence/startup-r2-2026-08-11.json` gebunden.
+
+Damit sind Größen-, Warnungs-, Lazy-Load-, Deployfehler- und p95-Gate erfüllt:
+**R2 = pass**.

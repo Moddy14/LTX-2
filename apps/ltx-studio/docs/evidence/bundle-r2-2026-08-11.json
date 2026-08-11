@@ -30,5 +30,5 @@
     { "file": "index-jtj3L-tt.js", "initial": true, "rawBytes": 388269, "gzipBytes": 115561, "brotliBytes": 99656 }
   ],
   "staticGate": "pass",
-  "performanceGate": "pending-40-cold-context-runs"
+  "performanceGate": "pass"
 }

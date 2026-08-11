@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "ltx-studio-startup-comparison.v1",
+  "protocol": {
+    "baselineCommit": "2f90052",
+    "candidateCommit": "7e09dec",
+    "runsPerArm": 40,
+    "cache": "new-browser-context-per-run",
+    "apiRequests": "aborted-identically",
+    "viewport": "1440x1000",
+    "readiness": "first-visible-mode-button",
+    "transferWindowMsAfterReadiness": 100
+  },
+  "environment": {
+    "node": "v24.18.0",
+    "chromium": "149.0.7827.0",
+    "architecture": "arm64",
+    "kernel": "6.17.0-1029-nvidia",
+    "cpuCount": 20,
+    "totalMemoryBytes": 130663002112
+  },
+  "baseline": {
+    "interactiveMs": {
+      "median": 138.19462400000157,
+      "p95": 175.41593600000124,
+      "mean": 144.84163075000004,
+      "sampleStandardDeviation": 19.757884543440934,
+      "min": 120.9958200000001,
+      "max": 226.16837600000008
+    },
+    "transferredBytes": {
+      "median": 165594,
+      "p95": 165594,
+      "mean": 165594,
+      "sampleStandardDeviation": 0,
+      "min": 165594,
+      "max": 165594
+    }
+  },
+  "candidate": {
+    "interactiveMs": {
+      "median": 116.99526400000013,
+      "p95": 131.57521199999974,
+      "mean": 113.89853127499994,
+      "sampleStandardDeviation": 12.308914730310955,
+      "min": 90.70179300000018,
+      "max": 137.9618870000004
+    },
+    "transferredBytes": {
+      "median": 158408,
+      "p95": 158408,
+      "mean": 158408,
+      "sampleStandardDeviation": 0,
+      "min": 158408,
+      "max": 158408
+    }
+  },
+  "delta": {
+    "medianInteractivePercent": -15.34,
+    "p95InteractivePercent": -24.99,
+    "transferredBytesPercent": -4.34
+  },
+  "verdict": "pass"
+}
