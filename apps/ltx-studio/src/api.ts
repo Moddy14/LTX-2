@@ -8,6 +8,15 @@ import type {
   ExperimentCreateInput,
 } from "../shared/experiments";
 import type {
+  ProjectArchiveRequest,
+  ProjectCreateRequest,
+  ProjectOutputApprovalRequest,
+  ProjectOutputCaptureRequest,
+  ProjectRevisionEnvelope,
+  ProjectShotCreateRequest,
+  ProjectShotRevisionRequest,
+} from "../shared/projects";
+import type {
   LipDubReferenceDiagnostics,
   PlanSuggestion,
   PreparedImageCrop,
@@ -62,6 +71,104 @@ export async function getExperiments(): Promise<{
   warnings: string[];
 }> {
   return decode<{ experiments: ControlledExperiment[]; warnings: string[] }>(await fetch("/api/experiments"));
+}
+
+export async function getProjects(): Promise<{
+  projects: ProjectRevisionEnvelope[];
+  warnings: string[];
+}> {
+  return decode<{ projects: ProjectRevisionEnvelope[]; warnings: string[] }>(await fetch("/api/projects"));
+}
+
+export async function getProjectHistory(id: string): Promise<ProjectRevisionEnvelope[]> {
+  const body = await decode<{ revisions: ProjectRevisionEnvelope[] }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/history`),
+  );
+  return body.revisions;
+}
+
+export async function createProject(input: ProjectCreateRequest): Promise<ProjectRevisionEnvelope> {
+  const body = await decode<{ project: ProjectRevisionEnvelope }>(
+    await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.project;
+}
+
+export async function addProjectShot(
+  id: string,
+  input: ProjectShotCreateRequest,
+): Promise<ProjectRevisionEnvelope> {
+  const body = await decode<{ project: ProjectRevisionEnvelope }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/shots`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.project;
+}
+
+export async function reviseProjectShot(
+  id: string,
+  shotId: string,
+  input: ProjectShotRevisionRequest,
+): Promise<ProjectRevisionEnvelope> {
+  const body = await decode<{ project: ProjectRevisionEnvelope }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/shots/${encodeURIComponent(shotId)}/revisions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.project;
+}
+
+export async function captureProjectShotOutput(
+  id: string,
+  shotId: string,
+  input: ProjectOutputCaptureRequest,
+): Promise<ProjectRevisionEnvelope> {
+  const body = await decode<{ project: ProjectRevisionEnvelope }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/shots/${encodeURIComponent(shotId)}/outputs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.project;
+}
+
+export async function approveProjectShotOutput(
+  id: string,
+  shotId: string,
+  input: ProjectOutputApprovalRequest,
+): Promise<ProjectRevisionEnvelope> {
+  const body = await decode<{ project: ProjectRevisionEnvelope }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/shots/${encodeURIComponent(shotId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.project;
+}
+
+export async function archiveProject(
+  id: string,
+  input: ProjectArchiveRequest,
+): Promise<ProjectRevisionEnvelope> {
+  const body = await decode<{ project: ProjectRevisionEnvelope }>(
+    await fetch(`/api/projects/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+  return body.project;
 }
 
 export async function createExperiment(input: ExperimentCreateInput): Promise<ControlledExperiment> {

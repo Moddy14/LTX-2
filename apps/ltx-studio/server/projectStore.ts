@@ -265,9 +265,30 @@ export class ProjectStore {
     return this.history(id).at(-1) ?? null;
   }
 
+  preflightOutputCapture(
+    id: string,
+    expectedRevision: number,
+    shotId: string,
+    requestRevisionId: string,
+  ): string {
+    const current = this.get(id);
+    if (!current) throw new ProjectConflictError("Projekt nicht gefunden.");
+    if (current.revision !== expectedRevision) {
+      throw new ProjectConflictError(
+        `Stale Write: erwartet Revision ${expectedRevision}, aktuell ist ${current.revision}.`,
+      );
+    }
+    assertActive(current.project);
+    const shot = findShot(current.project, shotId);
+    const revision = shot.requestRevisions.find(({ id: revisionId }) => revisionId === requestRevisionId);
+    if (!revision) throw new ProjectConflictError("Output referenziert keine Request-Revision dieses Shots.");
+    return revision.requestSha256;
+  }
+
   history(id: string): ProjectRevisionEnvelope[] {
     if (!PROJECT_ID_PATTERN.test(id)) throw new ProjectConflictError("Ungültige Projekt-ID.");
     const directory = join(this.root, id);
+    if (!existsSync(directory)) throw new ProjectConflictError("Projekt nicht gefunden.");
     assertRealDirectory(directory, `Projekt ${id}`);
     const revisionFiles = readdirSync(directory, { withFileTypes: true })
       .filter((entry) => REVISION_FILE_PATTERN.test(entry.name))

@@ -28,6 +28,13 @@ export const hybridRoot = join(dataRoot, "hybrid");
 export const hybridCacheRoot = join(dataRoot, "hybrid-cache");
 export const analysisTempRoot = join(dataRoot, "analysis-tmp");
 export const experimentRoot = join(dataRoot, "experiments");
+export const projectRoot = join(dataRoot, "projects");
+const configuredProjectActorId = process.env.LTX_STUDIO_PROJECT_ACTOR_ID
+  ?? `local-uid-${process.geteuid?.() ?? "unknown"}`;
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/.test(configuredProjectActorId)) {
+  throw new Error("LTX_STUDIO_PROJECT_ACTOR_ID must be a 3 to 128 character identifier");
+}
+export const projectActorId = configuredProjectActorId;
 export const longcatProjectRoot = resolve(
   process.env.LTX_STUDIO_LONGCAT_ROOT ?? "/home/moddy/projects/longcat-video-avatar-dgx",
 );
@@ -139,6 +146,7 @@ export function ensureRuntimeDirectories(): void {
     hybridCacheRoot,
     analysisTempRoot,
     experimentRoot,
+    projectRoot,
   ]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }

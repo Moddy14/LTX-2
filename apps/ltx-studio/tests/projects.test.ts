@@ -11,6 +11,10 @@ import {
   projectValueSha256,
 } from "../server/projectStore.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import {
+  projectCreateRequestSchema,
+  projectOutputCaptureRequestSchema,
+} from "../shared/projects.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -154,6 +158,25 @@ describe("persistent project history", () => {
     });
     const shot = shotRevision.project.shots[0];
     const requestRevision = shot?.requestRevisions[0];
+
+    expect(store.preflightOutputCapture(
+      created.projectId,
+      2,
+      shot?.id ?? "",
+      requestRevision?.id ?? "",
+    )).toBe(requestRevision?.requestSha256);
+    expect(() => store.preflightOutputCapture(
+      created.projectId,
+      1,
+      shot?.id ?? "",
+      requestRevision?.id ?? "",
+    )).toThrow("Stale Write");
+    expect(() => store.preflightOutputCapture(
+      created.projectId,
+      2,
+      shot?.id ?? "",
+      randomUUID(),
+    )).toThrow("keine Request-Revision");
 
     expect(() => store.addShot(created.projectId, {
       expectedRevision: 1,
@@ -299,5 +322,20 @@ describe("persistent project history", () => {
 
   it("uses a dedicated conflict type for operational failures", () => {
     expect(new ProjectConflictError("x").name).toBe("ProjectConflictError");
+  });
+
+  it("keeps actor identities and artifact digests outside the browser trust boundary", () => {
+    expect(projectCreateRequestSchema.safeParse({
+      title: "Browser",
+      description: "",
+      actorId: "spoofed-operator",
+    }).success).toBe(false);
+    expect(projectOutputCaptureRequestSchema.safeParse({
+      expectedRevision: 2,
+      requestRevisionId: randomUUID(),
+      outputName: "bound.mp4",
+      exportSha256: "a".repeat(64),
+      settingsSidecarSha256: "b".repeat(64),
+    }).success).toBe(false);
   });
 });

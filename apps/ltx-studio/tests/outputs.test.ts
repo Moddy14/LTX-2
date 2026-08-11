@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendFile, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -93,6 +94,21 @@ function runProvenance(): RunProvenance {
       fingerprint: "e".repeat(64),
     },
     fingerprint: "f".repeat(64),
+  };
+}
+
+function v2RunProvenance(): RunProvenance {
+  return {
+    ...runProvenance(),
+    schemaVersion: "ltx-studio-run-provenance.v2",
+    upstreamContracts: [],
+    release: {
+      sealed: false,
+      verified: false,
+      releaseDigest: null,
+      manifestSha256: null,
+      sourceCommit: null,
+    },
   };
 }
 
@@ -438,6 +454,65 @@ describe("generated output library", () => {
     const sidecar = await readFile(join(root, `${outputName}.ltx-settings.json`), "utf8");
     expect(sidecar).toContain(job.runProvenance.fingerprint);
     expect(sidecar).toContain("input:conditioning-audio");
+  });
+
+  it("captures project export and sidecar hashes only from unchanged v2-provenance outputs", async () => {
+    const root = await outputRoot();
+    const outputName = "project-bound-output.mp4";
+    const outputPath = join(root, outputName);
+    const sidecarPath = join(root, `${outputName}.ltx-settings.json`);
+    await writeFile(outputPath, "project-video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, "2026-07-24T09:36:00.000Z", "audio-to-video");
+    job.runProvenance = v2RunProvenance();
+    library.recordCompleted([job]);
+    const requestRevisionId = "55555555-5555-4555-8555-555555555555";
+    const recordedAt = new Date().toISOString();
+
+    const evidence = await library.captureProjectOutputEvidence(
+      outputName,
+      requestRevisionId,
+      [job],
+      recordedAt,
+    );
+
+    expect(evidence).toMatchObject({
+      requestRevisionId,
+      requestSha256: sha256Json(job.request),
+      jobId: job.id,
+      outputName,
+      provenanceFingerprint: job.runProvenance.fingerprint,
+      recordedAt,
+    });
+    expect(evidence.exportSha256).toBe(
+      createHash("sha256").update(await readFile(outputPath)).digest("hex"),
+    );
+    expect(evidence.settingsSidecarSha256).toBe(
+      createHash("sha256").update(await readFile(sidecarPath)).digest("hex"),
+    );
+
+    await appendFile(outputPath, "changed");
+    await expect(library.captureProjectOutputEvidence(
+      outputName,
+      requestRevisionId,
+      [job],
+    )).rejects.toThrow("unveränderte Datei");
+  });
+
+  it("does not promote legacy provenance into project export evidence", async () => {
+    const root = await outputRoot();
+    const outputName = "legacy-project-output.mp4";
+    await writeFile(join(root, outputName), "project-video");
+    const library = new OutputLibrary(root);
+    const job = completedJob(outputName, "2026-07-24T09:37:00.000Z", "audio-to-video");
+    job.runProvenance = runProvenance();
+    library.recordCompleted([job]);
+
+    await expect(library.captureProjectOutputEvidence(
+      outputName,
+      "66666666-6666-4666-8666-666666666666",
+      [job],
+    )).rejects.toThrow("v2-Laufprovenienz");
   });
 
   it("keeps a frozen experiment binding after the source job leaves bounded history", async () => {

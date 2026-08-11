@@ -12,6 +12,14 @@ import {
   experimentCreateInputSchema,
   type ControlledExperiment,
 } from "../shared/experiments.js";
+import {
+  projectArchiveRequestSchema,
+  projectCreateRequestSchema,
+  projectOutputApprovalRequestSchema,
+  projectOutputCaptureRequestSchema,
+  projectShotCreateRequestSchema,
+  projectShotRevisionRequestSchema,
+} from "../shared/projects.js";
 import { qualityReviewInputSchema } from "../shared/quality.js";
 import {
   recommendedModelAssets,
@@ -36,6 +44,8 @@ import {
   minResidualMemoryGiB,
   minSwapFreeGiB,
   outputRoot,
+  projectActorId,
+  projectRoot,
   pythonRuntimeAvailable,
   pythonExecutable,
   rendererPythonExecutable,
@@ -84,6 +94,7 @@ import { matchesUploadSignature } from "./uploads.js";
 import { PhonemeVisemeEvaluatorStateProvider } from "./evaluatorStateProvider.js";
 import { shouldAutoAnalyzeCompletedJob } from "./autoAnalysis.js";
 import { releaseIdentity } from "./releaseIdentity.js";
+import { ProjectConflictError, ProjectStore } from "./projectStore.js";
 
 ensureRuntimeDirectories();
 cleanupAnalysisTempRoot(analysisTempRoot);
@@ -101,6 +112,7 @@ const jobs = new JobManager(undefined, true, assets);
 const outputs = new OutputLibrary(outputRoot);
 jobs.wireReusableBaseSource(outputs);
 const experiments = new ExperimentStore(experimentRoot);
+const projects = new ProjectStore(projectRoot);
 const phonemeVisemeEvaluatorStates = new PhonemeVisemeEvaluatorStateProvider();
 experiments.reconcileJobs(jobs.list());
 const analyses = new OutputAnalysisManager(outputs, () => jobs.list(), outputRoot, {
@@ -648,6 +660,90 @@ app.post("/api/lipdub/reference/prepare", async (request, response) => {
 app.get("/api/jobs", (_request, response) => response.json({ jobs: jobs.list() }));
 app.get("/api/outputs", (_request, response) => response.json({ outputs: outputs.list(jobs.list()) }));
 app.get("/api/experiments", (_request, response) => response.json(experiments.listAvailable()));
+app.get("/api/projects", (_request, response) => response.json(projects.listAvailable()));
+
+app.get("/api/projects/:id/history", (request, response) => {
+  response.json({ revisions: projects.history(routeParam(request.params.id)) });
+});
+
+app.post("/api/projects", (request, response) => {
+  const payload = projectCreateRequestSchema.parse(request.body);
+  response.status(201).json({
+    project: projects.create({ ...payload, actorId: projectActorId }),
+  });
+});
+
+app.post("/api/projects/:id/shots", (request, response) => {
+  const payload = projectShotCreateRequestSchema.parse(request.body);
+  response.status(201).json({
+    project: projects.addShot(routeParam(request.params.id), {
+      ...payload,
+      actorId: projectActorId,
+    }),
+  });
+});
+
+app.post("/api/projects/:id/shots/:shotId/revisions", (request, response) => {
+  const payload = projectShotRevisionRequestSchema.parse(request.body);
+  response.status(201).json({
+    project: projects.reviseShot(routeParam(request.params.id), {
+      ...payload,
+      shotId: routeParam(request.params.shotId),
+      actorId: projectActorId,
+    }),
+  });
+});
+
+app.post("/api/projects/:id/shots/:shotId/outputs", async (request, response) => {
+  const payload = projectOutputCaptureRequestSchema.parse(request.body);
+  const projectId = routeParam(request.params.id);
+  const shotId = routeParam(request.params.shotId);
+  const expectedRequestSha256 = projects.preflightOutputCapture(
+    projectId,
+    payload.expectedRevision,
+    shotId,
+    payload.requestRevisionId,
+  );
+  const recordedAt = new Date().toISOString();
+  const evidence = await outputs.captureProjectOutputEvidence(
+    payload.outputName,
+    payload.requestRevisionId,
+    jobs.list(),
+    recordedAt,
+  );
+  if (evidence.requestSha256 !== expectedRequestSha256) {
+    throw new ProjectConflictError("Ausgabe stimmt nicht mit der gebundenen Projekt-Request-Revision überein.");
+  }
+  response.status(201).json({
+    project: projects.recordOutput(projectId, {
+      expectedRevision: payload.expectedRevision,
+      shotId,
+      evidence,
+      actorId: projectActorId,
+    }, recordedAt),
+  });
+});
+
+app.post("/api/projects/:id/shots/:shotId/approve", (request, response) => {
+  const payload = projectOutputApprovalRequestSchema.parse(request.body);
+  response.json({
+    project: projects.approveOutput(routeParam(request.params.id), {
+      ...payload,
+      shotId: routeParam(request.params.shotId),
+      actorId: projectActorId,
+    }),
+  });
+});
+
+app.post("/api/projects/:id/archive", (request, response) => {
+  const payload = projectArchiveRequestSchema.parse(request.body);
+  response.json({
+    project: projects.archive(routeParam(request.params.id), {
+      ...payload,
+      actorId: projectActorId,
+    }),
+  });
+});
 
 app.post("/api/experiments", (request, response) => {
   let payload = experimentCreateInputSchema.parse(request.body);
@@ -916,6 +1012,9 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
     return response.status(409).json({ error: error.message });
   }
   if (error instanceof ExperimentConflictError) {
+    return response.status(409).json({ error: error.message });
+  }
+  if (error instanceof ProjectConflictError) {
     return response.status(409).json({ error: error.message });
   }
   if (error instanceof ImageCropPreparationError) {

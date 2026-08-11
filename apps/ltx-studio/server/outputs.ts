@@ -1,5 +1,7 @@
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
+  createReadStream,
   existsSync,
   lstatSync,
   readFileSync,
@@ -28,6 +30,10 @@ import {
   experimentRunBindingSchema,
   type ExperimentRunBinding,
 } from "../shared/experiments.js";
+import {
+  projectOutputEvidenceSchema,
+  type ProjectOutputEvidence,
+} from "../shared/projects.js";
 import type { ReusableLtxBaseCandidate, StudioJob } from "./jobs.js";
 import {
   normalizeIdentityInputEvidence,
@@ -40,6 +46,38 @@ import { sha256Json } from "./experimentStore.js";
 
 const SIDECAR_SUFFIX = ".ltx-settings.json";
 const MAX_OUTPUTS = 500;
+
+async function hashUnchangedRegularFile(path: string): Promise<{
+  sha256: string;
+  sizeBytes: number;
+  changedAtMs: number;
+  fileId: string;
+}> {
+  const before = lstatSync(path);
+  if (before.isSymbolicLink() || !before.isFile() || before.size <= 0) {
+    throw new OutputQualityError("Projektartefakt ist keine reguläre, nichtleere Datei.", 409);
+  }
+  const digest = createHash("sha256");
+  for await (const chunk of createReadStream(path)) digest.update(chunk);
+  const after = lstatSync(path);
+  if (
+    after.isSymbolicLink()
+    || !after.isFile()
+    || before.dev !== after.dev
+    || before.ino !== after.ino
+    || before.size !== after.size
+    || before.mtimeMs !== after.mtimeMs
+    || before.ctimeMs !== after.ctimeMs
+  ) {
+    throw new OutputQualityError("Projektartefakt änderte sich während der Hash-Erfassung.", 409);
+  }
+  return {
+    sha256: digest.digest("hex"),
+    sizeBytes: after.size,
+    changedAtMs: after.ctimeMs,
+    fileId: String(after.ino),
+  };
+}
 
 type OutputSettingsRecord = {
   schemaVersion: "ltx-studio-output.v6";
@@ -395,6 +433,84 @@ export class OutputLibrary {
       identityEvidence: record.identityEvidence,
       runProvenance: record.runProvenance,
     };
+  }
+
+  async captureProjectOutputEvidence(
+    outputName: string,
+    requestRevisionId: string,
+    jobs: readonly StudioJob[],
+    recordedAt = new Date().toISOString(),
+  ): Promise<ProjectOutputEvidence> {
+    if (!outputNameSchema.safeParse(outputName).success) {
+      throw new OutputQualityError("Ausgabe nicht gefunden.", 404);
+    }
+    this.recordCompleted(jobs);
+    const outputPath = join(this.root, outputName);
+    const sidecarPath = settingsPath(this.root, outputName);
+    if (!existsSync(outputPath) || !existsSync(sidecarPath)) {
+      throw new OutputQualityError("Ausgabe oder Einstellungs-Sidecar fehlt.", 404);
+    }
+    const stats = lstatSync(outputPath);
+    const record = readRecord(this.root, outputName);
+    if (
+      stats.isSymbolicLink()
+      || !stats.isFile()
+      || stats.size <= 0
+      || !record
+      || !hasStrongRevision(record)
+      || !recordMatchesFile(record, stats)
+      || record.runProvenance?.schemaVersion !== "ltx-studio-run-provenance.v2"
+      || !record.runProvenance.verifiedAt
+      || !/^[0-9a-f]{64}$/.test(record.runProvenance.fingerprint)
+    ) {
+      throw new OutputQualityError(
+        "Die Projektausgabe benötigt unveränderte Datei-, Sidecar- und v2-Laufprovenienz.",
+        409,
+      );
+    }
+    const [exportEvidence, sidecarEvidence] = await Promise.all([
+      hashUnchangedRegularFile(outputPath),
+      hashUnchangedRegularFile(sidecarPath),
+    ]);
+    const after = lstatSync(outputPath);
+    const afterSidecar = lstatSync(sidecarPath);
+    const afterRecord = readRecord(this.root, outputName);
+    if (
+      after.isSymbolicLink()
+      || afterSidecar.isSymbolicLink()
+      || !afterSidecar.isFile()
+      || !afterRecord
+      || !hasStrongRevision(afterRecord)
+      || !recordMatchesFile(afterRecord, after)
+      || afterRecord.jobId !== record.jobId
+      || sha256Json(afterRecord.request) !== sha256Json(record.request)
+      || afterRecord.runProvenance?.fingerprint !== record.runProvenance.fingerprint
+      || exportEvidence.sizeBytes !== after.size
+      || exportEvidence.fileId !== String(after.ino)
+      || Math.abs(exportEvidence.changedAtMs - after.ctimeMs) >= 1
+      || sidecarEvidence.sizeBytes !== afterSidecar.size
+      || sidecarEvidence.fileId !== String(afterSidecar.ino)
+      || Math.abs(sidecarEvidence.changedAtMs - afterSidecar.ctimeMs) >= 1
+    ) {
+      throw new OutputQualityError(
+        "Projektausgabe oder Sidecar änderte sich während der Evidenzerfassung.",
+        409,
+      );
+    }
+    return projectOutputEvidenceSchema.parse({
+      id: randomUUID(),
+      requestRevisionId,
+      requestSha256: sha256Json(record.request),
+      jobId: record.jobId,
+      outputName,
+      sizeBytes: after.size,
+      changedAt: after.ctime.toISOString(),
+      fileId: String(after.ino),
+      provenanceFingerprint: record.runProvenance.fingerprint,
+      settingsSidecarSha256: sidecarEvidence.sha256,
+      exportSha256: exportEvidence.sha256,
+      recordedAt,
+    });
   }
 
   list(jobs: readonly StudioJob[]): StudioOutput[] {

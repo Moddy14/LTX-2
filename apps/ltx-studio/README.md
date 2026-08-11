@@ -178,6 +178,15 @@ atomic `.ltx-settings.json` provenance sidecar; selecting such a video can resto
 new collision-free output name. Externally created or later modified videos remain playable but never claim settings
 that cannot be proven from matching provenance.
 
+Persistent project histories live below `projects/` in the private data root.
+Every mutation appends an owner-only canonical revision that binds its predecessor
+hash. Shots retain every request revision, concrete continuity/retake source,
+output provenance fingerprint, settings-sidecar digest, and exported-media digest.
+The project API derives the actor from server configuration and hashes artifacts
+itself; browser-supplied actors or digests are rejected. The Studio project UI and
+job-start binding are still under development, so this backend contract does not
+yet constitute the complete P4 workflow.
+
 ## Runtime Settings
 
 | Variable | Default | Purpose |
@@ -197,6 +206,7 @@ that cannot be proven from matching provenance.
 | `LTX_STUDIO_THERMAL_START_SAMPLE_INTERVAL_MS` | `1000` | Delay between baseline samples |
 | `LTX_STUDIO_DGX_HEARTBEAT_INTERVAL_MS` | `45000` (maximum `60000`) | Owner-liveness POST interval for active DGX queue jobs |
 | `LTX_STUDIO_DATA_DIR` | `<repository>/.ltx-studio` | Private runtime data directory |
+| `LTX_STUDIO_PROJECT_ACTOR_ID` | `local-uid-<uid>` | Server-controlled identifier written to append-only project revisions |
 | `LTX_STUDIO_MODEL_ROOTS` | `/home/moddy/LTX-2.3-max` | Colon-separated, bounded model discovery roots |
 | `LTX_STUDIO_LIPFORCING_IMAGE` | `ltx-studio-lipforcing:14b-cu131` | Pinned offline LipForcing 14B runtime image |
 | `LTX_STUDIO_LIPFORCING_MODEL_ROOT` | `/home/moddy/models/lipforcing-14b` | Hash-verified LipForcing, Wan VAE, wav2vec2, text embedding, TAEHV, and manifest root |

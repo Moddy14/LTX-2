@@ -94,6 +94,33 @@ export const projectArchiveInputSchema = z.object({
   actorId: safeText(128),
 }).strict();
 
+export const projectCreateRequestSchema = projectCreateInputSchema.omit({ actorId: true });
+export const projectShotCreateRequestSchema = projectShotCreateInputSchema.omit({ actorId: true });
+export const projectShotRevisionRequestSchema = z.object({
+  expectedRevision: z.number().int().positive(),
+  request: generationRequestSchema,
+  reason: z.enum(["edit", "retake"]),
+  sourceOutputId: z.string().uuid().nullable().default(null),
+}).strict().superRefine((value, context) => {
+  if ((value.reason === "retake") !== (value.sourceOutputId !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["sourceOutputId"],
+      message: "Eine Retake-Revision benötigt genau eine gebundene Quellausgabe.",
+    });
+  }
+});
+export const projectOutputCaptureRequestSchema = z.object({
+  expectedRevision: z.number().int().positive(),
+  requestRevisionId: z.string().uuid(),
+  outputName: outputNameSchema,
+}).strict();
+export const projectOutputApprovalRequestSchema = projectOutputApprovalInputSchema.omit({
+  shotId: true,
+  actorId: true,
+});
+export const projectArchiveRequestSchema = projectArchiveInputSchema.omit({ actorId: true });
+
 export const projectRequestRevisionSchema = z.object({
   id: z.string().uuid(),
   parentRevisionId: z.string().uuid().nullable(),
@@ -282,10 +309,17 @@ export const projectRevisionEnvelopeSchema = z.object({
 });
 
 export type ProjectCreateInput = z.infer<typeof projectCreateInputSchema>;
+export type ProjectCreateRequest = z.infer<typeof projectCreateRequestSchema>;
 export type ProjectShotCreateInput = z.infer<typeof projectShotCreateInputSchema>;
+export type ProjectShotCreateRequest = z.infer<typeof projectShotCreateRequestSchema>;
 export type ProjectShotRevisionInput = z.infer<typeof projectShotRevisionInputSchema>;
+export type ProjectShotRevisionRequest = z.infer<typeof projectShotRevisionRequestSchema>;
 export type ProjectOutputRecordInput = z.infer<typeof projectOutputRecordInputSchema>;
+export type ProjectOutputEvidence = z.infer<typeof projectOutputEvidenceSchema>;
+export type ProjectOutputCaptureRequest = z.infer<typeof projectOutputCaptureRequestSchema>;
 export type ProjectOutputApprovalInput = z.infer<typeof projectOutputApprovalInputSchema>;
+export type ProjectOutputApprovalRequest = z.infer<typeof projectOutputApprovalRequestSchema>;
 export type ProjectArchiveInput = z.infer<typeof projectArchiveInputSchema>;
+export type ProjectArchiveRequest = z.infer<typeof projectArchiveRequestSchema>;
 export type StudioProject = z.infer<typeof studioProjectSchema>;
 export type ProjectRevisionEnvelope = z.infer<typeof projectRevisionEnvelopeSchema>;
