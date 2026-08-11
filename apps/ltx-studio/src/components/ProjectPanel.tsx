@@ -12,49 +12,31 @@ import {
   Save,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { GenerationRequest } from "../../shared/pipelines";
-import type {
-  ProjectArchiveRequest,
-  ProjectCreateRequest,
-  ProjectOutputApprovalRequest,
-  ProjectOutputCaptureRequest,
-  ProjectRevisionEnvelope,
-  ProjectShotCreateRequest,
-  ProjectShotRevisionRequest,
-  StudioProject,
-} from "../../shared/projects";
+import type { ProjectRevisionEnvelope, StudioProject } from "../../shared/projects";
+import {
+  addProjectShot,
+  approveProjectShotOutput,
+  archiveProject,
+  captureProjectShotOutput,
+  createProject,
+  getProjectHistory,
+  getProjects,
+  launchProjectShot,
+  reviseProjectShot,
+} from "../api";
+import { RefreshFence } from "../refreshFence";
 import type { StudioJob, StudioOutput } from "../types";
 import { SelectField, TextField } from "./Controls";
 
 type ProjectPanelProps = {
   request: GenerationRequest;
   requestValid: boolean;
-  projects: ProjectRevisionEnvelope[];
-  warnings: string[];
   jobs: StudioJob[];
   selectedOutput: StudioOutput | null;
-  onCreate: (input: ProjectCreateRequest) => Promise<ProjectRevisionEnvelope>;
-  onAddShot: (id: string, input: ProjectShotCreateRequest) => Promise<ProjectRevisionEnvelope>;
-  onReviseShot: (
-    id: string,
-    shotId: string,
-    input: ProjectShotRevisionRequest,
-  ) => Promise<ProjectRevisionEnvelope>;
-  onLaunch: (id: string, shotId: string, expectedRevision: number) => Promise<void>;
-  onCapture: (
-    id: string,
-    shotId: string,
-    input: ProjectOutputCaptureRequest,
-  ) => Promise<ProjectRevisionEnvelope>;
-  onApprove: (
-    id: string,
-    shotId: string,
-    input: ProjectOutputApprovalRequest,
-  ) => Promise<ProjectRevisionEnvelope>;
-  onArchive: (id: string, input: ProjectArchiveRequest) => Promise<ProjectRevisionEnvelope>;
-  onHistory: (id: string) => Promise<ProjectRevisionEnvelope[]>;
+  onJobLaunched: (job: StudioJob) => void;
   onLoadRequest: (request: GenerationRequest) => void;
 };
 
@@ -102,20 +84,16 @@ function latestBoundJob(shot: ProjectShot, jobs: StudioJob[]): StudioJob | null 
 export function ProjectPanel({
   request,
   requestValid,
-  projects,
-  warnings,
   jobs,
   selectedOutput,
-  onCreate,
-  onAddShot,
-  onReviseShot,
-  onLaunch,
-  onCapture,
-  onApprove,
-  onArchive,
-  onHistory,
+  onJobLaunched,
   onLoadRequest,
 }: ProjectPanelProps) {
+  const [projects, setProjects] = useState<ProjectRevisionEnvelope[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const refreshFence = useRef(new RefreshFence());
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [projectTitle, setProjectTitle] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
@@ -125,6 +103,32 @@ export function ProjectPanel({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyStatus, setHistoryStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      const snapshot = refreshFence.current.snapshot();
+      try {
+        const next = await getProjects();
+        if (!mounted || !refreshFence.current.accepts(snapshot)) return;
+        setProjects(next.projects);
+        setWarnings(next.warnings);
+        setRefreshError(null);
+      } catch (reason) {
+        if (mounted) {
+          setRefreshError(reason instanceof Error ? reason.message : "Projektdaten sind nicht verfügbar.");
+        }
+      } finally {
+        if (mounted) setLoaded(true);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (projects.some(({ projectId }) => projectId === selectedProjectId)) return;
@@ -159,11 +163,29 @@ export function ProjectPanel({
     }
   };
 
+  const mutate = async (
+    mutation: () => Promise<ProjectRevisionEnvelope>,
+  ): Promise<ProjectRevisionEnvelope> => {
+    const finishMutation = refreshFence.current.beginMutation();
+    try {
+      const project = await mutation();
+      finishMutation();
+      setProjects((current) => [
+        project,
+        ...current.filter(({ projectId }) => projectId !== project.projectId),
+      ]);
+      return project;
+    } catch (reason) {
+      finishMutation();
+      throw reason;
+    }
+  };
+
   const create = async () => {
-    const created = await action("create", () => onCreate({
+    const created = await action("create", () => mutate(() => createProject({
       title: projectTitle,
       description: projectDescription,
-    }));
+    })));
     if (!created) return;
     setSelectedProjectId(created.projectId);
     setProjectTitle("");
@@ -173,7 +195,7 @@ export function ProjectPanel({
   const addShot = async () => {
     if (!selected) return;
     const continuitySource = sourceOptions.find(({ value }) => value === continuityOutputId);
-    const updated = await action("add-shot", () => onAddShot(selected.projectId, {
+    const updated = await action("add-shot", () => mutate(() => addProjectShot(selected.projectId, {
       expectedRevision: selected.revision,
       title: shotTitle,
       request,
@@ -183,7 +205,7 @@ export function ProjectPanel({
             referenceOutputId: continuitySource.output.id,
           }
         : null,
-    }));
+    })));
     if (!updated) return;
     setShotTitle("");
     setContinuityOutputId("");
@@ -262,7 +284,7 @@ export function ProjectPanel({
               className="button button--secondary"
               disabled={busyAction !== null}
               onClick={() => void action("history", async () => {
-                const revisions = await onHistory(selected.projectId);
+                const revisions = await getProjectHistory(selected.projectId);
                 setHistoryStatus(
                   revisions.length === selected.revision
                     ? `${revisions.length} Revisionen vollständig und hashverkettet gelesen.`
@@ -280,9 +302,9 @@ export function ProjectPanel({
                 disabled={busyAction !== null}
                 onClick={() => {
                   if (!window.confirm(`Projekt „${selected.project.title}“ wirklich archivieren?`)) return;
-                  void action("archive", () => onArchive(selected.projectId, {
+                  void action("archive", () => mutate(() => archiveProject(selected.projectId, {
                     expectedRevision: selected.revision,
-                  }));
+                  })));
                 }}
               >
                 {busyAction === "archive" ? <LoaderCircle className="spin" size={16} /> : <Archive size={16} />}
@@ -377,7 +399,12 @@ export function ProjectPanel({
                         disabled={busyAction !== null}
                         onClick={() => void action(
                           `launch-${shot.id}`,
-                          () => onLaunch(selected.projectId, shot.id, selected.revision),
+                          async () => {
+                            const launched = await launchProjectShot(selected.projectId, shot.id, {
+                              expectedRevision: selected.revision,
+                            });
+                            onJobLaunched(launched.job);
+                          },
                         )}
                       >
                         {busyAction === `launch-${shot.id}`
@@ -394,12 +421,12 @@ export function ProjectPanel({
                         title={request.mode === "retake" ? "Retake muss mit einer Quellausgabe protokolliert werden." : undefined}
                         onClick={() => void action(
                           `revise-${shot.id}`,
-                          () => onReviseShot(selected.projectId, shot.id, {
+                          () => mutate(() => reviseProjectShot(selected.projectId, shot.id, {
                             expectedRevision: selected.revision,
                             request,
                             reason: "edit",
                             sourceOutputId: null,
-                          }),
+                          })),
                         )}
                       >
                         {busyAction === `revise-${shot.id}`
@@ -415,11 +442,11 @@ export function ProjectPanel({
                         disabled={busyAction !== null}
                         onClick={() => void action(
                           `capture-${shot.id}`,
-                          () => onCapture(selected.projectId, shot.id, {
+                          () => mutate(() => captureProjectShotOutput(selected.projectId, shot.id, {
                             expectedRevision: selected.revision,
                             requestRevisionId: selectedBinding!.requestRevisionId,
                             outputName: selectedOutput.name,
-                          }),
+                          })),
                         )}
                       >
                         {busyAction === `capture-${shot.id}`
@@ -451,12 +478,12 @@ export function ProjectPanel({
                           : "Im Editor zuerst einen Retake mit exakt dieser Quellausgabe vorbereiten."}
                         onClick={() => void action(
                           `retake-${shot.id}`,
-                          () => onReviseShot(selected.projectId, shot.id, {
+                          () => mutate(() => reviseProjectShot(selected.projectId, shot.id, {
                             expectedRevision: selected.revision,
                             request,
                             reason: "retake",
                             sourceOutputId: retakeOutputId,
-                          }),
+                          })),
                         )}
                       >
                         {busyAction === `retake-${shot.id}`
@@ -482,10 +509,10 @@ export function ProjectPanel({
                               disabled={busyAction !== null}
                               onClick={() => void action(
                                 `approve-${output.id}`,
-                                () => onApprove(selected.projectId, shot.id, {
+                                () => mutate(() => approveProjectShotOutput(selected.projectId, shot.id, {
                                   expectedRevision: selected.revision,
                                   outputId: output.id,
-                                }),
+                                })),
                               )}
                             >
                               {busyAction === `approve-${output.id}`
@@ -506,8 +533,10 @@ export function ProjectPanel({
             <div className="compact-empty">Noch kein Shot in diesem Projekt</div>
           ) : null}
         </article>
-      ) : (
+      ) : loaded ? (
         <div className="compact-empty">Noch kein Produktionsprojekt</div>
+      ) : (
+        <div className="compact-empty"><LoaderCircle className="spin" size={14} /> Projektverlauf wird geladen …</div>
       )}
 
       <p className="project-evidence">
@@ -518,6 +547,7 @@ export function ProjectPanel({
           {warnings.map((warning) => <p key={warning}>{warning}</p>)}
         </div>
       ) : null}
+      {refreshError ? <p className="section-error" role="alert">{refreshError}</p> : null}
       {error ? <p className="section-error" role="alert">{error}</p> : null}
     </section>
   );

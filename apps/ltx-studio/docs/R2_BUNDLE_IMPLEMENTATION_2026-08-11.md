@@ -2,8 +2,10 @@
 
 ## Urteil
 
-Das statische R2-Gate und der vorregistrierte Cold-Browser-Vergleich sind
-bestanden. **R2 ist abgeschlossen.**
+Das statische R2-Gate und der vorregistrierte Cold-Browser-Vergleich sind für
+den damaligen Digest bestanden. Spätere Projektworkflow-Änderungen haben die
+Digestbindung invalidiert; der aktuelle Engineering-Stand bleibt statisch
+grün und muss für den nächsten Finalkandidaten neu gemessen werden.
 
 ## Änderung
 
@@ -11,6 +13,8 @@ bestanden. **R2 ist abgeschlossen.**
   Synchronvergleich sind echte dynamische Chunks.
 - Die Experimentoberfläche wird erst nach einer ausdrücklichen Nutzeraktion
   geladen. Moduswahl und Laufmonitor bleiben sofort im Entry-Chunk.
+- Der Projektworkspace einschließlich Projektabruf, Polling und Mutations-API
+  wird ebenfalls erst nach einer ausdrücklichen Nutzeraktion geladen.
 - Chunkfehler nach einem Deploywechsel lösen genau einen automatischen Reload
   pro Chunk aus. Schlägt auch dieser Versuch fehl, zeigt eine Error Boundary
   einen sichtbaren, bedienbaren Aktualisierungspfad statt einer leeren UI.
@@ -19,6 +23,9 @@ bestanden. **R2 ist abgeschlossen.**
 - `npm run bundle:report -- --performance-evidence docs/evidence/startup-r2-2026-08-11.json`
   erzeugt aus dem realen `dist` Raw-, gzip- und
   Brotli-Größen sowie eine maschinenlesbare Gateentscheidung.
+- `startup:measure` kann eine Rohmessung atomar neu anlegen;
+  `startup:compare` prüft Protokoll, Hostprofil, Artefakthash, N und p95 und
+  erzeugt den write-once Vergleich. Vorhandene Belege werden nie überschrieben.
 
 ## Ergebnis
 
@@ -42,5 +49,6 @@ und Maximum sind ebenfalls kleiner. Browser, Node, Kernel, Hostprofil, N,
 Min/Max, Mittelwert, Standardabweichung, Median und p95 sind in
 `docs/evidence/startup-r2-2026-08-11.json` gebunden.
 
-Damit sind Größen-, Warnungs-, Lazy-Load-, Deployfehler- und p95-Gate erfüllt:
-**R2 = pass**.
+Damit waren Größen-, Warnungs-, Lazy-Load-, Deployfehler- und p95-Gate für den
+damaligen Digest erfüllt. Für den aktuellen Code gilt bis zur erneuten
+Digestbindung **R2 = hold**, nicht still `pass`.

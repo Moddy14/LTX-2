@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
@@ -94,4 +94,11 @@ const report = {
     : {}),
 };
 
-process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+const reportBytes = `${JSON.stringify(report, null, 2)}\n`;
+const outputPath = argumentValue("--output");
+if (outputPath) {
+  writeFileSync(outputPath, reportBytes, { encoding: "utf8", flag: "wx", mode: 0o644 });
+  process.stdout.write(`${JSON.stringify({ output: outputPath, staticGate: report.staticGate })}\n`);
+} else {
+  process.stdout.write(reportBytes);
+}

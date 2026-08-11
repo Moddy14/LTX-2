@@ -42,15 +42,6 @@ import type {
   ControlledExperiment,
   ExperimentCreateInput,
 } from "../../shared/experiments";
-import type {
-  ProjectArchiveRequest,
-  ProjectCreateRequest,
-  ProjectOutputApprovalRequest,
-  ProjectOutputCaptureRequest,
-  ProjectRevisionEnvelope,
-  ProjectShotCreateRequest,
-  ProjectShotRevisionRequest,
-} from "../../shared/projects";
 import { isSpeechQualityCandidate } from "../qualityCandidates";
 import { supportsSceneReference } from "../sceneReference";
 import { importWithSingleReload } from "../lazyImport";
@@ -176,28 +167,7 @@ type RunPanelProps = {
   onCreateExperiment: (input: ExperimentCreateInput) => Promise<void>;
   onFreezeExperiment: (id: string) => Promise<void>;
   onLaunchExperiment: (id: string, arm: "baseline" | "candidate") => Promise<void>;
-  projects: ProjectRevisionEnvelope[];
-  projectWarnings: string[];
-  onCreateProject: (input: ProjectCreateRequest) => Promise<ProjectRevisionEnvelope>;
-  onAddProjectShot: (id: string, input: ProjectShotCreateRequest) => Promise<ProjectRevisionEnvelope>;
-  onReviseProjectShot: (
-    id: string,
-    shotId: string,
-    input: ProjectShotRevisionRequest,
-  ) => Promise<ProjectRevisionEnvelope>;
-  onLaunchProjectShot: (id: string, shotId: string, expectedRevision: number) => Promise<void>;
-  onCaptureProjectOutput: (
-    id: string,
-    shotId: string,
-    input: ProjectOutputCaptureRequest,
-  ) => Promise<ProjectRevisionEnvelope>;
-  onApproveProjectOutput: (
-    id: string,
-    shotId: string,
-    input: ProjectOutputApprovalRequest,
-  ) => Promise<ProjectRevisionEnvelope>;
-  onArchiveProject: (id: string, input: ProjectArchiveRequest) => Promise<ProjectRevisionEnvelope>;
-  onGetProjectHistory: (id: string) => Promise<ProjectRevisionEnvelope[]>;
+  onProjectJobLaunched: (job: StudioJob) => void;
   onLoadProjectRequest: (request: GenerationRequest) => void;
   estimate: ResourceEstimate;
   requiredStartMemoryGiB: number;
@@ -246,16 +216,7 @@ export function RunPanel({
   onCreateExperiment,
   onFreezeExperiment,
   onLaunchExperiment,
-  projects,
-  projectWarnings,
-  onCreateProject,
-  onAddProjectShot,
-  onReviseProjectShot,
-  onLaunchProjectShot,
-  onCaptureProjectOutput,
-  onApproveProjectOutput,
-  onArchiveProject,
-  onGetProjectHistory,
+  onProjectJobLaunched,
   onLoadProjectRequest,
   estimate,
   requiredStartMemoryGiB,
@@ -560,18 +521,9 @@ export function RunPanel({
             <ProjectPanel
               request={request}
               requestValid={requestValid}
-              projects={projects}
-              warnings={projectWarnings}
               jobs={jobs}
               selectedOutput={selectedOutput}
-              onCreate={onCreateProject}
-              onAddShot={onAddProjectShot}
-              onReviseShot={onReviseProjectShot}
-              onLaunch={onLaunchProjectShot}
-              onCapture={onCaptureProjectOutput}
-              onApprove={onApproveProjectOutput}
-              onArchive={onArchiveProject}
-              onHistory={onGetProjectHistory}
+              onJobLaunched={onProjectJobLaunched}
               onLoadRequest={onLoadProjectRequest}
             />
           </Suspense>

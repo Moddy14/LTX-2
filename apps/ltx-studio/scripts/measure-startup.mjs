@@ -1,12 +1,13 @@
 import { cpus, totalmem, arch, release } from "node:os";
 import { performance } from "node:perf_hooks";
+import { writeFileSync } from "node:fs";
 
 import { chromium } from "@playwright/test";
 
-const [url, label, runCountValue = "40"] = process.argv.slice(2);
+const [url, label, runCountValue = "40", outputPath] = process.argv.slice(2);
 const runCount = Number.parseInt(runCountValue, 10);
 if (!url || !label || !Number.isInteger(runCount) || runCount < 1) {
-  throw new Error("usage: node scripts/measure-startup.mjs <url> <label> [runs]");
+  throw new Error("usage: node scripts/measure-startup.mjs <url> <label> [runs] [output]");
 }
 
 function percentile(values, fraction) {
@@ -90,4 +91,10 @@ const report = {
   samples,
 };
 
-process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+const reportBytes = `${JSON.stringify(report, null, 2)}\n`;
+if (outputPath) {
+  writeFileSync(outputPath, reportBytes, { encoding: "utf8", flag: "wx", mode: 0o644 });
+  process.stdout.write(`${JSON.stringify({ output: outputPath, runs: samples.length })}\n`);
+} else {
+  process.stdout.write(reportBytes);
+}

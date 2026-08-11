@@ -22,7 +22,7 @@ lautet der ehrliche Status **nicht 10/10**.
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
 | Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
 | Python HTTP-Stack | Die isolierte R1-Runtime besteht `uv lock --check`, `uv pip check`, `requests` unter `-W error` und den Runtime-Verifier; `chardet` ist dort verboten. Nur das nicht als Releasequelle zulässige Shared-ComfyUI-Environment enthält weiter `chardet 7.4.3` | Releasepfad gut; Shared-Env-Abweichung bleibt bewusst isoliert | abgeschlossen |
-| Frontend-Bundle | Der frühere R2-Digest bestand mit 388.269/115.561 Bytes raw/gzip und 40+40 kalten Chromium-Kontexten. Der aktuelle Engineering-Build bleibt trotz lazy Projektworkspace mit 392.625/116.813 Bytes unter 450/140 kB und ohne Vite-Warnung; gemäß Invalidierungsmatrix müssen Doppelbuild und 40+40-Messung für den neuen Finaldigest wiederholt werden | statisches Gate grün; digestgebundene R2-Erneuerung offen | P1 |
+| Frontend-Bundle | Der frühere R2-Digest bestand mit 388.269/115.561 Bytes raw/gzip und 40+40 kalten Chromium-Kontexten. Projektzustand, Polling und API liegen nun vollständig im Lazy-Chunk; der aktuelle Engineering-Build bleibt mit 391.361/116.122 Bytes unter 450/140 kB und ohne Vite-Warnung. Messung und Vergleich besitzen jetzt write-once CLIs; gemäß Invalidierungsmatrix muss der neue Finaldigest noch gebunden werden | statisches Gate grün; digestgebundene R2-Erneuerung offen | P1 |
 | Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 123 Einträge, davon 17 konditionale Kandidaten und 106 rechtlich/technisch gesperrt | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
 | Produktionsworkflow | Der persistente Projektkern speichert Shots, Request-Revisionen, konkrete Continuity-/Retake-Quellen sowie Output-, Sidecar- und Export-Digests in einer owner-only, monotonen Hashkette. API, Jobstart und v7-Sidecar binden den exakten Projekt-/Request-Stand; Restarts, Stale Writes, Kettenlücken, Legacy-Provenienz und verdeckte Mutationen bleiben fail-closed. Der lazy Desktop-/Mobile-Workspace bedient Anlage, Shot-/Continuity-Bindung, Start, Output-Erfassung/Freigabe, Edit/Retake, Kettenprüfung und Archivierung; Integritätswarnungen bleiben sichtbar | Engineering-Workflow gut; reale Cross-Shot-/P4-Evidenz offen | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten, Signatur-/Audit-/ACL-Prüfer, Blind-Scorer-Verträge und eine Draft-Preregistrierung existieren. `profile=product` bleibt absichtlich hart blockiert, bis getrennte UID/GID, versiegelte Roots, externe Schlüssel, aktuelle Rechte und reale disjunkte Daten provisioniert und belegt sind | technische Grundlage gut; unabhängige Provisionierung und Product-GO offen | P2 |
@@ -231,10 +231,13 @@ qualifizieren.** Der reproduzierbare Bericht
 die 40+40 Cold-Context-Messung in
 `docs/evidence/startup-r2-2026-08-11.json`. Diese Evidenz belegt den damaligen
 Digest; spätere Projektworkflow-Änderungen invalidieren sie gemäß Matrix. Der
-aktuelle unversiegelte Build liegt bei 392,625/116,813 kB raw/gzip und bleibt
-statisch grün. Doppelbuild und 40+40 Cold-Context-Messung werden erst für den
-nächsten stabilen Release Candidate neu gebunden. Die folgenden Punkte bleiben
-als Reproduktionsvorgabe bestehen.
+aktuelle unversiegelte Build liegt bei 391,361/116,122 kB raw/gzip und bleibt
+statisch grün. Der Projektworkspace lädt auch seine Zustandsabfrage, Polling-
+und Mutations-API erst nach ausdrücklichem Öffnen. `startup:measure` und
+`startup:compare` schreiben ihre Rohmessung beziehungsweise den
+artefaktgebundenen Vergleich write-once. Doppelbuild und 40+40
+Cold-Context-Messung werden für den nächsten stabilen Release Candidate neu
+gebunden. Die folgenden Punkte bleiben als Reproduktionsvorgabe bestehen.
 
 1. Einen reproduzierbaren Bundlebericht mit Input-/Chunk-Zuordnung sowie Raw-,
    gzip- und Brotli-Größe versionieren. Die gespeicherte Basis ist
