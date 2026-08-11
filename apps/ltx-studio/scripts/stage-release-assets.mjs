@@ -52,6 +52,31 @@ execFileSync("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no
   cwd: releaseAppRoot,
   stdio: "inherit",
 });
+const runtimeRoot = join(releaseAppRoot, "runtime");
+const releaseEnvironment = { ...process.env };
+delete releaseEnvironment.VIRTUAL_ENV;
+execFileSync("uv", [
+  "sync",
+  "--project", runtimeRoot,
+  "--locked",
+  "--no-dev",
+  "--no-editable",
+  "--compile-bytecode",
+], { cwd: releaseRoot, env: releaseEnvironment, stdio: "inherit" });
+const releasePython = join(runtimeRoot, ".venv", "bin", "python");
+execFileSync(releasePython, [join(runtimeRoot, "normalize_cusparselt_wheel.py")], {
+  cwd: releaseRoot,
+  stdio: "inherit",
+});
+execFileSync("uv", ["pip", "check", "--python", releasePython], {
+  cwd: releaseRoot,
+  env: releaseEnvironment,
+  stdio: "inherit",
+});
+execFileSync(releasePython, ["-I", join(runtimeRoot, "verify_runtime.py")], {
+  cwd: releaseRoot,
+  stdio: "inherit",
+});
 const packagePath = join(releaseAppRoot, "package.json");
 const sourcePackage = JSON.parse(readFileSync(packagePath, "utf8"));
 const productionPackage = {

@@ -167,15 +167,37 @@ export function selectPythonExecutable(
   return candidates.find(executableAvailable) ?? "python3";
 }
 
+export function selectRendererPythonExecutable(options: {
+  sealed: boolean;
+  explicit: string | undefined;
+  sealedCandidate: string;
+  developmentCandidates: readonly string[];
+}): string {
+  if (!options.sealed) {
+    return selectPythonExecutable(options.explicit, options.developmentCandidates);
+  }
+  const sealedCandidate = resolve(options.sealedCandidate);
+  if (options.explicit?.trim() && resolve(options.explicit.trim()) !== sealedCandidate) {
+    throw new Error("LTX_STUDIO_RENDER_PYTHON must point inside the sealed release runtime");
+  }
+  if (!executableAvailable(sealedCandidate)) {
+    throw new Error(`Sealed renderer runtime is missing or not executable: ${sealedCandidate}`);
+  }
+  return sealedCandidate;
+}
+
 export const pythonExecutable = selectPythonExecutable(process.env.LTX_STUDIO_PYTHON, [
   join(repoRoot, ".venv", "bin", "python"),
   join(homedir(), "comfyui-env", "bin", "python"),
   "python3",
 ]);
-export const rendererPythonExecutable = selectPythonExecutable(
-  process.env.LTX_STUDIO_RENDER_PYTHON,
-  [join(appRoot, "runtime", ".venv", "bin", "python"), pythonExecutable],
-);
+export const sealedRelease = process.env.LTX_STUDIO_SEALED_RELEASE === "1";
+export const rendererPythonExecutable = selectRendererPythonExecutable({
+  sealed: sealedRelease,
+  explicit: process.env.LTX_STUDIO_RENDER_PYTHON,
+  sealedCandidate: join(appRoot, "runtime", ".venv", "bin", "python"),
+  developmentCandidates: [join(appRoot, "runtime", ".venv", "bin", "python"), pythonExecutable],
+});
 export const phonemeVisemePythonExecutable =
   process.env.LTX_STUDIO_PHONEME_VISEME_PYTHON?.trim() || pythonExecutable;
 
