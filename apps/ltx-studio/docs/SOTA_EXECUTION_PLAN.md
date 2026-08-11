@@ -22,7 +22,7 @@ lautet der ehrliche Status **nicht 10/10**.
 | Scheduler-Vertrag | Orchestrator hat den haltbaren LTX-Segment-Waiter, Heartbeat und `/dgx/scheduler/segment-boundary/decide`. Studio sendet Heartbeats, entscheidet das Yield aber weiterhin nur über den alten Qwen-Demand-Wächter | sicher fail-closed, aber fachlich unvollständig: andere wartende Jobs sind unsichtbar | P0 |
 | Releasebasis | Dienst startet per `npm start`/`tsx` aus `/home/moddy/LTX-2`; Python fällt auf die gemeinsame `~/comfyui-env` zurück | veränderlich, nicht reproduzierbar | P0 |
 | Python HTTP-Stack | `requests 2.32.5`, `urllib3 2.6.3`, `charset-normalizer 3.4.5`, zusätzlich `chardet 7.4.3`. Requests akzeptiert in dieser Version nur `chardet < 6`; Import mit Warnungen als Fehler schlägt fehl. `pip check` übersieht den optionalen Konflikt | realer Umgebungsfehler, durch Shared-Env verursacht | P0 |
-| Frontend-Bundle | Vite erzeugt 533,43 kB initiales JS, 155,28 kB gzip. Es gibt keinen dynamischen Import. Große app-eigene Module sind insbesondere `Editor.tsx`, `fieldHelp.ts`, `App.tsx`, `RunPanel.tsx` und die Analyse-/Experiment-Panels | nicht blockierend; echte Startkosten optimieren, Warnlimit nicht nur erhöhen | P4 |
+| Frontend-Bundle | R2 ist mit artefaktgebundener Evidenz bestanden: 388.269/115.561 Bytes raw/gzip, keine Vite-Chunkwarnung, echte Lazy-Chunks und 40+40 kalte Chromium-Kontexte; p95 175,42 ms -> 131,58 ms | gut; kein offener Bundle-Defekt | abgeschlossen |
 | Releaseoberfläche | `PIPELINES` veröffentlicht 12 Modi; IC-LoRA und LipDub besitzen zusätzliche Profile. Der alte Plan zählte nur fünf sichtbare Modi | alte Canary-Matrix unvollständig | P1 |
 | Dataset-Governance | CAS-Freeze, Rechteledger, transitive Leakage-Komponenten und eine Draft-Preregistrierung existieren bereits. `profile=product` ist absichtlich hart blockiert, weil Signatur-, ACL-, Blind-Scorer- und Attestierungspfad fehlen | starke Grundlage, Product-GO offen | P2 |
 | Tune/Holdout | Es gibt noch keinen rechtsgeprüften Kalibriersatz und keinen versiegelten Holdout. Fünf funktionale Tune-Clips reichen nicht zur biometrischen Schwellenkalibrierung | zentraler 10/10-Blocker | P2 |
@@ -30,11 +30,10 @@ lautet der ehrliche Status **nicht 10/10**.
 | Video-Benchmark | VBench ist lokal nicht installiert. Für eigene I2V-Videos ist VBench++/VBench-I2V einschlägig; VBench 2.0 misst primär intrinsische Faithfulness und ersetzt weder Lip-Sync- noch Identitätsgates | alter Werkzeugname war zu pauschal | P2 |
 | Komparatoren | LongCat ist lokal vorhanden. MOVA und Wan2.2-S2V fehlen lokal. MOVA und Wan haben unterschiedliche Eingabeverträge und dürfen nicht in einen gemeinsamen Score gezwungen werden | lokaler Bake-off offen | P3 |
 
-Die 533-kB-Warnung ist somit der kleinste offene Punkt. Der
-`requests`-Konflikt ist ein Symptom der fehlenden Releaseumgebung. Die
-eigentlichen 10/10-Blocker sind Product-Governance, kalibrierte Daten,
-Cross-Shot-Nichtunterlegenheit, Release-Canaries und der verblindete lokale
-Bake-off.
+Die frühere 533-kB-Warnung ist durch R2 geschlossen. Der `requests`-Konflikt
+ist ein Symptom der fehlenden Releaseumgebung. Die eigentlichen 10/10-Blocker
+sind Product-Governance, kalibrierte Daten, Cross-Shot-Nichtunterlegenheit,
+Release-Canaries und der verblindete lokale Bake-off.
 
 ## 2. Definition des finalen Gates
 
@@ -217,9 +216,16 @@ beziehungsweise Freigabe.
 
 ### R2 — Bundle-Hinweis durch reale Startkosten schließen
 
+**Status: abgeschlossen.** Der reproduzierbare Bericht
+`docs/evidence/bundle-r2-2026-08-11.json` bindet den aktuellen Entry-Chunk an
+die 40+40 Cold-Context-Messung in
+`docs/evidence/startup-r2-2026-08-11.json`. Die folgenden Punkte beschreiben
+den erfüllten Vertrag und bleiben als Reproduktionsvorgabe bestehen.
+
 1. Einen reproduzierbaren Bundlebericht mit Input-/Chunk-Zuordnung sowie Raw-,
-   gzip- und Brotli-Größe versionieren. Der heutige Ausgangspunkt ist
-   533,43/155,28 kB (raw/gzip).
+   gzip- und Brotli-Größe versionieren. Die gespeicherte Basis ist
+   533,43/155,28 kB (raw/gzip), der gebundene Kandidat
+   388,269/115,561 kB.
 2. Selten benötigte Experiment-, objektive Analyse- und Vergleichsansichten
    über `React.lazy`/dynamische Imports laden. Editor, Moduswahl und Run-Status
    bleiben im initialen Pfad. Shared Zod-Schemas werden nur dort in den Client
@@ -232,7 +238,7 @@ beziehungsweise Freigabe.
    40 kalte, cachefreie Browserkontexte auf Loopback. Bericht: N, Median, p95
    und Streuung für erste bedienbare Moduswahl.
 
-**Exit R2:** Initiales JS höchstens 450 kB raw und 140 kB gzip, keine
+**Exit R2 (bestanden):** Initiales JS höchstens 450 kB raw und 140 kB gzip, keine
 Vite-Chunkwarnung, alle E2E grün und kein schlechterer p95-Wert für erste
 bedienbare Moduswahl gegenüber dem vorab gespeicherten Basislauf.
 

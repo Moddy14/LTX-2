@@ -38,8 +38,9 @@ damit weder aussagekräftig noch vertragskonform gewesen.
 
 - `npm test`: 59 Dateien, 572 Tests bestanden.
 - `npm run lint`: ohne Warnung bestanden.
-- `npm run build`: bestanden; der bekannte Bundle-Hinweis bleibt bei
-  533,43 kB raw / 155,28 kB gzip offen.
+- `npm run build`: bestanden. Der damals offene Bundle-Hinweis wurde
+  anschließend in R2 geschlossen: 388.269 B raw / 115.561 B gzip, ohne
+  Vite-Chunkwarnung; siehe `R2_BUNDLE_IMPLEMENTATION_2026-08-11.md`.
 - `test_cooperative_checkpoint.py`: 7 Tests bestanden, darunter gebundener
   Continue, Yield, stale Decision und 10-s-Timeoutpfad mit verkürzter Testzeit.
 - `git diff --check`: bestanden.
