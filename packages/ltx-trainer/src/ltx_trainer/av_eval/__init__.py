@@ -7,6 +7,7 @@ from .authorization import (
     validate_release_authorization,
     verify_detached_signature,
 )
+from .calibration import CalibrationError, build_calibration_gate_report
 from .design import DesignError, build_power_report, document_sha256
 from .governance import (
     FrozenDatasetSession,
@@ -27,11 +28,13 @@ from .product import (
 
 __all__ = [
     "AuthorizationError",
+    "CalibrationError",
     "DesignError",
     "FrozenDatasetSession",
     "GovernanceError",
     "ProductGovernanceError",
     "append_signed_access_event",
+    "build_calibration_gate_report",
     "build_power_report",
     "document_sha256",
     "freeze_dataset",

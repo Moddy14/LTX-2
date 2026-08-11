@@ -118,6 +118,27 @@ identities. Delta-, VBench-, quota-, and complete-design hashes are emitted
 separately so downstream D1/Q0/Q1/F0/Q2 evidence can bind them without changing
 the gates after results are visible.
 
+## D1 calibration gates
+
+`configs/av_eval/calibration-gates.v1.json` is the complete machine-readable
+gate inventory for calibration. It includes 33 fixed AV, phoneme/viseme,
+identity, artifact, ASR, sharpness, calibration and abstention decisions plus
+the 12 claim-specific VBench measurements from D0a. Plan-fixed thresholds are
+immutable in the validator; only the still-unknown relative sharpness floor is
+nullable. Evaluator fingerprints, D0a/preregistration/VBench bindings and a
+basis-evidence hash for every gate remain null in the checked-in draft.
+
+```bash
+uv run python scripts/av_eval.py calibration-check \
+  --catalog configs/av_eval/calibration-gates.v1.json
+```
+
+The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
+metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
+evidence, or an unbound upstream catalog. Its output is the exact 45-ID set
+that the tune/holdout report validator must cover; a VBench omission cannot be
+hidden behind the other D1 metrics.
+
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory
 inspector, signed hash-chained access ledger, and machine-validated

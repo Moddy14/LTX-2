@@ -9,7 +9,15 @@ import sys
 from pathlib import Path
 
 from ltx_trainer import logger
-from ltx_trainer.av_eval import DesignError, GovernanceError, build_power_report, freeze_dataset, load_split_seed
+from ltx_trainer.av_eval import (
+    CalibrationError,
+    DesignError,
+    GovernanceError,
+    build_calibration_gate_report,
+    build_power_report,
+    freeze_dataset,
+    load_split_seed,
+)
 
 
 def main() -> int:
@@ -25,6 +33,8 @@ def main() -> int:
     freeze.add_argument("--profile", choices=["development", "product"], default="product")
     design_check = subcommands.add_parser("design-check", help="validate D0a gates and compute fixed sample sizes")
     design_check.add_argument("--design", type=Path, required=True)
+    calibration_check = subcommands.add_parser("calibration-check", help="validate the complete D1 gate catalog")
+    calibration_check.add_argument("--catalog", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "design-check":
         try:
@@ -32,6 +42,15 @@ def main() -> int:
             report = build_power_report(design)
         except (OSError, json.JSONDecodeError, DesignError) as error:
             logger.error("D0a design rejected: %s", error)
+            return 2
+        sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+        return 0 if report["status"] == "ready-to-freeze" else 2
+    if args.command == "calibration-check":
+        try:
+            catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
+            report = build_calibration_gate_report(catalog)
+        except (OSError, json.JSONDecodeError, CalibrationError) as error:
+            logger.error("D1 calibration catalog rejected: %s", error)
             return 2
         sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
         return 0 if report["status"] == "ready-to-freeze" else 2
