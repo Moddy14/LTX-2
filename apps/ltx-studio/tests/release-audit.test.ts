@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { canonicalJson } from "../shared/canonicalJson.js";
 import {
   collectReleaseEvidence,
+  finalizeReleaseAudit,
   qualificationGateOwnership,
   qualificationKinds,
   type QualificationKind,
@@ -29,8 +30,14 @@ function timestamp(offsetHours: number): string {
     .replace(".000", "");
 }
 
-function fixture(): ReleaseEvidenceInput {
+type Fixture = ReleaseEvidenceInput & {
+  signDocument: (document: unknown) => Record<string, unknown>;
+  finalizerPrivateKeyPem: string;
+};
+
+function fixture(): Fixture {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const finalizer = generateKeyPairSync("ed25519");
   const rawPublicKey = publicKey
     .export({ format: "der", type: "spki" })
     .subarray(-32);
@@ -47,7 +54,20 @@ function fixture(): ReleaseEvidenceInput {
           "rights-attestor",
           "qualification-attestor",
           "holdout-scorer",
+          "release-authorizer",
         ],
+        notBefore: timestamp(-24),
+        notAfter: timestamp(24),
+        revokedAt: null,
+      },
+      {
+        keyId: "audit-finalizer-key-01",
+        algorithm: "ed25519",
+        publicKeyBase64: finalizer.publicKey
+          .export({ format: "der", type: "spki" })
+          .subarray(-32)
+          .toString("base64"),
+        roles: ["audit-finalizer"],
         notBefore: timestamp(-24),
         notAfter: timestamp(24),
         revokedAt: null,
@@ -207,6 +227,10 @@ function fixture(): ReleaseEvidenceInput {
     rightsAttestation: { document: rights, signature: signature(rights) },
     reports,
     trustPolicyDigest,
+    signDocument: signature,
+    finalizerPrivateKeyPem: finalizer.privateKey
+      .export({ format: "pem", type: "pkcs8" })
+      .toString(),
   };
 }
 
@@ -279,5 +303,86 @@ describe("release evidence collector", () => {
       emptyTargets.index as { targetSotaClaimIds: string[] }
     ).targetSotaClaimIds = [];
     expect(() => collectReleaseEvidence(emptyTargets)).toThrow();
+  });
+});
+
+describe("release audit finalizer", () => {
+  it("is the first stage allowed to emit production and SOTA go", () => {
+    const input = fixture();
+    const evidence = collectReleaseEvidence(input);
+    const evidenceDigest = hash(evidence);
+    const q2ReportDigest = evidence.reports.find(
+      ({ kind }) => kind === "q2-holdout",
+    )?.sha256;
+    if (!q2ReportDigest) throw new Error("missing Q2 fixture digest");
+    const authorization = {
+      schemaVersion: "ltx-studio-release-authorization.v1",
+      releaseDigest: evidence.releaseDigest,
+      preregistrationDigest: evidence.preregistrationDigest,
+      q2ReportDigest,
+      releaseEvidenceDigest: evidenceDigest,
+      rightsAttestationDigest: evidence.rightsAttestationDigest,
+      notBefore: timestamp(-1),
+      expiresAt: timestamp(1),
+    };
+
+    const envelope = finalizeReleaseAudit({
+      now: NOW,
+      evidence,
+      evidenceDigest,
+      authorization: {
+        document: authorization,
+        signature: input.signDocument(authorization),
+      },
+      rightsAttestation: input.rightsAttestation,
+      trustPolicy: input.trustPolicy,
+      trustPolicyDigest: input.trustPolicyDigest,
+      finalizerKeyId: "audit-finalizer-key-01",
+      finalizerPrivateKeyPem: input.finalizerPrivateKeyPem,
+    });
+
+    expect(envelope.audit).toMatchObject({
+      production_overall: "go",
+      sota_overall: "go",
+      releaseEvidenceDigest: evidenceDigest,
+      releaseAuthorizationDigest: hash(authorization),
+    });
+    expect(envelope.signature.payloadSha256).toBe(hash(envelope.audit));
+  });
+
+  it("rechecks authorization bindings and rights freshness at finalization", () => {
+    const input = fixture();
+    const evidence = collectReleaseEvidence(input);
+    const evidenceDigest = hash(evidence);
+    const q2ReportDigest = evidence.reports.find(
+      ({ kind }) => kind === "q2-holdout",
+    )?.sha256;
+    if (!q2ReportDigest) throw new Error("missing Q2 fixture digest");
+    const authorization = {
+      schemaVersion: "ltx-studio-release-authorization.v1",
+      releaseDigest: evidence.releaseDigest,
+      preregistrationDigest: evidence.preregistrationDigest,
+      q2ReportDigest,
+      releaseEvidenceDigest: "f".repeat(64),
+      rightsAttestationDigest: evidence.rightsAttestationDigest,
+      notBefore: timestamp(-1),
+      expiresAt: timestamp(1),
+    };
+    expect(() =>
+      finalizeReleaseAudit({
+        now: NOW,
+        evidence,
+        evidenceDigest,
+        authorization: {
+          document: authorization,
+          signature: input.signDocument(authorization),
+        },
+        rightsAttestation: input.rightsAttestation,
+        trustPolicy: input.trustPolicy,
+        trustPolicyDigest: input.trustPolicyDigest,
+        finalizerKeyId: "audit-finalizer-key-01",
+        finalizerPrivateKeyPem: input.finalizerPrivateKeyPem,
+      }),
+    ).toThrow(/authorization binding mismatch/i);
   });
 });

@@ -38,7 +38,7 @@ FFPROBE_PATH = Path("/usr/bin/ffprobe")
 FFPROBE_SHA256 = "b98cabc72a01bf522a3eb85cae3cf7a8843817bfb0315ff14d8699cef5413f7d"
 # This digest is updated only by reviewed code changes after the preregistration is
 # externally approved. The corresponding split seed is intentionally absent here.
-TRUSTED_PREREGISTRATION_SHA256 = "4233921b01d426689ffc1036371191ae869431f6186261421b2268992efe3e46"
+TRUSTED_PREREGISTRATION_SHA256 = "ab95c00f6c1a365262dbb43805166f59a85eb1f2dccbf44f78c9b54ad5419363"
 SPLITS = ("train", "tune", "design-pilot", "calibration", "test")
 OOD_KINDS = (
     "silence",
@@ -106,7 +106,7 @@ ARTIFACT_PATH_FIELDS = (
 SPLIT_RATIOS = {"train": 0.60, "tune": 0.10, "design-pilot": 0.10, "calibration": 0.10, "test": 0.10}
 AUTHORIZATION_CONTRACT = {
     "evaluation_authorization": "external-ed25519-after-f0-before-q2.v1",
-    "release_authorization": "external-ed25519-after-q2-before-product-go.v1",
+    "release_authorization": "external-ed25519-after-q2-before-product-go.v2",
     "evaluation_is_not_release": True,
 }
 RELEASE_GATES = {

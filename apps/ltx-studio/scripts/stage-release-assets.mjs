@@ -92,6 +92,7 @@ const productionPackage = {
   scripts: {
     start: "node server/index.js",
     "audit:release": "node scripts/audit-release.mjs",
+    "audit:finalize": "node scripts/finalize-release-audit.mjs",
   },
   dependencies: sourcePackage.dependencies,
 };

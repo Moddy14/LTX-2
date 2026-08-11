@@ -1,4 +1,10 @@
-import { createHash, createPublicKey, verify } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+  verify,
+} from "node:crypto";
 
 import { z } from "zod";
 
@@ -93,6 +99,8 @@ export const trustRoles = [
   "rights-attestor",
   "qualification-attestor",
   "holdout-scorer",
+  "release-authorizer",
+  "audit-finalizer",
 ] as const;
 export type TrustRole = (typeof trustRoles)[number];
 
@@ -207,6 +215,17 @@ export const trustedKeyPolicySchema = z
           code: "custom",
           path: ["keys", index],
           message: "key validity window is inconsistent",
+        });
+      }
+      if (
+        key.roles.includes("release-authorizer") &&
+        key.roles.includes("audit-finalizer")
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["keys", index, "roles"],
+          message:
+            "release authorization and audit finalization require separate keys",
         });
       }
     }
@@ -346,6 +365,7 @@ export const releaseEvidenceSchema = z
     rightsAttestationDigest: sha256Schema,
     trustPolicyDigest: sha256Schema,
     targetSotaClaimIds: z.array(identifierSchema).min(1),
+    candidateSurfaceEntryIds: z.array(identifierSchema).min(1),
     reports: z
       .array(
         z
@@ -356,6 +376,57 @@ export const releaseEvidenceSchema = z
     claimResults: z.array(claimResultSchema).min(1),
     blockers: z.array(z.string()).max(0),
     ready_for_release_authorization: z.literal(true),
+  })
+  .strict();
+
+export const releaseAuthorizationSchema = z
+  .object({
+    schemaVersion: z.literal("ltx-studio-release-authorization.v1"),
+    releaseDigest: sha256Schema,
+    preregistrationDigest: sha256Schema,
+    q2ReportDigest: sha256Schema,
+    releaseEvidenceDigest: sha256Schema,
+    rightsAttestationDigest: sha256Schema,
+    notBefore: timestampSchema,
+    expiresAt: timestampSchema,
+  })
+  .strict()
+  .superRefine((authorization, context) => {
+    if (
+      parseTimestamp(authorization.notBefore) >=
+      parseTimestamp(authorization.expiresAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["expiresAt"],
+        message: "release authorization validity window is inconsistent",
+      });
+    }
+  });
+
+export const releaseAuditPayloadSchema = z
+  .object({
+    schemaVersion: z.literal("ltx-studio-release-audit-payload.v1"),
+    releaseDigest: sha256Schema,
+    preregistrationDigest: sha256Schema,
+    q2ReportDigest: sha256Schema,
+    rightsAttestationDigest: sha256Schema,
+    releaseEvidenceDigest: sha256Schema,
+    releaseAuthorizationDigest: sha256Schema,
+    trustPolicyDigest: sha256Schema,
+    targetSotaClaimIds: z.array(identifierSchema).min(1),
+    releasedSurfaceEntryIds: z.array(identifierSchema).min(1),
+    finalizedAt: timestampSchema,
+    production_overall: z.literal("go"),
+    sota_overall: z.literal("go"),
+  })
+  .strict();
+
+export const releaseAuditEnvelopeSchema = z
+  .object({
+    schemaVersion: z.literal("ltx-studio-release-audit.v1"),
+    audit: releaseAuditPayloadSchema,
+    signature: detachedSignatureSchema,
   })
   .strict();
 
@@ -385,7 +456,7 @@ function parseTimestamp(value: string): number {
   return result;
 }
 
-function verifySignature(
+export function verifyDetachedSignature(
   document: unknown,
   rawSignature: unknown,
   policy: z.infer<typeof trustedKeyPolicySchema>,
@@ -442,6 +513,18 @@ function verifySignature(
   return digest;
 }
 
+function assertCurrentWindow(
+  notBefore: string,
+  expiresAt: string,
+  now: Date,
+  context: string,
+): void {
+  const nowMs = now.getTime();
+  if (nowMs < parseTimestamp(notBefore) || nowMs > parseTimestamp(expiresAt)) {
+    throw new Error(`${context} is outside its validity window`);
+  }
+}
+
 function sameArray(left: readonly string[], right: readonly string[]): boolean {
   return (
     left.length === right.length &&
@@ -475,7 +558,7 @@ export function collectReleaseEvidence(
     })
     .passthrough()
     .parse(raw.preregistration.document);
-  const preregistrationDigest = verifySignature(
+  const preregistrationDigest = verifyDetachedSignature(
     preregistration,
     raw.preregistration.signature,
     policy,
@@ -491,7 +574,7 @@ export function collectReleaseEvidence(
   }
 
   const rights = rightsAttestationSchema.parse(raw.rightsAttestation.document);
-  const rightsDigest = verifySignature(
+  const rightsDigest = verifyDetachedSignature(
     rights,
     raw.rightsAttestation.signature,
     policy,
@@ -545,7 +628,7 @@ export function collectReleaseEvidence(
         `Qualification report digest mismatch: ${rawReport.kind}`,
       );
     }
-    verifySignature(
+    verifyDetachedSignature(
       report,
       rawReport.signature,
       policy,
@@ -616,6 +699,7 @@ export function collectReleaseEvidence(
     rightsAttestationDigest: rightsDigest,
     trustPolicyDigest: raw.trustPolicyDigest,
     targetSotaClaimIds: index.targetSotaClaimIds,
+    candidateSurfaceEntryIds: candidateEntries.map(({ id }) => id),
     reports: reportDigests.sort((left, right) =>
       left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0,
     ),
@@ -624,5 +708,154 @@ export function collectReleaseEvidence(
     ),
     blockers: [],
     ready_for_release_authorization: true,
+  });
+}
+
+export type ReleaseFinalizationInput = {
+  now: Date;
+  evidence: unknown;
+  evidenceDigest: string;
+  authorization: SignedDocument;
+  rightsAttestation: SignedDocument;
+  trustPolicy: unknown;
+  trustPolicyDigest: string;
+  finalizerKeyId: string;
+  finalizerPrivateKeyPem: string;
+};
+
+export function finalizeReleaseAudit(
+  raw: ReleaseFinalizationInput,
+): z.infer<typeof releaseAuditEnvelopeSchema> {
+  if (Number.isNaN(raw.now.getTime()))
+    throw new Error("Finalization time is invalid");
+  const evidence = releaseEvidenceSchema.parse(raw.evidence);
+  if (sha256(evidence) !== raw.evidenceDigest)
+    throw new Error("Release evidence digest mismatch");
+  const policy = trustedKeyPolicySchema.parse(raw.trustPolicy);
+  if (
+    sha256(policy) !== raw.trustPolicyDigest ||
+    evidence.trustPolicyDigest !== raw.trustPolicyDigest
+  ) {
+    throw new Error("Finalizer trusted-key policy digest mismatch");
+  }
+
+  const rights = rightsAttestationSchema.parse(raw.rightsAttestation.document);
+  const rightsDigest = verifyDetachedSignature(
+    rights,
+    raw.rightsAttestation.signature,
+    policy,
+    "rights-attestor",
+    raw.now,
+  );
+  if (
+    rightsDigest !== evidence.rightsAttestationDigest ||
+    rights.releaseDigest !== evidence.releaseDigest
+  ) {
+    throw new Error("Finalizer rights attestation binding mismatch");
+  }
+  assertCurrentWindow(
+    rights.validAt,
+    rights.expiresAt,
+    raw.now,
+    "Rights attestation",
+  );
+
+  const authorization = releaseAuthorizationSchema.parse(
+    raw.authorization.document,
+  );
+  const authorizationSignature = detachedSignatureSchema.parse(
+    raw.authorization.signature,
+  );
+  if (authorizationSignature.keyId === raw.finalizerKeyId) {
+    throw new Error(
+      "Release authorizer and audit finalizer must use different keys",
+    );
+  }
+  const authorizationDigest = verifyDetachedSignature(
+    authorization,
+    authorizationSignature,
+    policy,
+    "release-authorizer",
+    raw.now,
+  );
+  const q2ReportDigest = evidence.reports.find(
+    ({ kind }) => kind === "q2-holdout",
+  )?.sha256;
+  if (!q2ReportDigest)
+    throw new Error("Release evidence has no Q2 report digest");
+  if (
+    authorization.releaseDigest !== evidence.releaseDigest ||
+    authorization.preregistrationDigest !== evidence.preregistrationDigest ||
+    authorization.q2ReportDigest !== q2ReportDigest ||
+    authorization.releaseEvidenceDigest !== raw.evidenceDigest ||
+    authorization.rightsAttestationDigest !== rightsDigest
+  ) {
+    throw new Error("Release authorization binding mismatch");
+  }
+  assertCurrentWindow(
+    authorization.notBefore,
+    authorization.expiresAt,
+    raw.now,
+    "Release authorization",
+  );
+
+  const payload = releaseAuditPayloadSchema.parse({
+    schemaVersion: "ltx-studio-release-audit-payload.v1",
+    releaseDigest: evidence.releaseDigest,
+    preregistrationDigest: evidence.preregistrationDigest,
+    q2ReportDigest,
+    rightsAttestationDigest: rightsDigest,
+    releaseEvidenceDigest: raw.evidenceDigest,
+    releaseAuthorizationDigest: authorizationDigest,
+    trustPolicyDigest: raw.trustPolicyDigest,
+    targetSotaClaimIds: evidence.targetSotaClaimIds,
+    releasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+    finalizedAt: new Date(Math.floor(raw.now.getTime() / 1000) * 1000)
+      .toISOString()
+      .replace(".000Z", "Z"),
+    production_overall: "go",
+    sota_overall: "go",
+  });
+  const finalizerKey = policy.keys.find(
+    ({ keyId }) => keyId === raw.finalizerKeyId,
+  );
+  if (!finalizerKey || !finalizerKey.roles.includes("audit-finalizer")) {
+    throw new Error("Finalizer key lacks the audit-finalizer role");
+  }
+  assertCurrentWindow(
+    finalizerKey.notBefore,
+    finalizerKey.notAfter,
+    raw.now,
+    "Finalizer key",
+  );
+  if (
+    finalizerKey.revokedAt &&
+    parseTimestamp(finalizerKey.revokedAt) <= raw.now.getTime()
+  ) {
+    throw new Error("Finalizer key is revoked");
+  }
+  const privateKey = createPrivateKey(raw.finalizerPrivateKeyPem);
+  const signature = detachedSignatureSchema.parse({
+    schemaVersion: "ltx-studio-detached-signature.v1",
+    algorithm: "ed25519",
+    keyId: raw.finalizerKeyId,
+    payloadSha256: sha256(payload),
+    signatureBase64: sign(
+      null,
+      Buffer.from(canonicalJson(payload)),
+      privateKey,
+    ).toString("base64"),
+  });
+  verifyDetachedSignature(
+    payload,
+    signature,
+    policy,
+    "audit-finalizer",
+    raw.now,
+  );
+  return releaseAuditEnvelopeSchema.parse({
+    schemaVersion: "ltx-studio-release-audit.v1",
+    audit: payload,
+    signature,
   });
 }

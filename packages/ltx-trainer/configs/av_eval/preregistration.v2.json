@@ -55,7 +55,7 @@
   },
   "authorization_contract": {
     "evaluation_authorization": "external-ed25519-after-f0-before-q2.v1",
-    "release_authorization": "external-ed25519-after-q2-before-product-go.v1",
+    "release_authorization": "external-ed25519-after-q2-before-product-go.v2",
     "evaluation_is_not_release": true
   },
   "target_sota_claim_ids": [],

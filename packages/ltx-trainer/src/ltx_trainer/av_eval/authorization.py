@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 SHA256_LENGTH = 64
 MAX_DOCUMENT_BYTES = 1024 * 1024
 EVALUATION_SCHEMA = "ltx-av-eval-evaluation-authorization.v1"
-RELEASE_SCHEMA = "ltx-av-eval-release-authorization.v1"
+RELEASE_SCHEMA = "ltx-av-eval-release-authorization.v2"
 SIGNATURE_SCHEMA = "ltx-av-eval-detached-signature.v1"
 TRUST_POLICY_SCHEMA = "ltx-av-eval-trusted-keys.v1"
 CONSUMPTION_SCHEMA = "ltx-av-eval-holdout-consumption.v1"
@@ -233,6 +233,7 @@ def validate_release_authorization(
     preregistration_digest: str,
     q2_report_digest: str,
     release_evidence_digest: str,
+    rights_attestation_digest: str,
 ) -> dict[str, Any]:
     """Validate P4 bindings. This authorization is never accepted as Q2 access."""
 
@@ -248,6 +249,7 @@ def validate_release_authorization(
             "preregistration_digest",
             "q2_report_digest",
             "release_evidence_digest",
+            "rights_attestation_digest",
             "not_before",
             "expires_at",
         },
@@ -258,6 +260,7 @@ def validate_release_authorization(
         "preregistration_digest": preregistration_digest,
         "q2_report_digest": q2_report_digest,
         "release_evidence_digest": release_evidence_digest,
+        "rights_attestation_digest": rights_attestation_digest,
     }.items():
         if document[field] != _expect_sha256(value, field):
             raise AuthorizationError(f"release authorization {field} mismatch")

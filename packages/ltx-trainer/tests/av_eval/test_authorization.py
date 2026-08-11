@@ -21,7 +21,7 @@ from ltx_trainer.av_eval.authorization import (
 DIGESTS = {
     name: str(index) * 64
     for index, name in enumerate(
-        ("release", "preregistration", "holdout", "runner", "nonce", "q2", "evidence"),
+        ("release", "preregistration", "holdout", "runner", "nonce", "q2", "evidence", "rights"),
         start=1,
     )
 }
@@ -50,11 +50,12 @@ def _evaluation_document() -> dict[str, object]:
 
 def _release_document() -> dict[str, object]:
     return {
-        "schema_version": "ltx-av-eval-release-authorization.v1",
+        "schema_version": "ltx-av-eval-release-authorization.v2",
         "release_digest": DIGESTS["release"],
         "preregistration_digest": DIGESTS["preregistration"],
         "q2_report_digest": DIGESTS["q2"],
         "release_evidence_digest": DIGESTS["evidence"],
+        "rights_attestation_digest": DIGESTS["rights"],
         "not_before": _timestamp(NOW - timedelta(minutes=5)),
         "expires_at": _timestamp(NOW + timedelta(hours=2)),
     }
@@ -175,6 +176,7 @@ def test_release_authorization_is_a_different_schema_and_binding() -> None:
             preregistration_digest=DIGESTS["preregistration"],
             q2_report_digest=DIGESTS["q2"],
             release_evidence_digest=DIGESTS["evidence"],
+            rights_attestation_digest=DIGESTS["rights"],
         )
         == document
     )
