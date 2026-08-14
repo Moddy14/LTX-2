@@ -7,6 +7,7 @@ import {
   candidateReleaseSurfaceSchema,
   deriveReleaseSurfaceEntries,
   promptEncoderProfileForRequest,
+  releaseSurfaceEntryForRequest,
   releaseGateIds,
 } from "../shared/releaseSurface.js";
 import { generationRequestSchema } from "../shared/pipelines.js";
@@ -85,6 +86,7 @@ describe("candidate release surface", () => {
       const request = requestFor(entry);
       expect(generationRequestSchema.safeParse(request), entry.id).toMatchObject({ success: true });
       expect(promptEncoderProfileForRequest(request), entry.id).toBe(entry.request.promptEncoderProfile);
+      expect(releaseSurfaceEntryForRequest(request).id, entry.id).toBe(entry.id);
       expect(supportsCooperativeCheckpoint(request), entry.id).toBe(entry.cooperativeCheckpoint);
     }
   });

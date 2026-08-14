@@ -119,6 +119,7 @@ import {
   verifyRunProvenance,
 } from "./runProvenance.js";
 import { RuntimeApiError } from "./runtimeApi.js";
+import { releaseSurfaceEntryForRequest } from "../shared/releaseSurface.js";
 import {
   bootstrapJobStartEnforcer,
   jobStartSources,
@@ -1404,6 +1405,7 @@ export class JobManager extends EventEmitter {
     if (!job || job.status !== "queued") return void this.pump();
     const decision = this.startEnforcer.decide({
       requestSha256: createHash("sha256").update(canonicalJson(job.request)).digest("hex"),
+      surfaceEntryId: releaseSurfaceEntryForRequest(job.request).id,
       source: job.startSource,
     });
     if (!decision.allowed) {
@@ -1448,6 +1450,7 @@ export class JobManager extends EventEmitter {
   private assertStartAllowed(request: GenerationRequest, source: Exclude<JobStartSource, "restored">): void {
     const decision = this.startEnforcer.decide({
       requestSha256: createHash("sha256").update(canonicalJson(request)).digest("hex"),
+      surfaceEntryId: releaseSurfaceEntryForRequest(request).id,
       source,
     });
     if (!decision.allowed) throw new JobConflictError(decision.reason);

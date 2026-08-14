@@ -149,6 +149,20 @@ export const candidateReleaseSurfaceSchema = z.object({
 export type CandidateReleaseSurface = z.infer<typeof candidateReleaseSurfaceSchema>;
 export type ReleaseSurfaceEntry = z.infer<typeof releaseSurfaceEntrySchema>;
 
+export function postprocessorForRequest(
+  request: Pick<GenerationRequest, "postprocess">,
+): PostprocessorId {
+  if (request.postprocess.longcatLipsync.enabled) return "longcat-lipsync";
+  if (request.postprocess.latentSync.enabled) return "latentsync-1.6";
+  if (request.postprocess.museTalk.enabled) return "musetalk-1.5";
+  if (request.postprocess.lipForcing.enabled) {
+    return request.postprocess.lipForcing.decoder === "streaming-taehv"
+      ? "lipforcing-14b-streaming-taehv"
+      : "lipforcing-14b-wan-vae";
+  }
+  return "none";
+}
+
 type BaseVariant = {
   id: string;
   claimId: string;
@@ -452,4 +466,27 @@ export function deriveReleaseSurfaceEntries(): ReleaseSurfaceEntry[] {
     }
   }
   return entries.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+}
+
+export function releaseSurfaceEntryForRequest(request: GenerationRequest): ReleaseSurfaceEntry {
+  const sourceMode = generationModes.includes(request.mode as (typeof generationModes)[number])
+    ? request.sourceMode
+    : "not-applicable";
+  const icLoraProfile = request.mode === "ic-lora" ? request.icLora.profile : null;
+  const lipDubPipelineProfile = request.mode === "lipdub" ? request.lipDub.pipelineProfile : null;
+  const retakeCheckpoint = request.mode === "retake"
+    ? request.retake.distilled ? "distilled" : "dev"
+    : null;
+  const promptEncoderProfile = promptEncoderProfileForRequest(request);
+  const postprocessor = postprocessorForRequest(request);
+  const result = deriveReleaseSurfaceEntries().find(({ request: entry }) =>
+    entry.mode === request.mode
+    && entry.sourceMode === sourceMode
+    && entry.icLoraProfile === icLoraProfile
+    && entry.lipDubPipelineProfile === lipDubPipelineProfile
+    && entry.retakeCheckpoint === retakeCheckpoint
+    && entry.promptEncoderProfile === promptEncoderProfile
+    && entry.postprocessor === postprocessor);
+  if (!result) throw new Error("Generation request is outside the declared release surface");
+  return result;
 }
