@@ -1,11 +1,16 @@
 # Durchführungs- und Abnahmeplan bis SOTA 10/10
 
-Stand: 2026-08-11. Dieses Dokument ist die kanonische Reihenfolge für die
-noch offenen Arbeiten. Die Messdefinitionen in
+Stand: 2026-08-14. Dieses Dokument ist die kanonische fachliche Reihenfolge
+für die noch offenen Arbeiten. Der ausführbare Portfolio-, Integrations- und
+Deploymentpfad für den am 14.08. verifizierten Ist-Stand steht ergänzend in
+`IMPLEMENTATION_MASTER_PLAN_2026-08-14.md`; dessen Phasen M0–M2 sind vor R0
+abzuschließen. Die Messdefinitionen in
 `QUALITY_AUDIT_2026-08-03.md`, `LIPDUB_SOTA_PLAN.md` und
 `packages/ltx-trainer/configs/av_eval/preregistration.v2.json` bleiben
 maßgeblich. Widerspricht ein älterer Statussatz dem hier belegten Stand, gilt
-dieser Plan.
+für den Iststand und Ausführungs-DAG der Masterplan. Dieser SOTA-Plan plus
+eingefrorene Preregistrierung bleiben für fachliche Gates maßgeblich; das
+Quality Audit ist die append-only Historie.
 
 SOTA bedeutet hier: vollständig lokale Ausführung auf der DGX, eine eng
 benannte Claim-Domäne, reproduzierbare Release-Artefakte und gleichzeitig
@@ -15,13 +20,14 @@ lautet der ehrliche Status **nicht 10/10**.
 
 ## 1. Aktueller Befund
 
-| Bereich | Stand am 11.08.2026 | Urteil | Priorität |
+| Bereich | Stand am 14.08.2026 | Urteil | Priorität |
 | --- | --- | --- | --- |
-| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Die AV-Evaluator-Suite besteht 175/175, Studio 615/615 Tests sowie 59/59 anwendbare Desktop-/Mobile-E2E-Strecken (eine absichtlich plattformspezifisch übersprungen); Lint und Build sind grün | gut, aber noch kein Release | P0 |
-| DGX-Control-Plane | Die User-Unit `dgx-runtime-api.service` ist aktiv und Port 8878 antwortet authentisierungspflichtig. Fremde Qwen-/LongCat-Dienste sind aktiv; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; Live-Fenster und Admission weiterhin Betreiberentscheidung | P0 |
+| Implementierungsbasis | Der Engineering-Stand enthält den vollständigen R0–F0-Vertrag und den fail-closed Q2-Assembler. Studio 617/617, native Suite 64/64 und 59/59 anwendbare Desktop-/Mobile-E2E-Strecken sind grün; eine Mobile-Strecke wird absichtlich übersprungen. Die AV-Evaluator-Suite steht aktuell bei 175/176: Die einzige rote CLI-Strecke verwendet einen festen 11.08.-Zeitpunkt mit 48-h-Key und trifft am realen 14.08. korrekt auf den fail-closed Ablauf | stark, aber Baseline formal rot bis die zeitrobuste Fixture korrigiert ist | P0 |
+| Branch/Upstream | Der Vor-Plan-Stand `7c87b9d3…` war sauber; die aktuelle Planrevision ist erwartungsgemäß modified/untracked und wird erst nach Review als eigener sauberer `reviewed_plan_head` gemessen. `feat/ltx-lipsync-lease` besitzt noch kein Remote-Tracking und ist nicht auf `moddy-fork` gesichert. Gegen `origin/main` fehlen sechs Upstream-Commits einschließlich LTX 1.2.0, Dub-It, Gemma 4, neuer VAE-/Media-Pfade und Transformer `>=5.8,<5.15`; 142 lokale Commits müssen kontrolliert portiert werden | Planrevision noch nicht committed; danach Sicherungs- und Integrationsblocker vor jedem neuen Digest | P0 |
+| DGX-Control-Plane | Die Runtime-API und Studio-Consumer-Verbindung sind aktiv, der aktuelle Snapshot ist insgesamt gesund und die Orchestrator-Queue leer. Fremde Qwen-/ComfyUI-Dienste bleiben geschützt; es wurde keine Queue-, Service- oder GPU-Mutation vorgenommen | Control-Plane erreichbar; jeder Live-Lauf weiter admission- und betreibergebunden | P0 |
 | Scheduler-Vertrag | Kanonische Segmententscheidung, persistente Boundary-ID, fail-closed Timeout/Checkpoint und Paused-Reconciliation sind implementiert und CPU-getestet; die frühere Qwen-Demand-Logik ist aus dem produktiven Pfad entfernt | Engineering gut; echter allowlisteter `LTX -> Waiter -> LTX`-Canary offen | P0 |
-| Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind bestanden. Der aktuell laufende Prozess startet weiterhin per `tsx server/index.ts` aus dem Arbeitsbaum; `current` wurde bewusst nicht umgeschaltet | Releaseartefakt gut; produktiver Betreiberwechsel und GPU-Cold-Canary offen | P0 |
-| Python HTTP-Stack | Die isolierte R1-Runtime besteht `uv lock --check`, `uv pip check`, `requests` unter `-W error` und den Runtime-Verifier; `chardet` ist dort verboten. Nur das nicht als Releasequelle zulässige Shared-ComfyUI-Environment enthält weiter `chardet 7.4.3` | Releasepfad gut; Shared-Env-Abweichung bleibt bewusst isoliert | abgeschlossen |
+| Releasebasis | Deterministische Doppelbuilds, isolierte Runtime, Manifestdrift-Sperre und versiegelte Installation sind historisch bestanden. Der laufende Prozess startet seit 10.08. per `tsx server/index.ts` ungefähr aus `41e4166` und liegt 78 Commits hinter HEAD; `/api/projects` ist live deshalb noch `404`. Es gibt keinen `/opt/ltx-studio/current`; der jüngste verifizierbare Root bindet `8d2ed98` und liegt 59 Commits hinter HEAD | Live- und Quellstand weichen erheblich ab; neuer Release und Betreiberwechsel offen | P0 |
+| Python HTTP-/Security-Stack | Die isolierte R1-Runtime besteht weiterhin `uv lock --check`, `uv pip check`, warnungsfreien Requests-Import und Runtime-Verifier; das Shared-ComfyUI-Environment bleibt ausgeschlossen. Der aktuelle Vulnerability-Feed meldet jedoch neue Treffer für Requests 2.32.5, Setuptools 81.0.0 und Transformers 4.57.6. Upstream 1.2.0 verlangt bereits die gepatchte Transformer-Linie `>=5.8,<5.15` | Dependency-Konsistenz gut, Security für einen neuen Release auf HOLD bis Upgrade, Offline-Härtung und Auditgate grün sind | P0 |
 | Frontend-Bundle | Release-Digest `223ee31e…` bestand mit 391.361/116.122 Bytes raw/gzip und 40+40 paarigen kalten Chromium-Kontexten; Median/p95 wurden um 25,07/28,16 % besser. Projektzustand, Polling und API liegen vollständig im Lazy-Chunk. Die anschließende D0a-Implementierung erzeugt wieder einen neuen Inhaltsdigest und verlangt vor F0 die erneute Bindung | letztes R2 grün; Finaldigest nach Stabilisierung erneut binden | P1 |
 | Releaseoberfläche | Die schema-validierte Candidate-Surface wird deterministisch aus Request-/Capability-Regeln erzeugt: 160 Einträge, davon 26 konditionale Kandidaten und 134 rechtlich/technisch gesperrt. Base-Gemma und die optionale Abliterated-LoRA sind getrennte Profile; kein Abliterated-LoRA-Eintrag ist Kandidat | Deklaration gut; reale R3-Canaries/Soak für Kandidaten offen | P1 |
 | Produktionsworkflow | Der persistente Projektkern speichert Shots, Request-Revisionen, konkrete Continuity-/Retake-Quellen sowie Output-, Sidecar- und Export-Digests in einer owner-only, monotonen Hashkette. API, Jobstart und v7-Sidecar binden den exakten Projekt-/Request-Stand; Restarts, Stale Writes, Kettenlücken, Legacy-Provenienz und verdeckte Mutationen bleiben fail-closed. Der lazy Desktop-/Mobile-Workspace bedient Anlage, Shot-/Continuity-Bindung, Start, Output-Erfassung/Freigabe, Edit/Retake, Kettenprüfung und Archivierung; Integritätswarnungen bleiben sichtbar | Engineering-Workflow gut; reale Cross-Shot-/P4-Evidenz offen | P1 |
@@ -29,14 +35,17 @@ lautet der ehrliche Status **nicht 10/10**.
 | Tune/Holdout | F0- und Q2-Verträge, write-once Consumption, objektive Revalidierung, ITT-/Anchor-Entscheidung und Blind-MOS-Gates sind implementiert. D0a wertet jetzt gepaarte Rohpilotmessungen, Wiederholbarkeit, Clustereffekt und Binomialraten deterministisch aus und bindet sie fail-closed an Powerdesign, D0 und F0. Der D1-Katalog umfasst alle 37 festen und 90 claim-spezifischen VBench-Gates der aktuellen Candidate-Surface. Es gibt weiterhin keine reale rechtsgeprüfte Pilot-/Kalibrierstichprobe, keinen versiegelten Holdout und keine unabhängigen Signaturen | Auswertungsvertrag gut; reale Pilot-, Schwellen- und Holdout-Evidenz bleibt zentraler 10/10-Blocker | P2 |
 | Cross-Shot | Szenengleiche Referenz verbessert im ersten A/B Kontinuität/Identität, fällt aber bei Schärfe auf `5,51` gegenüber `52,72`; der automatische Gegenlauf wurde noch schlechter | Hypothese plausibel, Kandidat nicht freigabefähig | P2/P4 |
 | Video-Benchmark | Der offizielle VBench-I2V-Commit `45e79ec1…` und 17 relevante Source-/Config-Dateien sind durch einen fail-closed Source-Contract gebunden und gegen einen vollständig sauberen offiziellen Checkout verifiziert; jede weitere tracked oder untracked Datei sperrt den Lauf. Ein zweiter fail-closed Vertrag verifiziert isoliert Python-Binärdatei/-Version, vollständigen Distributionensatz, Dependency-Lock, Importoberfläche, Offline-Policy sowie acht benötigte Checkpoint-/Source-Artefakte und revalidiert Source und Runtime nach dem Import-Smoke. Der vollständige D1-Assembler akzeptiert den `vbench-runtime`-Wert nur noch zusammen mit diesem strukturell nachgerechneten Runtime-Report und bindet dessen Digest in den 127-Gate-Bericht. Die sechs Dimensionen bleiben getrennt. Die reale Runtime-Konfiguration ist weiterhin `draft`, weil Lock-, Policy-, Python- und Artefakthashes sowie Messungen fehlen | Runtime- und D1-Bindung gut; Provisionierung und Evidenz offen | P2 |
-| Komparatoren | Die cutoff-datierte Landschaft und Matrix binden die Eingabeverträge jetzt maschinell: Nur `audio-driven-video.image-audio-to-video` hat mit LongCat und Wan anwendbare externe Kandidaten; MOVA konsumiert den festen Ziel-Audiotrack nicht. Native Dialoggenerierung und exaktes Referenzvideo-Redubbing sind mit diesen drei Armen `local-only`. Ein fail-closed Profiler bindet je anwendbarem externem Arm exakt drei kalte, offline und orchestriert zugelassene ITT-Läufe an Revisionen, Input, Hardware, Telemetrie, Output, Provenienz sowie VRAM-/Laufzeit-/Temperaturgrenzen. LongCat ist lokal vorhanden, Wan fehlt lokal; reale Profile, Rechtefreigaben und technische Piloten sind offen | Fairness- und Profilvertrag gut; lokaler Bake-off offen | P3 |
+| Komparatoren | Die cutoff-datierte Landschaft und Matrix binden die Eingabeverträge jetzt maschinell: Nur `audio-driven-video.image-audio-to-video` hat mit LongCat und Wan anwendbare externe Kandidaten; MOVA konsumiert den festen Ziel-Audiotrack nicht. Native Dialoggenerierung und exaktes Referenzvideo-Redubbing sind mit diesen drei Armen `local-only`. Ein fail-closed Profiler bindet je anwendbarem externem Arm exakt drei kalte, offline und orchestriert zugelassene ITT-Läufe an Revisionen, Input, Hardware, Telemetrie, Output, Provenienz sowie VRAM-/Laufzeit-/Temperaturgrenzen. LongCat ist lokal vorhanden, der Entwicklungscheckout enthält aber veränderte/unversionierte Artefakte und ist kein finaler immutable Anker; Wan fehlt lokal. Reale Profile, Rechtefreigaben und technische Piloten sind offen | Fairness- und Profilvertrag gut; saubere Comparator-Installationen und lokaler Bake-off offen | P3 |
 
-Die frühere 533-kB-Warnung ist durch R2 geschlossen. Auch der frühere
-`requests`-Konflikt ist im Releasepfad durch die eigene gelockte R1-Runtime
-geschlossen; er besteht nur im ausdrücklich ausgeschlossenen Shared-
-Environment. Die eigentlichen 10/10-Blocker sind Product-Governance,
-kalibrierte Daten, Cross-Shot-Nichtunterlegenheit, Release-Canaries und der
-verblindete lokale Bake-off.
+Die frühere 533-kB-Warnung ist durch R2 geschlossen. Auch der frühere reine
+`requests`-Versionskonflikt ist im Releasepfad durch die eigene gelockte
+R1-Runtime geschlossen; er besteht nur im ausdrücklich ausgeschlossenen
+Shared-Environment. Davon getrennt ist der neue Security-Auditbefund für die
+heute gepinnten Paketversionen und muss in M2 behoben werden. Vor den
+eigentlichen 10/10-Blockern Product-Governance, kalibrierte Daten,
+Cross-Shot-Nichtunterlegenheit, Release-Canaries und verblindeter lokaler
+Bake-off stehen deshalb jetzt Remote-Sicherung, Upstream-Integration,
+Security und eine vollständig grüne Baseline.
 
 ## 2. Definition des finalen Gates
 
@@ -89,10 +98,17 @@ Treffen mehrere Zeilen zu, gilt die Vereinigungsmenge aller Invalidierungen.
 | App-Code, Lock, Buildtool, Surface, Modell oder Gewicht | R1 und alle nachgelagerten Belege des neuen Digests |
 | Evaluator, Fingerprint, Threshold oder statistisches Delta | D1, Q0, Q1, F0 und Q2; bei manifestgebundenem Evaluator zusätzlich R1/R3 |
 | Comparator, Prompt, Seed-Policy oder Inputnormalisierung | Q1, F0 und Q2 |
+| `q1b-security-state.v1`, Security-Ledger-/Interlock-Unit, IPC, Policy, Key, Anchor, Health-SLO oder Collector-/Resolver-Source-Mount | R1, Q1b und alle F0-/Q2-/P4-/O24-/O7-Belege; nach Freeze neuer F0/disjunkter Holdout, nach Promotion HOLD/neuer Lifecycle |
+| Monitoring-/Resolver-Unit/Key/Trust/Freshness, `sota-claim-resolution.v1` oder Resolution-Anchor | R1/P4 und alle O24-/O7-/Marketingbelege; nach Promotion sofort HOLD bis neuer gültiger Lifecycle |
+| Q1b-Joint-Seal/Quiescence-Schema oder neue Q1-Arbeit nach Seal | neue höhere Q1b-Generation/Roots, kompletter Q1b-Seal, F0 und Q2 |
+| `q1b_seal_violation`, Security-Ledger-Source-Gap/Unavailable/HOLD-Latch, Anchor-Divergenz oder Prefix-Restore | sofort Security-HOLD und Incident; betroffene Generation dauerhaft unbrauchbar, neue Q1b-Generation/Roots und F0/Q2; nach Holdoutöffnung kein Retry desselben Holdouts |
+| F0-Release-Digest ungleich gebundenem Q1b-Release-Digest | Revision HOLD; Ursache und betroffene D1/Q0-Belege schließen, mindestens G0b/R1b/QAuth-/ExtTicket-Q1b/Q1b-Seal auf neuem Digest und F0-Rebuild bis exakter Fixpunkt |
 | VBench-Gate oder Delta | D0a, D1, Q0, Q1, F0 und Q2 |
 | `anchor-landscape` oder gewählter SOTA-Anker | Q1, F0 und Q2; ändert sich Comparator-Code/-Gewicht, zusätzlich die R1-Modellzeile |
 | statische Rights-Policy-Version, Lizenztext-/Evidence-Hash oder SBOM | R1 und alle nachgelagerten digestgebundenen Belege |
-| nur zeitvariables Rights-Attest bei unveränderten Evidence-Hashes | D0, F0, Q2 und P4 gemäß eingefrorener Policy; kein neuer Inhaltsdigest |
+| neues zeitvariables Rights-Attest/neue Series bei unveränderten statischen Evidence-Hashes, **kein** Same-Series-Snapshot-Successor | D0, G0b, F0/EvalAuth, Q2 und P4 gemäß eingefrorener Policy; kein neuer Inhaltsdigest, aber neue gebundene Autorisierung |
+| Rights-Updater-Unit/-Policy/-Allowlist/-Trust/-Anchor/-Transport | G0u, G0b, alle digestgebundenen Mode-/Runbelege, F0/EvalAuth und Q2; nach Freeze neuer F0/disjunkter Holdout |
+| nur monotoner Same-Series-Snapshot-Successor bei identischer Policy/Evidence und unverändertem Updatervertrag | nur Freshness-/Head-Rechecks gemäß bereits gebundener Successor-Policy; kein Inhaltsdigest-, F0-, EvalAuth- oder Q2-Wechsel |
 | Datenquelle, Split oder Stratum | D0 und alle datenabhängigen Belege |
 | Holdout-Offenlegung oder Änderung nach F0 | neuer disjunkter Holdout und neuer F0; kein Nachbessern am verbrauchten Satz |
 
@@ -157,7 +173,10 @@ künstlich manipuliert.
 Release-Surface, deterministischer Doppelbuild, versiegelte Installation,
 Manifestdrift-Sperre sowie digestgebundene Health-/Provenienzpfade sind
 implementiert und CPU-seitig bestanden. R1 bleibt bis zum aktuellen externen
-Rights-Attest und zum Betreiber-genehmigten Cold-GPU-Canary auf `hold`.
+Rights-Attest und zum Betreiber-genehmigten Cold-GPU-Canary auf `hold`. Der
+aktuelle Server besitzt noch keinen zentralen Surface-/Rights-Enforcer an
+allen Jobstartpfaden; bis R1b darf ein neuer Root deshalb nur gestaged, nicht
+als normale Live-Runtime aktiviert werden.
 
 Die Releasebasis wird content-addressed statt arbeitsbaumgebunden. Ein kompletter
 OCI-Umbau des nativen Renderers ist nicht der erste Weg: Er würde CUDA-,
@@ -187,9 +206,16 @@ Renderer erhalten eine unveränderliche Releasewurzel.
 4. Frontend mit `npm ci` und Vite bauen; Server/Shared-Code mit einem separaten
    Emit-`tsconfig` zu JavaScript kompilieren. Produktion darf weder `tsx` noch
    Source-Dateien aus dem Arbeitsbaum laden.
-5. Ein kanonisches `release-manifest.json` ohne Self-Hash erzeugen. Stabile
-   Pfadreihenfolge, kanonische JSON-Serialisierung, normalisierte Dateimodi und
-   `SOURCE_DATE_EPOCH` verhindern Zeit-/Pfaddrift; absolute Buildpfade und
+5. Vor dem ersten Build `canonical-build-input.v1` einfrieren: Source-Commit/
+   Tree, daraus deterministisch abgeleitetes `SOURCE_DATE_EPOCH`, Toolchain-/
+   Lock-Digests, `TZ=UTC`, `C.UTF-8`, `umask=022`, stabile Sortierung,
+   Path-/Root-Normalisierung und alle Buildflags. Q1b-Release, F0-Rebuild und
+   jede Fixpunktrevision mit demselben Source/Tree verwenden exakt denselben
+   Inputdigest. Ein anderer Epoch-/Locale-/Path-Vertrag ist
+   `build_input_mismatch`, kein neuer Candidate. Danach ein kanonisches
+   `release-manifest.json` ohne Self-Hash erzeugen. Stabile Pfadreihenfolge,
+   kanonische JSON-Serialisierung und normalisierte Dateimodi verhindern
+   Zeit-/Pfaddrift; absolute Buildpfade und
    nichtdeterministische Source-Map-Metadaten sind ausgeschlossen. Der extern
    berechnete SHA-256 ist der `release_digest`; Signatur und Attestierung liegen
    separat und binden diesen Digest. Gebunden werden mindestens Git-Commit und
@@ -209,19 +235,96 @@ Renderer erhalten eine unveränderliche Releasewurzel.
    `ltx-studio-run-provenance.v2` binden Release-ID und Manifest-Hash. Ein
    schmutziger Baum darf weiter Entwicklungsläufe erzeugen, aber niemals ein
    Release-Attest.
-9. Zweiphasiges Deployment: Build/Verify ohne Serviceänderung, read-only
-   Job-Preflight mit leerer aktiver Jobmenge, kontrollierter Betreiberwechsel
-   über atomaren `current`-Symlink/Unit-Switch, Health/Smoke, anschließend
-   Canary. Veränderliche Daten werden vorher gehasht und gesichert. Jede
-   Migration ist schema-versioniert und nachweislich rückwärtskompatibel; sonst
-   gilt vor dem Wechsel ein ausdrückliches No-Rollback-Gate. Vorherigen Digest
-   behalten und Restore plus Rollback-Canary testen. Nie während eines aktiven
-   GPU-Jobs umschalten.
+9. Deployment in drei Gattern:
+   - **R1a:** Build/Verify/Install ohne Serviceänderung. Statische
+     Surface-/Rights-Evidence ist bereits vollständig im Manifest;
+   - **G0b:** Externer Rights-Verantwortlicher attestiert exakt diesen Digest.
+     Eine statische Änderung geht zurück zu R1a. G0b darf keine
+     Qualification-Autorisierung ausstellen. Sein signierter Revocation-
+     Vertrag trennt unveränderlichen `rights_policy_evidence_digest` und
+     stabile `attestation_series_id` vom Snapshot mit `checked_at`,
+     `max_age`/`next_update`, Quelle und monotoner Version. Nur ein monotoner
+     Successor derselben Series/Evidence/Policy ist zulässig; stale,
+     unerreichbar oder Cross-Evidence ist fail-closed;
+     ein operator-/rights-owned `rights-snapshot-updater.v1` mit eigener UID
+     und enger Egress-Allowlist verifiziert Signer/Series/Evidence/Policy/
+     Version und publiziert per monotonic-CAS+fsync/rename in einen App-read-
+     only Root. App und Renderer bleiben offline; Fetchfehler/Staleness werden
+     append-only protokolliert. Eine owner-separierte Anchor-Writer-UID
+     verankert nach jedem Accept `{series,version,snapshot_hash,fetchlog_head}`
+     WORM-/TPM-/Transparency-äquivalent. Consumer/Restore vergleichen Root,
+     Log und Anchor; gültiger älterer Prefix, fehlender/divergierender Anchor
+     oder Staleness führt zu `hold`;
+   - **R1b:** Ein zentraler Enforcer an der `jobs.create`-/Queue-Grenze prüft
+     für jeden direkten oder indirekten Jobstart Release, Surface, Attest,
+     Ablauf/Widerruf und Autorisierungszweck. Normale Starts bleiben während
+     Qualification fail-closed. Ein vom Rights-Signer technisch getrennter
+     Qualification-Autorisierer aktiviert den Modus genau einmal und
+     registriert danach append-only je Phase eigene matrixgebundene
+     R0l-/R3-/D0a-/D1-/Q0-/Q1-/Final-Run-Aufträge mit einzelnen One-time-
+     Tickets. Die unabhängige Q2-Evaluation-Autorisierung bleibt davon
+     getrennt.
+   Erst danach: read-only Job-Preflight mit leerer aktiver Jobmenge,
+   kontrollierter Betreiberwechsel über atomaren `current`-Symlink/
+   Unit-Switch, Health/Smoke und Canary. Veränderliche Daten werden vorher
+   gehasht und gesichert. Jede Migration ist schema-versioniert und
+   nachweislich rückwärtskompatibel; sonst gilt vor dem Wechsel ein
+   ausdrückliches No-Rollback-Gate. Beim ersten Enforcer-Rollout darf der
+   vorherige unenforced Legacy-Digest unter keinem Unit-/`current`-Pfad live
+   zurückkehren; Bootstrap-Fallback ist derselbe versiegelte Binary in
+   `blocked`/`hold` oder service-stopped Maintenance. Ein echter Binärrollback
+   ist erst zwischen zwei Releases mit identischem Enforcer-/Activation-
+   Vertrag zulässig. Nie während eines aktiven GPU-Jobs umschalten.
+   Activation-/Ticket-Consumption wird durch eine getrennte Journal-Writer-
+   UID signiert; jede höchste Generation und jeder Head-Hash wird außerhalb
+   der App owner-separiert append-only/WORM-/TPM-äquivalent verankert. Ein
+   gültiger älterer Prefix, fehlender Anchor oder divergierender Head ergibt
+   `hold` und kann keine alte Nonce reaktivieren.
+   Ein Releasewechsel verwendet `supersede_release_generation.v1`: bei
+   `0 armed/started` und ohne blockierten Wrapper/Prozess-cgroup werden alte
+   `pending/accepted` Tickets terminalisiert, der alte
+   Head gebunden und der neue Digest in strikt höherer Generation auf
+   `blocked` eröffnet. Erst danach folgt dessen neue Mode-Autorisierung.
+   Ein owner-separierter Qualification-Supervisor setzt zweiphasig
+   `accepted -> armed -> started`: cgroup/ID/Deadline persistieren und Timer
+   armen; dann nur einen inert blockierten Wrapper starten, PID/cgroup prüfen,
+   `started` dauerhaft schreiben und erst nach Ack die Exec-Barriere lösen.
+   Kein Runner-Byte vor gültigem `started`, kein App-Exec/Migrate;
+   Reconciliation beendet blockierte/gestartete Grenzfälle und jeden Exec ohne
+   gültigen Record. `complete_by` gilt auch ohne Heartbeat/Segment
+   per monotonem cgroup-Timer: TERM, begrenzte
+   Grace, cgroup-weites KILL, alle Descendants/FDs geschlossen, Output
+   unfreigegeben und Ticket terminal.
+10. Bereits in R1a die gehärtete `q1b-security-interlock`-Unit mit eigener UID/
+    GID, Signer-/Key-ID, engem IPC und extern verankertem set-only-CAS-Register
+    installieren. Nur sie setzt `{release_generation,latch_version,hold=true}`;
+    keine Rolle löscht den Latch derselben Generation. Supersede darf nach
+    unabhängig geschlossenem Incident nur einen neuen unset Register der
+    höheren Generation anlegen. Unit-/Key-/ACL-/Health-/Anchor-Digests und
+    Tests für Ack-Ausfall bei totem Activation-Writer, Fence-Crash, Latch-Ack-
+    Verlust, Restore/Prefix und Clear-Versuch sind R1-Exitbestandteil.
+11. Monitoring-Collector, dauerhaften Claim-Resolver und den bestehenden Q1b-
+    Quiescence-Finalizer in seiner zusätzlichen Rolle als Security-State-
+    Finalizer als getrennte gehärtete UIDs/Units/Keys provisionieren. Eine
+    weitere owner-separierte Security-State-Anchor-Writer-UID/Key verankert die
+    höchste Composite-Series/Version/Digest extern. Alle lesen Joint-Seal, beide Registry-/
+    Anchor-Heads, Security-Ledger/Anchor und Trust-/Revocation ausschließlich
+    über digestgebundene read-only Mounts sowie Interlock-CAS/Health über
+    authentisiertes read-only IPC. Jede Ausgabe bindet Mount-/Source-/IPC-/
+    Policy-Digests, beobachtete Head-Versionen und live Trust/Revocation ihrer
+    eigenen Monitoring-/Resolver-Keys. App/API/Finalizer/Marketing-
+    Writer dürfen weder Quelle noch Cache sein. Read-Denial, Partial-Read, stale
+    Cache, Root-Swap, App-Spoof, IPC-MITM/Replay, kompromittierter State-
+    Finalizer, alter frischer grüner Composite-Snapshot, State-Anchor-Ausfall/
+    Prefix/Restore, Key-Policy-Substitution und Resolver-Ausfall sind fail-closed
+    R1-/P4-Tests. Der Marketing-State-Writer besitzt ebenfalls eine eigene
+    UID/Unit/Key und nur Append-/Anchor-Rechte auf die Resolution-Chain.
 
-**Exit R1:** Ein Cold-Canary startet aus dem installierten Releasepfad, der
-`requests`-Import ist warnungsfrei, `/api/health` und die Output-Provenienz
-nennen denselben Digest, und eine absichtliche Artefaktänderung blockiert Start
-beziehungsweise Freigabe.
+**Exit R1:** Ein Cold-Canary startet über den signierten Qualification-Auftrag
+aus dem installierten Releasepfad; normale Jobstartpfade bleiben gesperrt. Der
+Dependency-/Security- und Egress-Vertrag ist grün, `/api/health`, Rights-
+Attest und Output-Provenienz nennen denselben Digest, und absichtliche
+Artefakt-/Attestdrift blockiert Start beziehungsweise Freigabe.
 
 ### R2 — Bundle-Hinweis durch reale Startkosten schließen
 
@@ -534,6 +637,29 @@ abgewiesen. Im aktuellen Cutoff sind ausschließlich LongCat und Wan für den
 Driving-Audio-/Portrait-Claim kompatibel. MOVA sowie alle externen Arme der
 Native-Dialog- und Redubbing-Claims sind objektiv input-inkompatibel.
 
+Jeder externe Profil- und Qualitätslauf benötigt ein
+`external-comparator-run-ticket.v1` aus einer getrennten append-only Registry.
+Ticket und signierte Liste binden Phase, Release, Comparator-Code/Gewichte,
+Runner, `claim_id`, Comparator-/Quality-Matrix, Inclusion-/Failure-/ITT-
+Regeln, Gate-Set-/Evaluatorrevision, Input, Seed/Profil, Ressourcen,
+Normalisierung und erwarteten Output-Root/-Contract, Rights-Series/Evidence/
+Mindestversion, `not_before`/`start_by`/`complete_by`, Budgets, Nonce und
+vorregistrierte Recovery. Erst der Terminalrecord bindet tatsächlichen
+Outputdigest/Failure. Ein qualitätsblinder Autorisierer und
+owner-separierter Writer verbrauchen beim Admission-Accept atomar
+**nur** Nonce/Budget und `pending -> accepted`. Danach folgen getrennte,
+hashverkettete Records `accepted -> armed`, inert Wrapper, durable
+`armed -> started`, Exec-Ack und `started -> terminal`; kein Zustand darf
+übersprungen oder zusammengefasst werden. cgroup/Deadline/Timer sind vor dem
+ersten Runner-Byte armed. Ein unabhängiger cgroup-Supervisor
+erzwingt die Deadline. Jeder Attempt/Fehler bleibt in ITT, kein
+Ersatz oder Retry außer derselben vorab registrierten Recovery. Replay,
+Cross-Claim/-Arm/-Weights/-Input/-Seed/-Matrix/-Failure/-Gate-/Evaluator-/
+Phase, stale Rights, Budget, Arm/Journal/Exec-Crash sind negative Exit-Tests.
+Q1a-Collector/Signer sieht keine Qualitätswerte.
+
+**Q1a – Landschaft, Provisionierung und Ressourcenfit ohne Qualitätsblick:**
+
 1. Mit dokumentiertem Cutoff-Datum eine reproduzierbare Landschaftssuche in
    Primärpapieren, offiziellen Repositories und anwendbaren Leaderboards
    durchführen. `anchor-landscape.v1` protokolliert Suchraum, Ein-/Ausschlüsse,
@@ -560,9 +686,10 @@ Native-Dialog- und Redubbing-Claims sind objektiv input-inkompatibel.
    offiziellem Single-GPU-Pfad mindestens 80 GB und braucht einen eigenen
    Orchestrator-Consumer. `comparator-resource-check` verlangt je anwendbarem
    externem Arm genau drei kalte, offline ausgeführte und vom Orchestrator
-   zugelassene Versuche. Jeder Versuch bleibt nach ITT im Profil und bindet
+   zugelassene Versuche mit synthetischen Nicht-Person-Fixtures. Jeder Versuch bindet
    Job-/Orchestrator-Evidenz, Hardwareinventar, Runner, Launchmanifest, Input,
    Output, Provenienz, Rohtelemetrie, Peak-VRAM, Laufzeit und Maximaltemperatur.
+   Qualitätsmetriken werden weder berechnet noch zugänglich gemacht.
    Fehler, fremde Serviceaktionen, Orphans oder eine gerissene vorregistrierte
    Ressourcen-/Thermalgrenze ergeben `resource-fit-fail`. Nur ein passender
    Profil-Digest mit `resource_fit_status=pass` erlaubt `included`. MOVA bleibt
@@ -579,13 +706,84 @@ Native-Dialog- und Redubbing-Claims sind objektiv input-inkompatibel.
    ein neuer passender Comparator erfordert eine neue cutoff-datierte
    Landschaft, Preregistrierung und Invalidierung der nachgelagerten Belege;
    nach dem Freeze gibt es keine nachträgliche Favoritenaufnahme.
-6. Einen Pilot auf ausschließlich Kalibrierdaten fahren. Fehler führen zu
+
+**Exit Q1a:** Installationen, drei Ressourcenprofile und die ausschließlich
+nach Rechte-, Input-, Reproduzierbarkeits-, Ressourcen- und technischer
+Mindestfunktion eingefrorene Comparator-Matrix sind grün. Erst danach werden
+Qualitäts-Run-Autorisierungen ausgestellt.
+
+**Q1b – Qualitätsvergleich:**
+
+6. Studio-Kandidaten nur mit QAuth-Q1b und externe Comparatoren nur mit
+   getrennten admission-/input-/digestgebundenen Quality-Run-Tickets auf
+   ausschließlich Kalibrierdaten fahren. Fehler führen zu
    neuer Release-/Evaluatorrevision und über die Invalidierungsmatrix zurück zu
    den betroffenen Gates, niemals zur Inspektion des Holdouts.
+7. Beide Q1b-Ticketgenerationen koordiniert `open -> sealing -> sealed`
+   führen: Admission sperren, alles terminalisieren, Heads/Nullzähler fixieren,
+   owner-separiert `q1b-joint-seal.v1` verankern und dasselbe Seal in beiden
+   Registries konsumieren. Der Seal-Writer entzieht den Registry-Writern für
+   diese Generation dauerhaft Write/Admit und übernimmt die Roots read-only/
+   immutable beziehungsweise WORM-/verity-äquivalent. Partial-Crash bleibt
+   `sealing`/HOLD; nie zurück zu `open`. Append nach Seal wird ohne Headmutation
+   abgewiesen und in `q1b-security-ledger.v1` protokolliert. Dessen signierter
+   Genesis, lückenloser monotoner Audit-Source-Cursor/Sequence, Boot-ID,
+   getrennte Event-Writer-/Anchor-Key-IDs, frischer Coverage-/Health-Checkpoint
+   und separat verankerter Head sind Pflicht. `missing`, Gap, stale/unavailable
+   oder Head-/Anchor-Divergenz ist HOLD und nie still `0 violations`. Der
+   blockierende Deny-Pfad verlangt Event- plus Anchor-Ack oder fordert über eine
+   separate `q1b-security-interlock`-UID/Key/Unit per engem IPC set-only-CAS auf
+   einen extern verankerten monotonen Generation-/Latch-Register an. Nur diese
+   Rolle darf setzen; niemand darf in derselben Releasegeneration clearen.
+   Erst Supersede darf nach unabhängig geschlossenem Incident einen neuen unset
+   Register der höheren Generation anlegen. Unit-/Key-/ACL-/Health-/Anchor-
+   Digest, Latch-Version und Ack-SLO sind gebunden; unavailable/stale ist HOLD,
+   auch wenn der Latch selbst nicht geschrieben werden konnte. Jeder
+   `q1b_seal_violation` löst
+   Security-HOLD, Credential-Revoke und das
+   Host-Incident-Runbook aus. Nur ein unabhängiger Closure-Signer darf den
+   Incident schließen; die betroffene Generation bleibt unbrauchbar. Neue
+   Q1-Arbeit benötigt höhere Generation und neue Roots. Event-Writer-/Anchor-
+   Ack-Ausfall auch bei ausgefallenem Activation-Writer, Source-Gap, Deny vor/
+   während Fence, Fence-Holder-Crash, Latch-Ack-Verlust, Prefix-/Restore-/
+   Anchor-, Key-Revoke-, Recovery- und Event-direkt-nach-Check-Tests sind Pflicht.
+   Alle Felder werden nur als signiertes `q1b-security-state.v1`-Composite
+   konsumiert. Der owner-separierte Q1b-Quiescence-/Security-State-Finalizer
+   liest ausschließlich die autoritativen read-only Roots/Interlock-IPC und hat
+   keine Component-Write-Rechte. Das Composite ist proof-carrying: Es trägt die
+   vollständigen/content-addressierten, komponentenseitig signierten Records
+   samt WORM-/TPM-/Transparency-Anchor-Proofs; jeder Consumer verifiziert alle
+   Signaturen/Proofs selbst, die Aggregatorsignatur nur Vollständigkeit. Der
+   Contractdigest pinnt Schema, Source-IDs, sieben Component-Rollen/Key-Policy,
+   Anchor-Backends und erlaubte mutable Felder; Key-/Trust-/Source-/Anchor-
+   Policywechsel ist Cross-Contract. Snapshots binden Series, Version/Digest,
+   `prev_hash`, Ledger-Cursor/Boot-ID/Heads/Coverage-SLO, Interlock-Unit-/Policy-/
+   IPC-/ACL-/Health-/Key-/Anchor-Digests, Latch-Version/-Wert, zwei Zähler und
+   Trust-/Revocation-Proofs. Ein vom Finalizer und Components getrennter
+   Security-State-Anchor-Writer verankert jeden höchsten
+   `{series,version,digest}`-Head extern. Quiescence bindet Snapshot/Anchor;
+   Freeze/EvalAuth binden Digest, Series, Mindestversion, Anchor-Head und Live-
+   Successor-Regel. Jeder Start/Restart/Ready/Q2/P4/O24/O7/Resolver vergleicht
+   Envelope, Hashchain und höchsten Anchor und erlaubt nur denselben Contract,
+   monotone Heads/Cursor, frische Health, unset Latch, Nullzähler und gültige
+   Component-Proofs. Einzelne/behauptete Felder, Aggregatorsignatur ohne Proofs,
+   Anchor-Gap oder Regression ist HOLD.
 
-**Exit Q1:** Je Claim steht die endgültige Arm-/Abstention-Entscheidung fest;
-Inputs, Normalisierung, Failure-Regeln und Comparator-Digests sind vollständig
-und auf Kalibrierdaten ausführbar.
+**Exit Q1b:** Exakt eingefrorene Studio- und externe Ticketgenerationen sind
+irreversibel `sealed` und besitzen vollständige terminale ITT-Ledger:
+`0 pending`, `0 accepted`, `0 armed`,
+`0 started`, `0 offene Recovery`. Beide Registry-/Anchor-Heads und Collector sind reconciled und im
+Quality-Report gebunden. Je Claim steht die Arm-/Abstention-Entscheidung fest;
+Inputs, Normalisierung, Failure-Regeln und Comparator-Digests sind vollständig.
+Nur `q1b-quiescence-record.v1` erlaubt F0. Er bindet `q1b-joint-seal.v1`,
+Seal-Status, Schema/Policy, Release,
+beide Ticketsets/Registry-/Anchor-Heads/Nullzähler, Collector-/Quality-Report,
+Trust, `issued_at`, Nonce sowie den aktuellen
+`q1b-security-state.v1`-Snapshotdigest/Series/Version/externem Anchor-Head mit unset
+Latch, zwei Nullzählern, frischer Health und gültigem Trust.
+Ein qualitätsunabhängiger Quiescence-Finalizer
+mit eigener Key-ID signiert; Quality-Auswerter und Registry-Writer dürfen dies
+nicht allein.
 
 ### F0 — Stabiler Finalkandidat und signierter Freeze
 
@@ -598,29 +796,70 @@ lautet ausschließlich `f0-pass-ready-for-q2` mit
 echten unabhängigen F0-Signaturen und bleibt daher `hold`.
 
 1. Q0-Sieger/Abstention und Q1-Comparator-Matrix in das
-   `ready-to-freeze`-Paket übernehmen. Kein Holdoutwert ist bekannt.
+   `ready-to-freeze`-Paket übernehmen. `q1b-quiescence-record.v1` gegen beide
+   aktuellen Registry-/Anchor-Heads revalidieren; unmittelbar vor Freeze und
+   EvalAuth-Signatur erneut `sealed + joint seal + exact heads` prüfen und
+   Record/Seal/Heads sowie den aktuellen `q1b-security-state.v1`-Snapshotdigest,
+   Contract/Series/Version/externen Anchor-Head und die einzige Live-Successor-
+   Regel in beide binden.
+   Jede spätere Mutation,
+   Availability-/Coverage-Störung oder Seal-Violation macht EvalAuth
+   unbrauchbar und verlangt
+   neuen F0/disjunkten Holdout. Kein Holdoutwert ist bekannt.
 2. Jede Änderung aus Q0/Q1 nach der Invalidierungsmatrix zurückführen. Erst wenn
    keine Code-, Modell-, Evaluator-, Threshold-, Delta-, Comparator-, Prompt-
-   oder Surface-Änderung mehr offen ist, den finalen R1-Digest bauen und alle
-   betroffenen R0-/R3-Belege auf genau diesem Digest wiederholen. Der finale
+   oder Surface-Änderung mehr offen ist, den finalen R1-Digest bauen. Der finale
    Doppelbuild läuft erneut in zwei **neuen** getrennten, sauberen Wurzeln; ein
-   früherer Engineering-Bericht darf nicht übernommen werden.
-3. Claim-Domäne, feste Stichproben, Split-/Leakage-Commitments, Arme,
+   früherer Engineering-Bericht darf nicht übernommen werden. Der kanonische
+   Inhaltsdigest enthält statischen Code/Locks/Surface, nicht die erst extern
+   gebundenen Q1b-/Rights-/Signaturrecords, und bleibt daher
+   nicht-selbstreferenziell vergleichbar.
+3. Exakt `q1b.release_digest == f0_release_digest` verlangen und durch einen
+   unabhängigen Build-Verifier als `q1b-final-release-equality.v1` über Seal,
+   Source/Tree, `canonical-build-input.v1` samt Epoch/Toolchain/Locale/TZ/Umask/
+   Path-Map, Manifest, beide Clean-Builds und R2 signieren lassen. Keine
+   Packaging-Ausnahme. Bei Abweichung: aktuelle Revision HOLD, neuer Digest
+   wird Candidate, ursächliche Invalidierungen einschließlich D1/Q0 soweit
+   betroffen schließen, dann G0b/R1b/QAuth-Q1b/ExtTicket-Q1b/alle Q1b-Arme und Seal
+   vollständig wiederholen, dann F0 neu bauen; nur exakter Fixpunkt darf
+   weiter.
+4. Erst für diesen bekannten Finaldigest einen aktuell grünen G0u-Exit mit
+   Updater-/Trust-Digest, Fetchlog-/Anchor-Head, Snapshot-Hash, Series/Version
+   und `checked_at/max_age` binden. Dann ein frisches G0b-Rights-Attest samt
+   Revocation-Snapshot ausstellen, den neuen Qualification-Modus ohne Runs
+   aktivieren, danach QAuth-final für die feste R0l-/R3-Matrix registrieren
+   und alle betroffenen R0-/R3-Belege wiederholen. Keine Engineering-
+   Autorisierung wird übernommen.
+5. Claim-Domäne, feste Stichproben, Split-/Leakage-Commitments, Arme,
    Inputnormalisierung, Prompts, Seeds/Seed-Policy, Evaluatoren, Thresholds,
    Deltas, ITT-/Abbruchregeln, MOS-Protokoll, Multiplicity und alle Digests in
    die Preregistrierung schreiben. Außerdem eine nichtleere Menge
    `target_sota_claim_ids` festschreiben; jeder Target-Claim besitzt bereits
    einen anwendbaren `sota_anchor`. Der unabhängige Account wechselt das Paket
    dann einmalig von `draft` auf signiert `frozen`.
-4. Eine Post-Freeze-Änderung erzeugt eine neue Preregistrierung und einen neuen
+6. Eine Post-Freeze-Änderung erzeugt eine neue Preregistrierung und einen neuen
    disjunkten Holdout; sie darf nicht als Revision desselben Tests erscheinen.
    Das Entfernen eines Target-Claims zählt als solche Änderung.
-5. Für den finalen Digest, die endgültige Surface, Modelle, Evaluatoren und
-   Comparatoren ein frisches Rights-Attest ausstellen, dessen Gültigkeitsfenster
-   Q2 und P4 abdeckt. Danach signiert der unabhängige Autorisierer genau eine
+7. Einen unabhängigen `q2-runner.v1` mit eigener UID/Orchestrator-Consumer-ID,
+   Runner-/Release-Digest, versiegelten Input-/Outputroots und bestandenen
+   Direct-GPU-, Produkt-API-, `jobs.create`-, Activation-/QAuth-Bypasstests
+   binden. Ein operator-owned `q2-runtime-sandbox.v1` muss GPU-Devices im
+   Ruhezustand sperren und ausschließlich über einen job-/zeitgebundenen
+   Orchestrator-Grant im privilegierten Launcher/cgroup/Unit öffnen und
+   terminal wieder entziehen. Der Terminalpfad beendet cgroup-weit alle
+   Descendants, schließt offene GPU-Device-FDs und belegt freigegebene GPU-
+   Kontexte vor Ack/neuem Grant; ACL-Entzug allein genügt nicht. Fehlt diese
+   Fähigkeit, bleibt F0 blockiert.
+   Danach signiert der unabhängige Autorisierer genau eine
    zeitlich begrenzte `evaluation_authorization`, gebunden an Release-Digest,
    Prereg-Digest, Holdout-Digest, Runner-Digest, Nonce, `not_before`, `start_by`,
-   `complete_by` und die vorregistrierte Recovery-Regel. Das Fenster wird
+   `complete_by`, `rights_policy_evidence_digest`, `attestation_series_id`,
+   `minimum_snapshot_version`, die monotone Same-Series-Successor-Regel und
+   `q1b-quiescence-record.v1`, `q1b-joint-seal.v1`, beide Registry-/Anchor-
+   Heads, den aktuellen `q1b-security-state.v1`-Snapshotdigest samt Contract/
+   Series/Mindestversion/externem Anchor-Head und exakt derselben Live-Successor-Regel,
+   `q1b-final-release-equality.v1` und die
+   vorregistrierte Recovery-Regel. Das Fenster wird
    konservativ aus Q2-Worst-Case, MOS und Review dimensioniert. Sie erlaubt
    ausschließlich die einmalige Q2-Auswertung und keine Produktfreigabe.
 
@@ -645,13 +884,26 @@ weder echte Holdoutwerte noch eine unabhängige Q2-Signatur und bleibt deshalb
 `hold`.
 
 1. Vor Entschlüsselung die `evaluation_authorization` und das finale
-   Rights-Attest frisch gegen Digest, Ablauf und Widerruf prüfen. Der
+   Rights-Attest frisch gegen Digest, Ablauf und Widerruf prüfen. Bei
+   Admission, Start und unmittelbar vor Entschlüsselung müssen beide Q1b-
+   Registry-/Anchor-Heads und Joint-Seal exakt der Autorisierung entsprechen
+   und beide Generationen `sealed` bleiben. Der aktuelle
+   `q1b-security-state.v1`-Snapshot muss die EvalAuth-gebundene Contract/Series/
+   Mindestversion, Hashchain/externen höchsten Anchor-Head, selbst verifizierte
+   Component-Proofs und Live-Successor-Regel erfüllen. Dieselbe Composite-Prüfung
+   erfolgt bei jedem Resume/Heartbeat/Segment und vor Outputfreigabe; Event,
+   Gap, Ausfall, Latch, Cross-Series/-Contract oder Trust-Drift löst sofort HOLD
+   aus.
+   Abweichung öffnet nichts und invalidiert F0/EvalAuth. Der
    unabhängige Writer setzt dann atomar einen signierten append-only
    Consumption-Record mit Writer-Identität, Transaction-ID und Nonce. Der
    Zustand wechselt vor Entschlüsselung auf `started` und spätestens beim
    ersten entschlüsselten Byte beziehungsweise Output irreversibel auf
    `consumed`; gehashte Validitäts-/Abbruchregeln, Armreihenfolge und ITT-Regel
-   sind gebunden. Ein Infrastrukturfehler darf nur innerhalb derselben
+   sind gebunden. Rights-/Revocation-Snapshot und Deadline werden bei
+   Admission, Start, jedem Resume/Heartbeat/Segment und vor Outputfreigabe
+   nach derselben Freshness-Policy erneut geprüft. Ein Infrastrukturfehler
+   darf nur innerhalb derselben
    deterministischen Exactly-once-Transaktion fortgesetzt werden, solange kein
    Armresultat offengelegt wurde; jede Fortsetzung verwendet identische
    Transaction-ID und Nonce und prüft `complete_by` erneut. Vor `start_by`
@@ -663,7 +915,10 @@ weder echte Holdoutwerte noch eine unabhängige Q2-Signatur und bleibt deshalb
    Deadline. Nach jeder Ergebnisoffenlegung gilt der Holdout ebenfalls als
    verbraucht; neue Revision oder geändertes Gate verlangen einen neuen
    disjunkten Holdout.
-2. Danach den Holdout über den unabhängigen Runner ausführen. Zehntausend
+2. Danach den Holdout über den in F0 gebundenen unabhängigen `q2-runner.v1`
+   ausführen. Er verwendet ausschließlich die Evaluation-Autorisierung und
+   Orchestrator-Admission, nie Produkt-API, QAuth-Registry oder direkte GPU-
+   Nutzung. Zehntausend
    Bootstrap-Replikate gruppieren nach Stimme/Sprecher und transitiver
    Leakage-Komponente. Gesamt-, Worst-Stratum- und multiplicity-korrigierte
    Grenzen müssen bestehen.
@@ -701,28 +956,159 @@ unveränderliche Audit in 3–4.
    Auch das finalizer-seitig erneut gelesene Evidence-Schema erzwingt jede
    Report-Art genau einmal und verlangt für jeden Target-Claim intern ein
    eindeutiges `sota-qualified`-Resultat.
-   Das Evidence-Paket prüft das externe Rights-Attest frisch auf
-   `valid_at`, Ablauf und Widerruf.
+   Vor `ready_for_release_authorization` revalidiert es exakt die in Freeze und
+   EvalAuth gebundenen `q1b-quiescence-record.v1`, `q1b-joint-seal.v1`, beide
+   versiegelten Studio-/Comparator-Generations-, Root-, Registry- und externen
+   Anchor-Heads, `q1b-final-release-equality.v1`, `canonical-build-input.v1`,
+   finalen Release-Digest sowie den aktuellen `q1b-security-state.v1`-Snapshot
+   nach der Freeze-/EvalAuth-gebundenen Contract/Series/Mindestversion und Live-
+   Successor-Regel. Joint-Seal-Writer, Quiescence-Finalizer, Build-Verifier,
+   Security-Event-Writer, Security-Ledger-Anchor-Writer, Security-Interlock-
+   Writer, Incident-Closure-Signer und Security-State-Anchor-Writer müssen aktuell trusted und nicht
+   widerrufen sein; jede Abweichung ist HOLD.
+   Das Evidence-Paket prüft das externe Rights-Attest und den signierten
+   Revocation-Snapshot frisch auf `checked_at`, `max_age`/`next_update`,
+   Quelle, monotone Version, `valid_at`, Ablauf und Widerruf.
 4. Der getrennte Autorisierer signiert erst danach eine
    `release_authorization`, gebunden an Evidence-, Release-, Prereg-, Q2- und
    Rights-Attest-Digests. Ein unveränderlicher Finalizer verifiziert diese
    Signatur und erzeugt den signierten `ltx-studio-release-audit.v1`-Envelope,
-   der den Authorization-Digest bindet. Erst dieser Envelope darf
+   der den Authorization-Digest bindet. Dazu liest der Finalizer die gesamte
+   Joint-Seal-/Quiescence-/Equality-/Build-Input-Kette, beide Registry-/Anchor-
+   Heads, `q1b-security-state.v1`, alle sieben Component-Signerrollen und den
+   Security-State-Anchor-Writer erneut aus autoritativen
+   Roots; keine Evidence-Zusammenfassung ersetzt diesen aktuellen Trust-/
+   Revocation-Recheck. Erst dieser Envelope darf
    `production_overall=go` melden und Candidate-Surface-Einträge zu `released`
    promovieren, ohne den Inhaltsdigest umzudefinieren. `sota_overall=go`
    verlangt zusätzlich eine nichtleere Target-Menge und `sota_qualified` für
    jeden eingefrorenen Target-Claim. Unmittelbar zur Finalisierungszeit prüft
    der Finalizer Rights-Attest, Release-Autorisierung, Trusted Keys und
-   Revocation-State erneut. Ablauf, Widerruf oder unlesbarer Status ergibt
+   Revocation-State samt Snapshot-Freshness erneut. Ablauf, Stale/Unreachable,
+   Widerruf oder unlesbarer Status ergibt
    `hold`; dann sind frisches Attest und neue Autorisierung nötig. Das
    unveränderte Evidence-Paket darf nur wiederverwendet werden, wenn die
    eingefrorene Policy dies ausdrücklich erlaubt.
+5. Der in R1e implementierte Enforcer gleicht zuerst Journal, externen
+   WORM-/TPM-äquivalenten Head-Anchor und höchste gesicherte Generation ab und
+   führt dann einen side-effect-freien `prepared`-Dry-run über Signaturen,
+   Policy und alle erlaubten/gesperrten Surface-Fälle aus. Collector-/Resolver-
+   Unit/UID/Keys mit aktuellem Trust/Revocation, read-only Mount-/Source-/IPC-/
+   Policy-Digests, Resolution-Writer-/Anchor-Vertrag, Rawroot-ACLs und
+   negative App-/Finalizer-/Marketing-Input-Spoof-Tests müssen grün sein. Erst danach
+   verlangt er eine vollständig reconciled Qualification-Registry mit
+   `0 active/queued/accepted/armed/started`. Der Prepared-Preflight revalidiert
+   nochmals Quiescence- und Joint-Seal, **beide** irreversibel versiegelten
+   Studio-/Comparator-Generationen samt Root-/Registry-/Anchor-Heads, Equality-
+   Record, kanonischen Build-Input, finalen Release und die aktuellen Trust-/
+   Revocation-Zustände aller sieben Component-Signer plus Security-State-Anchor-
+   Writer. Der aktuelle
+   `q1b-security-state.v1`-Snapshot muss dieselbe Contract/Series/Mindestversion,
+   Hashchain/externen höchsten Anchor-Head, selbst verifizierte Component-Proofs
+   und Live-Successor-Regel erfüllen. Jede
+   Abweichung ist HOLD. Eine eindeutige
+   `promotion_attempt_id` bindet neuen Rawroot/Sequenz 0, Release, Surface,
+   Envelope, Autorisierung, Activation-Head und T0. Unmittelbar vor Consumption
+   erwirbt der Activation-Single-Writer einen monoton gefenceten
+   `promotion_commit_fence`: QAuth kann nichts neu akzeptieren, Security-Events
+   serialisieren ihren persistenten HOLD-Latch gegen denselben owner-separierten
+   CAS-State. In dieser kritischen Sektion wiederholt der Writer per CAS alle
+   mutablen Prepared-Prädikate und bindet ihre Werte: Journal-/Anchor-
+   Generation, 0 aktive/queued Jobs, QAuth `0 accepted/armed/started`, Joint-
+   Seal/beide Heads/`sealed`, aktuellen `q1b-security-state.v1`-Snapshotdigest
+   samt Contract/Series/Version/externem Anchor-Head, bestandenen Component-
+   Proofs und Live-Successor,
+   Trust-/Revocation aller sieben Component-Signer plus Security-State-Anchor-
+   Writer,
+   gültige Autorisierung/Envelope, frische Rights und Collector-Sequenz-0/
+   Attemptbindung. Drift terminalisiert den Attempt vor Consumption und
+   erzeugt keine Transition. Ein direkt nach Commit linearisiertes Event
+   wechselt vor jedem Produktstart append-only nach `hold`; der Enforcer prüft
+   den CAS-State je Start. Nur bei identischen Werten konsumiert er
+   Autorisierung und Envelope
+   genau einmal und bindet Consumption plus append-only Transition
+   `qualification_only -> production_provisional` in einem crash-sicheren,
+   hashverketteten Journalrecord; alle verbleibenden `pending` QAuth-Tickets
+   werden darin terminal `closed_by_promotion`. Productionzustände verweigern
+   jeden QAuth-Start/Resume. Ein kleiner normaler Cold-Canary läuft erst
+   **nach** dem Commit; sein Fehler erzeugt `hold`, aber reaktiviert die
+   konsumierte Autorisierung nie. Crash-/Restore-/Anchor-Divergenz- und
+   Signer-Key-Revoke-Tests zwischen Q2 und P4 sowie Event, Writer-/Anchor-
+   Ausfall, Source-Gap und QAuth-Accept exakt nach Prepared/vor Commit müssen
+   fail-closed enden. Vor
+   Consumption darf ein terminalisierter
+   Prepared-Attempt nur mit noch unverbrauchter/frischer Authorization und
+   Envelope unter neuer Attempt-ID/Rawroot/Sequenz 0 wiederholt werden. Nach
+   Commit gibt es keinen Retry derselben Generation: erst Release-Supersede,
+   frische Rights, neue Mode-/betroffene QAuth-/R3-Evidence, neue Release-
+   Authorization und neuer Envelope eröffnen einen Lifecycle; Code-/Policy-
+   Änderung geht zusätzlich über F0 zurück. Crash-Tests liegen direkt vor und
+   nach der Commitgrenze. Nur im Envelope als `released` gebundene
+   Entries erhalten normale Starts. Der Revocation-Snapshot wird bei Queue-
+   Accept, Start, sicheren Segmentgrenzen und Outputfreigabe revalidiert;
+   stale oder unerreichbar ist fail-closed.
+6. Ein vor Promotion gestarteter unabhängiger Collector mit eigener UID,
+   Signer-Key-ID und nur für ihn schreibbarem Rawroot schreibt lückenlose,
+   signierte Raw-Probes mit Sequenznummer, Boot-ID, monotonic-/Wall-Clock und
+   erwarteter Probeanzahl. Er liest direkt aus den in R1 gebundenen read-only
+   Roots und dem authentisierten Interlock-IPC; App/API/Finalizer sind keine
+   Messquelle. Jede Minutenprobe bindet Mount-/Source-/IPC-/Policy-Digests,
+   beobachtete Head-Versionen, Attempt-ID und alle
+   vorgenannten Digests, `q1b-joint-seal.v1`, beide exakten Q1b-Registry-/
+   Anchor-Heads und den neuesten `q1b-security-state.v1`-Snapshotdigest/
+   externen State-Anchor-Head samt Contract/Series/Version und beobachteten
+   Composite-Feldern, Collector-Unit-/Key-/Trust-Policy-Digest sowie live
+   trusted/not-revoked Status des separaten Monitoring-Keys. Fehlgeschlagene
+   Attempts werden signiert terminalisiert; die
+   vorgenannte Recovery-Tabelle entscheidet, ob überhaupt ein neuer Attempt
+   zulässig ist. App und Finalizer können weder Rawrecords ändern
+   noch nachsignieren; Missing oder Backfill ist Fail. Erst eine lückenlose
+   Folge, in der jede Probe exaktes Seal/Heads, frischen lückenlosen Ledger-
+   Cursor, verfügbaren unset Interlock, zwei Nullzähler, gültige Component-/
+   State-Anchor-Keys sowie live trusted Collector-Unit/Key/Policy zeigt,
+   erlaubt dem rekonstruierten +24-h-Report den Wechsel nach
+   `production_stable`; O24/O7 revalidieren den Monitoring-Key live zum
+   Entscheidungszeitpunkt. Dieselbe Invariante gilt für den +7-Tage-Report und
+   schließt erst dann die 10/10-Ausführung ab. Bis dahin lautet ein
+   grüner Qualitätsstatus nur `sota_qualified_pending_observation`; erst O7
+   darf `sota_marketing_authorized` ausstellen. Gerissene Oracles führen zu
+   HOLD/Rollback unter RPO-0-/Schema-/Journalvertrag, nie zum Überschreiben
+   neuer Nutzerdaten mit einem alten Backup.
+7. Der öffentliche Claim-Resolver behandelt O7 nicht als zeitloses Bit und
+   liest unter eigener UID/Unit direkt aus denselben digestgebundenen read-only
+   Roots/IPC; App/API/Marketing-Writer liefern keine Prädikate. Jede Auflösung
+   ist ein signiertes `sota-claim-resolution.v1` mit Release/Generation, O7,
+   Composite-/State-Anchor- und Source-Heads, Resolver-Unit-/Key-/Policy-Digest,
+   live Trust/Revocation des separaten Resolver-Keys, `issued_at/max_age`,
+   monotoner Sequence, `prev_hash` und Entscheidung. Der Marketing-State-
+   Writer verankert append-only die höchste Resolution-Sequence/Head; API/UI
+   akzeptieren nur diese aktuelle signatur-/trustgeprüfte Entscheidung. Stale,
+   unavailable, revoked, Replay oder Out-of-order ist sofort HOLD und kann kein
+   altes GO erneut publizieren. `sota_marketing_authorized` erfordert O7, aktuellen
+   `production_stable`-State, exakt aktiven Release/Surface, konsistenten
+   Journal/Anchor, exaktes Joint-Seal/beide Q1b-Heads, live lückenlosen/frischen
+   Security-Ledger-Cursor/Anchor, verfügbaren unset Interlock, zwei Nullzähler,
+   frische Same-Series-Rights und gültige Trust-/Key-Revocation aller sieben
+   Component-Rollen plus Security-State-Anchor-Writer. Jede spätere Staleness,
+   Gap, Event, Writer-/Anchor-/Interlock-
+   Ausfall/Latch, Revocation, Keyrotation, HOLD, Rollback oder Supersede schreibt
+   append-only Marketing-HOLD/REVOKED und
+   API/UI fallen fail-closed zurück. Re-Autorisierung braucht einen neuen
+   vollständigen Lifecycle. Faulttests vor P4, nach P4/vor O24, zwischen O24/O7
+   und nach O7 decken Collector-/Resolver-Key-Revoke, Replay/Out-of-order eines
+   alten GO, Resolver-Crash zwischen Signatur/Publish, Marketing-Writer-Race,
+   Read-Denial, Partial-Read, stale Cache, Root-Swap, App-Spoof, IPC-MITM/Replay,
+   Resolver-Ausfall, Event, Gap, Writer-/Anchor-/Interlock-Ausfall.
 
 **Exit P4 / 10 von 10:** Das finale Audit meldet sowohl
 `production_overall=go` als auch `sota_overall=go`; ein unabhängiger Neuaufbau
 aus den Locks reproduziert denselben Release-Digest und besteht einen
-Cold-Canary, ohne den Arbeitsbaum oder `comfyui-env` zu verwenden. Ohne
-externen Spitzenanker bleibt der Status ausdrücklich unter 10/10.
+Cold-Canary, ohne den Arbeitsbaum oder `comfyui-env` zu verwenden. Die
+Promotion ist nach dem Envelope zunächst provisional; eine abschließende oder
+öffentliche 10/10-Bezeichnung bleibt vor
+`sota_marketing_authorized` verboten und der Masterplan erst nach grünem
++7-Tage-Report abgeschlossen. Ohne externen Spitzenanker bleibt
+der Status ausdrücklich unter 10/10.
 
 ## 4. Kosten und sichere Staffelung
 
@@ -737,16 +1123,35 @@ GPU-Schritt benötigt weiterhin caller-eigenes Thermal-Pacing.
 
 Sichere Staffelung:
 
-1. R0 und R1;
-2. R2, P4-Workflow und D0a-Design-Pilot parallel;
-3. R3 aus dem ersten Release-Digest;
-4. D0-Akquise/Governance und D1-Kalibrierung;
-5. Q0-Cross-Shot- und Q1-Comparator-Pilot ausschließlich auf Kalibrierdaten;
-6. Feedbackschleifen über die Invalidierungsmatrix schließen und P4-Workflow
-   abschließen;
-7. F0: finalen R1-/R3-Kandidaten bauen und Preregistrierung einfrieren;
-8. Q2-Holdout/MOS genau einmal;
-9. unverändertes finales P4-Audit.
+1. M0: den unveränderlichen Vor-Plan-Baseline-Ref, danach den geprüften
+   Plan-Source-Commit und schließlich dessen nicht-selbstreferenziellen
+   M0-Evidence-Folgecommit als drei getrennte Remote-Rollen sichern;
+2. M1/M2: Upstream 1.2.0/Dub-It integrieren, Security- und Testbaseline
+   vollständig schließen;
+3. R1e-Enforcer/Activation-Code, G0a statische Rechteauflösung und D0s-
+   Sicherheitsprofile parallel; nach G0a den externen G0u-Snapshot-Updater,
+   nach R1e das R0c-Contractpreflight. Vor D0s kein reales Datenbyte;
+4. danach R1a-Stage und R2 ohne Live-Switch; G0b attestiert exakt diesen
+   Digest und den via G0u frisch publizierten Same-Series-Snapshot;
+5. erst mit dem in R1a versiegelten Enforcer R1b-Mode-Aktivierung, danach
+   separat QAuth-R0lR3 und R0l-Live-Canary; normale Jobstarts bleiben
+   blockiert;
+6. R3 aus dem ersten Release-Digest; D0a-Design nach D0s, anschließend
+   QAuth-D0a und D0a-Pilot;
+7. D0-Akquise/Governance, danach D1-Design, QAuth-D1 und D1-Kalibrierung;
+8. Q1a-Landschaft/Provisionierung, dann exakt ticketgebundene
+   Ressourcenprofile ohne Qualitätsblick; danach getrennte QAuth-Q0/Q1b und
+   externe Quality-Tickets, erst dann Cross-Shot-/Comparator-
+   Qualitätspiloten ausschließlich auf Kalibrierdaten;
+9. Q0/Q1-Feedbackschleifen über die Invalidierungsmatrix schließen und nur
+   den noch nicht autorisierenden P4-Implementierungs-/Schema-Preflight
+   abschließen; keine Release-Autorisierung, Auditfinalisierung oder Promotion;
+10. F0-Sub-DAG: Finalbuild/R2, exakter Q1b-/F0-Digest-Fixpunkt, G0b-final,
+    neuer R1b-Mode, QAuth-final,
+    Final-R0l/R3 und erst danach Preregistrierung/Evaluation-Autorisierung
+    einfrieren;
+11. Q2-Holdout/MOS genau einmal;
+12. unverändertes finales P4-Audit sowie 24-h-/7-Tage-Beobachtung.
 
 ## 5. Betreiberentscheidungen vor teurer Ausführung
 
@@ -759,9 +1164,10 @@ Sichere Staffelung:
 3. **GPU-Budget:** empfohlen R0–R3 sofort nach Betreiberfreigabe, dann
    Kalibrier-Pilot; den einmaligen Holdout erst terminieren, wenn alle
    Software-, Rechts- und Messgates eingefroren sind.
-4. **Control-Plane:** der aktuell inaktive Runtime-API-Dienst benötigt eine
-   Betreiberentscheidung nach seinem eigenen Restart-Preflight. Das ist kein
-   Auftrag an Studio, den Dienst selbst zu starten.
+4. **Control-Plane/Deployment:** Die Runtime-API ist aktuell erreichbar. Jeder
+   künftige Servicewechsel und jeder Live-Canary benötigt trotzdem den
+   aktuellen Preflight und die Betreiberfreigabe; Erreichbarkeit ist kein
+   Auftrag an Studio, Dienste selbst neu zu starten.
 
 ## 6. Was ausdrücklich nicht als Lösung gilt
 

@@ -9,16 +9,19 @@ weder aus dem Code noch aus der Git-Historie ablesen kann.
 
 | Frage | Dokument |
 | --- | --- |
-| Auditstand, Releaseplan, 10/10-Kriterien, offene Befunde | `apps/ltx-studio/docs/QUALITY_AUDIT_2026-08-03.md` (fortgeschrieben; jüngster Nachtrag zuletzt lesen) |
-| Was bis SOTA 10/10 fehlt, in welcher Reihenfolge | `apps/ltx-studio/docs/SOTA_EXECUTION_PLAN.md` |
+| Append-only Historie der Audits und Rohbefunde | `apps/ltx-studio/docs/QUALITY_AUDIT_2026-08-03.md` (jüngsten Nachtrag zuletzt lesen) |
+| Fachliche SOTA-/10/10-Gates und Messreihenfolge | `apps/ltx-studio/docs/SOTA_EXECUTION_PLAN.md` plus eingefrorene Preregistrierung |
+| Aktueller Iststand und ausführbarer Integrations-, Security-, Deployment- und Evidenz-DAG ab 14.08.2026 | `apps/ltx-studio/docs/IMPLEMENTATION_MASTER_PLAN_2026-08-14.md` |
 | LipDub-Claims, Evaluator- und Experimentspezifikation | `apps/ltx-studio/docs/LIPDUB_SOTA_PLAN.md` |
 | Gepinnte Upstream-Workflowquellen | `apps/ltx-studio/shared/upstreamWorkflowContracts.ts` |
 | Rohdaten der Canary-Läufe | `apps/ltx-studio/docs/evidence/` |
 | Ressourcenvertrag mit der DGX | `~/projects/dgx_orchestrator/CALLER-GUIDE.md` und dort `docs/handoffs/` |
 
-Das Audit ist die kanonische Wahrheitsquelle. Ältere Abschnitte werden dort
-**nicht** rückwirkend überschrieben, sondern durch datierte Nachträge
-fortgeschrieben — beim Lesen also immer bis ans Ende gehen.
+Die Präzedenz ist eindeutig: Der Masterplan ist die Wahrheit für aktuellen
+Iststand und Ausführungs-DAG; SOTA-Plan und eingefrorene Preregistrierung sind
+die Wahrheit für fachliche Gates; das Audit ist die append-only Historie.
+Ältere Auditabschnitte werden **nicht** rückwirkend überschrieben, sondern
+durch datierte Nachträge fortgeschrieben — beim Lesen also bis ans Ende gehen.
 
 ## Harte Betriebsregeln
 
@@ -45,7 +48,7 @@ die richtige Reaktion — nicht neu einreichen und nicht eingreifen.
 
 ```bash
 # Studio: Tests, Lint, Build (aus apps/ltx-studio)
-npx vitest run          # 529 Tests, globales Timeout 30 s (echte Python-/ffmpeg-Subprozesse)
+npx vitest run          # vollständige aktuelle Suite; Zahl nicht als Vertrag hardcoden
 npm run lint            # eslint --max-warnings 0
 npm run build           # tsc -b && vite build
 

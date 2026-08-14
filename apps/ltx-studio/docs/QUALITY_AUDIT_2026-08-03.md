@@ -749,3 +749,13 @@ Der ehrliche Gesamtstatus bleibt damit unter `10/10`: Engineering-Integrität
 ist hoch, die aktuelle Qualitätshypothese ist sauber eingegrenzt, aber weder
 der scharfe Cross-Shot-Nachweis noch P0/P2/P5-Abnahme und statistischer lokaler
 Bake-off sind abgeschlossen.
+
+## Präzedenznachtrag 2026-08-14
+
+Dieses Dokument bleibt die append-only Historie der Audits und Rohbefunde;
+ältere Messungen werden nicht rückwirkend umgeschrieben. Für den aktuellen
+Iststand und die ausführbare Abhängigkeits-DAG gilt
+`IMPLEMENTATION_MASTER_PLAN_2026-08-14.md`. Für fachliche SOTA-/10/10-Gates
+gelten `SOTA_EXECUTION_PLAN.md` und die eingefrorene Preregistrierung. Ein
+historischer Statussatz oder eine alte Testzahl in diesem Audit überschreibt
+keine neuere Beobachtung des Masterplans.
