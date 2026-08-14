@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -174,6 +174,7 @@ type DgxOwnerHeartbeatState = {
   timer?: NodeJS.Timeout;
   inFlight?: Promise<void>;
   lastError?: string;
+  activationBlockReason?: string;
 };
 
 type RuntimeJob = StudioJob & {
@@ -525,6 +526,16 @@ export function resolveRenderOutputPaths(
       ? refinedOutput
       : hybridEnabled ? compositeOutput : ltxOutput,
   };
+}
+
+export function quarantineUnreleasedArtifact(outputPath: string, quarantineRoot: string): string | null {
+  if (!existsSync(outputPath)) return null;
+  mkdirSync(quarantineRoot, { recursive: true, mode: 0o700 });
+  const quarantinePath = join(quarantineRoot, `unreleased-output${extname(outputPath)}`);
+  rmSync(quarantinePath, { force: true });
+  renameSync(outputPath, quarantinePath);
+  chmodSync(quarantinePath, 0o600);
+  return quarantinePath;
 }
 
 export function buildRefinerAudioArgs(request: GenerationRequest): string[] {
@@ -1406,11 +1417,7 @@ export class JobManager extends EventEmitter {
     if (!id) return;
     const job = this.jobs.get(id);
     if (!job || job.status !== "queued") return void this.pump();
-    const decision = this.startEnforcer.decide({
-      requestSha256: createHash("sha256").update(canonicalJson(job.request)).digest("hex"),
-      surfaceEntryId: releaseSurfaceEntryForRequest(job.request).id,
-      source: job.startSource,
-    });
+    const decision = this.jobStartDecision(job);
     if (!decision.allowed) {
       job.status = "failed";
       job.finishedAt = now();
@@ -1457,6 +1464,14 @@ export class JobManager extends EventEmitter {
       source,
     });
     if (!decision.allowed) throw new JobConflictError(decision.reason);
+  }
+
+  private jobStartDecision(job: RuntimeJob) {
+    return this.startEnforcer.decide({
+      requestSha256: createHash("sha256").update(canonicalJson(job.request)).digest("hex"),
+      surfaceEntryId: releaseSurfaceEntryForRequest(job.request).id,
+      source: job.startSource,
+    });
   }
 
   private async run(job: RuntimeJob): Promise<void> {
@@ -1953,6 +1968,15 @@ export class JobManager extends EventEmitter {
             );
             return;
           }
+          const activationDecision = this.jobStartDecision(job);
+          if (!activationDecision.allowed) {
+            await this.failDgxJob(
+              job,
+              `Activation-/Rights-Gate blieb nach dem sicheren LTX-Checkpoint geschlossen: ${activationDecision.reason}`,
+              "activation or rights revoked at cooperative LTX boundary",
+            );
+            return;
+          }
           if (!await this.pauseAndResumeDgxSlice(job, artifact)) return;
           if (!await this.verifyJobRunProvenance(job, "vor dem LTX-Resume")) {
             await this.transitionDgxJob(job, "failed", {
@@ -2402,6 +2426,27 @@ export class JobManager extends EventEmitter {
           last_error: job.error ?? "run provenance verification failed",
         });
       }
+      return;
+    }
+    const outputReleaseDecision = this.jobStartDecision(job);
+    if (!outputReleaseDecision.allowed) {
+      try {
+        const quarantinePath = quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+        if (quarantinePath) {
+          this.appendLog(job, `Nicht freigegebene Ausgabe wurde aus der öffentlichen Output-Bibliothek nach ${quarantinePath} verschoben.`);
+        }
+      } catch (error) {
+        rmSync(job.plan.outputPath, { force: true });
+        this.appendLog(
+          job,
+          `Nicht freigegebene Ausgabe konnte nicht sicher quarantänisiert werden und wurde entfernt: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      await this.failDgxJob(
+        job,
+        `Ausgabe bleibt wegen des aktuellen Activation-/Rights-Gates unveröffentlicht: ${outputReleaseDecision.reason}`,
+        "activation or rights gate failed before output release",
+      );
       return;
     }
     const completionMetadata: DgxTransitionMetadata = {
@@ -3208,6 +3253,40 @@ export class JobManager extends EventEmitter {
       || !this.dgxQueueOperations.heartbeat
     ) return;
 
+    const activationDecision = this.jobStartDecision(job);
+    if (!activationDecision.allowed) {
+      if (supportsCooperativeCheckpoint(job.request)) {
+        if (state.activationBlockReason !== activationDecision.reason) {
+          state.activationBlockReason = activationDecision.reason;
+          this.appendLog(
+            job,
+            `Activation-/Rights-Gate ist geschlossen; der kooperative Lauf beendet sich an der nächsten sicheren Euler-Grenze (${activationDecision.reason}).`,
+          );
+          this.changed();
+        }
+      } else {
+        state.stopped = true;
+        if (state.timer) clearInterval(state.timer);
+        if (job.dgxOwnerHeartbeat === state) delete job.dgxOwnerHeartbeat;
+        const child = job.process;
+        if (child && processIsAlive(child)) {
+          await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
+        }
+        if (isActiveJobStatus(job.status)) {
+          await this.failDgxJob(
+            job,
+            `Nicht-kooperativer Lauf wurde wegen des aktuellen Activation-/Rights-Gates beendet: ${activationDecision.reason}`,
+            "activation or rights revoked during non-cooperative run",
+          );
+        }
+        return;
+      }
+    } else if (state.activationBlockReason) {
+      delete state.activationBlockReason;
+      this.appendLog(job, "Activation-/Rights-Gate ist wieder aktuell; der Lauf bleibt autorisiert.");
+      this.changed();
+    }
+
     const sentProgressEpoch = state.progressEpoch;
     const payload: QueueHeartbeatPayload = {
       runtime_status: { phase: state.phase },
@@ -3358,21 +3437,32 @@ export class JobManager extends EventEmitter {
 
       const decisionId = randomUUID();
       let decision: SegmentBoundaryDecision;
-      try {
-        if (!job.dgxJobId) throw new Error("DGX-Job-ID fehlt an der Segmentgrenze");
-        decision = await this.dgxSchedulerOperations.decide(job.dgxJobId);
-        if (!job.dgxJobId || decision.current_job_id !== job.dgxJobId) {
-          throw new Error("Segmententscheidung gehört nicht zum laufenden DGX-Job");
-        }
-      } catch (error) {
-        process.stderr.write(`LTX Studio Segmentgrenzen-Wächter (fail-closed): ${String(error)}\n`);
+      const activationDecision = this.jobStartDecision(job);
+      if (!activationDecision.allowed) {
         decision = {
           action: "yield_to_waiting_job",
           current_job_id: job.dgxJobId ?? "missing",
           next_job_id: null,
-          reason: "scheduler_unavailable_fail_closed",
-          retry_after_seconds: 5,
+          reason: `activation_gate_fail_closed:${activationDecision.reason}`,
+          retry_after_seconds: 0,
         };
+      } else {
+        try {
+          if (!job.dgxJobId) throw new Error("DGX-Job-ID fehlt an der Segmentgrenze");
+          decision = await this.dgxSchedulerOperations.decide(job.dgxJobId);
+          if (!job.dgxJobId || decision.current_job_id !== job.dgxJobId) {
+            throw new Error("Segmententscheidung gehört nicht zum laufenden DGX-Job");
+          }
+        } catch (error) {
+          process.stderr.write(`LTX Studio Segmentgrenzen-Wächter (fail-closed): ${String(error)}\n`);
+          decision = {
+            action: "yield_to_waiting_job",
+            current_job_id: job.dgxJobId ?? "missing",
+            next_job_id: null,
+            reason: "scheduler_unavailable_fail_closed",
+            retry_after_seconds: 5,
+          };
+        }
       }
       if (stopped || !processIsAlive(child)) return;
       const action = decision.action === "continue_current"

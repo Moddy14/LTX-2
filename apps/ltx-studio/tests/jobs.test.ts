@@ -16,6 +16,7 @@ import {
   PipelineProgressTracker,
   progressFromPipelineLog,
   publishedOutputIsReusableLtxBase,
+  quarantineUnreleasedArtifact,
   runProvenanceSharesLtxBase,
   requestsShareLtxBase,
   resolveRenderOutputPaths,
@@ -120,6 +121,21 @@ const testRunProvenanceOperations = {
 };
 
 describe("job persistence and reservations", () => {
+  it("moves a denied final artifact out of the public output root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ltx-unreleased-output-"));
+    roots.push(root);
+    const output = join(root, "outputs", "result.mp4");
+    const quarantine = join(root, "private", "job-1");
+    await mkdir(join(root, "outputs"), { recursive: true });
+    await writeFile(output, "unreleased");
+
+    const quarantined = quarantineUnreleasedArtifact(output, quarantine);
+
+    expect(quarantined).toBe(join(quarantine, "unreleased-output.mp4"));
+    await expect(access(output)).rejects.toThrow();
+    await expect(readFile(quarantined!, "utf8")).resolves.toBe("unreleased");
+  });
+
   it("heartbeats an active DGX owner and claims progress only once per real Euler advance", async () => {
     vi.useFakeTimers();
     try {
@@ -188,6 +204,66 @@ describe("job persistence and reservations", () => {
       const stoppedAt = heartbeats.length;
       await vi.advanceTimersByTimeAsync(90_000);
       expect(heartbeats).toHaveLength(stoppedAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminalizes a non-cooperative run when its activation becomes invalid between heartbeats", async () => {
+    vi.useFakeTimers();
+    try {
+      let allowed = true;
+      const decide = () => ({
+        allowed,
+        mode: allowed ? "production_stable" as const : "hold" as const,
+        reason: allowed ? "released" : "runtime rights snapshot revoked",
+        schemaVersion: "ltx-studio-activation-start-enforcer.v1" as const,
+        generation: 2,
+        activationHeadSha256: "a".repeat(64),
+      });
+      const heartbeats: string[] = [];
+      const manager = new JobManager(
+        await statePath(),
+        false,
+        null,
+        undefined,
+        {
+          read: async (jobId) => ({ schema_version: "dgx-job-read.v0", job: { job_id: jobId, state: "running" } }),
+          transition: async (jobId, state) => ({ schema_version: "dgx-job-transition.v0", job: { job_id: jobId, state } }),
+          heartbeat: async (jobId) => {
+            heartbeats.push(jobId);
+            return { schema_version: "dgx-job-heartbeat.v0", job: { job_id: jobId, state: "running" } };
+          },
+        },
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          decide,
+          inspect: () => ({ ...decide(), productStartsAllowed: allowed }),
+        },
+      );
+      const created = manager.create(validRequest("two-stage-hq"));
+      const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>).get(created.id)!;
+      active.status = "running";
+      active.dgxJobId = "dgx-job-rights-revoke";
+      const startHeartbeat = Reflect.get(manager, "startDgxOwnerHeartbeat") as (job: unknown, phase: string) => void;
+
+      startHeartbeat.call(manager, active, "ltx_rendering");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(heartbeats).toHaveLength(1);
+      allowed = false;
+      await vi.advanceTimersByTimeAsync(45_000);
+
+      expect(manager.get(created.id)).toMatchObject({
+        status: "failed",
+        outputUrl: null,
+      });
+      expect(manager.get(created.id)?.error).toContain("runtime rights snapshot revoked");
+      expect(heartbeats).toHaveLength(1);
+      expect(Reflect.get(active, "dgxOwnerHeartbeat")).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
