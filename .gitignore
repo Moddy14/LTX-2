@@ -102,6 +102,7 @@ playwright-report/
 !apps/ltx-studio/docs/evidence/m0-contract-inventory-2026-08-14.json
 !apps/ltx-studio/docs/evidence/m1-conflict-ledger-2026-08-14.json
 !apps/ltx-studio/docs/evidence/m1-integration-report-2026-08-14.json
+!apps/ltx-studio/docs/evidence/m2-security-runtime-report-2026-08-15.json
 !packages/ltx-trainer/configs/av_eval/*.json
 
 # LTX Studio machine-local evaluator bindings and operator evidence

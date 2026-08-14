@@ -231,7 +231,9 @@ export function isolatedPythonEnvironment(
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     ...overrides,
+    HF_HUB_OFFLINE: "1",
     PYTHONNOUSERSITE: "1",
+    TRANSFORMERS_OFFLINE: "1",
   };
   delete environment.PYTHONHOME;
   delete environment.PYTHONPATH;

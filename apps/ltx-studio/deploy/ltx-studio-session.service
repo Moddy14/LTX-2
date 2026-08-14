@@ -5,6 +5,8 @@ Wants=dgx-runtime-api.service
 
 [Service]
 Type=simple
+User=moddy
+Group=moddy
 WorkingDirectory=/home/moddy/LTX-2/apps/ltx-studio
 EnvironmentFile=/opt/ltx-studio-phoneme-viseme/ltx-studio.env
 ExecStart=/home/moddy/.nvm/versions/node/v24.18.0/bin/npm start
@@ -15,6 +17,10 @@ RestartSec=3
 # Keep the server alive so it can mark the job interrupted instead of losing
 # the whole session to systemd's default OOMPolicy=stop.
 OOMPolicy=continue
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8
+IPAddressAllow=::1/128
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

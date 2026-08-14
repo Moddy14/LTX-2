@@ -5,19 +5,34 @@ import csv
 import hashlib
 import importlib.metadata
 import json
+import os
 import sys
 import warnings
 from pathlib import Path
 
 EXPECTED_DISTRIBUTIONS = (
+    "kornia",
     "ltx-core",
     "ltx-pipelines",
     "openai-whisper",
     "requests",
+    "setuptools",
     "torch",
     "torchaudio",
+    "transformers",
 )
-EXPECTED_CUSPARSELT_VERSION = "0.8.0"
+EXPECTED_VERSIONS = {
+    "kornia": "0.8.2",
+    "ltx-core": "1.2.0",
+    "ltx-pipelines": "1.2.0",
+    "openai-whisper": "20250625",
+    "requests": "2.34.2",
+    "setuptools": "84.0.0",
+    "torch": "2.13.0+cu132",
+    "torchaudio": "2.11.0+cu132",
+    "transformers": "5.14.1",
+}
+EXPECTED_CUSPARSELT_VERSION = "0.8.1"
 EXPECTED_CUSPARSELT_TAG = "Tag: py3-none-manylinux2014_aarch64\n"
 
 
@@ -43,6 +58,21 @@ def verify_cusparselt_metadata() -> None:
 
 def main() -> None:
     verify_cusparselt_metadata()
+    for variable in ("HF_HUB_OFFLINE", "PYTHONNOUSERSITE", "TRANSFORMERS_OFFLINE"):
+        if os.environ.get(variable) != "1":
+            raise SystemExit(f"{variable}=1 is required in the native release runtime")
+    if sys.flags.no_user_site != 1 or sys.flags.isolated != 1:
+        raise SystemExit("native release runtime must run with isolated Python and no user site")
+
+    actual_versions = {
+        name: importlib.metadata.version(name)
+        for name in EXPECTED_DISTRIBUTIONS
+    }
+    if actual_versions != EXPECTED_VERSIONS:
+        raise SystemExit(
+            "native release runtime version mismatch: "
+            + json.dumps({"actual": actual_versions, "expected": EXPECTED_VERSIONS}, sort_keys=True)
+        )
     try:
         importlib.metadata.version("chardet")
     except importlib.metadata.PackageNotFoundError:
@@ -72,10 +102,7 @@ def main() -> None:
 
     print(json.dumps({  # noqa: T201
         "python": sys.version.split()[0],
-        "packages": {
-            name: importlib.metadata.version(name)
-            for name in EXPECTED_DISTRIBUTIONS
-        },
+        "packages": actual_versions,
         "torch_cuda": torch.version.cuda,
         "verdict": "ok",
     }, sort_keys=True))

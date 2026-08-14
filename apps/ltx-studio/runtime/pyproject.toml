@@ -12,15 +12,17 @@ dependencies = [
     "opencv-python-headless==4.13.0.92",
     "openai-whisper==20250625",
     "openimageio==3.1.15.0",
-    "requests==2.32.5",
-    "torch==2.11.0+cu130",
-    "torchaudio==2.11.0+cu130",
-    "transformers==4.57.6",
+    "requests==2.34.2",
+    "setuptools==84.0.0",
+    "torch @ https://download-r2.pytorch.org/whl/cu132/torch-2.13.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=184f88e91546a2087aee2e5e71012ea6182aaf9d6bc81c28375be2816c349a49",
+    "torchaudio @ https://download-r2.pytorch.org/whl/test/cu132/torchaudio-2.11.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=06dcecc6ccd6746fc9f497c0587f67cb5c79cbc7160034e82c97353583cf9d3d",
+    "transformers==5.14.1",
 ]
 
 [tool.uv]
 package = false
 environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
+no-sources-package = ["torch", "torchaudio"]
 
 [tool.uv.workspace]
 members = []
@@ -28,13 +30,6 @@ members = []
 [tool.uv.sources]
 ltx-core = { path = "../../../packages/ltx-core", editable = true }
 ltx-pipelines = { path = "../../../packages/ltx-pipelines", editable = true }
-torch = { index = "pytorch-cu130" }
-torchaudio = { index = "pytorch-cu130" }
-
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
 
 [[tool.uv.index]]
 name = "pypi"

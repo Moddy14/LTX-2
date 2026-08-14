@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analysisRuntimeAvailable,
+  isolatedPythonEnvironment,
   pythonRuntimeAvailable,
   selectRendererPythonExecutable,
   selectPythonExecutable,
@@ -28,6 +29,21 @@ describe("local endpoint configuration", () => {
 
   it("does not let an isolated runtime inherit Python path overrides", () => {
     expect(pythonRuntimeAvailable(process.execPath, { isolated: true })).toBe(false);
+  });
+
+  it("forces offline model loading and removes Python path injection", () => {
+    const environment = isolatedPythonEnvironment({
+      HF_HUB_OFFLINE: "0",
+      PYTHONHOME: "/host/python",
+      PYTHONPATH: "/host/packages",
+      TRANSFORMERS_OFFLINE: "0",
+    });
+
+    expect(environment.HF_HUB_OFFLINE).toBe("1");
+    expect(environment.TRANSFORMERS_OFFLINE).toBe("1");
+    expect(environment.PYTHONNOUSERSITE).toBe("1");
+    expect(environment.PYTHONHOME).toBeUndefined();
+    expect(environment.PYTHONPATH).toBeUndefined();
   });
 
   it("requires the exact in-release renderer for a sealed release", () => {

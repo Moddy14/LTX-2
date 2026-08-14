@@ -54,6 +54,7 @@ def load_gemma_with_device_map(
             dtype=dtype,
             device_map="auto",
             local_files_only=True,
+            trust_remote_code=False,
         )
 
     tokenizer = build_gemma_tokenizer(assets)

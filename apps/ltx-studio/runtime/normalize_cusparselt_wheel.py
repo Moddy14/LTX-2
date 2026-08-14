@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 DISTRIBUTION = "nvidia-cusparselt-cu13"
-EXPECTED_VERSION = "0.8.0"
+EXPECTED_VERSION = "0.8.1"
 ORIGINAL_TAG = b"Tag: py3-none-manylinux2014_sbsa\n"
 NORMALIZED_TAG = b"Tag: py3-none-manylinux2014_aarch64\n"
 AARCH64_ELF_MACHINE = 183

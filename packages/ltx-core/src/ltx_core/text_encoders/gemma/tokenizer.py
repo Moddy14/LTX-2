@@ -71,6 +71,7 @@ class LTXVGemmaTokenizer(LTXGemmaTokenizer):
             gemma_root,
             local_files_only=True,
             model_max_length=max_length,
+            trust_remote_code=False,
             use_fast=False,
         )
         super().__init__(tokenizer, max_length=max_length)

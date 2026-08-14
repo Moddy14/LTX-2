@@ -18,6 +18,7 @@ def test_gemma_tokenizer_uses_sentencepiece_backend() -> None:
         "/models/gemma",
         local_files_only=True,
         model_max_length=1024,
+        trust_remote_code=False,
         use_fast=False,
     )
     assert wrapped.tokenizer is tokenizer

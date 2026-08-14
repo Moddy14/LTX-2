@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "ltx-m2-security-runtime-report.v1",
+  "generatedAt": "2026-08-15T00:15:26+02:00",
+  "sourceCommit": "d277729bdb1a33c82b554d0d780c3c46d4735c37",
+  "status": "security-and-cpu-runtime-pass",
+  "cutoff": {
+    "timestamp": "2026-08-15T00:15:26+02:00",
+    "pythonAdvisoryService": "https://api.osv.dev",
+    "pythonAuditTool": "uv 0.12.2",
+    "javascriptAdvisoryService": "npm registry audit API",
+    "systemdVersion": "255"
+  },
+  "boundInputs": {
+    "runtimePyprojectSha256": "6894fa45098b9d3661529f6cfd19f07ce638b8471cdce221b02872d8c3f27a2b",
+    "runtimeLockSha256": "af0bd218daf47f374610226592a4e5914e4895077a95284e6c4aed41acfaa66a",
+    "runtimeVerifierSha256": "146f6c04cf5e826394f798d1847bc5e9f34d16f57ec1f8eb7bf35f123731735a",
+    "cusparseltNormalizerSha256": "db8962dcbbae8299aa03ffc1cd54a01fbc1c2f77709150c0f5c0de5134ae3ef2",
+    "serviceUnitSha256": "a7f77ad031bc3e849ee94fb9257e0802a4311c780197f9fc22ba3e5045be1aa1",
+    "serverConfigSha256": "6fe6c616f4255c2b85aa6a0b3a0dd6ed4d85019ab67964cd4c684ec8043a3c35",
+    "packageLockSha256": "a13dd339a1054c2df8ed5172789bc8471063e757f06790621e38ea4514da8fa4",
+    "ltxCorePyprojectSha256": "dde0b49185124025d81b315c1afa903101c0ba9ff12c86a30091392fee2c8948",
+    "ltxPipelinesPyprojectSha256": "7de28d69133affe77a409f4dcba2ada6f6d666a0c07f3b2d3532ce0004e7584b",
+    "gemmaTokenizerSha256": "2ab075ee1a9847f671d1620473234564d8a182c1408952e6d434c0bd212b2c77",
+    "gemmaMultigpuLoaderSha256": "f1c7e703e1413b539392226251ffe986d19dae969ee320d81e3a4481dc04d712"
+  },
+  "runtime": {
+    "python": "3.12.3",
+    "platform": "linux-aarch64",
+    "packagesInstalled": 75,
+    "versions": {
+      "kornia": "0.8.2",
+      "ltx-core": "1.2.0",
+      "ltx-pipelines": "1.2.0",
+      "openai-whisper": "20250625",
+      "requests": "2.34.2",
+      "setuptools": "84.0.0",
+      "torch": "2.13.0+cu132",
+      "torchaudioDistribution": "2.11.0+cu132",
+      "torchaudioModuleVersionString": "2.11.0+cu130",
+      "transformers": "5.14.1"
+    },
+    "directWheelIntegrity": {
+      "torchSha256": "184f88e91546a2087aee2e5e71012ea6182aaf9d6bc81c28375be2816c349a49",
+      "torchaudioSha256": "06dcecc6ccd6746fc9f497c0587f67cb5c79cbc7160034e82c97353583cf9d3d"
+    },
+    "compatibility": {
+      "uvPipCheck": "passed",
+      "runtimeVerifier": "passed",
+      "torchCpuSmoke": "passed",
+      "torchaudioResampleSmoke": "passed",
+      "torchaudioCompiledLfilterSmoke": "passed",
+      "torchaudioVersionStringDisposition": "The official cu132 wheel retains the upstream module-level cu130 build string. The signed wheel filename, distribution metadata, lock hash, CUDA-13.2 linkage, official future-Torch compatibility statement, and compiled-operator smokes are authoritative; no application contract reads torchaudio.__version__.",
+      "cusparseltMetadataNormalization": "passed"
+    }
+  },
+  "audits": {
+    "python": {
+      "command": "uv audit --no-config --locked --no-dev --output-format json",
+      "auditedPackages": 75,
+      "rawVulnerabilityRecords": 0,
+      "deduplicatedApplicableAdvisories": 0,
+      "adverseStatuses": 0,
+      "verdict": "passed"
+    },
+    "javascript": {
+      "command": "npm audit --json",
+      "auditedDependencies": 374,
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "verdict": "passed"
+    }
+  },
+  "reproducibility": {
+    "command": "uv lock --project apps/ltx-studio/runtime --no-config",
+    "consecutiveResolutionCount": 2,
+    "lockSha256EachRun": [
+      "af0bd218daf47f374610226592a4e5914e4895077a95284e6c4aed41acfaa66a",
+      "af0bd218daf47f374610226592a4e5914e4895077a95284e6c4aed41acfaa66a"
+    ],
+    "verdict": "passed",
+    "qualification": "The final release phase still requires clean rebuilds in two distinct roots."
+  },
+  "offlineAndEgress": {
+    "isolatedPythonEnvironment": {
+      "hfHubOffline": true,
+      "transformersOffline": true,
+      "pythonNoUserSite": true,
+      "pythonHomeRemoved": true,
+      "pythonPathRemoved": true,
+      "trustRemoteCodeFalse": true,
+      "localFilesOnly": true,
+      "test": "passed"
+    },
+    "evaluatorPrivateNetworkContract": "passed-existing-contract",
+    "nodeSystemUnit": {
+      "restrictAddressFamilies": [
+        "AF_UNIX",
+        "AF_INET",
+        "AF_INET6"
+      ],
+      "ipAddressDeny": "any",
+      "ipAddressAllow": [
+        "127.0.0.0/8",
+        "::1/128"
+      ],
+      "unitSyntax": "passed",
+      "systemTransientNegativeTest": {
+        "loopback4318": "allowed",
+        "publicTcp1_1_1_1_443": "blocked",
+        "verdict": "passed"
+      },
+      "userManagerProbe": {
+        "publicTcpWasBlocked": false,
+        "disposition": "rejected-as-unsafe",
+        "correctiveAction": "The shipped release unit is a privileged system unit running as User=moddy and Group=moddy; default.target user-unit activation was removed."
+      }
+    }
+  },
+  "tests": {
+    "lockedNativeCpu": {
+      "passed": 66,
+      "failed": 0,
+      "cudaVisibleDevices": "empty"
+    },
+    "studio": {
+      "testFilesPassed": 67,
+      "testsPassed": 621,
+      "testsSkippedIntentional": 1,
+      "testsFailed": 0,
+      "lint": "passed",
+      "build": "passed",
+      "mainBundleRawKiB": 391.73,
+      "mainBundleGzipKiB": 116.52
+    }
+  },
+  "claims": {
+    "deploymentPerformed": false,
+    "gpuQualificationPerformed": false,
+    "productionAuthorized": false,
+    "sota10Of10Achieved": false
+  },
+  "decision": "M2 security, dependency, CPU-runtime, offline-loading, and system-unit egress gates pass for this candidate. Deployment and SOTA remain on HOLD for the separately specified activation, rights, GPU, calibration, holdout, and observation gates."
+}
