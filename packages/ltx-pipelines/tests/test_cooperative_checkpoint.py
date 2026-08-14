@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from ltx_core.components.diffusion_steps import EulerAncestralRFDiffusionStep
+from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep
 from ltx_core.types import LatentState
 from ltx_pipelines.utils import cooperative_checkpoint
 from ltx_pipelines.utils.samplers import (
@@ -268,7 +268,7 @@ def test_ancestral_rf_loop_resumes_with_identical_rng_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sigmas = torch.tensor([1.0, 0.725, 0.421875, 0.0])
-    stepper = EulerAncestralRFDiffusionStep()
+    stepper = EulerAncestralDiffusionStep()
 
     monkeypatch.delenv("LTX_COOPERATIVE_CHECKPOINT_DIR", raising=False)
     monkeypatch.delenv("LTX_COOPERATIVE_JOB_FINGERPRINT", raising=False)

@@ -552,7 +552,7 @@ test("LipDub live preflight surfaces plan findings before starting a job", async
   await page.route("**/api/jobs/plan", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
-      command: "python -m ltx_pipelines.lipdub",
+      command: "python -m ltx_pipelines.dubit",
       outputPath: "/outputs/lipdub-preflight-test.mp4",
       pathErrors: ["LipDub IC-LoRA: nicht gefunden (/models/lipdub.safetensors)"],
       pathWarnings: ["Die native LipDub-Pipeline snappt 122 Referenzframes auf 121 Frames nach 8k+1; das Clipende kann dadurch wegfallen."],

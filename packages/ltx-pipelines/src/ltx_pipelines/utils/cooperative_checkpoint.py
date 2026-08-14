@@ -11,7 +11,7 @@ from typing import Any
 
 import torch
 
-from ltx_core.types import LatentState
+from ltx_core.types import GeneratedKeyframeLayout, LatentState
 
 CHECKPOINT_SCHEMA = "ltx-cooperative-checkpoint.v1"
 YIELD_REQUEST_SCHEMA = "ltx-cooperative-yield-request.v1"
@@ -119,17 +119,26 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _state_to_cpu(state: LatentState | None) -> dict[str, torch.Tensor | None] | None:
+def _state_to_cpu(state: LatentState | None) -> dict[str, Any] | None:
     if state is None:
         return None
-    return {
-        field.name: (
-            value.detach().to(device="cpu", copy=True)
-            if isinstance((value := getattr(state, field.name)), torch.Tensor)
-            else None
-        )
-        for field in fields(LatentState)
-    }
+    payload: dict[str, Any] = {}
+    for field in fields(LatentState):
+        value = getattr(state, field.name)
+        if isinstance(value, torch.Tensor):
+            payload[field.name] = value.detach().to(device="cpu", copy=True)
+        elif isinstance(value, GeneratedKeyframeLayout):
+            payload[field.name] = {
+                "schema_version": "ltx-generated-keyframe-layout.v1",
+                "pixel_frame_indices": list(value.pixel_frame_indices),
+                "tokens_per_keyframe": value.tokens_per_keyframe,
+                "first_token": value.first_token,
+            }
+        elif value is None or isinstance(value, bool):
+            payload[field.name] = value
+        else:
+            raise RuntimeError(f"Cooperative checkpoint cannot serialize LatentState.{field.name}")
+    return payload
 
 
 def _state_from_cpu(
@@ -142,12 +151,32 @@ def _state_from_cpu(
     if not isinstance(payload, dict) or reference is None:
         raise RuntimeError(f"Cooperative checkpoint {modality} modality does not match this pipeline run")
 
-    restored: dict[str, torch.Tensor | None] = {}
+    restored: dict[str, Any] = {}
     for field in fields(LatentState):
         saved = payload.get(field.name)
         expected = getattr(reference, field.name)
         if saved is None and expected is None:
             restored[field.name] = None
+            continue
+        if isinstance(expected, bool):
+            if not isinstance(saved, bool):
+                raise RuntimeError(f"Cooperative checkpoint has invalid {modality}.{field.name}")
+            restored[field.name] = saved
+            continue
+        if isinstance(expected, GeneratedKeyframeLayout):
+            if not isinstance(saved, dict) or saved.get("schema_version") != "ltx-generated-keyframe-layout.v1":
+                raise RuntimeError(f"Cooperative checkpoint has invalid {modality}.{field.name}")
+            try:
+                layout = GeneratedKeyframeLayout(
+                    pixel_frame_indices=tuple(saved["pixel_frame_indices"]),
+                    tokens_per_keyframe=int(saved["tokens_per_keyframe"]),
+                    first_token=int(saved["first_token"]),
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise RuntimeError(f"Cooperative checkpoint has invalid {modality}.{field.name}") from error
+            if layout != expected:
+                raise RuntimeError(f"Cooperative checkpoint layout mismatch for {modality}.{field.name}")
+            restored[field.name] = layout
             continue
         if not isinstance(saved, torch.Tensor) or not isinstance(expected, torch.Tensor):
             raise RuntimeError(f"Cooperative checkpoint has invalid {modality}.{field.name}")

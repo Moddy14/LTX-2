@@ -1,0 +1,254 @@
+{
+  "schemaVersion": "ltx-m1-conflict-ledger.v1",
+  "generatedAt": "2026-08-14T23:55:00+02:00",
+  "mergeBase": "9377758131b1ffde4b7f766804590a6617bf2ab9",
+  "localInput": "205fc7c633bdc0595014f7f0c2667d526d8d595e",
+  "upstreamInput": "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca",
+  "upstreamRef": "origin/main",
+  "entryCount": 27,
+  "entries": [
+    {
+      "path": "README.md",
+      "conflictType": "content",
+      "upstreamIntent": "Document LTX-2.5 split components, Gemma 4, DiffVAE and Dub-It.",
+      "localIntent": "Document Studio, DGX admission, local workflows and prompt enhancement.",
+      "disposition": "Combined upstream 2.5 documentation with the current twelve-mode Studio and cooperative-checkpoint contract; restored ID-LoRA, FLF2V, In/Outpaint and LipDub compatibility notes.",
+      "contract": "documentation-and-capability-inventory",
+      "proof": ["README review", "M2 CLI help smoke matrix"]
+    },
+    {
+      "path": "packages/ltx-core/pyproject.toml",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt the 1.2/2.5 dependency and package contract, including Transformers 5.",
+      "localIntent": "Retain the locally tested dependency additions.",
+      "disposition": "Adopted upstream constraints; exact secure runtime versions are deferred to M2 lock resolution.",
+      "contract": "runtime-lock",
+      "proof": ["M2 uv lock --check", "M2 uv pip check", "M2 advisory audit"]
+    },
+    {
+      "path": "packages/ltx-core/src/ltx_core/components/diffusion_steps.py",
+      "conflictType": "content",
+      "upstreamIntent": "Rename and generalize the ancestral Euler step.",
+      "localIntent": "Keep official Comfy sampling behavior and cooperative resume tests.",
+      "disposition": "Adopted EulerAncestralDiffusionStep and ported all local callers/tests.",
+      "contract": "sampler-api",
+      "proof": ["packages/ltx-core/tests/test_diffusion_steps.py", "packages/ltx-pipelines/tests/test_cooperative_checkpoint.py"]
+    },
+    {
+      "path": "packages/ltx-core/src/ltx_core/text_encoders/gemma/__init__.py",
+      "conflictType": "content",
+      "upstreamIntent": "Export the Gemma 3/4 asset and configurator APIs.",
+      "localIntent": "Export Comfy Gemma-LoRA key operations.",
+      "disposition": "Kept upstream exports and restored GEMMA_LORA_COMFY_KEY_OPS.",
+      "contract": "python-export",
+      "proof": ["packages/ltx-core/tests/test_gemma_lora_ops.py", "native import matrix"]
+    },
+    {
+      "path": "packages/ltx-core/src/ltx_core/text_encoders/gemma/encoders/base_encoder.py",
+      "conflictType": "content",
+      "upstreamIntent": "Support Gemma 3/4 assets, generation and processor-backed enhancement.",
+      "localIntent": "Keep deferred tokenizer/processor module operations and clear failures.",
+      "disposition": "Adopted upstream encoder, retained module operations, removed the stale processor_root branch and updated contract tests.",
+      "contract": "gemma-encoder",
+      "proof": ["packages/ltx-core/tests/test_base_encoder.py"]
+    },
+    {
+      "path": "packages/ltx-core/src/ltx_core/text_encoders/gemma/tokenizer.py",
+      "conflictType": "content",
+      "upstreamIntent": "Use the in-memory Gemma tokenizer and normalized BOS/padding contract.",
+      "localIntent": "Keep the public LTXVGemmaTokenizer path-loader API.",
+      "disposition": "Adopted LTXGemmaTokenizer and retained LTXVGemmaTokenizer as a compatibility loader.",
+      "contract": "gemma-tokenizer-api",
+      "proof": ["packages/ltx-core/tests/test_tokenizer.py"]
+    },
+    {
+      "path": "packages/ltx-pipelines/docs/pipelines.md",
+      "conflictType": "content",
+      "upstreamIntent": "Describe 2.5 pipelines and Dub-It.",
+      "localIntent": "Describe local official-workflow variants.",
+      "disposition": "Upstream documentation is authoritative for 2.5; local workflow behavior remains covered by README, CLI help and Studio contracts.",
+      "contract": "pipeline-documentation",
+      "proof": ["M2 CLI help smoke matrix", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/__init__.py",
+      "conflictType": "content",
+      "upstreamIntent": "Export DubItPipeline and DFRPipeline lazily.",
+      "localIntent": "Retain FLF2VPipeline and LipDubPipeline public exports.",
+      "disposition": "Exports Dub-It and DFR while retaining FLF2V and a LipDub compatibility alias/module.",
+      "contract": "pipeline-exports",
+      "proof": ["packages/ltx-pipelines/tests/test_pipeline_exports.py"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/a2vid_two_stage.py",
+      "conflictType": "content",
+      "upstreamIntent": "Use ModelPaths, DiffVAE auto-tiling and split checkpoints.",
+      "localIntent": "Keep official 8+3 schedule, image-strength cap and original-audio fidelity.",
+      "disposition": "Combined both contracts and restored missing denoiser/helper APIs plus --disable-tiling.",
+      "contract": "image-audio-to-video",
+      "proof": ["packages/ltx-pipelines/tests/test_a2vid_two_stage.py", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/distilled.py",
+      "conflictType": "content",
+      "upstreamIntent": "Use split paths, duration prediction and DiffVAE.",
+      "localIntent": "Keep prompt enhancement and explicit tiling control.",
+      "disposition": "Adopted upstream pipeline and preserved enhancement plus --disable-tiling.",
+      "contract": "distilled-generation",
+      "proof": ["native CLI help smoke", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/dubit.py",
+      "conflictType": "rename-content",
+      "upstreamIntent": "Rename LipDub to Dub-It and use ModelPaths/2.5 media metadata.",
+      "localIntent": "Keep native-distilled and official-comfy-hq profiles, deterministic stage-2 seed and Studio mode ID.",
+      "disposition": "Runs DubItPipeline internally, keeps both profiles and deterministic seeds, and maps persisted lipdub requests to the new module.",
+      "contract": "reference-video-redubbing",
+      "proof": ["apps/ltx-studio/tests/command.test.ts", "apps/ltx-studio/tests/python-cli-contract.test.ts", "packages/ltx-pipelines/tests/test_pipeline_exports.py"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/ic_lora.py",
+      "conflictType": "content",
+      "upstreamIntent": "Use ModelPaths, HDR/DiffVAE and new component paths.",
+      "localIntent": "Keep official single-stage samplers, control preprocessing, static-reference repeat and frozen source audio.",
+      "disposition": "Combined contracts; repaired single/two-stage selection, preprocessing, audio preservation, scale and all sampler paths.",
+      "contract": "ic-lora-profiles",
+      "proof": ["packages/ltx-pipelines/tests/test_ic_lora_cli.py", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/iclora_utils.py",
+      "conflictType": "content",
+      "upstreamIntent": "Support EXR/HDR references and tensor-based conditioning.",
+      "localIntent": "Validate masks/scales and repeat one-frame references.",
+      "disposition": "Kept upstream HDR/tensor path and restored validation plus static-reference repetition.",
+      "contract": "ic-lora-conditioning",
+      "proof": ["packages/ltx-pipelines/tests/test_iclora_utils.py", "packages/ltx-pipelines/tests/test_official_comfy_conditioning.py"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/keyframe_interpolation.py",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt split component paths and DiffVAE.",
+      "localIntent": "Keep prompt enhancement and Studio workflow behavior.",
+      "disposition": "Adopted upstream structure and retained the local enhancement contract.",
+      "contract": "keyframe-interpolation",
+      "proof": ["native CLI help smoke", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/retake.py",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt ModelPaths, HDR and DiffVAE retake.",
+      "localIntent": "Keep typed LoRAs, modality controls, prompt enhancement and tiling toggle.",
+      "disposition": "Combined both contracts and restored --disable-tiling.",
+      "contract": "retake",
+      "proof": ["native CLI help smoke", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/t2a_one_stage.py",
+      "conflictType": "content",
+      "upstreamIntent": "Add split paths and optional duration prediction.",
+      "localIntent": "Keep audio-only loading and official fixed CFG++ schedule.",
+      "disposition": "Combined duration prediction with the fixed distilled schedule, Euler CFG++ and forced unconditional pass.",
+      "contract": "text-to-audio",
+      "proof": ["native CLI help smoke", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/ti2vid_one_stage.py",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt ModelPaths, generated keyframes, auto-duration and DiffVAE.",
+      "localIntent": "Keep prompt enhancement and Studio request compatibility.",
+      "disposition": "Adopted upstream implementation with the local enhancement contract.",
+      "contract": "one-stage-generation",
+      "proof": ["native CLI help smoke", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages.py",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt ModelPaths, auto-duration, generated keyframes and DiffVAE.",
+      "localIntent": "Keep official 8+3 workflow, fixed stage-2 seed/audio selection and tiling toggle.",
+      "disposition": "Combined all contracts and restored the missing official CLI flag and --disable-tiling.",
+      "contract": "two-stage-generation",
+      "proof": ["packages/ltx-pipelines/tests/test_ti2vid_official_contract.py", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages_hq.py",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt ModelPaths, auto-duration and DiffVAE HQ flow.",
+      "localIntent": "Keep Gemma LoRA enhancement and explicit tiling control.",
+      "disposition": "Combined both contracts; the official enhancer remains isolated from encoding and tiling can be disabled.",
+      "contract": "two-stage-hq",
+      "proof": ["native CLI help smoke", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/utils/args.py",
+      "conflictType": "content",
+      "upstreamIntent": "Introduce ModelPaths, split-pack flags, DiffVAE and auto-duration CLI.",
+      "localIntent": "Keep Gemma LoRA, official profiles, stage seeds and --disable-tiling.",
+      "disposition": "Merged the flag surfaces, retained typed local actions and restored the Studio-required tiling switch.",
+      "contract": "pipeline-cli",
+      "proof": ["packages/ltx-pipelines/tests/test_args_help.py", "apps/ltx-studio/tests/python-cli-contract.test.ts"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/utils/blocks.py",
+      "conflictType": "content",
+      "upstreamIntent": "Use ModelPaths, Gemma 3/4 and component-specific builders.",
+      "localIntent": "Keep Gemma LoRA fusion and separate official enhancement encoding.",
+      "disposition": "Applied LoRAs to the correct builder, kept base encoding clean for official enhancement and fixed merged builder attribute drift.",
+      "contract": "pipeline-builders",
+      "proof": ["packages/ltx-pipelines/tests/test_prompt_enhancement_order.py", "native import matrix"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/utils/helpers.py",
+      "conflictType": "content",
+      "upstreamIntent": "Add DiffVAE tiling and generated-keyframe helpers.",
+      "localIntent": "Keep image-strength capping and public latent-length normalization.",
+      "disposition": "Kept upstream helpers and restored both compatibility helpers.",
+      "contract": "pipeline-helper-api",
+      "proof": ["packages/ltx-pipelines/tests/test_helpers.py", "packages/ltx-pipelines/tests/test_official_comfy_conditioning.py"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/utils/media_io.py",
+      "conflictType": "modify-delete",
+      "upstreamIntent": "Replace the monolith with the media_io package and HDR-aware codecs.",
+      "localIntent": "Preserve fractional FPS and exact audio-tail alignment.",
+      "disposition": "Deleted the monolith and ported the local timeline logic into media_io/encode.py.",
+      "contract": "media-timeline",
+      "proof": ["packages/ltx-pipelines/tests/test_media_io_timeline.py", "M2 full media tests"]
+    },
+    {
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/utils/samplers.py",
+      "conflictType": "content",
+      "upstreamIntent": "Introduce the generic ancestral Euler loop for Distilled and DFR.",
+      "localIntent": "Keep cooperative boundary checkpoint/resume and the old RF loop entry point.",
+      "disposition": "Moved cooperative restore/checkpoint/yield into the generic loop and retained the old RF name as a compatibility wrapper.",
+      "contract": "cooperative-scheduler",
+      "proof": ["packages/ltx-pipelines/tests/test_cooperative_checkpoint.py"]
+    },
+    {
+      "path": "packages/ltx-trainer/pyproject.toml",
+      "conflictType": "content",
+      "upstreamIntent": "Adopt the 1.2 trainer dependency/runtime contract.",
+      "localIntent": "Keep AV evaluator dependencies and entry points.",
+      "disposition": "Combined dependency surfaces; exact compatible pins and audit decisions are deferred to M2.",
+      "contract": "trainer-runtime",
+      "proof": ["M2 AV evaluator suite", "M2 uv pip check"]
+    },
+    {
+      "path": "packages/ltx-trainer/scripts/decode_latents.py",
+      "conflictType": "content",
+      "upstreamIntent": "Use the new video decoder and DiffVAE interfaces.",
+      "localIntent": "Keep local decode CLI behavior.",
+      "disposition": "Adopted the upstream decoder API while retaining the script entry point.",
+      "contract": "trainer-cli",
+      "proof": ["M2 trainer CLI smoke", "M2 AV evaluator suite"]
+    },
+    {
+      "path": "uv.lock",
+      "conflictType": "modify-delete",
+      "upstreamIntent": "Remove the obsolete root lock from the workspace.",
+      "localIntent": "Retain the prior environment resolution.",
+      "disposition": "Removed the root lock; isolated Studio locks stay untouched and M2 produces/checks the compatible release-runtime lock.",
+      "contract": "runtime-lock",
+      "proof": ["M2 uv lock --check", "M2 uv pip check"]
+    }
+  ]
+}

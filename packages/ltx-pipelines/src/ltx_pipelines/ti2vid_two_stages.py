@@ -1,8 +1,9 @@
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import torch
 
+from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_core.components.guiders import (
     MultiModalGuiderFactory,
     MultiModalGuiderParams,
@@ -13,22 +14,26 @@ from ltx_core.components.schedulers import LTX2Scheduler
 from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import Registry
 from ltx_core.model.transformer.compiling import CompilationConfig
-from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
+from ltx_core.model.video_vae import AUTO_TILING, AutoTiling, TilingConfig, get_video_chunks_number
+from ltx_core.model.video_vae.transformer import DiffVAEMode
 from ltx_core.quantization import QuantizationPolicy
 from ltx_core.types import Audio, VideoPixelShape
-from ltx_pipelines.utils.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
+    add_generated_keyframes_arg,
     default_2_stage_arg_parser,
     resolve_cli_params,
 )
 from ltx_pipelines.utils.blocks import (
     AudioDecoder,
     DiffusionStage,
+    DurationPredictor,
     ImageConditioner,
     PromptEncoder,
     VideoDecoder,
     VideoUpsampler,
+    require_num_frames_source,
+    resolve_num_frames,
 )
 from ltx_pipelines.utils.constants import (
     DISTILLED_SIGMAS,
@@ -41,10 +46,20 @@ from ltx_pipelines.utils.helpers import (
     assert_resolution,
     cap_image_conditioning_strength,
     combined_image_conditionings,
+    ensure_tiling_config,
+    generated_keyframe_conditionings,
     get_device,
+    has_generated_keyframes,
+    tiling_scale_factors_for_vae,
 )
-from ltx_pipelines.utils.media_io import encode_video
-from ltx_pipelines.utils.types import Denoiser, ModalitySpec, OffloadMode
+from ltx_pipelines.utils.media_io import (
+    HDRColorSpace,
+    encode_video,
+    resolve_hdr_color_space,
+    vae_dtype_for_hdr,
+)
+from ltx_pipelines.utils.model_paths import ModelPaths
+from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode
 
 
 def _stage_1_denoiser(
@@ -56,7 +71,7 @@ def _stage_1_denoiser(
     a_context_n: torch.Tensor,
     video_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
     audio_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
-) -> Denoiser:
+) -> SimpleDenoiser | FactoryGuidedDenoiser:
     if official_comfy_workflow:
         return SimpleDenoiser(v_context_p, a_context_p)
     return FactoryGuidedDenoiser(
@@ -120,10 +135,9 @@ class TI2VidTwoStagesPipeline:
 
     def __init__(  # noqa: PLR0913
         self,
-        checkpoint_path: str,
+        model_paths: ModelPaths,
         distilled_lora: list[LoraPathStrengthAndSDOps],
         spatial_upsampler_path: str,
-        gemma_root: str,
         loras: list[LoraPathStrengthAndSDOps],
         gemma_loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
         official_comfy_workflow: bool = False,
@@ -133,6 +147,8 @@ class TI2VidTwoStagesPipeline:
         compilation_config: CompilationConfig | None = None,
         offload_mode: OffloadMode = OffloadMode.NONE,
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
+        prompt_enhancer_gemma_root: str | None = None,
+        diffvae_optimization: DiffVAEMode = DiffVAEMode.CHUNKED_EAGER,
     ):
         self.device = device or get_device()
         self.dtype = torch.bfloat16
@@ -140,8 +156,7 @@ class TI2VidTwoStagesPipeline:
         self._official_comfy_workflow = official_comfy_workflow
 
         self.prompt_encoder = PromptEncoder(
-            checkpoint_path,
-            gemma_root,
+            model_paths,
             self.dtype,
             self.device,
             gemma_loras=gemma_loras,
@@ -149,12 +164,17 @@ class TI2VidTwoStagesPipeline:
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
             official_comfy_prompt_enhancement=official_comfy_workflow,
+            prompt_enhancer_gemma_root=prompt_enhancer_gemma_root,
         )
         self.image_conditioner = ImageConditioner(
-            checkpoint_path, self.dtype, self.device, registry=registry, alloc_trim_strategy=alloc_trim_strategy
+            model_paths.video_vae(),
+            self.dtype,
+            self.device,
+            registry=registry,
+            alloc_trim_strategy=alloc_trim_strategy,
         )
         self.upsampler = VideoUpsampler(
-            checkpoint_path,
+            model_paths.video_vae(),
             spatial_upsampler_path,
             self.dtype,
             self.device,
@@ -162,14 +182,30 @@ class TI2VidTwoStagesPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.video_decoder = VideoDecoder(
-            checkpoint_path, self.dtype, self.device, registry=registry, alloc_trim_strategy=alloc_trim_strategy
+            model_paths.video_vae(),
+            self.dtype,
+            self.device,
+            registry=registry,
+            alloc_trim_strategy=alloc_trim_strategy,
+            diffvae_optimization=diffvae_optimization,
         )
         self.audio_decoder = AudioDecoder(
-            checkpoint_path, self.dtype, self.device, registry=registry, alloc_trim_strategy=alloc_trim_strategy
+            model_paths.audio_vae(),
+            self.dtype,
+            self.device,
+            registry=registry,
+            alloc_trim_strategy=alloc_trim_strategy,
+        )
+        # None on checkpoints that predate DurationHead (LTX 2.5 / gemma4 only) -- __call__ requires
+        # an explicit num_frames in that case instead of crashing deep in a forward pass.
+        self.duration_predictor = DurationPredictor.from_checkpoint(
+            model_paths.duration_head_path,
+            self.dtype,
+            self.device,
         )
 
         self.stage_1 = DiffusionStage.from_checkpoint(
-            checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             loras=(*tuple(loras), *distilled_lora) if official_comfy_workflow else tuple(loras),
@@ -180,7 +216,7 @@ class TI2VidTwoStagesPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.stage_2 = DiffusionStage.from_checkpoint(
-            checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             loras=(*tuple(loras), *distilled_lora),
@@ -198,38 +234,61 @@ class TI2VidTwoStagesPipeline:
         seed: int,
         height: int,
         width: int,
-        num_frames: int,
         frame_rate: float,
         num_inference_steps: int,
         video_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
         audio_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
         images: list[ImageConditioningInput],
-        tiling_config: TilingConfig | None = None,
+        num_frames: int | AutoDuration = DEFAULT_AUTO_DURATION,
+        vae_dtype: torch.dtype | None = None,
+        tiling_config: TilingConfig | AutoTiling | None = AUTO_TILING,
         enhance_prompt: bool = False,
+        enhance_static_cache: bool = False,
         max_batch_size: int = 1,
         stage_1_sigmas: torch.Tensor | None = None,
         stage_2_sigmas: torch.Tensor = STAGE_2_DISTILLED_SIGMAS,
-    ) -> tuple[Iterator[torch.Tensor], Audio]:
+        color_space: HDRColorSpace | None = None,
+        generated_keyframes: int | Sequence[int] = 0,
+    ) -> tuple[Iterator[torch.Tensor], Audio, int, TilingConfig | None]:
+        require_num_frames_source(num_frames, self.duration_predictor)
+        images = self.image_conditioner.resolve_crf(images)
         assert_resolution(height=height, width=width, is_two_stage=True)
+        if has_generated_keyframes(generated_keyframes):
+            self.stage_1.assert_generated_keyframes_supported()
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
         dtype = torch.bfloat16
+        if vae_dtype is None:
+            vae_dtype = dtype
 
         ctx_p, ctx_n = self.prompt_encoder(
             [prompt, negative_prompt],
             enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=(
-                None
-                if self._official_comfy_workflow
-                else images[0][0]
-                if len(images) > 0
-                else None
-            ),
+            enhance_static_cache=enhance_static_cache,
+            enhance_prompt_image=images[0][0] if len(images) > 0 else None,
             enhance_prompt_seed=seed,
         )
         v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
         v_context_n, a_context_n = ctx_n.video_encoding, ctx_n.audio_encoding
+
+        num_frames = resolve_num_frames(
+            num_frames,
+            self.duration_predictor,
+            video_encoding=v_context_p,
+            audio_encoding=a_context_p,
+            frame_rate=frame_rate,
+        )
+
+        scale_factors = tiling_scale_factors_for_vae(self.video_decoder.checkpoint_path)
+        tiling_config = ensure_tiling_config(
+            tiling_config,
+            scale_factors=scale_factors,
+            vae_checkpoint_path=self.video_decoder.checkpoint_path,
+            video_shape=VideoPixelShape(batch=1, frames=num_frames, height=height, width=width, fps=frame_rate),
+            diffvae_optimization=self.video_decoder.diffvae_optimization,
+            device=self.device,
+        )
 
         # Stage 1: Generate video at half resolution with CFG guidance.
         stage_1_output_shape = VideoPixelShape(
@@ -252,8 +311,10 @@ class TI2VidTwoStagesPipeline:
                 video_encoder=enc,
                 dtype=dtype,
                 device=self.device,
+                color_space=color_space,
             )
         )
+        stage_1_conditionings.extend(generated_keyframe_conditionings(generated_keyframes, num_frames))
 
         sigmas = _stage_1_sigmas(
             official_comfy_workflow=self._official_comfy_workflow,
@@ -305,6 +366,7 @@ class TI2VidTwoStagesPipeline:
                 video_encoder=enc,
                 dtype=dtype,
                 device=self.device,
+                color_space=color_space,
             )
         )
 
@@ -333,7 +395,7 @@ class TI2VidTwoStagesPipeline:
         if video_state is None or stage_2_audio_state is None:
             raise RuntimeError("The second LTX-2.3 stage returned an incomplete AV latent.")
 
-        decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
+        decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
         decoded_audio = self.audio_decoder(
             _final_audio_latent(
                 official_comfy_workflow=self._official_comfy_workflow,
@@ -341,35 +403,36 @@ class TI2VidTwoStagesPipeline:
                 stage_2_audio_latent=stage_2_audio_state.latent,
             )
         )
-        return decoded_video, decoded_audio
+        return decoded_video, decoded_audio, num_frames, tiling_config
 
 
 @torch.inference_mode()
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     params = resolve_cli_params()
-    parser = default_2_stage_arg_parser(params=params)
+    parser = add_generated_keyframes_arg(default_2_stage_arg_parser(params=params, supports_auto_duration=True))
     parser.add_argument(
         "--official-comfy-workflow",
         action="store_true",
-        help="Use the official LTX-2.3 ComfyUI 8+3 schedule and apply the distilled LoRA in both stages.",
+        help="Use the official LTX-2.3 8+3 schedule and distilled LoRA in both stages.",
     )
     args = parser.parse_args()
     pipeline = TI2VidTwoStagesPipeline(
-        checkpoint_path=args.checkpoint_path,
+        model_paths=args.model_paths,
         distilled_lora=args.distilled_lora,
         spatial_upsampler_path=args.spatial_upsampler_path,
-        gemma_root=args.gemma_root,
         loras=tuple(args.lora) if args.lora else (),
         gemma_loras=tuple(args.gemma_lora) if args.gemma_lora else (),
         official_comfy_workflow=args.official_comfy_workflow,
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
+        prompt_enhancer_gemma_root=args.prompt_enhancer_gemma_root,
+        diffvae_optimization=args.diffvae_optimization,
     )
-    tiling_config = None if args.disable_tiling else TilingConfig.default()
-    video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
-    video, audio = pipeline(
+    hdr = resolve_hdr_color_space(images=args.images, hdr=args.hdr)
+    vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
+    video, audio, num_frames, tiling_config = pipeline(
         prompt=args.prompt,
         negative_prompt=args.negative_prompt,
         seed=args.seed,
@@ -395,9 +458,13 @@ def main() -> None:
             stg_blocks=args.audio_stg_blocks,
         ),
         images=args.images,
-        tiling_config=tiling_config,
+        vae_dtype=vae_dtype,
+        color_space=hdr,
         enhance_prompt=args.enhance_prompt,
+        enhance_static_cache=args.enhance_static_cache,
         max_batch_size=args.max_batch_size,
+        tiling_config=None if args.disable_tiling else AUTO_TILING,
+        generated_keyframes=args.num_generated_keyframes,
     )
 
     encode_video(
@@ -405,7 +472,8 @@ def main() -> None:
         fps=args.frame_rate,
         audio=audio,
         output_path=args.output_path,
-        video_chunks_number=video_chunks_number,
+        video_chunks_number=get_video_chunks_number(num_frames, tiling_config),
+        color_space=hdr,
     )
 
 

@@ -24,7 +24,7 @@ const expectedModules = {
   keyframes: "ltx_pipelines.flf2v",
   "image-audio-to-video": "ltx_pipelines.a2vid_two_stage",
   "audio-to-video": "ltx_pipelines.a2vid_two_stage",
-  lipdub: "ltx_pipelines.lipdub",
+  lipdub: "ltx_pipelines.dubit",
   retake: "ltx_pipelines.retake",
 } as const;
 
@@ -496,7 +496,7 @@ describe("buildCommand", () => {
     const plan = buildCommand(request);
     const args = plan.args;
 
-    expect(args.slice(0, 3)).toEqual(["-I", "-m", "ltx_pipelines.lipdub"]);
+    expect(args.slice(0, 3)).toEqual(["-I", "-m", "ltx_pipelines.dubit"]);
     expect(args).toEqual(expect.arrayContaining([
       "--pipeline-profile",
       "official-comfy-hq",

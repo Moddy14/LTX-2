@@ -8,6 +8,7 @@ from collections.abc import Iterator
 
 import torch
 
+from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.conditioning import AudioConditionByReferenceLatent, ConditioningItem
 from ltx_core.loader import LoraPathStrengthAndSDOps
@@ -18,8 +19,7 @@ from ltx_core.model.transformer.compiling import CompilationConfig
 from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
 from ltx_core.quantization import QuantizationPolicy
 from ltx_core.types import Audio, LatentState, VideoPixelShape
-from ltx_pipelines.lipdub import patchify_lipdub_audio_reference_latent
-from ltx_pipelines.utils.allocator_trim_strategy import AllocatorTrimStrategy
+from ltx_pipelines.dubit import patchify_dubit_audio_reference_latent
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     LoraAction,
@@ -50,6 +50,7 @@ from ltx_pipelines.utils.helpers import (
     modality_from_latent_state,
 )
 from ltx_pipelines.utils.media_io import decode_audio_from_file, encode_video
+from ltx_pipelines.utils.model_paths import ModelPaths
 from ltx_pipelines.utils.types import DenoisedLatentResult, ModalitySpec, OffloadMode
 
 _COMFY_LTX_SIGMA_SHIFT = 2.37
@@ -169,11 +170,11 @@ class IDLoraPipeline:
 
     def __init__(  # noqa: PLR0913
         self,
-        checkpoint_path: str,
+        checkpoint_path: str | ModelPaths,
         distilled_lora: tuple[LoraPathStrengthAndSDOps, ...],
         id_lora: LoraPathStrengthAndSDOps,
         spatial_upsampler_path: str,
-        gemma_root: str,
+        gemma_root: str | None = None,
         loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
@@ -182,11 +183,15 @@ class IDLoraPipeline:
         offload_mode: OffloadMode = OffloadMode.NONE,
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
     ) -> None:
+        model_paths = (
+            checkpoint_path
+            if isinstance(checkpoint_path, ModelPaths)
+            else ModelPaths.from_monolith(checkpoint_path, gemma_root)
+        )
         self.device = device or get_device()
         self.dtype = torch.bfloat16
         self.prompt_encoder = PromptEncoder(
-            checkpoint_path,
-            gemma_root,
+            model_paths,
             self.dtype,
             self.device,
             registry=registry,
@@ -194,21 +199,21 @@ class IDLoraPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.image_conditioner = ImageConditioner(
-            checkpoint_path,
+            model_paths.video_vae(),
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_conditioner = AudioConditioner(
-            checkpoint_path,
+            model_paths.audio_vae(),
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.stage_1 = DiffusionStage.from_checkpoint(
-            checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             loras=(*loras, *distilled_lora, id_lora),
@@ -219,7 +224,7 @@ class IDLoraPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.stage_2 = DiffusionStage.from_checkpoint(
-            checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             loras=(*loras, *distilled_lora),
@@ -230,7 +235,7 @@ class IDLoraPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.upsampler = VideoUpsampler(
-            checkpoint_path,
+            model_paths.video_vae(),
             spatial_upsampler_path,
             self.dtype,
             self.device,
@@ -238,14 +243,14 @@ class IDLoraPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.video_decoder = VideoDecoder(
-            checkpoint_path,
+            model_paths.video_vae(),
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_decoder = AudioDecoder(
-            checkpoint_path,
+            model_paths.audio_vae(),
             self.dtype,
             self.device,
             registry=registry,
@@ -260,7 +265,7 @@ class IDLoraPipeline:
         if audio is None:
             raise ValueError(f"No audio stream found in {reference_audio_path}")
         latent = self.audio_conditioner(lambda encoder: vae_encode_audio(audio, encoder, None))
-        patchified, positions = patchify_lipdub_audio_reference_latent(
+        patchified, positions = patchify_dubit_audio_reference_latent(
             latent,
             negative_positions=True,
             device=self.device,
@@ -435,11 +440,10 @@ def main() -> None:
         raise ValueError("Identity guidance requires 0 <= start <= end <= 1.")
 
     pipeline = IDLoraPipeline(
-        checkpoint_path=args.checkpoint_path,
+        checkpoint_path=args.model_paths,
         distilled_lora=tuple(args.distilled_lora),
         id_lora=args.id_lora[0],
         spatial_upsampler_path=args.spatial_upsampler_path,
-        gemma_root=args.gemma_root,
         loras=tuple(args.lora),
         quantization=args.quantization,
         compilation_config=args.compile,

@@ -15,7 +15,7 @@ const pipelineFiles = [
   "inoutpaint.py",
   "flf2v.py",
   "a2vid_two_stage.py",
-  "lipdub.py",
+  "dubit.py",
   "retake.py",
 ] as const;
 
@@ -28,10 +28,10 @@ describe("Python CLI source contract", () => {
     expect(source(filename)).toContain("enhance_prompt=args.enhance_prompt");
   });
 
-  it.each(pipelineFiles.filter((filename) => !["ti2vid_one_stage.py", "lipdub.py", "t2a_one_stage.py"].includes(filename)))(
+  it.each(pipelineFiles.filter((filename) => !["ti2vid_one_stage.py", "dubit.py", "t2a_one_stage.py"].includes(filename)))(
     "wires the VAE tiling switch in %s",
     (filename) => {
-      expect(source(filename)).toContain("None if args.disable_tiling else TilingConfig.default()");
+      expect(source(filename)).toContain("None if args.disable_tiling else");
     },
   );
 
@@ -56,9 +56,9 @@ describe("Python CLI source contract", () => {
     expect(flfSource).toContain("image_conditionings_by_adding_guiding_latent");
     expect(flfSource).toContain("len(images) != 2");
     expect(flfSource).toContain("images[1].frame_idx != num_frames - 1");
-    expect(flfSource).toContain("EulerAncestralRFDiffusionStep(eta=0.0, s_noise=1.0)");
+    expect(flfSource).toContain("EulerAncestralDiffusionStep(eta=0.0, s_noise=1.0)");
     expect(flfSource).toContain("_official_flf_stepper()");
-    expect(flfSource).toContain("euler_ancestral_rf_denoising_loop");
+    expect(flfSource).toContain("euler_ancestral_denoising_loop");
     expect(flfSource).toContain("noise_seed=seed");
     expect(flfSource).not.toContain("VideoUpsampler");
     expect(flfSource).not.toContain("STAGE_2_DISTILLED_SIGMAS");
@@ -85,9 +85,9 @@ describe("Python CLI source contract", () => {
   });
 
   it("supports both the official Comfy HQ and reproducible legacy LipDub CLI contracts", () => {
-    const lipdubSource = source("lipdub.py");
+    const lipdubSource = source("dubit.py");
     const argsSource = source("utils/args.py");
-    expect(argsSource).toContain("def lipdub_arg_parser");
+    expect(argsSource).toContain("def dubit_arg_parser");
     expect(argsSource).toContain('"--reference-video"');
     expect(argsSource).toContain('"--pipeline-profile"');
     expect(argsSource).toContain('"--distilled-lora"');
@@ -128,8 +128,8 @@ describe("Python CLI source contract", () => {
     expect(icLoraSource).toContain('"--freeze-control-audio"');
     expect(icLoraSource).toContain('"--checkpoint-path"');
     expect(icLoraSource).toContain("preprocess_control_video(");
-    expect(icLoraSource).toContain("EulerAncestralRFDiffusionStep()");
-    expect(icLoraSource).toContain("euler_ancestral_rf_denoising_loop");
+    expect(icLoraSource).toContain("EulerAncestralDiffusionStep()");
+    expect(icLoraSource).toContain("euler_ancestral_denoising_loop");
     expect(icLoraSource).toContain("EulerCfgPpDiffusionStep(");
     expect(icLoraSource).toContain("euler_cfg_pp_denoising_loop");
     expect(icLoraSource).toContain("force_uncond_pass=True");

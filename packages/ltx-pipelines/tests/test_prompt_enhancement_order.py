@@ -13,7 +13,7 @@ from ltx_pipelines.utils import blocks
 def test_i2v_system_prompt_has_one_mode_specific_preamble() -> None:
     prompt_path = (
         Path(__file__).parents[2]
-        / "ltx-core/src/ltx_core/text_encoders/gemma/encoders/prompts/gemma_i2v_system_prompt.txt"
+        / "ltx-core/src/ltx_core/text_encoders/gemma/encoders/prompts/gemma3_i2v_system_prompt.txt"
     )
     prompt = prompt_path.read_text(encoding="utf-8")
     first_line = prompt.splitlines()[0]
@@ -47,11 +47,14 @@ def test_gemma_enhancement_reuses_text_encoder_for_encoding(monkeypatch: pytest.
         yield model
 
     encoder = object.__new__(blocks.PromptEncoder)
-    encoder._gemma_root = "gemma"
-    encoder._checkpoint_path = "checkpoint"
+    encoder._text_encoder_path = "gemma"
+    encoder._embeddings_paths = ("checkpoint",)
     encoder._alloc_trim_strategy = None
-    encoder._enhancement_text_encoder_builder = None
-    encoder._official_comfy_prompt_enhancement = False
+    shared_builder = object()
+    encoder._text_encoder_builder = shared_builder
+    encoder._enhancer_text_encoder_builder = shared_builder
+    encoder._encode_model_type = "gemma3"
+    encoder._prompt_enhancer_gemma_root = None
     encoder._text_encoder_ctx = lambda: fake_context(FakeTextEncoder())
     encoder._build_embeddings_processor = lambda: FakeEmbeddingsProcessor()
 
@@ -100,14 +103,15 @@ def test_official_comfy_enhancement_uses_lora_encoder_only_for_generation(
         yield model
 
     encoder = object.__new__(blocks.PromptEncoder)
-    encoder._gemma_root = "gemma"
-    encoder._checkpoint_path = "checkpoint"
+    encoder._text_encoder_path = "gemma"
+    encoder._embeddings_paths = ("checkpoint",)
     encoder._alloc_trim_strategy = None
-    encoder._enhancement_text_encoder_builder = object()
-    encoder._official_comfy_prompt_enhancement = True
-    encoder._text_encoder_ctx = lambda *, enhancement=False: fake_context(
-        FakeEnhancementEncoder() if enhancement else FakeEncodingEncoder(),
-    )
+    encoder._text_encoder_builder = object()
+    encoder._enhancer_text_encoder_builder = object()
+    encoder._encode_model_type = "gemma3"
+    encoder._prompt_enhancer_gemma_root = None
+    encoder._build_enhancer_text_encoder = lambda: FakeEnhancementEncoder()
+    encoder._text_encoder_ctx = lambda: fake_context(FakeEncodingEncoder())
     encoder._build_embeddings_processor = lambda: FakeEmbeddingsProcessor()
 
     def fake_gpu_model(model: object, alloc_trim_strategy: object | None = None):
@@ -129,12 +133,8 @@ def test_official_comfy_enhancement_uses_lora_encoder_only_for_generation(
             (
                 "prompt",
                 {
-                    "max_new_tokens": 2048,
-                    "seed": 0,
-                    "top_k": 64,
-                    "top_p": 0.95,
-                    "min_p": 0.05,
-                    "repetition_penalty": 1.05,
+                    "seed": 99,
+                    "static_cache": False,
                 },
             ),
         ),

@@ -42,7 +42,7 @@ const MODULES: Record<PipelineMode, string> = {
   keyframes: "ltx_pipelines.flf2v",
   "image-audio-to-video": "ltx_pipelines.a2vid_two_stage",
   "audio-to-video": "ltx_pipelines.a2vid_two_stage",
-  lipdub: "ltx_pipelines.lipdub",
+  lipdub: "ltx_pipelines.dubit",
   retake: "ltx_pipelines.retake",
 };
 

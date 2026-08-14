@@ -12,4 +12,4 @@ def test_cli_help_formats_guidance_modulo_expression() -> None:
 
     assert "step_index % (N + 1) == 0" in normalized_help
     assert "--enhance-prompt" in help_text
-    assert "same Gemma text encoder" in normalized_help
+    assert "Gemma 3 encode root is reused" in normalized_help

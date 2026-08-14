@@ -3,6 +3,7 @@ from functools import partial
 
 import torch
 
+from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_core.components.diffusion_steps import EulerCfgPpDiffusionStep
 from ltx_core.components.guiders import (
     MultiModalGuiderFactory,
@@ -18,7 +19,6 @@ from ltx_core.model.transformer.compiling import CompilationConfig
 from ltx_core.quantization import QuantizationPolicy
 from ltx_core.types import Audio
 from ltx_pipelines.utils import get_device
-from ltx_pipelines.utils.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_pipelines.utils.args import (
     default_1_stage_t2a_arg_parser,
     resolve_cli_params,
@@ -26,13 +26,17 @@ from ltx_pipelines.utils.args import (
 from ltx_pipelines.utils.blocks import (
     AudioDecoder,
     DiffusionStage,
+    DurationPredictor,
     PromptEncoder,
+    require_num_frames_source,
+    resolve_num_frames,
 )
 from ltx_pipelines.utils.constants import DISTILLED_SIGMAS
 from ltx_pipelines.utils.denoisers import FactoryGuidedDenoiser
 from ltx_pipelines.utils.media_io import encode_audio
+from ltx_pipelines.utils.model_paths import ModelPaths
 from ltx_pipelines.utils.samplers import euler_cfg_pp_denoising_loop
-from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
+from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode
 
 # Placeholder pixel dimensions used for ``VideoPixelShape`` construction.
 # Audio-only generation reads ``frames`` and ``fps`` from the pixel shape via
@@ -52,8 +56,7 @@ class T2AOneStagePipeline:
 
     def __init__(
         self,
-        checkpoint_path: str,
-        gemma_root: str,
+        model_paths: ModelPaths,
         loras: list[LoraPathStrengthAndSDOps],
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
@@ -61,25 +64,26 @@ class T2AOneStagePipeline:
         compilation_config: CompilationConfig | None = None,
         offload_mode: OffloadMode = OffloadMode.NONE,
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
+        prompt_enhancer_gemma_root: str | None = None,
     ):
         self.dtype = torch.bfloat16
         self.device = device or get_device()
         self._scheduler = LTX2Scheduler()
         self.prompt_encoder = PromptEncoder(
-            checkpoint_path=checkpoint_path,
-            gemma_root=gemma_root,
+            model_paths,
             dtype=self.dtype,
             device=self.device,
             registry=registry,
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
+            prompt_enhancer_gemma_root=prompt_enhancer_gemma_root,
         )
         # Audio-only: build an audio-only transformer (model_configurator) so the video
         # weights are never instantiated, plus a use-case-specific SDOps that restricts
         # checkpoint reads to the audio model's keys, so the video weights are never even
         # read from disk (the loader skips any key the SDOps maps to None).
         self.stage = DiffusionStage.from_checkpoint(
-            checkpoint_path=checkpoint_path,
+            model_paths.transformer(),
             dtype=self.dtype,
             device=self.device,
             loras=tuple(loras),
@@ -92,38 +96,52 @@ class T2AOneStagePipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_decoder = AudioDecoder(
-            checkpoint_path=checkpoint_path,
+            model_paths.audio_vae(),
             dtype=self.dtype,
             device=self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
+        # None on checkpoints that predate DurationHead (LTX 2.5 / gemma4 only) -- __call__ requires
+        # an explicit num_frames in that case instead of crashing deep in a forward pass.
+        self.duration_predictor = DurationPredictor.from_checkpoint(
+            checkpoint_path=model_paths.duration_head_path,
+            dtype=self.dtype,
+            device=self.device,
+        )
 
-    def __call__(
+    def __call__(  # noqa: PLR0913
         self,
         prompt: str,
         negative_prompt: str,
         seed: int,
-        num_frames: int,
         frame_rate: float,
         num_inference_steps: int,
         audio_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
+        num_frames: int | AutoDuration = DEFAULT_AUTO_DURATION,
         enhance_prompt: bool = False,
+        enhance_static_cache: bool = False,
         max_batch_size: int = 1,
         sigmas: torch.Tensor | None = None,
         official_comfy_workflow: bool = False,
     ) -> Audio:
+        require_num_frames_source(num_frames, self.duration_predictor)
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
 
         ctx_p, ctx_n = self.prompt_encoder(
             [prompt, negative_prompt],
             enhance_first_prompt=enhance_prompt,
+            enhance_static_cache=enhance_static_cache,
             enhance_prompt_image=None,
             enhance_prompt_seed=seed,
         )
         a_context_p = ctx_p.audio_encoding
         a_context_n = ctx_n.audio_encoding
+
+        num_frames = resolve_num_frames(
+            num_frames, self.duration_predictor, video_encoding=None, audio_encoding=a_context_p, frame_rate=frame_rate
+        )
 
         resolved_sigmas = (
             sigmas
@@ -131,8 +149,7 @@ class T2AOneStagePipeline:
             else DISTILLED_SIGMAS
             if official_comfy_workflow
             else self._scheduler.execute(steps=num_inference_steps)
-        )
-        resolved_sigmas = resolved_sigmas.to(
+        ).to(
             dtype=torch.float32, device=self.device
         )
 
@@ -189,12 +206,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     pipeline = T2AOneStagePipeline(
-        checkpoint_path=args.checkpoint_path,
-        gemma_root=args.gemma_root,
+        model_paths=args.model_paths,
         loras=tuple(args.lora) if args.lora else (),
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
+        prompt_enhancer_gemma_root=args.prompt_enhancer_gemma_root,
     )
     audio = pipeline(
         prompt=args.prompt,
@@ -213,8 +230,9 @@ def main() -> None:
             skip_step=args.audio_skip_step,
             stg_blocks=args.audio_stg_blocks,
         ),
-        max_batch_size=args.max_batch_size,
         enhance_prompt=args.enhance_prompt,
+        enhance_static_cache=args.enhance_static_cache,
+        max_batch_size=args.max_batch_size,
         official_comfy_workflow=args.official_comfy_workflow,
     )
 

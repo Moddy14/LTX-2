@@ -1,7 +1,7 @@
 import torch
 
 from ltx_core.components.diffusion_steps import (
-    EulerAncestralRFDiffusionStep,
+    EulerAncestralDiffusionStep,
     EulerCfgPpDiffusionStep,
     EulerDiffusionStep,
 )
@@ -13,7 +13,7 @@ def test_euler_ancestral_rf_matches_comfy_formula() -> None:
     noise = torch.tensor([-0.2, 0.4], dtype=torch.float32)
     sigmas = torch.tensor([1.0, 0.725, 0.0], dtype=torch.float32)
 
-    actual = EulerAncestralRFDiffusionStep().step(
+    actual = EulerAncestralDiffusionStep().step(
         sample,
         denoised,
         sigmas,
@@ -43,7 +43,7 @@ def test_euler_ancestral_rf_eta_zero_matches_deterministic_euler() -> None:
     denoised = torch.tensor([0.75, 0.125], dtype=torch.float32)
     sigmas = torch.tensor([1.0, 0.725, 0.0], dtype=torch.float32)
 
-    ancestral = EulerAncestralRFDiffusionStep(eta=0).step(
+    ancestral = EulerAncestralDiffusionStep(eta=0).step(
         sample,
         denoised,
         sigmas,
@@ -59,7 +59,7 @@ def test_euler_ancestral_rf_final_step_returns_denoised_sample() -> None:
     denoised = torch.tensor([0.75], dtype=torch.float32)
     sigmas = torch.tensor([0.725, 0.0], dtype=torch.float32)
 
-    actual = EulerAncestralRFDiffusionStep().step(
+    actual = EulerAncestralDiffusionStep().step(
         sample,
         denoised,
         sigmas,

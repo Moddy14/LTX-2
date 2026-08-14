@@ -21,6 +21,7 @@ from typing import Literal
 
 import torch
 
+from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_core.components.diffusion_steps import EulerCfgPpDiffusionStep
 from ltx_core.components.guiders import MultiModalGuiderParams, create_multimodal_guider_factory
 from ltx_core.components.noisers import GaussianNoiser
@@ -30,7 +31,6 @@ from ltx_core.model.audio_vae import encode_audio as vae_encode_audio
 from ltx_core.model.video_vae import TilingConfig, VideoEncoder
 from ltx_core.types import Audio, AudioLatentShape, VideoPixelShape
 from ltx_pipelines.iclora_utils import append_ic_lora_reference_tensor_conditioning
-from ltx_pipelines.utils.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_pipelines.utils.args import basic_arg_parser, resolve_cli_params, resolve_existing_path
 from ltx_pipelines.utils.blocks import (
     AudioConditioner,
@@ -55,6 +55,7 @@ from ltx_pipelines.utils.media_io import (
     encode_video,
     video_preprocess,
 )
+from ltx_pipelines.utils.model_paths import ModelPaths
 from ltx_pipelines.utils.samplers import euler_cfg_pp_denoising_loop
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
@@ -162,8 +163,8 @@ def _vae_range(video: torch.Tensor) -> torch.Tensor:
 class InOutpaintPipeline:
     def __init__(  # noqa: PLR0913
         self,
-        checkpoint_path: str,
-        gemma_root: str,
+        checkpoint_path: str | ModelPaths,
+        gemma_root: str | None,
         loras: tuple[LoraPathStrengthAndSDOps, ...],
         *,
         device: torch.device | None = None,
@@ -171,11 +172,15 @@ class InOutpaintPipeline:
         offload_mode: OffloadMode = OffloadMode.NONE,
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
     ) -> None:
+        model_paths = (
+            checkpoint_path
+            if isinstance(checkpoint_path, ModelPaths)
+            else ModelPaths.from_monolith(checkpoint_path, gemma_root)
+        )
         self.device = device or get_device()
         self.dtype = torch.bfloat16
         self.prompt_encoder = PromptEncoder(
-            checkpoint_path,
-            gemma_root,
+            model_paths,
             self.dtype,
             self.device,
             official_comfy_prompt_enhancement=True,
@@ -183,25 +188,25 @@ class InOutpaintPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.image_conditioner = ImageConditioner(
-            checkpoint_path,
+            model_paths.video_vae(),
             self.dtype,
             self.device,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_conditioner = AudioConditioner(
-            checkpoint_path,
+            model_paths.audio_vae(),
             self.dtype,
             self.device,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.video_decoder = VideoDecoder(
-            checkpoint_path,
+            model_paths.video_vae(),
             self.dtype,
             self.device,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_decoder = AudioDecoder(
-            checkpoint_path,
+            model_paths.audio_vae(),
             self.dtype,
             self.device,
             alloc_trim_strategy=alloc_trim_strategy,
@@ -213,13 +218,13 @@ class InOutpaintPipeline:
             "alloc_trim_strategy": alloc_trim_strategy,
         }
         self.stage_1 = DiffusionStage.from_checkpoint(
-            checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             **stage_options,
         )
         self.stage_2 = DiffusionStage.from_checkpoint(
-            checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             **stage_options,
@@ -511,8 +516,8 @@ def main() -> None:
         )
 
     pipeline = InOutpaintPipeline(
-        checkpoint_path=args.checkpoint_path,
-        gemma_root=args.gemma_root,
+        checkpoint_path=args.model_paths,
+        gemma_root=None,
         loras=tuple(args.lora),
         quantization=args.quantization,
         offload_mode=args.offload_mode,

@@ -6,7 +6,7 @@ Full reference for each pipeline. See the [Pipeline Selection Guide](pipeline-se
 
 ## 1. TI2VidTwoStagesPipeline
 
-**Best for:** High-quality text/image-to-video generation with upsampling. **Recommended for production use.**
+**Best for:** High-quality text/image-to-video generation with upsampling.
 
 **Source**: [`src/ltx_pipelines/ti2vid_two_stages.py`](../src/ltx_pipelines/ti2vid_two_stages.py)
 
@@ -44,7 +44,7 @@ Single-stage generation (no upsampling) with [multimodal guidance](multimodal-gu
 
 ## 4. DistilledPipeline
 
-**Best for:** Fastest inference with good quality using a distilled model with predefined sigma schedule.
+**Best for:** Fastest inference with good quality using a distilled model with predefined sigma schedule. **Recommended default.**
 
 **Source**: [`src/ltx_pipelines/distilled.py`](../src/ltx_pipelines/distilled.py)
 
@@ -118,7 +118,9 @@ Single-stage generation that encodes the source video and audio into latents, ap
 
 **Source**: [`src/ltx_pipelines/hdr_ic_lora.py`](../src/ltx_pipelines/hdr_ic_lora.py)
 
-Two-stage video-to-video on the distilled model with an HDR IC-LoRA. Decoded latents pass through an HDR inverse transform (ARRI LogC3, auto-detected from LoRA metadata) to produce a **linear HDR float** tensor `[f, h, w, c]`. Video-only (audio skipped). Text embeddings are pre-computed externally and loaded from a `.safetensors` file. Tonemapping and EXR saving are the caller's responsibility. LoRA and embeddings: [`Lightricks/LTX-2.3-22b-IC-LoRA-HDR`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-HDR).
+Two-stage video-to-video on the distilled model with an HDR IC-LoRA. Decoded latents pass through an HDR inverse transform (ARRI LogC3) to produce a **linear HDR float** tensor `[f, h, w, c]`. Video-only (audio skipped). Text embeddings are pre-computed externally and loaded from a `.safetensors` file. Tonemapping and EXR saving are the caller's responsibility. LoRA and embeddings: [`Lightricks/LTX-2.3-22b-IC-LoRA-HDR`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-HDR).
+
+This path is separate from native EXR/`--hdr` support on the other pipelines (see [HDR Support](hdr.md)). Prefer `--hdr` + distilled / retake / TI2V when you already have EXR plates and want first-class EXR+HLG I/O without an HDR IC-LoRA.
 
 **Extra CLI arguments:** `--input` (mp4 or directory, required), `--output-dir` (required), `--hdr-lora` (required), `--text-embeddings` (pre-computed `.safetensors`, required), `--num-frames`, `--spatial-tile` (tiled VAE decode tile size; reduce on lower-VRAM GPUs), `--skip-mp4` (EXR only, no H.264 preview), `--exr-half` (float16 EXR), `--high-quality` (generates 2x frames internally for smoother output, ~2x slower), `--offload {none,cpu,disk}` (weight offloading; disables FP8 quantization when not `none`).
 
@@ -126,22 +128,15 @@ Two-stage video-to-video on the distilled model with an HDR IC-LoRA. Decoded lat
 
 ---
 
-## 10. LipDubPipeline
+## 10. DubItPipeline
 
-**Best for:** Lip dubbing, rephrasing while keeping the same speaker identity and matching lip movements to new audio.
+**Best for:** Dub-It — rephrasing while keeping the same speaker identity and matching lip movements to new audio.
 
-**Source**: [`src/ltx_pipelines/lipdub.py`](../src/ltx_pipelines/lipdub.py)
+**Source**: [`src/ltx_pipelines/dubit.py`](../src/ltx_pipelines/dubit.py)
 
-Offers two explicit, reproducible profiles. `official-comfy-hq` mirrors the published ComfyUI workflow: the **dev**
-checkpoint, distilled 1.1 LoRA at `0.5`, and the lip-dub IC-LoRA at `1.0` in both stages, with the published Euler
-sigma schedules and an independent second-stage seed. `native-distilled` preserves the original **distilled**
-checkpoint plus single lip-dub IC-LoRA path. The reference clip provides video and audio reference tokens whose VAE
-latents are appended to the target audio sequence as frozen reference tokens. The frame count and frame rate are
-derived from the reference video (frame count is silently snapped to the nearest `8k+1`), so the CLI does not accept
-`--num-frames` or `--frame-rate`. Required: `--reference-video`. Optional: `--reference-strength`. LoRA:
-[`Lightricks/LTX-2.3-22b-IC-LoRA-LipDub`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-LipDub).
+Uses IC-LoRA on a **distilled** checkpoint with a **single** Dub-It IC-LoRA applied in **both** stages. The reference clip provides video and audio reference tokens whose VAE latents are appended to the target audio sequence as frozen reference tokens. The frame count and frame rate are derived from the reference video (frame count is silently snapped to the nearest `8k+1`), so the CLI does not accept `--num-frames` or `--frame-rate`. Required: `--reference-video`. Optional: `--reference-strength`. LoRA: [`Lightricks/LTX-2.3-22b-IC-LoRA-DubIt`](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-DubIt).
 
-**Note:** Requires a distilled model checkpoint and one lip-dub IC-LoRA (`--lora` exactly once).
+**Note:** Requires a distilled model checkpoint and one Dub-It IC-LoRA (`--lora` exactly once).
 
 **Use when:** Dubbing, rephrasing with matched lips and speaker identity.
 
@@ -161,39 +156,30 @@ Single-stage, **audio-only** generation: the video branch is absent (`video=None
 
 ---
 
-## 12. FLF2VPipeline
+## 12. DFRPipeline
 
-**Best for:** The current LTX-2.3 first/last-frame ComfyUI workflow.
+**Best for:** Maximum detail fidelity — generating at half resolution with extra generated keyframes, then re-rendering at full resolution with a spatial detailing LoRA, optionally densifying time by 2x or 4x.
 
-**Source**: [`src/ltx_pipelines/flf2v.py`](../src/ltx_pipelines/flf2v.py)
+**Source**: [`src/ltx_pipelines/dfr_pipeline.py`](../src/ltx_pipelines/dfr_pipeline.py)
 
-Runs the distilled-FP8 model in one fixed eight-step stage. It requires exactly
-two image guides: frame `0` and the final `8k` frame. It does not add a
-transformer LoRA or spatial upscaler.
+Diffusion Fidelity Rendering runs the distilled sigma schedule on a full checkpoint with a distilled LoRA. Stage 1 generates video **and [generated keyframe slots](conditioning.md#generated-keyframe-slots)** at half resolution, placing slots on an 8-frame-border segment grid; the half-resolution result is kept as a reference while video and keyframes are upsampled in latent space. Stage 2 re-denoises at full resolution with the distilled LoRA plus an optional 2x spatial detailing IC-LoRA, conditioned on the stage-1 reference.
 
----
+Audio comes from **stage 1**. Stage 2 still runs an audio pass, because the video branch needs the cross-modal attention, but nothing refines audio after stage 1.
 
-## 13. IDLoraPipeline
+**Temporal refinement (optional).** `--temporal-upsample-rounds {0,1,2}` adds rounds that each double the frame rate: the canvas is upsampled temporally, split into `2**round` tiles that meet at shared keyframes, given fresh mid-segment slots, and densified with ancestral Euler. Whatever padding the canvas needs internally, you always get `(num_frames - 1) * 2**rounds + 1` frames back.
 
-**Best for:** TalkVid person and speaker identity from one image and a short reference recording.
+**Extra CLI arguments:** `--detailing-lora PATH [STRENGTH]` (optional, off by default), `--temporal-upsampler-path` (required when rounds > 0), `--temporal-upsample-rounds {0,1,2}`. Unlike the other keyframe-capable pipelines, DFR does **not** take `--num-generated-keyframes` — it derives slot positions from its own segment grid.
 
-**Source**: [`src/ltx_pipelines/id_lora.py`](../src/ltx_pipelines/id_lora.py)
+```bash
+uv run python -m ltx_pipelines.dfr_pipeline \
+    --checkpoint-path         models/ltx-2.5/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors \
+    --distilled-lora          models/ltx-2.5/loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors \
+    --spatial-upsampler-path  models/ltx-2.5/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors \
+    --temporal-upsampler-path models/ltx-2.5/latent_upscale_models/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors \
+    --temporal-upsample-rounds 1 \
+    --num-frames 121 --output-path output.mp4 --prompt "..."
+```
 
-Mirrors the current ComfyUI ID-LoRA graph: dev FP8, dynamic-rank distilled LoRA
-at `0.5`, TalkVid ID-LoRA at `1.0`, identity guidance `3/0/1`, image strengths
-`0.7` then `1.0`, fixed eight-step generation and the independent seed-42
-three-step x2 refinement.
+**Note:** Requires a checkpoint that supports generated keyframe slots (LTX-2.5 and later) and a distilled LoRA.
 
----
-
-## 14. InOutpaintPipeline
-
-**Best for:** Masked video repair and centered canvas extension.
-
-**Source**: [`src/ltx_pipelines/inoutpaint.py`](../src/ltx_pipelines/inoutpaint.py)
-
-Implements the published two-stage In-/Outpainting graph with green-screen
-masked conditioning, source audio frozen across both stages, ancestral CFG++
-generation, deterministic CFG++ refinement, per-stage mask dilation, and
-Laplacian-pyramid blending. Inpainting requires `--mask-video`; outpainting
-derives its padding mask from `--width` and `--height`.
+**Use when:** Detail fidelity matters more than wall-clock time, or you want a higher effective frame rate than the base model produces.

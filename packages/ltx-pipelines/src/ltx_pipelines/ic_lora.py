@@ -6,7 +6,8 @@ from typing import Literal
 
 import torch
 
-from ltx_core.components.diffusion_steps import EulerAncestralRFDiffusionStep, EulerCfgPpDiffusionStep
+from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
+from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep, EulerCfgPpDiffusionStep
 from ltx_core.components.guiders import MultiModalGuiderParams, create_multimodal_guider_factory
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.conditioning import ConditioningItem
@@ -14,7 +15,8 @@ from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import Registry
 from ltx_core.model.audio_vae import encode_audio as vae_encode_audio
 from ltx_core.model.transformer.compiling import CompilationConfig
-from ltx_core.model.video_vae import TilingConfig, VideoEncoder, get_video_chunks_number
+from ltx_core.model.video_vae import AUTO_TILING, AutoTiling, TilingConfig, VideoEncoder, get_video_chunks_number
+from ltx_core.model.video_vae.transformer import DiffVAEMode
 from ltx_core.quantization import QuantizationPolicy
 from ltx_core.types import Audio, AudioLatentShape, VideoPixelShape
 from ltx_pipelines.iclora_utils import (
@@ -22,7 +24,6 @@ from ltx_pipelines.iclora_utils import (
     read_lora_reference_downscale_factor,
     read_lora_reference_temporal_scale_factor,
 )
-from ltx_pipelines.utils.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     VideoConditioningAction,
@@ -49,15 +50,21 @@ from ltx_pipelines.utils.helpers import (
     assert_resolution,
     combined_image_conditionings,
     conform_latent_length,
+    ensure_tiling_config,
     get_device,
+    tiling_scale_factors_for_vae,
 )
 from ltx_pipelines.utils.media_io import (
+    HDRColorSpace,
     decode_audio_from_file,
     decode_video_by_frame,
     encode_video,
+    resolve_hdr_color_space,
+    vae_dtype_for_hdr,
     video_preprocess,
 )
-from ltx_pipelines.utils.samplers import euler_ancestral_rf_denoising_loop, euler_cfg_pp_denoising_loop
+from ltx_pipelines.utils.model_paths import ModelPaths
+from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop, euler_cfg_pp_denoising_loop
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
 OfficialICLoraSampler = Literal[
@@ -84,9 +91,8 @@ class ICLoraPipeline:
 
     def __init__(  # noqa: PLR0913
         self,
-        distilled_checkpoint_path: str,
+        model_paths: ModelPaths,
         spatial_upsampler_path: str | None,
-        gemma_root: str,
         loras: list[LoraPathStrengthAndSDOps],
         gemma_loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
         official_comfy_workflow: bool = False,
@@ -97,7 +103,9 @@ class ICLoraPipeline:
         compilation_config: CompilationConfig | None = None,
         offload_mode: OffloadMode = OffloadMode.NONE,
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
-    ):
+        prompt_enhancer_gemma_root: str | None = None,
+        diffvae_optimization: DiffVAEMode = DiffVAEMode.CHUNKED_EAGER,
+    ) -> None:
         self.device = device or get_device()
         self.dtype = torch.bfloat16
         self._official_comfy_workflow = official_comfy_workflow
@@ -106,8 +114,7 @@ class ICLoraPipeline:
             raise ValueError("An official Comfy sampler can only be selected with official_comfy_workflow=True")
 
         self.prompt_encoder = PromptEncoder(
-            distilled_checkpoint_path,
-            gemma_root,
+            model_paths,
             self.dtype,
             self.device,
             gemma_loras=gemma_loras,
@@ -115,16 +122,17 @@ class ICLoraPipeline:
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
             official_comfy_prompt_enhancement=official_comfy_workflow,
+            prompt_enhancer_gemma_root=prompt_enhancer_gemma_root,
         )
         self.image_conditioner = ImageConditioner(
-            distilled_checkpoint_path,
+            model_paths.video_vae(),
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.stage_1 = DiffusionStage.from_checkpoint(
-            distilled_checkpoint_path,
+            model_paths.transformer(),
             self.dtype,
             self.device,
             loras=tuple(loras),
@@ -140,7 +148,7 @@ class ICLoraPipeline:
             if spatial_upsampler_path is None:
                 raise ValueError("The two-stage IC-LoRA path requires a spatial upsampler.")
             self.stage_2 = DiffusionStage.from_checkpoint(
-                distilled_checkpoint_path,
+                model_paths.transformer(),
                 self.dtype,
                 self.device,
                 loras=(),
@@ -151,7 +159,7 @@ class ICLoraPipeline:
                 alloc_trim_strategy=alloc_trim_strategy,
             )
             self.upsampler = VideoUpsampler(
-                distilled_checkpoint_path,
+                model_paths.video_vae(),
                 spatial_upsampler_path,
                 self.dtype,
                 self.device,
@@ -159,21 +167,22 @@ class ICLoraPipeline:
                 alloc_trim_strategy=alloc_trim_strategy,
             )
         self.video_decoder = VideoDecoder(
-            distilled_checkpoint_path,
+            model_paths.video_vae(),
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
+            diffvae_optimization=diffvae_optimization,
         )
         self.audio_decoder = AudioDecoder(
-            distilled_checkpoint_path,
+            model_paths.audio_vae(),
             self.dtype,
             self.device,
             registry=registry,
             alloc_trim_strategy=alloc_trim_strategy,
         )
         self.audio_conditioner = AudioConditioner(
-            distilled_checkpoint_path,
+            model_paths.audio_vae(),
             self.dtype,
             self.device,
             registry=registry,
@@ -217,7 +226,9 @@ class ICLoraPipeline:
         video_conditioning: list[tuple[str, float]],
         negative_prompt: str = "",
         enhance_prompt: bool = False,
-        tiling_config: TilingConfig | None = None,
+        enhance_static_cache: bool = False,
+        vae_dtype: torch.dtype | None = None,
+        tiling_config: TilingConfig | AutoTiling | None = AUTO_TILING,
         conditioning_attention_strength: float = 1.0,
         skip_stage_2: bool = False,
         conditioning_attention_mask: torch.Tensor | None = None,
@@ -225,7 +236,8 @@ class ICLoraPipeline:
         freeze_control_audio_path: str | None = None,
         stage_1_sigmas: torch.Tensor = DISTILLED_SIGMAS,
         stage_2_sigmas: torch.Tensor = STAGE_2_DISTILLED_SIGMAS,
-    ) -> tuple[Iterator[torch.Tensor], Audio]:
+        color_space: HDRColorSpace | None = None,
+    ) -> tuple[Iterator[torch.Tensor], Audio, TilingConfig | None]:
         """
         Generate video with IC-LoRA conditioning.
         Args:
@@ -258,11 +270,8 @@ class ICLoraPipeline:
         Returns:
             Tuple of (video_iterator, audio_tensor).
         """
-        assert_resolution(
-            height=height,
-            width=width,
-            is_two_stage=not self._official_comfy_workflow,
-        )
+        images = self.image_conditioner.resolve_crf(images)
+        assert_resolution(height=height, width=width, is_two_stage=not self._official_comfy_workflow)
         if not (0.0 <= conditioning_attention_strength <= 1.0):
             raise ValueError(
                 f"conditioning_attention_strength must be in [0.0, 1.0], got {conditioning_attention_strength}"
@@ -270,6 +279,8 @@ class ICLoraPipeline:
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
+        if vae_dtype is None:
+            vae_dtype = self.dtype
 
         cfg_pp = self._official_comfy_workflow and self._official_comfy_sampler in {
             "euler-ancestral-cfg-pp",
@@ -278,6 +289,7 @@ class ICLoraPipeline:
         contexts = self.prompt_encoder(
             [prompt, negative_prompt] if cfg_pp else [prompt],
             enhance_first_prompt=enhance_prompt,
+            enhance_static_cache=enhance_static_cache,
             enhance_prompt_image=(
                 images[0][0]
                 if len(images) > 0
@@ -291,6 +303,18 @@ class ICLoraPipeline:
         ctx_n = contexts[1] if cfg_pp else None
         video_context, audio_context = ctx_p.video_encoding, ctx_p.audio_encoding
 
+        scale_factors = tiling_scale_factors_for_vae(self.video_decoder.checkpoint_path)
+        tiling_config = ensure_tiling_config(
+            tiling_config,
+            scale_factors=scale_factors,
+            vae_checkpoint_path=self.video_decoder.checkpoint_path,
+            video_shape=VideoPixelShape(batch=1, frames=num_frames, height=height, width=width, fps=frame_rate),
+            diffvae_optimization=self.video_decoder.diffvae_optimization,
+            device=self.device,
+        )
+
+        # Official examples are single-stage at target resolution; the native path
+        # remains a half-resolution first stage followed by 2x refinement.
         scale = 1 if self._official_comfy_workflow else 2
         stage_1_output_shape = VideoPixelShape(
             batch=1,
@@ -312,6 +336,7 @@ class ICLoraPipeline:
                 conditioning_attention_strength=conditioning_attention_strength,
                 conditioning_attention_mask=conditioning_attention_mask,
                 repeat_static_video_conditioning=repeat_static_video_conditioning,
+                color_space=color_space,
             )
         )
 
@@ -322,8 +347,8 @@ class ICLoraPipeline:
         loop = None
         if self._official_comfy_workflow:
             if self._official_comfy_sampler == "euler-ancestral-rf":
-                stepper = EulerAncestralRFDiffusionStep()
-                loop = partial(euler_ancestral_rf_denoising_loop, noise_seed=seed)
+                stepper = EulerAncestralDiffusionStep()
+                loop = partial(euler_ancestral_denoising_loop, noise_seed=seed, model_dtype=self.dtype)
             else:
                 if ctx_n is None:
                     raise RuntimeError("CFG++ sampling requires negative text conditioning")
@@ -408,9 +433,9 @@ class ICLoraPipeline:
                 if self._official_comfy_workflow
                 else "[IC-LoRA] Skipping Stage 2 (--skip-stage-2 enabled)"
             )
-            decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
+            decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
             output_audio = preserved_audio or self.audio_decoder(audio_state.latent)
-            return decoded_video, output_audio
+            return decoded_video, output_audio, tiling_config
 
         # Stage 2: Upsample and refine the video at higher resolution with distilled LORA.
         if self.upsampler is None or self.stage_2 is None:
@@ -427,6 +452,7 @@ class ICLoraPipeline:
                 video_encoder=enc,
                 dtype=self.dtype,
                 device=self.device,
+                color_space=color_space,
             )
         )
 
@@ -451,9 +477,9 @@ class ICLoraPipeline:
             ),
         )
 
-        decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
+        decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
         output_audio = preserved_audio or self.audio_decoder(audio_state.latent)
-        return decoded_video, output_audio
+        return decoded_video, output_audio, tiling_config
 
     def _create_conditionings(
         self,
@@ -466,6 +492,7 @@ class ICLoraPipeline:
         conditioning_attention_strength: float = 1.0,
         conditioning_attention_mask: torch.Tensor | None = None,
         repeat_static_video_conditioning: bool = False,
+        color_space: HDRColorSpace | None = None,
     ) -> list[ConditioningItem]:
         """
         Create conditioning items for video generation.
@@ -488,6 +515,7 @@ class ICLoraPipeline:
             video_encoder=video_encoder,
             dtype=self.dtype,
             device=self.device,
+            color_space=color_space,
         )
 
         append_ic_lora_reference_video_conditionings(
@@ -505,6 +533,7 @@ class ICLoraPipeline:
             conditioning_attention_mask=conditioning_attention_mask,
             repeat_static_reference=repeat_static_video_conditioning,
             tiling_config=None,
+            color_space=color_space,
         )
 
         if video_conditioning:
@@ -561,6 +590,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         nargs=2,
         metavar=("PATH", "STRENGTH"),
         required=True,
+        help=(
+            "IC-LoRA reference: video file (SDR) or directory of scene-linear *.exr frames (HDR), "
+            "plus strength. Example: --video-conditioning ref.mp4 1.0  or  --video-conditioning exr_dir/ 1.0"
+        ),
     )
     parser.add_argument(
         "--conditioning-attention-mask",
@@ -647,9 +680,8 @@ def main() -> None:
     ]
 
     pipeline = ICLoraPipeline(
-        distilled_checkpoint_path=args.distilled_checkpoint_path,
+        model_paths=args.model_paths,
         spatial_upsampler_path=args.spatial_upsampler_path,
-        gemma_root=args.gemma_root,
         loras=tuple(args.lora) if args.lora else (),
         gemma_loras=tuple(args.gemma_lora) if args.gemma_lora else (),
         official_comfy_workflow=args.official_comfy_workflow,
@@ -657,10 +689,16 @@ def main() -> None:
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
+        prompt_enhancer_gemma_root=args.prompt_enhancer_gemma_root,
+        diffvae_optimization=args.diffvae_optimization,
     )
-    tiling_config = None if args.disable_tiling else TilingConfig.default()
-    video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
-    video, audio = pipeline(
+    hdr = resolve_hdr_color_space(
+        images=args.images,
+        video_paths=[path for path, _ in args.video_conditioning],
+        hdr=args.hdr,
+    )
+    vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
+    video, audio, tiling_config = pipeline(
         prompt=args.prompt,
         seed=args.seed,
         height=args.height,
@@ -669,15 +707,18 @@ def main() -> None:
         frame_rate=args.frame_rate,
         images=args.images,
         video_conditioning=video_conditioning,
-        negative_prompt=args.negative_prompt,
-        tiling_config=tiling_config,
+        enhance_prompt=args.enhance_prompt,
+        enhance_static_cache=args.enhance_static_cache,
+        vae_dtype=vae_dtype,
+        color_space=hdr,
+        tiling_config=None if args.disable_tiling else AUTO_TILING,
         conditioning_attention_strength=conditioning_attention_strength,
         skip_stage_2=args.skip_stage_2,
         conditioning_attention_mask=conditioning_attention_mask,
         repeat_static_video_conditioning=args.repeat_static_control,
         freeze_control_audio_path=args.freeze_control_audio,
-        enhance_prompt=args.enhance_prompt,
     )
+    video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
 
     encode_video(
         video=video,
@@ -685,6 +726,7 @@ def main() -> None:
         audio=audio,
         output_path=args.output_path,
         video_chunks_number=video_chunks_number,
+        color_space=hdr,
     )
 
 
