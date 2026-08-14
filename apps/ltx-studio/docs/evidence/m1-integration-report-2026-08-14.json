@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "ltx-m1-integration-report.v1",
+  "generatedAt": "2026-08-14T23:57:13+02:00",
+  "status": "provisional-static-pass",
+  "releaseStatus": "hold",
+  "inputs": {
+    "mergeBase": "9377758131b1ffde4b7f766804590a6617bf2ab9",
+    "localInput": "205fc7c633bdc0595014f7f0c2667d526d8d595e",
+    "upstreamInput": "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca"
+  },
+  "integration": {
+    "branch": "integration/ltx-1.2.0-dubit-20260814",
+    "mergeCommit": "1a7db9498b2be25fe6df403f9f7a1a862c15f206",
+    "tree": "51e850cb12194464ef8c7ca5f82b534d4ead75dd",
+    "parents": [
+      "205fc7c633bdc0595014f7f0c2667d526d8d595e",
+      "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca"
+    ],
+    "conflictLedger": {
+      "path": "apps/ltx-studio/docs/evidence/m1-conflict-ledger-2026-08-14.json",
+      "sha256": "07152ddef861e178f3fc4426ad12f343495c10f1f2f02feb1525f76671270c88",
+      "entryCount": 27,
+      "unmergedPaths": 0,
+      "conflictMarkers": 0
+    }
+  },
+  "contracts": {
+    "candidateReleaseSurface": {
+      "path": "apps/ltx-studio/release/candidate-release-surface.v1.json",
+      "sha256": "78701de8aa0174a020038a601898e2a981f7fb7c50d52aeaf2a1d1b724de5374",
+      "entries": 160,
+      "modes": 12,
+      "candidateEntries": 26,
+      "candidateClaims": 19,
+      "blockedEntries": 134,
+      "semanticDriftFromM0": false
+    },
+    "httpRoutesAndSchemas": "retained",
+    "compatibilityExports": [
+      "LipDubPipeline",
+      "DubItPipeline",
+      "FLF2VPipeline",
+      "EulerAncestralRFDiffusionStep",
+      "EulerAncestralDiffusionStep",
+      "LTXVGemmaTokenizer"
+    ],
+    "studioModeCount": 12
+  },
+  "verification": {
+    "pythonUndefinedImportLint": {
+      "command": "ruff check --select F821,F841,F401",
+      "status": "passed"
+    },
+    "nativeCliHelpMatrix": {
+      "modules": 11,
+      "status": "passed"
+    },
+    "nativeTests": {
+      "passed": 66,
+      "failed": 0,
+      "status": "passed",
+      "qualification": "Pure-Python Kornia test coverage used an isolated compatibility harness; the deployable runtime lock remains an M2 gate."
+    },
+    "studioTests": {
+      "testFilesPassed": 66,
+      "testsPassed": 619,
+      "testsSkippedIntentional": 1,
+      "testsFailed": 0,
+      "status": "passed"
+    },
+    "studioLint": "passed",
+    "studioBuild": {
+      "status": "passed",
+      "mainBundleRawKiB": 391.73,
+      "mainBundleGzipKiB": 116.52,
+      "legacy533KiBWarningPresent": false
+    },
+    "stagedDiffCheck": "passed"
+  },
+  "m2Gates": {
+    "status": "required",
+    "runtimeLock": {
+      "currentTransformers": "4.57.6",
+      "requiredTransformersRange": ">=5.8,<5.15",
+      "targetTransformers": "5.14.1",
+      "currentRequests": "2.32.5",
+      "targetRequests": "2.34.2"
+    },
+    "requiredEvidence": [
+      "clean deterministic runtime lock",
+      "native imports and contract tests in the locked runtime",
+      "severity-independent Python and npm advisory disposition",
+      "offline and egress-negative tests"
+    ]
+  },
+  "claims": {
+    "deploymentPerformed": false,
+    "gpuWorkPerformed": false,
+    "runtimeQualified": false,
+    "productionAuthorized": false,
+    "sota10Of10Achieved": false
+  },
+  "decision": "M1 is accepted as a static and CPU-tested integration candidate. Promotion, deployment, GPU qualification, and any SOTA claim remain fail-closed pending M2 and all downstream evidence gates."
+}
