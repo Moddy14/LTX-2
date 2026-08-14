@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "ltx-studio-m0-verification.v1",
+  "reviewedPlanCommit": "f0685962d99516c559353d48d7d4e01b60d08e4c",
+  "capturedAt": "2026-08-14T23:20:13+02:00",
+  "commands": [
+    {
+      "id": "studio-full",
+      "command": "npm test",
+      "status": "pass",
+      "exitCode": 0,
+      "passed": 620,
+      "failed": 0,
+      "skipped": 0,
+      "outputSha256": null,
+      "note": "All 66 Studio test files passed, including the three schema and contract checks for the generated M0 evidence."
+    },
+    {
+      "id": "studio-lint",
+      "command": "npm run lint",
+      "status": "pass",
+      "exitCode": 0,
+      "passed": null,
+      "failed": 0,
+      "skipped": null,
+      "outputSha256": null,
+      "note": "ESLint completed without findings."
+    },
+    {
+      "id": "studio-typescript",
+      "command": "npx tsc -b",
+      "status": "pass",
+      "exitCode": 0,
+      "passed": null,
+      "failed": 0,
+      "skipped": null,
+      "outputSha256": null,
+      "note": "TypeScript project references compiled successfully."
+    },
+    {
+      "id": "studio-build",
+      "command": "npm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "passed": null,
+      "failed": 0,
+      "skipped": null,
+      "outputSha256": null,
+      "note": "Production build passed; main JavaScript bundle is 391.73 kB raw and 116.52 kB gzip, below the previously reported 533 kB warning threshold."
+    },
+    {
+      "id": "studio-e2e",
+      "command": "npm run test:e2e",
+      "status": "pass",
+      "exitCode": 0,
+      "passed": 59,
+      "failed": 0,
+      "skipped": 1,
+      "outputSha256": null,
+      "note": "Desktop and mobile Playwright coverage passed; one test is intentionally skipped by the suite."
+    },
+    {
+      "id": "native-cpu",
+      "command": "CUDA_VISIBLE_DEVICES='' PYTHONPATH=packages/ltx-pipelines/src:packages/ltx-core/src:/home/moddy/.local/lib/python3.12/site-packages /home/moddy/comfyui-env/bin/python -m pytest -q packages/ltx-core/tests packages/ltx-pipelines/tests",
+      "status": "pass",
+      "exitCode": 0,
+      "passed": 64,
+      "failed": 0,
+      "skipped": 0,
+      "outputSha256": null,
+      "note": "CPU-only native suite passed with the known RequestsDependencyWarning from the external ComfyUI environment."
+    },
+    {
+      "id": "av-eval",
+      "command": "uv run pytest -q packages/ltx-trainer/tests/av_eval",
+      "status": "expected-fail",
+      "exitCode": 1,
+      "passed": 175,
+      "failed": 1,
+      "skipped": 0,
+      "outputSha256": null,
+      "note": "Known wall-clock fixture failure only: test_q2_assembles_only_consumed_objective_mos_and_anchor_passes rejects its fixed trusted key as outside its validity window; all other AV-eval tests passed. This is recorded as test-hygiene debt, not green evidence."
+    }
+  ]
+}

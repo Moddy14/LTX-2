@@ -1,0 +1,191 @@
+{
+  "activeJobs": {
+    "endpoint": "http://127.0.0.1:4318/api/jobs",
+    "running": 0
+  },
+  "capturedAt": "2026-08-14T23:20:13+02:00",
+  "dependencyInputs": [
+    {
+      "bytes": 179995,
+      "path": "apps/ltx-studio/package-lock.json",
+      "sha256": "a13dd339a1054c2df8ed5172789bc8471063e757f06790621e38ea4514da8fa4"
+    },
+    {
+      "bytes": 2190,
+      "path": "apps/ltx-studio/package.json",
+      "sha256": "880d59df4c0f79cda46c79bea6901b344a87ea58aa2c451dffcf8b69c0e142a4"
+    },
+    {
+      "bytes": 1057,
+      "path": "apps/ltx-studio/runtime/pyproject.toml",
+      "sha256": "9c2526af05c207fdaef873e11947f25211ea5c5f0a332483a16524522a996a01"
+    },
+    {
+      "bytes": 49146,
+      "path": "apps/ltx-studio/runtime/uv.lock",
+      "sha256": "462ed0bd88ec5e56c64dfae66d031c3a9c5d906be7de1b956cccdf4dbb1daf31"
+    },
+    {
+      "bytes": 2709,
+      "path": "pyproject.toml",
+      "sha256": "cb5c6fc9663bddb86f50cff94ba2226b4a1d485bd272f05ee045fd6aeab03e83"
+    },
+    {
+      "bytes": 750539,
+      "path": "uv.lock",
+      "sha256": "f4e78b39e60cb3f8bbeda91c9d9a7c46a70a7c8b2c9d968c5af3fdd064a2d27e"
+    }
+  ],
+  "identities": [
+    {
+      "commit": "7c87b9d3bd7abdbab4b0c8bfc1ec55a0efd10c6b",
+      "role": "pre_plan_baseline",
+      "tree": "9764f526735208a34901753222d94ab9c9c5dcf5"
+    },
+    {
+      "commit": "f0685962d99516c559353d48d7d4e01b60d08e4c",
+      "role": "reviewed_plan_source_commit",
+      "tree": "22f7c52ee785cdedafe8f07e1ff05090933b31b6"
+    }
+  ],
+  "repository": {
+    "aheadOfOriginMain": 143,
+    "behindOriginMain": 6,
+    "branch": "feat/ltx-lipsync-lease",
+    "evidenceWorktreeChanges": [
+      ".gitignore",
+      "apps/ltx-studio/docs/evidence/m0-baseline-2026-08-14.json",
+      "apps/ltx-studio/docs/evidence/m0-contract-inventory-2026-08-14.json",
+      "apps/ltx-studio/docs/evidence/m0-verification-2026-08-14.json",
+      "apps/ltx-studio/package.json",
+      "apps/ltx-studio/scripts/generate-m0-evidence.ts",
+      "apps/ltx-studio/shared/m0Evidence.ts",
+      "apps/ltx-studio/tests/m0-evidence.test.ts"
+    ],
+    "localCommitsSinceMergeBase": 143,
+    "originMain": "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca",
+    "remoteRefs": [
+      {
+        "commit": "7c87b9d3bd7abdbab4b0c8bfc1ec55a0efd10c6b",
+        "ref": "refs/heads/backup/feat-ltx-lipsync-lease-pre-plan-20260814",
+        "remote": "moddy-fork"
+      },
+      {
+        "commit": "f0685962d99516c559353d48d7d4e01b60d08e4c",
+        "ref": "refs/heads/backup/feat-ltx-lipsync-lease-reviewed-plan-20260814",
+        "remote": "moddy-fork"
+      }
+    ],
+    "remotes": [
+      {
+        "fetchUrl": "https://github.com/Moddy14/LTX-2.git",
+        "name": "moddy-fork",
+        "pushUrl": "https://github.com/Moddy14/LTX-2.git"
+      },
+      {
+        "fetchUrl": "https://github.com/Lightricks/LTX-2.git",
+        "name": "origin",
+        "pushUrl": "https://github.com/Lightricks/LTX-2.git"
+      }
+    ],
+    "reviewedPlanWasClean": true
+  },
+  "runtime": {
+    "activeEnterTimestamp": "Mon 2026-08-10 23:49:19 CEST",
+    "currentReleaseTarget": null,
+    "healthBodySha256": "ad6e818e38705f5a523dccdaf739f404fd8c16b0264a9541ff1c27c06e6e03bb",
+    "healthStatus": 200,
+    "installedReleaseDigests": [
+      "34f5effa9d65bc9b286a8383b5c79112bb728e16ef872e9b66f7820d69610975",
+      "3a66445b00f8e18223f8cec0c95f5c749534169e992002d696156830ba864349"
+    ],
+    "mainPid": 3860042,
+    "processStart": "Mon Aug 10 23:49:19 2026",
+    "serviceUnit": "ltx-studio-session.service",
+    "studioEndpoint": "http://127.0.0.1:4318"
+  },
+  "schemaVersion": "ltx-studio-m0-baseline.v1",
+  "verification": {
+    "commands": [
+      {
+        "command": "npm test",
+        "exitCode": 0,
+        "failed": 0,
+        "id": "studio-full",
+        "note": "All 66 Studio test files passed, including the three schema and contract checks for the generated M0 evidence.",
+        "outputSha256": null,
+        "passed": 620,
+        "skipped": 0,
+        "status": "pass"
+      },
+      {
+        "command": "npm run lint",
+        "exitCode": 0,
+        "failed": 0,
+        "id": "studio-lint",
+        "note": "ESLint completed without findings.",
+        "outputSha256": null,
+        "passed": null,
+        "skipped": null,
+        "status": "pass"
+      },
+      {
+        "command": "npx tsc -b",
+        "exitCode": 0,
+        "failed": 0,
+        "id": "studio-typescript",
+        "note": "TypeScript project references compiled successfully.",
+        "outputSha256": null,
+        "passed": null,
+        "skipped": null,
+        "status": "pass"
+      },
+      {
+        "command": "npm run build",
+        "exitCode": 0,
+        "failed": 0,
+        "id": "studio-build",
+        "note": "Production build passed; main JavaScript bundle is 391.73 kB raw and 116.52 kB gzip, below the previously reported 533 kB warning threshold.",
+        "outputSha256": null,
+        "passed": null,
+        "skipped": null,
+        "status": "pass"
+      },
+      {
+        "command": "npm run test:e2e",
+        "exitCode": 0,
+        "failed": 0,
+        "id": "studio-e2e",
+        "note": "Desktop and mobile Playwright coverage passed; one test is intentionally skipped by the suite.",
+        "outputSha256": null,
+        "passed": 59,
+        "skipped": 1,
+        "status": "pass"
+      },
+      {
+        "command": "CUDA_VISIBLE_DEVICES='' PYTHONPATH=packages/ltx-pipelines/src:packages/ltx-core/src:/home/moddy/.local/lib/python3.12/site-packages /home/moddy/comfyui-env/bin/python -m pytest -q packages/ltx-core/tests packages/ltx-pipelines/tests",
+        "exitCode": 0,
+        "failed": 0,
+        "id": "native-cpu",
+        "note": "CPU-only native suite passed with the known RequestsDependencyWarning from the external ComfyUI environment.",
+        "outputSha256": null,
+        "passed": 64,
+        "skipped": 0,
+        "status": "pass"
+      },
+      {
+        "command": "uv run pytest -q packages/ltx-trainer/tests/av_eval",
+        "exitCode": 1,
+        "failed": 1,
+        "id": "av-eval",
+        "note": "Known wall-clock fixture failure only: test_q2_assembles_only_consumed_objective_mos_and_anchor_passes rejects its fixed trusted key as outside its validity window; all other AV-eval tests passed. This is recorded as test-hygiene debt, not green evidence.",
+        "outputSha256": null,
+        "passed": 175,
+        "skipped": 0,
+        "status": "expected-fail"
+      }
+    ],
+    "path": "apps/ltx-studio/docs/evidence/m0-verification-2026-08-14.json",
+    "sha256": "3d8079567400bb1ae20de2e7184af39ba9b64135071dd267c3bd673cf2b4db92"
+  }
+}

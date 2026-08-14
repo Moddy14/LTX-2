@@ -1,0 +1,1915 @@
+{
+  "capabilitySurface": {
+    "blocked": 134,
+    "candidate": 26,
+    "claimIds": [
+      "audio-driven-video.audio-to-video",
+      "audio-driven-video.audio-to-video.refined.latentsync-1.6",
+      "audio-driven-video.audio-to-video.refined.lipforcing-14b-streaming-taehv",
+      "audio-driven-video.audio-to-video.refined.lipforcing-14b-wan-vae",
+      "audio-driven-video.audio-to-video.refined.longcat-lipsync",
+      "audio-driven-video.audio-to-video.refined.musetalk-1.5",
+      "audio-driven-video.image-audio-to-video",
+      "audio-driven-video.image-audio-to-video.refined.latentsync-1.6",
+      "audio-driven-video.image-audio-to-video.refined.lipforcing-14b-streaming-taehv",
+      "audio-driven-video.image-audio-to-video.refined.lipforcing-14b-wan-vae",
+      "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+      "audio-driven-video.image-audio-to-video.refined.musetalk-1.5",
+      "controlled-video.first-last-frame",
+      "controlled-video.first-last-frame.refined.latentsync-1.6",
+      "controlled-video.first-last-frame.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.first-last-frame.refined.lipforcing-14b-wan-vae",
+      "controlled-video.first-last-frame.refined.musetalk-1.5",
+      "controlled-video.ic-lora.hdr",
+      "controlled-video.ic-lora.hdr.refined.latentsync-1.6",
+      "controlled-video.ic-lora.hdr.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.hdr.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.hdr.refined.musetalk-1.5",
+      "controlled-video.ic-lora.ingredients",
+      "controlled-video.ic-lora.ingredients.refined.latentsync-1.6",
+      "controlled-video.ic-lora.ingredients.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.ingredients.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.ingredients.refined.musetalk-1.5",
+      "controlled-video.ic-lora.inpainting",
+      "controlled-video.ic-lora.inpainting.refined.latentsync-1.6",
+      "controlled-video.ic-lora.inpainting.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.inpainting.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.inpainting.refined.musetalk-1.5",
+      "controlled-video.ic-lora.motion-track",
+      "controlled-video.ic-lora.motion-track.refined.latentsync-1.6",
+      "controlled-video.ic-lora.motion-track.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.motion-track.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.motion-track.refined.musetalk-1.5",
+      "controlled-video.ic-lora.outpainting",
+      "controlled-video.ic-lora.outpainting.refined.latentsync-1.6",
+      "controlled-video.ic-lora.outpainting.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.outpainting.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.outpainting.refined.musetalk-1.5",
+      "controlled-video.ic-lora.pixel-upscaler",
+      "controlled-video.ic-lora.pixel-upscaler.refined.latentsync-1.6",
+      "controlled-video.ic-lora.pixel-upscaler.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.pixel-upscaler.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.pixel-upscaler.refined.musetalk-1.5",
+      "controlled-video.ic-lora.union-control",
+      "controlled-video.ic-lora.union-control.refined.latentsync-1.6",
+      "controlled-video.ic-lora.union-control.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.union-control.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.union-control.refined.musetalk-1.5",
+      "controlled-video.ic-lora.v2v-instant-shave",
+      "controlled-video.ic-lora.v2v-instant-shave.refined.latentsync-1.6",
+      "controlled-video.ic-lora.v2v-instant-shave.refined.lipforcing-14b-streaming-taehv",
+      "controlled-video.ic-lora.v2v-instant-shave.refined.lipforcing-14b-wan-vae",
+      "controlled-video.ic-lora.v2v-instant-shave.refined.musetalk-1.5",
+      "identity-video.id-lora",
+      "identity-video.id-lora.refined.latentsync-1.6",
+      "identity-video.id-lora.refined.lipforcing-14b-streaming-taehv",
+      "identity-video.id-lora.refined.lipforcing-14b-wan-vae",
+      "identity-video.id-lora.refined.musetalk-1.5",
+      "native-generation.image-to-video",
+      "native-generation.image-to-video.refined.latentsync-1.6",
+      "native-generation.image-to-video.refined.lipforcing-14b-streaming-taehv",
+      "native-generation.image-to-video.refined.lipforcing-14b-wan-vae",
+      "native-generation.image-to-video.refined.musetalk-1.5",
+      "native-generation.text-to-audio",
+      "native-generation.text-to-video",
+      "native-generation.text-to-video.refined.latentsync-1.6",
+      "native-generation.text-to-video.refined.lipforcing-14b-streaming-taehv",
+      "native-generation.text-to-video.refined.lipforcing-14b-wan-vae",
+      "native-generation.text-to-video.refined.musetalk-1.5",
+      "reference-video-redubbing.native-distilled",
+      "reference-video-redubbing.native-distilled.refined.latentsync-1.6",
+      "reference-video-redubbing.native-distilled.refined.lipforcing-14b-streaming-taehv",
+      "reference-video-redubbing.native-distilled.refined.lipforcing-14b-wan-vae",
+      "reference-video-redubbing.native-distilled.refined.musetalk-1.5",
+      "reference-video-redubbing.official-comfy-hq",
+      "reference-video-redubbing.official-comfy-hq.refined.latentsync-1.6",
+      "reference-video-redubbing.official-comfy-hq.refined.lipforcing-14b-streaming-taehv",
+      "reference-video-redubbing.official-comfy-hq.refined.lipforcing-14b-wan-vae",
+      "reference-video-redubbing.official-comfy-hq.refined.musetalk-1.5",
+      "video-edit.retake",
+      "video-edit.retake.refined.latentsync-1.6",
+      "video-edit.retake.refined.lipforcing-14b-streaming-taehv",
+      "video-edit.retake.refined.lipforcing-14b-wan-vae",
+      "video-edit.retake.refined.musetalk-1.5"
+    ],
+    "entries": 160,
+    "modes": [
+      "audio-to-video",
+      "distilled",
+      "ic-lora",
+      "id-lora",
+      "image-audio-to-video",
+      "keyframes",
+      "lipdub",
+      "one-stage",
+      "retake",
+      "text-to-audio",
+      "two-stage",
+      "two-stage-hq"
+    ],
+    "path": "apps/ltx-studio/release/candidate-release-surface.v1.json",
+    "sha256": "78701de8aa0174a020038a601898e2a981f7fb7c50d52aeaf2a1d1b724de5374"
+  },
+  "cliPrograms": [
+    {
+      "commands": [
+        "artifact-score",
+        "asr-score",
+        "calibration-check",
+        "comparator-check",
+        "comparator-score",
+        "complete-d1",
+        "content-score",
+        "cross-shot-check",
+        "cross-shot-score",
+        "design-check",
+        "f0-check",
+        "fixed-d1",
+        "freeze",
+        "identity-score",
+        "offset-score",
+        "q2-score",
+        "readiness-check",
+        "sharpness-score",
+        "technical-score",
+        "vbench-score"
+      ],
+      "path": "packages/ltx-trainer/scripts/av_eval.py"
+    }
+  ],
+  "contracts": [
+    {
+      "id": "capability-release-surface",
+      "sources": [
+        "apps/ltx-studio/shared/pipelines.ts",
+        "apps/ltx-studio/shared/releaseSurface.ts",
+        "apps/ltx-studio/release/candidate-release-surface.v1.json"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/pipelines.test.ts",
+        "apps/ltx-studio/tests/release-surface.test.ts"
+      ]
+    },
+    {
+      "id": "http-api-routes",
+      "sources": [
+        "apps/ltx-studio/server/index.ts"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/projects.test.ts",
+        "apps/ltx-studio/tests/jobs.test.ts",
+        "apps/ltx-studio/tests/outputs.test.ts",
+        "apps/ltx-studio/tests/uploads.test.ts"
+      ]
+    },
+    {
+      "id": "request-sidecar-schema",
+      "sources": [
+        "apps/ltx-studio/shared/pipelines.ts",
+        "apps/ltx-studio/shared/outputs.ts",
+        "apps/ltx-studio/shared/provenance.ts"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/pipelines.test.ts",
+        "apps/ltx-studio/tests/output-state.test.ts",
+        "apps/ltx-studio/tests/run-provenance.test.ts"
+      ]
+    },
+    {
+      "id": "scheduler-admission",
+      "sources": [
+        "apps/ltx-studio/server/admission.ts",
+        "apps/ltx-studio/server/orchestrator.ts",
+        "apps/ltx-studio/server/jobs.ts"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/admission.test.ts",
+        "apps/ltx-studio/tests/orchestrator.test.ts",
+        "apps/ltx-studio/tests/segment-boundary-scheduler.test.ts"
+      ]
+    },
+    {
+      "id": "release-provenance",
+      "sources": [
+        "apps/ltx-studio/server/releaseIdentity.ts",
+        "apps/ltx-studio/server/runProvenance.ts",
+        "apps/ltx-studio/shared/provenance.ts"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/release-identity.test.ts",
+        "apps/ltx-studio/tests/run-provenance.test.ts"
+      ]
+    },
+    {
+      "id": "release-audit-rights",
+      "sources": [
+        "apps/ltx-studio/shared/releaseAudit.ts",
+        "apps/ltx-studio/shared/rightsEvidence.ts",
+        "apps/ltx-studio/release/rights-evidence.v1.json"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/release-audit.test.ts",
+        "apps/ltx-studio/tests/rights-evidence.test.ts"
+      ]
+    },
+    {
+      "id": "evaluator-bindings",
+      "sources": [
+        "apps/ltx-studio/server/evaluatorBindings.ts",
+        "apps/ltx-studio/server/evaluatorManifest.ts",
+        "apps/ltx-studio/shared/objectiveQuality.ts"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/evaluator-bindings.test.ts",
+        "apps/ltx-studio/tests/objective-quality.test.ts",
+        "apps/ltx-studio/tests/objective-analysis-integration.test.ts"
+      ]
+    },
+    {
+      "id": "project-history",
+      "sources": [
+        "apps/ltx-studio/server/projectStore.ts",
+        "apps/ltx-studio/shared/projects.ts"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/projects.test.ts"
+      ]
+    },
+    {
+      "id": "av-evaluator-cli",
+      "sources": [
+        "packages/ltx-trainer/scripts/av_eval.py",
+        "packages/ltx-trainer/src/ltx_trainer/av_eval"
+      ],
+      "tests": [
+        "packages/ltx-trainer/tests/av_eval"
+      ]
+    },
+    {
+      "id": "pipeline-exports",
+      "sources": [
+        "apps/ltx-studio/shared/pipelines.ts",
+        "packages/ltx-pipelines/src/ltx_pipelines/__init__.py"
+      ],
+      "tests": [
+        "apps/ltx-studio/tests/pipelines.test.ts",
+        "packages/ltx-pipelines/tests"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "language": "typescript",
+      "path": "apps/ltx-studio/shared/pipelines.ts",
+      "symbols": [
+        "createDefaultRequest",
+        "GenerationRequest",
+        "generationRequestSchema",
+        "guidanceSchema",
+        "hasDialogueIntent",
+        "ICLoraProfile",
+        "icLoraProfiles",
+        "imageInputSchema",
+        "isAudioConditionedMode",
+        "isAudioOnlyMode",
+        "isNativeDialogueRequest",
+        "isReferenceAudioMode",
+        "LipDubPipelineProfile",
+        "lipDubPipelineProfiles",
+        "loraSchema",
+        "mergeGenerationRequest",
+        "migrateGenerationRequest",
+        "needsGemmaAbliteratedLora",
+        "needsGemmaAbliteratedLoraForRequest",
+        "outputNameSchema",
+        "PipelineDefinition",
+        "PipelineMode",
+        "pipelineModes",
+        "PIPELINES",
+        "PromptParts",
+        "promptPartsSchema",
+        "SourceMode",
+        "sourceModes",
+        "supportsGemmaAbliteratedLoraForRequest",
+        "usesOfficialComfyLipDub",
+        "videoConditioningSchema",
+        "withLongCatLipsyncDisabled"
+      ]
+    },
+    {
+      "language": "typescript",
+      "path": "apps/ltx-studio/shared/releaseSurface.ts",
+      "symbols": [
+        "CandidateReleaseSurface",
+        "candidateReleaseSurfaceSchema",
+        "deriveReleaseSurfaceEntries",
+        "PostprocessorId",
+        "postprocessorIds",
+        "PromptEncoderProfile",
+        "promptEncoderProfileForRequest",
+        "promptEncoderProfiles",
+        "ReleaseGateId",
+        "releaseGateIds",
+        "ReleaseSurfaceEntry",
+        "releaseSurfaceEntrySchema"
+      ]
+    },
+    {
+      "language": "python",
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/__init__.py",
+      "symbols": [
+        "A2VidPipelineTwoStage",
+        "DistilledPipeline",
+        "FLF2VPipeline",
+        "ICLoraPipeline",
+        "KeyframeInterpolationPipeline",
+        "LipDubPipeline",
+        "RetakePipeline",
+        "T2AOneStagePipeline",
+        "TI2VidOneStagePipeline",
+        "TI2VidTwoStagesPipeline"
+      ]
+    }
+  ],
+  "generatedAt": "2026-08-14T23:20:13+02:00",
+  "httpRoutes": [
+    {
+      "method": "GET",
+      "path": "/{*path}",
+      "source": {
+        "line": 1019,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admission/preflight",
+      "source": {
+        "line": 890,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/assets",
+      "source": {
+        "line": 367,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/config",
+      "source": {
+        "line": 287,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/estimates",
+      "source": {
+        "line": 885,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/events",
+      "source": {
+        "line": 998,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/experiments",
+      "source": {
+        "line": 666,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/experiments",
+      "source": {
+        "line": 769,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/experiments/:id/freeze",
+      "source": {
+        "line": 811,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/experiments/:id/runs/:arm",
+      "source": {
+        "line": 829,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/experiments/:id/supersede",
+      "source": {
+        "line": 815,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "source": {
+        "line": 304,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/images/crop",
+      "source": {
+        "line": 388,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/images/from-output",
+      "source": {
+        "line": 461,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs",
+      "source": {
+        "line": 664,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs",
+      "source": {
+        "line": 895,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/jobs/:id",
+      "source": {
+        "line": 920,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/jobs/:id",
+      "source": {
+        "line": 913,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/:id/cancel",
+      "source": {
+        "line": 900,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/:id/output",
+      "source": {
+        "line": 926,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/:id/rerun",
+      "source": {
+        "line": 906,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/plan",
+      "source": {
+        "line": 445,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/lipdub/reference/inspect",
+      "source": {
+        "line": 604,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/lipdub/reference/prepare",
+      "source": {
+        "line": 614,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/models",
+      "source": {
+        "line": 342,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/outputs",
+      "source": {
+        "line": 665,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/outputs/:filename",
+      "source": {
+        "line": 946,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/outputs/:filename",
+      "source": {
+        "line": 934,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/outputs/:filename/analysis",
+      "source": {
+        "line": 969,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/outputs/:filename/analysis",
+      "source": {
+        "line": 977,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/outputs/:filename/analysis/cancel",
+      "source": {
+        "line": 987,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/outputs/:filename/quality-review",
+      "source": {
+        "line": 959,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "source": {
+        "line": 667,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects",
+      "source": {
+        "line": 673,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/archive",
+      "source": {
+        "line": 759,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:id/history",
+      "source": {
+        "line": 669,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/shots",
+      "source": {
+        "line": 680,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/shots/:shotId/approve",
+      "source": {
+        "line": 748,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/shots/:shotId/outputs",
+      "source": {
+        "line": 703,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/shots/:shotId/revisions",
+      "source": {
+        "line": 691,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/shots/:shotId/run",
+      "source": {
+        "line": 737,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/sequences/assemble",
+      "source": {
+        "line": 558,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/uploads/:kind",
+      "source": {
+        "line": 349,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/uploads/:kind/:filename",
+      "source": {
+        "line": 375,
+        "path": "apps/ltx-studio/server/index.ts"
+      }
+    }
+  ],
+  "reviewedPlan": {
+    "commit": "f0685962d99516c559353d48d7d4e01b60d08e4c",
+    "role": "reviewed_plan_source_commit",
+    "tree": "22f7c52ee785cdedafe8f07e1ff05090933b31b6"
+  },
+  "schemaVersion": "ltx-studio-m0-contract-inventory.v1",
+  "schemas": [
+    {
+      "name": "identityInputEvidenceSchema",
+      "source": {
+        "line": 48,
+        "path": "apps/ltx-studio/server/inputEvidence.ts"
+      }
+    },
+    {
+      "name": "sceneReferenceFrameRecommendationSchema",
+      "source": {
+        "line": 26,
+        "path": "apps/ltx-studio/server/sceneReferenceFrame.ts"
+      }
+    },
+    {
+      "name": "dialogueEvaluationSchema",
+      "source": {
+        "line": 28,
+        "path": "apps/ltx-studio/shared/dialogueEvaluator.ts"
+      }
+    },
+    {
+      "name": "controlledExperimentSchema",
+      "source": {
+        "line": 79,
+        "path": "apps/ltx-studio/shared/experiments.ts"
+      }
+    },
+    {
+      "name": "experimentBaselineEvidenceSchema",
+      "source": {
+        "line": 59,
+        "path": "apps/ltx-studio/shared/experiments.ts"
+      }
+    },
+    {
+      "name": "experimentCandidateSchema",
+      "source": {
+        "line": 13,
+        "path": "apps/ltx-studio/shared/experiments.ts"
+      }
+    },
+    {
+      "name": "experimentCreateInputSchema",
+      "source": {
+        "line": 48,
+        "path": "apps/ltx-studio/shared/experiments.ts"
+      }
+    },
+    {
+      "name": "experimentRunArmSchema",
+      "source": {
+        "line": 70,
+        "path": "apps/ltx-studio/shared/experiments.ts"
+      }
+    },
+    {
+      "name": "experimentRunBindingSchema",
+      "source": {
+        "line": 123,
+        "path": "apps/ltx-studio/shared/experiments.ts"
+      }
+    },
+    {
+      "name": "m0BaselineSchema",
+      "source": {
+        "line": 39,
+        "path": "apps/ltx-studio/shared/m0Evidence.ts"
+      }
+    },
+    {
+      "name": "m0CommandResultSchema",
+      "source": {
+        "line": 14,
+        "path": "apps/ltx-studio/shared/m0Evidence.ts"
+      }
+    },
+    {
+      "name": "m0ContractInventorySchema",
+      "source": {
+        "line": 93,
+        "path": "apps/ltx-studio/shared/m0Evidence.ts"
+      }
+    },
+    {
+      "name": "m0GitIdentitySchema",
+      "source": {
+        "line": 8,
+        "path": "apps/ltx-studio/shared/m0Evidence.ts"
+      }
+    },
+    {
+      "name": "m0VerificationSchema",
+      "source": {
+        "line": 26,
+        "path": "apps/ltx-studio/shared/m0Evidence.ts"
+      }
+    },
+    {
+      "name": "avSyncRawMetricsSchema",
+      "source": {
+        "line": 140,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "faceTrackingMetricsSchema",
+      "source": {
+        "line": 20,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "faceTrackingMetricsV7Schema",
+      "source": {
+        "line": 48,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "identityMetricsSchema",
+      "source": {
+        "line": 87,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "objectiveBaseWorkerResultSchema",
+      "source": {
+        "line": 200,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "objectiveBaseWorkerResultV7Schema",
+      "source": {
+        "line": 209,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "objectiveQualityAnalysisSchema",
+      "source": {
+        "line": 380,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "objectiveTechnicalMetricsSchema",
+      "source": {
+        "line": 10,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "objectiveWorkerResultSchema",
+      "source": {
+        "line": 215,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "outputAnalysisRecordSchema",
+      "source": {
+        "line": 464,
+        "path": "apps/ltx-studio/shared/objectiveQuality.ts"
+      }
+    },
+    {
+      "name": "mfaMediaPipeMeasurementSchema",
+      "source": {
+        "line": 519,
+        "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts"
+      }
+    },
+    {
+      "name": "mfaMediaPipeRunnerOutputSchema",
+      "source": {
+        "line": 544,
+        "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts"
+      }
+    },
+    {
+      "name": "phonemeVisemeBlockerCodeSchema",
+      "source": {
+        "line": 506,
+        "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts"
+      }
+    },
+    {
+      "name": "phonemeVisemeEvaluatorManifestSchema",
+      "source": {
+        "line": 492,
+        "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts"
+      }
+    },
+    {
+      "name": "phonemeVisemeResultSchema",
+      "source": {
+        "line": 647,
+        "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts"
+      }
+    },
+    {
+      "name": "visemeMappingSchema",
+      "source": {
+        "line": 31,
+        "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts"
+      }
+    },
+    {
+      "name": "generationRequestSchema",
+      "source": {
+        "line": 355,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "guidanceSchema",
+      "source": {
+        "line": 346,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "imageInputSchema",
+      "source": {
+        "line": 323,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "loraSchema",
+      "source": {
+        "line": 318,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "outputNameSchema",
+      "source": {
+        "line": 337,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "promptPartsSchema",
+      "source": {
+        "line": 89,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "videoConditioningSchema",
+      "source": {
+        "line": 331,
+        "path": "apps/ltx-studio/shared/pipelines.ts"
+      }
+    },
+    {
+      "name": "projectArchiveInputSchema",
+      "source": {
+        "line": 114,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectArchiveRequestSchema",
+      "source": {
+        "line": 147,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectContinuityBindingSchema",
+      "source": {
+        "line": 25,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectCreateInputSchema",
+      "source": {
+        "line": 19,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectCreateRequestSchema",
+      "source": {
+        "line": 119,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectMutationSchema",
+      "source": {
+        "line": 287,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectOutputApprovalInputSchema",
+      "source": {
+        "line": 107,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectOutputApprovalRequestSchema",
+      "source": {
+        "line": 143,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectOutputCaptureRequestSchema",
+      "source": {
+        "line": 135,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectOutputEvidenceSchema",
+      "source": {
+        "line": 66,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectOutputRecordInputSchema",
+      "source": {
+        "line": 100,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectRequestRevisionSchema",
+      "source": {
+        "line": 149,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectRevisionEnvelopeSchema",
+      "source": {
+        "line": 311,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectRunBindingSchema",
+      "source": {
+        "line": 30,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectRunRequestSchema",
+      "source": {
+        "line": 140,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectShotCreateInputSchema",
+      "source": {
+        "line": 41,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectShotCreateRequestSchema",
+      "source": {
+        "line": 120,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectShotRevisionInputSchema",
+      "source": {
+        "line": 49,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectShotRevisionRequestSchema",
+      "source": {
+        "line": 121,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "projectShotSchema",
+      "source": {
+        "line": 160,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "studioProjectSchema",
+      "source": {
+        "line": 172,
+        "path": "apps/ltx-studio/shared/projects.ts"
+      }
+    },
+    {
+      "name": "composePromptRequestSchema",
+      "source": {
+        "line": 10,
+        "path": "apps/ltx-studio/shared/prompts.ts"
+      }
+    },
+    {
+      "name": "composePromptResultSchema",
+      "source": {
+        "line": 30,
+        "path": "apps/ltx-studio/shared/prompts.ts"
+      }
+    },
+    {
+      "name": "jobQualityReviewSchema",
+      "source": {
+        "line": 31,
+        "path": "apps/ltx-studio/shared/quality.ts"
+      }
+    },
+    {
+      "name": "qualityReviewInputSchema",
+      "source": {
+        "line": 17,
+        "path": "apps/ltx-studio/shared/quality.ts"
+      }
+    },
+    {
+      "name": "detachedSignatureSchema",
+      "source": {
+        "line": 182,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "qualificationReportSchema",
+      "source": {
+        "line": 336,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "releaseAuditEnvelopeSchema",
+      "source": {
+        "line": 515,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "releaseAuditPayloadSchema",
+      "source": {
+        "line": 497,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "releaseAuthorizationSchema",
+      "source": {
+        "line": 472,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "releaseEvidenceIndexSchema",
+      "source": {
+        "line": 133,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "releaseEvidenceSchema",
+      "source": {
+        "line": 405,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "rightsAttestationSchema",
+      "source": {
+        "line": 280,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "trustedKeyPolicySchema",
+      "source": {
+        "line": 192,
+        "path": "apps/ltx-studio/shared/releaseAudit.ts"
+      }
+    },
+    {
+      "name": "candidateReleaseSurfaceSchema",
+      "source": {
+        "line": 123,
+        "path": "apps/ltx-studio/shared/releaseSurface.ts"
+      }
+    },
+    {
+      "name": "releaseSurfaceEntrySchema",
+      "source": {
+        "line": 63,
+        "path": "apps/ltx-studio/shared/releaseSurface.ts"
+      }
+    },
+    {
+      "name": "rightsDecisionSchema",
+      "source": {
+        "line": 6,
+        "path": "apps/ltx-studio/shared/rightsEvidence.ts"
+      }
+    },
+    {
+      "name": "rightsDimensionSchema",
+      "source": {
+        "line": 7,
+        "path": "apps/ltx-studio/shared/rightsEvidence.ts"
+      }
+    },
+    {
+      "name": "rightsEvidenceCatalogSchema",
+      "source": {
+        "line": 40,
+        "path": "apps/ltx-studio/shared/rightsEvidence.ts"
+      }
+    },
+    {
+      "name": "rightsEvidenceEntrySchema",
+      "source": {
+        "line": 25,
+        "path": "apps/ltx-studio/shared/rightsEvidence.ts"
+      }
+    },
+    {
+      "name": "rightsEvidenceSourceSchema",
+      "source": {
+        "line": 15,
+        "path": "apps/ltx-studio/shared/rightsEvidence.ts"
+      }
+    }
+  ],
+  "sourceFiles": [
+    {
+      "bytes": 270140,
+      "path": "apps/ltx-studio/release/candidate-release-surface.v1.json",
+      "sha256": "78701de8aa0174a020038a601898e2a981f7fb7c50d52aeaf2a1d1b724de5374"
+    },
+    {
+      "bytes": 15375,
+      "path": "apps/ltx-studio/server/admission.ts",
+      "sha256": "a32a5a817672c27513784216e2518d0a8da3781cc7cd8fc119f59a7c8b762ae0"
+    },
+    {
+      "bytes": 2859,
+      "path": "apps/ltx-studio/server/analysisStore.ts",
+      "sha256": "c3c723435942d915dcab0ec2e6c74c3e3688e51dad10633f8bf3f4475739fe63"
+    },
+    {
+      "bytes": 5103,
+      "path": "apps/ltx-studio/server/assets.ts",
+      "sha256": "045b639eab1a5ed555917ff5f6e011d94ae65073c9e9f4e3b14935d82662340d"
+    },
+    {
+      "bytes": 1216,
+      "path": "apps/ltx-studio/server/audioRemux.ts",
+      "sha256": "cee569cdf7c42ce70458930e8d6848f53900068b8df41cc1786c402e1ae65167"
+    },
+    {
+      "bytes": 492,
+      "path": "apps/ltx-studio/server/autoAnalysis.ts",
+      "sha256": "16698981247b4086a1d4e7e0e9f47c9034f7f662a24c92e390e30707eb27906c"
+    },
+    {
+      "bytes": 31621,
+      "path": "apps/ltx-studio/server/command.ts",
+      "sha256": "ec7dfe5e0b58c498a9983865aaba2535364bec127215c6665d934c764c49a25c"
+    },
+    {
+      "bytes": 11088,
+      "path": "apps/ltx-studio/server/config.ts",
+      "sha256": "377cae2f581d42eb1fb84a6a130dbd9a95719d7adbd08ee15293e86c10fe9a5b"
+    },
+    {
+      "bytes": 7266,
+      "path": "apps/ltx-studio/server/dialogueEvaluator.ts",
+      "sha256": "5dc48243e8d5c8d333fb9dfde2eaaecd9a8de8fd20475c82faf461b79b312a5b"
+    },
+    {
+      "bytes": 2145,
+      "path": "apps/ltx-studio/server/estimates.ts",
+      "sha256": "310b695c11f2fba4e600ab1f091fd3a32064f9d2fca613437b6ec4d60e9a7206"
+    },
+    {
+      "bytes": 6166,
+      "path": "apps/ltx-studio/server/evaluatorBindings.ts",
+      "sha256": "89a619f1eb484080edc10c4876b51e368c33af786674504963f0fb40d37f5545"
+    },
+    {
+      "bytes": 40232,
+      "path": "apps/ltx-studio/server/evaluatorManifest.ts",
+      "sha256": "2244f1bcaed3ed46d918ce27b1108aad6d6b2ed2c91a4ca93c19e60a23f1b003"
+    },
+    {
+      "bytes": 482,
+      "path": "apps/ltx-studio/server/evaluatorManifestWorker.ts",
+      "sha256": "4d41023e7678a2da80394414c2120bc6fcdea32edbef7564e62cd116015435f1"
+    },
+    {
+      "bytes": 1271,
+      "path": "apps/ltx-studio/server/evaluatorSandbox.ts",
+      "sha256": "dfff25709432b21364edfba6fdb322de824f5c9a6aa4be2639a0eaf76c3f308f"
+    },
+    {
+      "bytes": 6578,
+      "path": "apps/ltx-studio/server/evaluatorStateProvider.ts",
+      "sha256": "f49be5eb6a922f8d83e8cfc53f395f27f670f30c04b7fa3caa91cae50d3ec09e"
+    },
+    {
+      "bytes": 2266,
+      "path": "apps/ltx-studio/server/experimentRetry.ts",
+      "sha256": "c3afcda466c69d66441b483034ec6ad810868d07571cb5f3fc708b8466904403"
+    },
+    {
+      "bytes": 18573,
+      "path": "apps/ltx-studio/server/experimentStore.ts",
+      "sha256": "63dd91753d2563cb1b1cfe1f497af973e4f3ce6d15806a520a2cab22f74391dd"
+    },
+    {
+      "bytes": 8033,
+      "path": "apps/ltx-studio/server/imageCrop.ts",
+      "sha256": "6a2a685057c3d1f4b16d5b3b41c4a598d50f85cc8a053f41e0e734a2cbb4dee1"
+    },
+    {
+      "bytes": 44039,
+      "path": "apps/ltx-studio/server/index.ts",
+      "sha256": "085af1b81fa45e6e89da53f209fefe80f42d90e2623ce66ed92b47bfbac32c6f"
+    },
+    {
+      "bytes": 8751,
+      "path": "apps/ltx-studio/server/inputEvidence.ts",
+      "sha256": "ac93d9c4921a26e09afde3f60440ead566cd7fa38aef9a2f102d74319606e993"
+    },
+    {
+      "bytes": 153357,
+      "path": "apps/ltx-studio/server/jobs.ts",
+      "sha256": "194c529c41c03b07544ef75c9d3cb2a5451d561714b23041b3c568563bfc0167"
+    },
+    {
+      "bytes": 14658,
+      "path": "apps/ltx-studio/server/lipdubDiagnostics.ts",
+      "sha256": "5d4ebd41378d0760fe2eb7f6c24a1916f3080e03f7ad7ebce731b3b484ed6e15"
+    },
+    {
+      "bytes": 8834,
+      "path": "apps/ltx-studio/server/lipdubPrep.ts",
+      "sha256": "68aa865e1a85751eaf5bc2e0e8a1a9db1abf2122b827a28a0209277df1d090d2"
+    },
+    {
+      "bytes": 6140,
+      "path": "apps/ltx-studio/server/mediaProbe.ts",
+      "sha256": "49c9136ba99c61ed9580fc5c59efc57dd6bfac4f13f6a848ed754b29719f200f"
+    },
+    {
+      "bytes": 9265,
+      "path": "apps/ltx-studio/server/models.ts",
+      "sha256": "358eb72f1ce762082d3d7a7561524ef64c3f19e7bdc88060e7e8c9d524118b64"
+    },
+    {
+      "bytes": 2136,
+      "path": "apps/ltx-studio/server/orchestrator.ts",
+      "sha256": "a9aa66752eda4a7d22c3af7b2f31e1ab479b313c592c0d7ff9b4ca006f754562"
+    },
+    {
+      "bytes": 60398,
+      "path": "apps/ltx-studio/server/outputAnalysis.ts",
+      "sha256": "2e1dd2c9144b2a9d21d11b7f44c6845e142a2661e47f19fa8aede42d926c8b9d"
+    },
+    {
+      "bytes": 5910,
+      "path": "apps/ltx-studio/server/outputFrame.ts",
+      "sha256": "6c991315572c171b43cf2adfa0db969687235216fccd0c9e605be033f272a465"
+    },
+    {
+      "bytes": 21294,
+      "path": "apps/ltx-studio/server/outputs.ts",
+      "sha256": "2dfd5389482d1ec39d08a4b82a8de65b15b8f0943b0fa50555249359429eb26a"
+    },
+    {
+      "bytes": 27203,
+      "path": "apps/ltx-studio/server/projectStore.ts",
+      "sha256": "83b1a98d5418c9d8bedcc5b95bdefe068f25ec4e9719d365cc5ba6280a22d38f"
+    },
+    {
+      "bytes": 4941,
+      "path": "apps/ltx-studio/server/releaseIdentity.ts",
+      "sha256": "a863b34a550483990f88c2a586aa9e5d020c6a92ae14235f62b2d2953396a3de"
+    },
+    {
+      "bytes": 33892,
+      "path": "apps/ltx-studio/server/runProvenance.ts",
+      "sha256": "c2f704d391580191e6e4adc753422b4360bc740a5d6857bbe453f2cb10dfca51"
+    },
+    {
+      "bytes": 4719,
+      "path": "apps/ltx-studio/server/runtimeApi.ts",
+      "sha256": "4daaba66be11d33b6af57fdfe1a40c0a1efcd6066f76cfda37500a988a8ac7a6"
+    },
+    {
+      "bytes": 5040,
+      "path": "apps/ltx-studio/server/sceneReferenceFrame.ts",
+      "sha256": "515995e9650a7cc035342403b7fa8ba5c509115117607793206be7489328f227"
+    },
+    {
+      "bytes": 9957,
+      "path": "apps/ltx-studio/server/sequenceAssemble.ts",
+      "sha256": "5dce2ae29f42686f76f5fb7922c9e5924742bad48f27a19f0b9c60939eb5d405"
+    },
+    {
+      "bytes": 3887,
+      "path": "apps/ltx-studio/server/system.ts",
+      "sha256": "24e57c186d0738866d4ead59b73b12c6c70ecd9c3c21efd0968912fdf917ed3b"
+    },
+    {
+      "bytes": 4733,
+      "path": "apps/ltx-studio/server/thermal.ts",
+      "sha256": "4acb29634b1e64a59d5283677345c87bc10b5d18899bda2fc35704b1b80594d7"
+    },
+    {
+      "bytes": 1589,
+      "path": "apps/ltx-studio/server/uploads.ts",
+      "sha256": "953363dd205a34eb78b97c4f7437c527a2da6d3643bc92b1cd1dfa8ca8eb70d2"
+    },
+    {
+      "bytes": 1996,
+      "path": "apps/ltx-studio/shared/admissionPreflight.ts",
+      "sha256": "052d19413a0f605b4172c015f12ef5ac21d97f5dd53051ecdf5de69cfdd97b3e"
+    },
+    {
+      "bytes": 978,
+      "path": "apps/ltx-studio/shared/assets.ts",
+      "sha256": "015e89795da9ce389e31edfc0544e4ad232c8a7e3288849edbb3dbceb1bdd185"
+    },
+    {
+      "bytes": 556,
+      "path": "apps/ltx-studio/shared/canonicalJson.ts",
+      "sha256": "a39847355a42e559495a986a65667a2ea4c6973b603374f6776e423b1bab9cc8"
+    },
+    {
+      "bytes": 10141,
+      "path": "apps/ltx-studio/shared/dialogueEvaluator.ts",
+      "sha256": "193cab0cf05b69b0deada1fdbf226efff12b6aa2dc466264c744e3cccf15fa5d"
+    },
+    {
+      "bytes": 642,
+      "path": "apps/ltx-studio/shared/drafts.ts",
+      "sha256": "f16f67e1f16b93231da6ee47f3c651cd9ce20f0fc6d9beac10216f97b8ba26aa"
+    },
+    {
+      "bytes": 4857,
+      "path": "apps/ltx-studio/shared/estimates.ts",
+      "sha256": "e569cf1920cdb908af7acc0932500e1fa33991bb65dd93b438f50260968929e3"
+    },
+    {
+      "bytes": 10831,
+      "path": "apps/ltx-studio/shared/experiments.ts",
+      "sha256": "faa7ac3ae79d75d617fe193b9d0dcf399d519e4023acaa3af0ace2828c1b0c06"
+    },
+    {
+      "bytes": 6073,
+      "path": "apps/ltx-studio/shared/m0Evidence.ts",
+      "sha256": "27eb504b4fecef995898fd62673a63e36953467df3b660977343552e0a6126a2"
+    },
+    {
+      "bytes": 114,
+      "path": "apps/ltx-studio/shared/media.ts",
+      "sha256": "3ba8d5858bfb348ee8db0463e3c893b7de87a734e9264fd3fc8c28c2cfd97fa0"
+    },
+    {
+      "bytes": 29219,
+      "path": "apps/ltx-studio/shared/models.ts",
+      "sha256": "bee6106f719bd5faf002013d41a40a0ff9bdbe4250c83ca33f66a265ad609d93"
+    },
+    {
+      "bytes": 813,
+      "path": "apps/ltx-studio/shared/mouthSkinSufficiency.ts",
+      "sha256": "faeb5f97b91707495c53c5deeb8625391862734a858bb8500b656a7e4512a973"
+    },
+    {
+      "bytes": 18882,
+      "path": "apps/ltx-studio/shared/objectiveQuality.ts",
+      "sha256": "3346306196308f7106f96d0448d1f75789c3e189bb6ea7a39a0efc8f27a89dfe"
+    },
+    {
+      "bytes": 974,
+      "path": "apps/ltx-studio/shared/outputs.ts",
+      "sha256": "86e66abaea20a59ddd2976a950bdf790f9336e3af7ecb6a261a8fda0711c4b6a"
+    },
+    {
+      "bytes": 29909,
+      "path": "apps/ltx-studio/shared/phonemeVisemeEvaluator.ts",
+      "sha256": "b54fc7bac49a61cf7e4be314ef3829894b95cb6de63727780037921916d2accd"
+    },
+    {
+      "bytes": 40533,
+      "path": "apps/ltx-studio/shared/pipelines.ts",
+      "sha256": "3649f6d67383563a6e8b3281a3ab5bff87c4d8b06475c894a86d2ccc503c7801"
+    },
+    {
+      "bytes": 2772,
+      "path": "apps/ltx-studio/shared/plan.ts",
+      "sha256": "7aa52ad11cc22494f1013e0f7281ae2787d102dbd1cee45abe712b8dae5f6b82"
+    },
+    {
+      "bytes": 1923,
+      "path": "apps/ltx-studio/shared/presets.ts",
+      "sha256": "9809693c257fb6fb89ce4b9edda9f177cc6dd45b5b6361f308a47974037b741c"
+    },
+    {
+      "bytes": 13584,
+      "path": "apps/ltx-studio/shared/projects.ts",
+      "sha256": "fa5d2906fe2cb0e168d240367177f5b171f6f8c7d67349a17f79a0aea51cb839"
+    },
+    {
+      "bytes": 2758,
+      "path": "apps/ltx-studio/shared/prompts.ts",
+      "sha256": "e6609a318ca40e391ab218bbc784afe216cb494b94410077ca476fa31ae5c53e"
+    },
+    {
+      "bytes": 1803,
+      "path": "apps/ltx-studio/shared/provenance.ts",
+      "sha256": "b474e0b5f891e9d69d17a9e60fea2e4a495fbbe163951385e202dc83d497e6a3"
+    },
+    {
+      "bytes": 1490,
+      "path": "apps/ltx-studio/shared/quality.ts",
+      "sha256": "cb13738ecba119a7d80aea40bb40ad76e71b31e830d1f1dc0ae67f5ea6aa1b4a"
+    },
+    {
+      "bytes": 30195,
+      "path": "apps/ltx-studio/shared/releaseAudit.ts",
+      "sha256": "f541053e1b4b043cda7c23080e42d93c145b891cd143dfab624463eb714189f9"
+    },
+    {
+      "bytes": 17471,
+      "path": "apps/ltx-studio/shared/releaseSurface.ts",
+      "sha256": "4a1a3bd228398a0d54159b1e1289f37a9e979192165ddfecc51547736027fd86"
+    },
+    {
+      "bytes": 3099,
+      "path": "apps/ltx-studio/shared/rightsEvidence.ts",
+      "sha256": "7c0ca5df8054cecd8db35cf313568d45ec5567fb298b260ebcb2da81f3c182f9"
+    },
+    {
+      "bytes": 458,
+      "path": "apps/ltx-studio/shared/sceneReferenceQuality.ts",
+      "sha256": "6a6056a7bd28fa7e934802ccaf3740e31a3666189207623ab0224ce46ff1aee5"
+    },
+    {
+      "bytes": 5161,
+      "path": "apps/ltx-studio/shared/upstreamWorkflowContracts.ts",
+      "sha256": "0fa35c1526eb8552e3851489b388ca9946c38e0f9abe360ba289868570ee9c3e"
+    },
+    {
+      "bytes": 5245,
+      "path": "apps/ltx-studio/tests/admission-preflight.test.ts",
+      "sha256": "ee412cab0369f8fb98ce7dc28714e27e031c64401bbf770f86df650765001647"
+    },
+    {
+      "bytes": 11275,
+      "path": "apps/ltx-studio/tests/admission.test.ts",
+      "sha256": "73d028358c2f911d81b7b245e3c753a02a86a0bfd517b836f8620c7b769e2174"
+    },
+    {
+      "bytes": 3904,
+      "path": "apps/ltx-studio/tests/analysis-store.test.ts",
+      "sha256": "68fc8020190f33ae1a93f5ef7cd849012a5f3cf72eee069551d83783c5ddef9a"
+    },
+    {
+      "bytes": 2464,
+      "path": "apps/ltx-studio/tests/assets.test.ts",
+      "sha256": "419f419680f2357a130fa7f6d0470e17188ec93763c474896bcdda8ae6d7e535"
+    },
+    {
+      "bytes": 4835,
+      "path": "apps/ltx-studio/tests/audio-remux.test.ts",
+      "sha256": "0802fc2377bb0e95cf74bf5300a5ed5c71b66ca28bbaa1c034a7e66be36cdf95"
+    },
+    {
+      "bytes": 1365,
+      "path": "apps/ltx-studio/tests/auto-analysis.test.ts",
+      "sha256": "83d96ac7e88c0d63a9684206306ec8d862b1c1f158e7dead16788fba9cd0cf05"
+    },
+    {
+      "bytes": 9980,
+      "path": "apps/ltx-studio/tests/av-sync-proxy.test.ts",
+      "sha256": "87360279955abd5b4eb5f81c58d5db093df1d175b0662dbda269a27df606a94d"
+    },
+    {
+      "bytes": 30384,
+      "path": "apps/ltx-studio/tests/command.test.ts",
+      "sha256": "f63619547fec9a564568516a252c9af9dbbbc04f36715e5d299616cdf8537130"
+    },
+    {
+      "bytes": 1848,
+      "path": "apps/ltx-studio/tests/config.test.ts",
+      "sha256": "2044181dc6f6b166a719d0ff586411263f02265f07301baf0f556c4ad628f38c"
+    },
+    {
+      "bytes": 8061,
+      "path": "apps/ltx-studio/tests/dialogue-evaluator.test.ts",
+      "sha256": "d5b86b483e1bc97da988571ac42719a63e78d7a682bcc89a1d3fded5f8a6621b"
+    },
+    {
+      "bytes": 731,
+      "path": "apps/ltx-studio/tests/drafts.test.ts",
+      "sha256": "535903d20e423d2e4e379d17a6c06febb9cc3e96aa68e7e889524104aa9e9a12"
+    },
+    {
+      "bytes": 86433,
+      "path": "apps/ltx-studio/tests/e2e/studio.spec.ts",
+      "sha256": "f7cbb804be44b5bd824f46cdc1ac0a6410f29637a12f3d0df468a21387fc8f13"
+    },
+    {
+      "bytes": 953,
+      "path": "apps/ltx-studio/tests/editor-lipsync-visibility.test.ts",
+      "sha256": "2565ec6a1f88d9394316205e5f560bd989a14b7ba9eef4ebda9ecc76b14d9f00"
+    },
+    {
+      "bytes": 4657,
+      "path": "apps/ltx-studio/tests/estimates.test.ts",
+      "sha256": "25c359659253c6ce20c218b82f865b3615a909dc9db18a8e177dd22d28f6a74d"
+    },
+    {
+      "bytes": 1928,
+      "path": "apps/ltx-studio/tests/evaluator-bindings.test.ts",
+      "sha256": "5636c33c23e68adaf59c5f2431480349fb545dad4b42be14b9b91065a96cacf3"
+    },
+    {
+      "bytes": 7147,
+      "path": "apps/ltx-studio/tests/evaluator-state-provider.test.ts",
+      "sha256": "a78aea906d270ed5c225ccde8306566e030997debb83b766d59bff29dd897c0b"
+    },
+    {
+      "bytes": 2848,
+      "path": "apps/ltx-studio/tests/experiment-baseline-output.test.ts",
+      "sha256": "e40d38a2b5b698688eb9c7992d2adcfba3b700a94412ae7c7bfe056d7a7b3784"
+    },
+    {
+      "bytes": 8663,
+      "path": "apps/ltx-studio/tests/experiment-retry.test.ts",
+      "sha256": "510d9b66042a402756b8bfc764d8f5d064f370ae9cd4fd380096bed5378f2bca"
+    },
+    {
+      "bytes": 17636,
+      "path": "apps/ltx-studio/tests/experiments.test.ts",
+      "sha256": "d19a1f5992149b7cae281836dbe23e6e3fb7eea42fd0426d327170fdca010799"
+    },
+    {
+      "bytes": 3656,
+      "path": "apps/ltx-studio/tests/fixtures.ts",
+      "sha256": "5eb0b4dd5a29dfbb89efe530d9a1d05f5020e91696278c76747de4e3e32204fc"
+    },
+    {
+      "bytes": 1483,
+      "path": "apps/ltx-studio/tests/identity-model.test.ts",
+      "sha256": "e6a58e8b306f1c251f52d3d0aa77c6a7a02ce810f8766cf8b6d262e92779c227"
+    },
+    {
+      "bytes": 7043,
+      "path": "apps/ltx-studio/tests/identity-tracking.test.ts",
+      "sha256": "c71a4fe487f96e0f8d580105ad69424f01b74ea2b91b520ceb76bc66275ac36c"
+    },
+    {
+      "bytes": 5845,
+      "path": "apps/ltx-studio/tests/image-crop.test.ts",
+      "sha256": "f839d54ef4177c79199584dd6ce5014f13b15dc0f468285fedb1425bc1371cce"
+    },
+    {
+      "bytes": 5133,
+      "path": "apps/ltx-studio/tests/input-evidence.test.ts",
+      "sha256": "7dbfc7a3761d21f90b5590192cd1df95a51436a937f61366c597c8d75f2fa3f0"
+    },
+    {
+      "bytes": 90028,
+      "path": "apps/ltx-studio/tests/jobs.test.ts",
+      "sha256": "6636ffb7dc008c6d7a97b9e14e6f636aa51203b47fc35da28cf81477ec418adc"
+    },
+    {
+      "bytes": 6978,
+      "path": "apps/ltx-studio/tests/latentsync-refiner.test.ts",
+      "sha256": "6659c3f833e99c696b01ced62e92ea156b62aaf6901b8e772648a20c7baa329a"
+    },
+    {
+      "bytes": 3972,
+      "path": "apps/ltx-studio/tests/lipdub-diagnostics.test.ts",
+      "sha256": "17231a9da3c88beed7301a92139dbce650657b030746120bdd8cd5fc1522261b"
+    },
+    {
+      "bytes": 2514,
+      "path": "apps/ltx-studio/tests/lipdub-media-contract.test.ts",
+      "sha256": "2dee46a302cbdfa75e56c5b473989438dab0570b1c9a8b742ed3401f3f74003f"
+    },
+    {
+      "bytes": 5184,
+      "path": "apps/ltx-studio/tests/lipdub-prep.test.ts",
+      "sha256": "99be97cf7af45efbb5ec2f1c8e8be426c308bfbcd2309846c8211570e7edccae"
+    },
+    {
+      "bytes": 14196,
+      "path": "apps/ltx-studio/tests/lipforcing-refiner.test.ts",
+      "sha256": "5f3326a8f3cf7987a56cbf0bcf4c6b4b11a5fc46000e11cfc2d291ba6d22527f"
+    },
+    {
+      "bytes": 1852,
+      "path": "apps/ltx-studio/tests/longcat-hybrid.test.ts",
+      "sha256": "ceb4e0c12c5f8313c454ecc0c873699ed5a05c9a5670c16ef32a8ed467529f7a"
+    },
+    {
+      "bytes": 1926,
+      "path": "apps/ltx-studio/tests/m0-evidence.test.ts",
+      "sha256": "e3f4c4e510cca6fd0ad9d28a23a777d51736e17e252bfb92c63e1a0f82f8d174"
+    },
+    {
+      "bytes": 19432,
+      "path": "apps/ltx-studio/tests/models.test.ts",
+      "sha256": "500ecadf1f4d5e9f49276b5b19c0a75b5e5ff72b678463af1fb98352a47774ae"
+    },
+    {
+      "bytes": 6114,
+      "path": "apps/ltx-studio/tests/musetalk-refiner.test.ts",
+      "sha256": "6227ca70c3436b5e0fa0f5d145a143d1b7d2c4658258b630e6aefc8a77b55b3e"
+    },
+    {
+      "bytes": 68457,
+      "path": "apps/ltx-studio/tests/objective-analysis-integration.test.ts",
+      "sha256": "fe2208c0bc4e9676dbc200e3abc976976af5fd7192606115c626ed5df07b694d"
+    },
+    {
+      "bytes": 13692,
+      "path": "apps/ltx-studio/tests/objective-comparison.test.ts",
+      "sha256": "46aa85989d27a5cb6ec70ac19ca1a364eb1533b527ca0686786c648caf2142ce"
+    },
+    {
+      "bytes": 12792,
+      "path": "apps/ltx-studio/tests/objective-quality.test.ts",
+      "sha256": "0752a5e51eb9f3f526d4f8d3ba4543c567c25585db7a2e6653080e1e965640d7"
+    },
+    {
+      "bytes": 1272,
+      "path": "apps/ltx-studio/tests/orchestrator.test.ts",
+      "sha256": "dff2d55645266b7c4c0e07921f63136da9f030c020ca871e86d0eed3a0465e48"
+    },
+    {
+      "bytes": 3391,
+      "path": "apps/ltx-studio/tests/output-frame.test.ts",
+      "sha256": "1258ef5bb0e9f953e9fffa15de5a951c953d5966488a4adf985172d8021e97f4"
+    },
+    {
+      "bytes": 6027,
+      "path": "apps/ltx-studio/tests/output-state.test.ts",
+      "sha256": "3fcaea722822a0e5336ab3a52ea4aaa50409857028a136784d45b19981c66fe4"
+    },
+    {
+      "bytes": 28646,
+      "path": "apps/ltx-studio/tests/outputs.test.ts",
+      "sha256": "d374caa7bc00ffcdd08b2500c37bc4ecc3e50ec2828461aaf8f0d01c36cdcf9c"
+    },
+    {
+      "bytes": 9181,
+      "path": "apps/ltx-studio/tests/phoneme-viseme-evaluator.test.ts",
+      "sha256": "67d27596c5e270a66c51e7c6059d0b5229f796212c306706a6713862141fd72b"
+    },
+    {
+      "bytes": 14998,
+      "path": "apps/ltx-studio/tests/phoneme-viseme-measurement-manifest.test.ts",
+      "sha256": "4ed7116a85cf4e17de4eee362d721506a33704edf5ab6d29dc66ef0f26d144ac"
+    },
+    {
+      "bytes": 16939,
+      "path": "apps/ltx-studio/tests/phoneme-viseme-runner.test.ts",
+      "sha256": "7ba60eab6f20c5376bc217f379357a2e48c9359bd732e17b862ec512a51070bd"
+    },
+    {
+      "bytes": 24346,
+      "path": "apps/ltx-studio/tests/pipelines.test.ts",
+      "sha256": "b778cfe35a3b686994f0f2822eaafe985789f4af41c03e68f5d73b18d71a81e3"
+    },
+    {
+      "bytes": 1144,
+      "path": "apps/ltx-studio/tests/presets.test.ts",
+      "sha256": "3de33224fd1a0f4f14c187d83b19f9caefbac997ce01c42f4783e6d1da8a52a6"
+    },
+    {
+      "bytes": 12585,
+      "path": "apps/ltx-studio/tests/projects.test.ts",
+      "sha256": "2965b404c25e7e07e1c12dfe1cf5cc87fa1b204b9d2cc86320835af2d12a605e"
+    },
+    {
+      "bytes": 3553,
+      "path": "apps/ltx-studio/tests/prompts.test.ts",
+      "sha256": "8a09f2a00c6f95c31db2fe2694ac8082e8343fa28f85fd0303f305793f921e9b"
+    },
+    {
+      "bytes": 9544,
+      "path": "apps/ltx-studio/tests/python-cli-contract.test.ts",
+      "sha256": "d14238173fc07f9237776e113afc4d68921bebea7efddf2e6652bf4abeb221aa"
+    },
+    {
+      "bytes": 1604,
+      "path": "apps/ltx-studio/tests/quality.test.ts",
+      "sha256": "4bcbfef8e541310118c6289ab6794371f6f23bb847f85337dd068d72963aae3b"
+    },
+    {
+      "bytes": 2178,
+      "path": "apps/ltx-studio/tests/refiner-audio.test.ts",
+      "sha256": "a5cd2ed970c24077ee161a9fa0219033700ef8da40e4fb7618564e5c326686a8"
+    },
+    {
+      "bytes": 1308,
+      "path": "apps/ltx-studio/tests/refresh-fence.test.ts",
+      "sha256": "868471319d2077c81655b3d6b14818f5fc91026be02eacfca9cfeea23b0ffc58"
+    },
+    {
+      "bytes": 2898,
+      "path": "apps/ltx-studio/tests/release-audit-io.test.ts",
+      "sha256": "582ea3cee8b450370d8d0a97c37a2c2c858b6a442fe507deaa68168e1fdea5a4"
+    },
+    {
+      "bytes": 16884,
+      "path": "apps/ltx-studio/tests/release-audit.test.ts",
+      "sha256": "00343a799c4ca14ab980da084fdb1a2c2aa7ffd6748d6ef7743703b8f53d1a3a"
+    },
+    {
+      "bytes": 2331,
+      "path": "apps/ltx-studio/tests/release-identity.test.ts",
+      "sha256": "cb175d961b1464501e9671016abffb00e014d81d524f562d140b795b84a2ffb1"
+    },
+    {
+      "bytes": 6831,
+      "path": "apps/ltx-studio/tests/release-surface.test.ts",
+      "sha256": "65af8ece394b3141e225160e28c6b13f0e8ff40161c35c850b8a8ade244d218a"
+    },
+    {
+      "bytes": 10487,
+      "path": "apps/ltx-studio/tests/reusable-ltx-base.test.ts",
+      "sha256": "5982b47509d80954a741384ca74687d9299c1ec00b44e0eddfc9e418f7cd3e4d"
+    },
+    {
+      "bytes": 2966,
+      "path": "apps/ltx-studio/tests/rights-evidence.test.ts",
+      "sha256": "65145ee754dd9ff076ca56cce18689c576e85735e503056ebfaac90c2de7ccb1"
+    },
+    {
+      "bytes": 470,
+      "path": "apps/ltx-studio/tests/run-panel.test.ts",
+      "sha256": "f59da83c5fcf481f9a5abd44b529fd75b19b37a75e29d674bbc25e4a8dda6459"
+    },
+    {
+      "bytes": 9666,
+      "path": "apps/ltx-studio/tests/run-provenance.test.ts",
+      "sha256": "89bcc462d4616e6472cb28023e330dd4f1bdaa33119bdbc99ffeee27de176461"
+    },
+    {
+      "bytes": 5096,
+      "path": "apps/ltx-studio/tests/scene-reference-frame-selector.test.ts",
+      "sha256": "e02dbac818cdd4e8e03a413a95f713cebc37d4ec61b41491a3d3192a4ae47cc5"
+    },
+    {
+      "bytes": 1597,
+      "path": "apps/ltx-studio/tests/scene-reference.test.ts",
+      "sha256": "925776bbf215cc44cf67d011635b829605c64e949431207699d6ee4b65e8f19a"
+    },
+    {
+      "bytes": 3818,
+      "path": "apps/ltx-studio/tests/segment-boundary-scheduler.test.ts",
+      "sha256": "a29a703a610d8e2862b099ddfc2b6b071fc4582806ade6809ec9cd3576def448"
+    },
+    {
+      "bytes": 6197,
+      "path": "apps/ltx-studio/tests/sequence-assemble.test.ts",
+      "sha256": "93e5d17a0f2f016e0fe21b226278276c597d45b152751e4bfd5f8759ece9b9ec"
+    },
+    {
+      "bytes": 2763,
+      "path": "apps/ltx-studio/tests/system.test.ts",
+      "sha256": "5faa1fa00b8059984f58c15ee5e58f69b19c6e6cb2807a7c58a24e0a99c43a59"
+    },
+    {
+      "bytes": 3521,
+      "path": "apps/ltx-studio/tests/thermal.test.ts",
+      "sha256": "ca44780299909307af24cb56bd806d9a26c40cc15a71e0a0bc754673f847fc5c"
+    },
+    {
+      "bytes": 1267,
+      "path": "apps/ltx-studio/tests/uploads.test.ts",
+      "sha256": "be60a93b3ca62713c5ff0f91cecb177ba1f3abe0becb2cb91b61585b1426891a"
+    },
+    {
+      "bytes": 709,
+      "path": "apps/ltx-studio/tests/variants.test.ts",
+      "sha256": "efb5f5dece83ec3ff71f535690fa81785583b24322f396124fe6997ceebf68a0"
+    },
+    {
+      "bytes": 3220,
+      "path": "packages/ltx-pipelines/src/ltx_pipelines/__init__.py",
+      "sha256": "89fa37a2f843d0e29ddf059e899f7e364ebb0db88d224d0b48d3a82946ddf838"
+    },
+    {
+      "bytes": 33129,
+      "path": "packages/ltx-trainer/scripts/av_eval.py",
+      "sha256": "5ad602059717611bb3f239fbbcf4751c5fb95d656ea53b9672fb2b8ff83138ac"
+    }
+  ]
+}

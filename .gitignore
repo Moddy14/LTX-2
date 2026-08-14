@@ -85,6 +85,9 @@ playwright-report/
 !apps/ltx-studio/evaluators/phoneme-viseme/*.json
 !apps/ltx-studio/release/rights-evidence.v1.json
 !apps/ltx-studio/docs/evidence/scene-reference-ab-2026-08-10.json
+!apps/ltx-studio/docs/evidence/m0-verification-2026-08-14.json
+!apps/ltx-studio/docs/evidence/m0-baseline-2026-08-14.json
+!apps/ltx-studio/docs/evidence/m0-contract-inventory-2026-08-14.json
 !packages/ltx-trainer/configs/av_eval/*.json
 
 # LTX Studio machine-local evaluator bindings and operator evidence
