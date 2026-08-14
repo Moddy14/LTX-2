@@ -30,6 +30,7 @@ import {
 } from "../shared/models.js";
 import { RuntimeApiError } from "../server/runtimeApi.js";
 import { projectValueSha256 } from "../server/projectStore.js";
+import { bootstrapJobStartEnforcer } from "../server/startEnforcer.js";
 import { validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
@@ -354,6 +355,56 @@ describe("job persistence and reservations", () => {
     });
     expect(restored.get(id)?.logs.at(-1)).toContain("automatisch fortgesetzt");
     expect(Reflect.get(restored, "queue")).toEqual([id]);
+  });
+
+  it("does not persist a direct job denied by the sealed-release start enforcer", async () => {
+    const path = await statePath();
+    const manager = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bootstrapJobStartEnforcer(true),
+    );
+
+    expect(() => manager.create(validRequest())).toThrow(JobConflictError);
+    expect(manager.list()).toEqual([]);
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  it("rechecks and fails a persisted queued job before runner side effects", async () => {
+    const path = await statePath();
+    const created = new JobManager(path, false).create(validRequest());
+    const restored = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bootstrapJobStartEnforcer(true),
+    );
+    const pump = Reflect.get(restored, "pump") as () => Promise<void>;
+
+    await pump.call(restored);
+
+    expect(restored.get(created.id)).toMatchObject({
+      status: "failed",
+      startedAt: null,
+      outputUrl: null,
+    });
+    expect(restored.get(created.id)?.error).toContain("fail-closed");
+    expect(Reflect.get(restored, "runningId")).toBeNull();
   });
 
   it("resumes a resource-free paused slice with the same orchestrator job id", async () => {

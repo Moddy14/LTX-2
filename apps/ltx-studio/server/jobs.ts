@@ -84,6 +84,7 @@ import {
   outputRoot,
   pythonExecutable,
   rendererPythonExecutable,
+  sealedRelease,
   pythonRuntimeAvailable,
   repoRoot,
   statePath,
@@ -118,6 +119,12 @@ import {
   verifyRunProvenance,
 } from "./runProvenance.js";
 import { RuntimeApiError } from "./runtimeApi.js";
+import {
+  bootstrapJobStartEnforcer,
+  jobStartSources,
+  type JobStartEnforcer,
+  type JobStartSource,
+} from "./startEnforcer.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -170,6 +177,7 @@ type DgxOwnerHeartbeatState = {
 };
 
 type RuntimeJob = StudioJob & {
+  startSource: JobStartSource;
   plan: CommandPlan;
   process?: ChildProcess;
   processTermination?: Promise<void>;
@@ -229,6 +237,7 @@ type LocalProcessGroupIdentity = {
   leaderStartTicks: string;
 };
 type PersistedStudioJob = StudioJob & {
+  startSource?: JobStartSource;
   dgxTerminalDelivery?: DgxTerminalDelivery;
   localProcessGroupPending?: boolean;
   localProcessGroupIdentity?: LocalProcessGroupIdentity;
@@ -254,6 +263,14 @@ type RunProvenanceOperations = {
 };
 type ModelInventoryOperations = {
   read: typeof getModelInventory;
+};
+
+type JobCreateMetadata = {
+  variantOf?: string | null;
+  experiment?: ExperimentRunBinding | null;
+  project?: ProjectRunBinding | null;
+  deferStart?: boolean;
+  startSource?: Exclude<JobStartSource, "restored">;
 };
 
 const MAX_JOBS = 100;
@@ -838,11 +855,13 @@ function publicJob(job: RuntimeJob): StudioJob {
   delete value.dgxTerminalDeliveryInFlight;
   delete value.dgxTerminalRetry;
   delete value.dgxOwnerHeartbeat;
+  delete value.startSource;
   return value as StudioJob;
 }
 
 function persistedJob(job: RuntimeJob): PersistedStudioJob {
   const value: PersistedStudioJob = publicJob(job);
+  value.startSource = job.startSource;
   if (job.dgxTerminalDelivery) value.dgxTerminalDelivery = structuredClone(job.dgxTerminalDelivery);
   if (job.localProcessGroupPending) value.localProcessGroupPending = true;
   if (job.localProcessGroupIdentity) {
@@ -934,6 +953,7 @@ export class JobManager extends EventEmitter {
     private readonly modelInventoryOperations: ModelInventoryOperations = {
       read: getModelInventory,
     },
+    private readonly startEnforcer: JobStartEnforcer = bootstrapJobStartEnforcer(sealedRelease),
   ) {
     super();
     this.restore();
@@ -963,12 +983,7 @@ export class JobManager extends EventEmitter {
 
   create(
     request: GenerationRequest,
-    metadata: {
-      variantOf?: string | null;
-      experiment?: ExperimentRunBinding | null;
-      project?: ProjectRunBinding | null;
-      deferStart?: boolean;
-    } = {},
+    metadata: JobCreateMetadata = {},
   ): StudioJob {
     if (metadata.experiment && metadata.project) {
       throw new JobConflictError("Ein Job darf nicht gleichzeitig Experiment- und Projektlauf sein.");
@@ -985,6 +1000,7 @@ export class JobManager extends EventEmitter {
     ) {
       throw new JobConflictError("Projektlauf stimmt nicht mit seiner gebundenen Request-Revision überein.");
     }
+    this.assertStartAllowed(request, this.startSource(metadata));
     if (this.shuttingDown) {
       throw new JobConflictError("LTX Studio wird beendet und nimmt keine neuen Aufträge mehr an.");
     }
@@ -1024,6 +1040,7 @@ export class JobManager extends EventEmitter {
       dgxJobId: null,
       identityEvidence: null,
       runProvenance: null,
+      startSource: this.startSource(metadata),
       plan,
     };
     this.jobs.set(id, job);
@@ -1057,7 +1074,7 @@ export class JobManager extends EventEmitter {
     const request = withOfficialSpeechModelPaths(structuredClone(source.request));
     request.outputName = nextVariantOutputName(source.outputName, unavailable);
     if (mode === "random-seed") request.seed = randomInt(0, 2_147_483_647);
-    return this.create(request, { variantOf: source.variantOf ?? source.id });
+    return this.create(request, { variantOf: source.variantOf ?? source.id, startSource: "rerun" });
   }
 
   setFavorite(id: string, favorite: boolean): StudioJob | undefined {
@@ -1385,6 +1402,18 @@ export class JobManager extends EventEmitter {
     if (!id) return;
     const job = this.jobs.get(id);
     if (!job || job.status !== "queued") return void this.pump();
+    const decision = this.startEnforcer.decide({
+      requestSha256: createHash("sha256").update(canonicalJson(job.request)).digest("hex"),
+      source: job.startSource,
+    });
+    if (!decision.allowed) {
+      job.status = "failed";
+      job.finishedAt = now();
+      job.error = decision.reason;
+      this.appendLog(job, decision.reason);
+      this.changed();
+      return void this.pump();
+    }
     this.runningId = id;
     const runPromise = this.run(job);
     this.activeRunPromise = runPromise;
@@ -1406,6 +1435,22 @@ export class JobManager extends EventEmitter {
       this.runningId = null;
       if (!this.shuttingDown) void this.pump();
     }
+  }
+
+  private startSource(metadata: JobCreateMetadata): Exclude<JobStartSource, "restored"> {
+    if (metadata.startSource) return metadata.startSource;
+    if (metadata.project) return "project";
+    if (metadata.experiment) return "experiment";
+    if (metadata.variantOf) return "rerun";
+    return "direct";
+  }
+
+  private assertStartAllowed(request: GenerationRequest, source: Exclude<JobStartSource, "restored">): void {
+    const decision = this.startEnforcer.decide({
+      requestSha256: createHash("sha256").update(canonicalJson(request)).digest("hex"),
+      source,
+    });
+    if (!decision.allowed) throw new JobConflictError(decision.reason);
   }
 
   private async run(job: RuntimeJob): Promise<void> {
@@ -3955,6 +4000,15 @@ export class JobManager extends EventEmitter {
             : undefined,
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
           runProvenance: normalizeRunProvenance(entry.runProvenance),
+          startSource: jobStartSources.includes(entry.startSource as JobStartSource)
+            ? entry.startSource as JobStartSource
+            : projectBinding
+              ? "project"
+              : experimentBinding
+                ? "experiment"
+                : typeof entry.variantOf === "string" && /^[0-9a-f-]{36}$/i.test(entry.variantOf)
+                  ? "rerun"
+                  : "restored",
           plan,
         });
         if (status === "queued") this.queue.push(entry.id);
