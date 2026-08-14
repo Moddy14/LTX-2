@@ -1,4 +1,4 @@
-import type { ActivationState } from "../shared/activation.js";
+import type { ActivationState, RuntimeActivationSnapshot } from "../shared/activation.js";
 
 export const jobStartSources = ["direct", "project", "experiment", "rerun", "restored"] as const;
 
@@ -38,16 +38,6 @@ export function bootstrapJobStartEnforcer(sealedRelease: boolean): JobStartEnfor
     }),
   };
 }
-
-export type RuntimeActivationSnapshot = {
-  state: ActivationState;
-  generation: number;
-  activationHeadSha256: string;
-  releaseDigest: string;
-  surfaceDigest: string;
-  rightsCurrent: boolean;
-  releasedSurfaceEntryIds: readonly string[];
-};
 
 export type RuntimeActivationProvider = {
   read(): RuntimeActivationSnapshot;

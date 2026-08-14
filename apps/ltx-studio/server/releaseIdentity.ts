@@ -19,6 +19,7 @@ type ManifestArtifact = {
 type ReleaseManifest = {
   schemaVersion: "ltx-studio-release-manifest.v1";
   source: { gitCommit: string; clean: boolean };
+  surface: { path: "apps/ltx-studio/release/candidate-release-surface.v1.json"; sha256: string };
   artifacts: ManifestArtifact[];
 };
 
@@ -27,6 +28,7 @@ export type ReleaseIdentity = {
   verified: boolean;
   releaseDigest: string | null;
   manifestSha256: string | null;
+  surfaceDigest: string | null;
   sourceCommit: string | null;
 };
 
@@ -81,6 +83,9 @@ function parseManifest(bytes: Buffer): ReleaseManifest {
     || !manifest.source
     || manifest.source.clean !== true
     || !/^[0-9a-f]{40}$/.test(manifest.source.gitCommit)
+    || !manifest.surface
+    || manifest.surface.path !== "apps/ltx-studio/release/candidate-release-surface.v1.json"
+    || !SHA256_PATTERN.test(manifest.surface.sha256)
     || !Array.isArray(manifest.artifacts)) {
     throw new Error("Release manifest schema or source state is invalid");
   }
@@ -101,6 +106,7 @@ export function loadReleaseIdentity(options: {
       verified: false,
       releaseDigest: null,
       manifestSha256: null,
+      surfaceDigest: null,
       sourceCommit: null,
     };
   }
@@ -115,6 +121,10 @@ export function loadReleaseIdentity(options: {
     throw new Error("Release digest does not match the expected sealed identity");
   }
   const manifest = parseManifest(manifestBytes);
+  const surfaceArtifact = manifest.artifacts.find(({ path }) => path === manifest.surface.path);
+  if (surfaceArtifact?.type !== "file" || surfaceArtifact.sha256 !== manifest.surface.sha256) {
+    throw new Error("Release surface digest is not bound to its manifest artifact");
+  }
   const expectedPaths = manifest.artifacts.map(({ path }) => path).sort();
   if (new Set(expectedPaths).size !== expectedPaths.length
     || canonicalJson(expectedPaths) !== canonicalJson(artifactPaths(root))) {
@@ -126,6 +136,7 @@ export function loadReleaseIdentity(options: {
     verified: true,
     releaseDigest: digest,
     manifestSha256: digest,
+    surfaceDigest: manifest.surface.sha256,
     sourceCommit: manifest.source.gitCommit,
   };
 }

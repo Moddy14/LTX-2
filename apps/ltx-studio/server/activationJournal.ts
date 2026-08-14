@@ -19,11 +19,19 @@ import {
 } from "../shared/activation.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
 
+import { z } from "zod";
+
 export type ActivationAnchorHead = {
   generation: number;
   sequence: number;
   headSha256: string;
 };
+
+export const activationAnchorHeadSchema = z.object({
+  generation: z.number().int().positive(),
+  sequence: z.number().int().nonnegative(),
+  headSha256: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export type ActivationHeadAnchor = {
   read(): ActivationAnchorHead | null;

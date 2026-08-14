@@ -5,6 +5,7 @@ import {
   activationEnvelopeDigest,
   activationRecordDigest,
   qualificationAuthorizationSchema,
+  runtimeActivationSnapshot,
   validateActivationJournal,
   verifyActivationEnvelopeSignature,
   type ActivationJournalEnvelope,
@@ -48,6 +49,7 @@ function bootstrap(): ActivationJournalEnvelope {
     state: "blocked",
     operation: "bootstrap_generation",
     release: release(),
+    releasedSurfaceEntryIds: [],
     authorizationDigest: null,
     auditEnvelopeDigest: null,
     evidenceDigest: null,
@@ -230,5 +232,43 @@ describe("activation contracts", () => {
     signed.record.recordedAt = "2026-08-15T00:00:01Z";
     expect(() => verifyActivationEnvelopeSignature(signed, policy, new Date("2026-08-15T00:00:00Z")))
       .toThrow(/binding mismatch/);
+  });
+
+  it("derives the runtime state and released surface set from the signed journal head", () => {
+    const first = bootstrap();
+    const mode = envelope({
+      ...first.record,
+      recordId: "00000000-0000-4000-8000-000000000006",
+      sequence: 1,
+      previousRecordSha256: activationEnvelopeDigest(first),
+      previousState: "blocked",
+      state: "qualification_only",
+      operation: "activate_qualification_mode",
+      authorizationDigest: sha("mode-authorization"),
+      recordedAt: "2026-08-15T00:01:00Z",
+    });
+    const promotion = envelope({
+      ...mode.record,
+      recordId: "00000000-0000-4000-8000-000000000007",
+      sequence: 2,
+      previousRecordSha256: activationEnvelopeDigest(mode),
+      previousState: "qualification_only",
+      state: "production_provisional",
+      operation: "promote_production",
+      releasedSurfaceEntryIds: ["native-generation.text-to-video"],
+      authorizationDigest: sha("release-authorization"),
+      auditEnvelopeDigest: sha("audit-envelope"),
+      recordedAt: "2026-08-15T00:02:00Z",
+    });
+
+    expect(runtimeActivationSnapshot([first, mode, promotion], true)).toEqual({
+      state: "production_provisional",
+      generation: 1,
+      activationHeadSha256: activationEnvelopeDigest(promotion),
+      releaseDigest: release().releaseDigest,
+      surfaceDigest: release().surfaceDigest,
+      rightsCurrent: true,
+      releasedSurfaceEntryIds: ["native-generation.text-to-video"],
+    });
   });
 });

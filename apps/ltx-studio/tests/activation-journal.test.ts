@@ -56,6 +56,7 @@ function envelope(overrides: Partial<ActivationJournalRecord> = {}): ActivationJ
         minimumSnapshotVersion: 1,
       },
     },
+    releasedSurfaceEntryIds: [],
     authorizationDigest: null,
     auditEnvelopeDigest: null,
     evidenceDigest: null,

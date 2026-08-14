@@ -29,6 +29,16 @@ export const hybridCacheRoot = join(dataRoot, "hybrid-cache");
 export const analysisTempRoot = join(dataRoot, "analysis-tmp");
 export const experimentRoot = join(dataRoot, "experiments");
 export const projectRoot = join(dataRoot, "projects");
+export const activationControlRoot = resolve(
+  process.env.LTX_STUDIO_ACTIVATION_CONTROL_ROOT ?? join(dataRoot, "activation-control"),
+);
+export const activationJournalPath = join(activationControlRoot, "activation-journal.json");
+export const activationAnchorPath = join(activationControlRoot, "activation-head.json");
+export const activationTrustPolicyPath = join(activationControlRoot, "activation-writer-trust.json");
+export const runtimeRightsSnapshotPath = join(activationControlRoot, "runtime-rights-snapshot.json");
+export const runtimeRightsTrustPolicyPath = join(activationControlRoot, "release-trusted-keys.json");
+export const activationTrustPolicyDigest = process.env.LTX_STUDIO_ACTIVATION_TRUST_POLICY_SHA256?.trim() ?? "";
+export const runtimeRightsTrustPolicyDigest = process.env.LTX_STUDIO_RIGHTS_TRUST_POLICY_SHA256?.trim() ?? "";
 const configuredProjectActorId = process.env.LTX_STUDIO_PROJECT_ACTOR_ID
   ?? `local-uid-${process.geteuid?.() ?? "unknown"}`;
 if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/.test(configuredProjectActorId)) {

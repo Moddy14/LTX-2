@@ -3,6 +3,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 import { z } from "zod";
 
 import { canonicalJson } from "./canonicalJson.js";
+import { trustedKeyPolicySchema, verifyDetachedSignature } from "./releaseAudit.js";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const identifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/);
@@ -161,6 +162,7 @@ export const activationJournalRecordSchema = z.object({
   state: z.enum(activationStates),
   operation: z.enum(activationOperations),
   release: activationReleaseBindingSchema,
+  releasedSurfaceEntryIds: z.array(identifierSchema),
   authorizationDigest: sha256Schema.nullable(),
   auditEnvelopeDigest: sha256Schema.nullable(),
   evidenceDigest: sha256Schema.nullable(),
@@ -176,6 +178,10 @@ export const activationJournalRecordSchema = z.object({
   writerKeyId: identifierSchema,
 }).strict().superRefine((record, context) => {
   const fail = (path: string, message: string) => context.addIssue({ code: "custom", path: [path], message });
+  if (new Set(record.releasedSurfaceEntryIds).size !== record.releasedSurfaceEntryIds.length
+    || record.releasedSurfaceEntryIds.some((id, index) => index > 0 && record.releasedSurfaceEntryIds[index - 1] >= id)) {
+    fail("releasedSurfaceEntryIds", "released surface entries must be unique and sorted");
+  }
   if (record.sequence === 0 ? record.previousRecordSha256 !== null : record.previousRecordSha256 === null) {
     fail("previousRecordSha256", "only the first record may omit the previous hash");
   }
@@ -234,6 +240,22 @@ export const activationJournalRecordSchema = z.object({
   if ((record.operation === "promote_production") !== (record.auditEnvelopeDigest !== null)) {
     fail("auditEnvelopeDigest", "only production promotion must bind the final audit envelope");
   }
+  if ((record.operation === "promote_production" || record.operation === "stabilize_production")
+    && record.releasedSurfaceEntryIds.length === 0) {
+    fail("releasedSurfaceEntryIds", "production states require at least one released surface entry");
+  }
+  if ([
+    "bootstrap_generation",
+    "activate_qualification_mode",
+    "register_qualification_authorization",
+    "accept_run_ticket",
+    "arm_run_ticket",
+    "start_run_ticket",
+    "terminalize_run_ticket",
+    "supersede_release_generation",
+  ].includes(record.operation) && record.releasedSurfaceEntryIds.length !== 0) {
+    fail("releasedSurfaceEntryIds", "pre-production and supersede records cannot release surface entries");
+  }
   if ((record.operation === "stabilize_production") !== (record.evidenceDigest !== null)) {
     fail("evidenceDigest", "only production stabilization must bind its observation evidence");
   }
@@ -289,6 +311,35 @@ export const activationWriterTrustPolicySchema = z.object({
 
 export type ActivationWriterTrustPolicy = z.infer<typeof activationWriterTrustPolicySchema>;
 
+export const runtimeRightsSnapshotSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-runtime-rights-snapshot.v1"),
+  releaseDigest: sha256Schema,
+  surfaceDigest: sha256Schema,
+  policyEvidenceDigest: sha256Schema,
+  attestationSeriesId: identifierSchema,
+  version: z.number().int().nonnegative(),
+  checkedAt: timestampSchema,
+  nextUpdate: timestampSchema,
+  sourceDigest: sha256Schema,
+  revocationState: z.enum(["clear", "revoked"]),
+}).strict().superRefine((snapshot, context) => {
+  if (Date.parse(snapshot.checkedAt) >= Date.parse(snapshot.nextUpdate)) {
+    context.addIssue({ code: "custom", path: ["nextUpdate"], message: "rights freshness window is inconsistent" });
+  }
+});
+
+export type RuntimeRightsSnapshot = z.infer<typeof runtimeRightsSnapshotSchema>;
+
+export type RuntimeActivationSnapshot = {
+  state: ActivationState;
+  generation: number;
+  activationHeadSha256: string;
+  releaseDigest: string;
+  surfaceDigest: string;
+  rightsCurrent: boolean;
+  releasedSurfaceEntryIds: readonly string[];
+};
+
 export function activationRecordDigest(record: ActivationJournalRecord): string {
   return createHash("sha256").update(canonicalJson(record)).digest("hex");
 }
@@ -336,6 +387,38 @@ export function verifyActivationEnvelopeSignature(
   return envelope;
 }
 
+export function verifyRuntimeRightsSnapshot(options: {
+  signed: { document: unknown; signature: unknown };
+  trustPolicy: unknown;
+  release: z.infer<typeof activationReleaseBindingSchema>;
+  now: Date;
+}): { document: RuntimeRightsSnapshot; digest: string } {
+  const trustPolicy = trustedKeyPolicySchema.parse(options.trustPolicy);
+  const document = runtimeRightsSnapshotSchema.parse(options.signed.document);
+  const digest = verifyDetachedSignature(
+    document,
+    options.signed.signature,
+    trustPolicy,
+    "rights-attestor",
+    options.now,
+  );
+  if (document.releaseDigest !== options.release.releaseDigest
+    || document.surfaceDigest !== options.release.surfaceDigest
+    || document.policyEvidenceDigest !== options.release.rights.policyEvidenceDigest
+    || document.attestationSeriesId !== options.release.rights.attestationSeriesId
+    || document.version < options.release.rights.minimumSnapshotVersion) {
+    throw new Error("Runtime rights snapshot binding mismatch");
+  }
+  const nowMs = options.now.getTime();
+  if (Date.parse(document.checkedAt) > nowMs || Date.parse(document.nextUpdate) < nowMs) {
+    throw new Error("Runtime rights snapshot is stale or not yet valid");
+  }
+  if (document.revocationState !== "clear") {
+    throw new Error("Runtime rights snapshot is revoked");
+  }
+  return { document, digest };
+}
+
 export function validateActivationJournal(raw: unknown): ActivationJournalEnvelope[] {
   const envelopes = z.array(activationJournalEnvelopeSchema).min(1).parse(raw);
   const registeredAuthorizations = new Set<string>();
@@ -371,6 +454,13 @@ export function validateActivationJournal(raw: unknown): ActivationJournalEnvelo
         || canonicalJson(envelope.record.release) !== canonicalJson(previous.record.release)) {
         throw new Error(`Activation record ${index} changed generation or release without supersede`);
       }
+      const releasedEntriesMayChange = envelope.record.operation === "promote_production";
+      const releasedEntriesMustReset = envelope.record.operation === "supersede_release_generation";
+      if (!releasedEntriesMayChange && !releasedEntriesMustReset
+        && canonicalJson(envelope.record.releasedSurfaceEntryIds)
+          !== canonicalJson(previous.record.releasedSurfaceEntryIds)) {
+        throw new Error(`Activation record ${index} changed released surface entries outside promotion`);
+      }
     }
     if (envelope.record.operation === "register_qualification_authorization") {
       const digest = envelope.record.authorizationDigest!;
@@ -402,4 +492,21 @@ export function validateActivationJournal(raw: unknown): ActivationJournalEnvelo
     }
   }
   return envelopes;
+}
+
+export function runtimeActivationSnapshot(
+  rawJournal: unknown,
+  rightsCurrent: boolean,
+): RuntimeActivationSnapshot {
+  const journal = validateActivationJournal(rawJournal);
+  const last = journal.at(-1)!;
+  return {
+    state: last.record.state,
+    generation: last.record.generation,
+    activationHeadSha256: activationEnvelopeDigest(last),
+    releaseDigest: last.record.release.releaseDigest,
+    surfaceDigest: last.record.release.surfaceDigest,
+    rightsCurrent,
+    releasedSurfaceEntryIds: [...last.record.releasedSurfaceEntryIds],
+  };
 }

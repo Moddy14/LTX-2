@@ -84,7 +84,6 @@ import {
   outputRoot,
   pythonExecutable,
   rendererPythonExecutable,
-  sealedRelease,
   pythonRuntimeAvailable,
   repoRoot,
   statePath,
@@ -121,11 +120,11 @@ import {
 import { RuntimeApiError } from "./runtimeApi.js";
 import { releaseSurfaceEntryForRequest } from "../shared/releaseSurface.js";
 import {
-  bootstrapJobStartEnforcer,
   jobStartSources,
   type JobStartEnforcer,
   type JobStartSource,
 } from "./startEnforcer.js";
+import { configuredJobStartEnforcer } from "./configuredStartEnforcer.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -954,7 +953,7 @@ export class JobManager extends EventEmitter {
     private readonly modelInventoryOperations: ModelInventoryOperations = {
       read: getModelInventory,
     },
-    private readonly startEnforcer: JobStartEnforcer = bootstrapJobStartEnforcer(sealedRelease),
+    private readonly startEnforcer: JobStartEnforcer = configuredJobStartEnforcer(),
   ) {
     super();
     this.restore();
