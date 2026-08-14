@@ -120,6 +120,46 @@ export const qualificationModeAuthorizationSchema = z.object({
   }
 });
 
+export const qualificationAuthorizerTrustPolicySchema = z.object({
+  schemaVersion: z.literal("ltx-studio-qualification-authorizer-trust.v1"),
+  policyId: identifierSchema,
+  keys: z.array(z.object({
+    keyId: identifierSchema,
+    algorithm: z.literal("ed25519"),
+    role: z.literal("qualification-authorizer"),
+    publicKeyBase64: z.string().min(1),
+    notBefore: timestampSchema,
+    notAfter: timestampSchema,
+    revokedAt: timestampSchema.nullable(),
+  }).strict()).min(1),
+}).strict().superRefine((policy, context) => {
+  const ids = policy.keys.map(({ keyId }) => keyId);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: "custom", path: ["keys"], message: "qualification authorizer key ids must be unique" });
+  }
+  for (const [index, key] of policy.keys.entries()) {
+    if (Date.parse(key.notBefore) >= Date.parse(key.notAfter)) {
+      context.addIssue({ code: "custom", path: ["keys", index], message: "qualification authorizer key window is invalid" });
+    }
+  }
+});
+
+const qualificationAuthorizationSignatureSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-detached-signature.v1"),
+  algorithm: z.literal("ed25519"),
+  role: z.literal("qualification-authorizer"),
+  keyId: identifierSchema,
+  payloadSha256: sha256Schema,
+  signatureBase64: z.string().min(1),
+}).strict();
+
+export const signedQualificationAuthorizationSchema = z.object({
+  document: z.union([qualificationModeAuthorizationSchema, qualificationAuthorizationSchema]),
+  signature: qualificationAuthorizationSignatureSchema,
+}).strict();
+
+export type SignedQualificationAuthorization = z.infer<typeof signedQualificationAuthorizationSchema>;
+
 export const activationOperations = [
   "bootstrap_generation",
   "activate_qualification_mode",
@@ -342,6 +382,92 @@ export type RuntimeActivationSnapshot = {
 
 export function activationRecordDigest(record: ActivationJournalRecord): string {
   return createHash("sha256").update(canonicalJson(record)).digest("hex");
+}
+
+export function qualificationAuthorizationDigest(
+  document: z.infer<typeof qualificationModeAuthorizationSchema> | z.infer<typeof qualificationAuthorizationSchema>,
+): string {
+  return createHash("sha256").update(canonicalJson(document)).digest("hex");
+}
+
+export function verifySignedQualificationAuthorization(options: {
+  signed: unknown;
+  trustPolicy: unknown;
+  now: Date;
+}): SignedQualificationAuthorization {
+  const signed = signedQualificationAuthorizationSchema.parse(options.signed);
+  const policy = qualificationAuthorizerTrustPolicySchema.parse(options.trustPolicy);
+  const signature = signed.signature;
+  const digest = qualificationAuthorizationDigest(signed.document);
+  if (signature.payloadSha256 !== digest || signature.keyId !== signed.document.signerKeyId) {
+    throw new Error("Qualification authorization signature binding mismatch");
+  }
+  const key = policy.keys.find(({ keyId }) => keyId === signature.keyId);
+  if (!key) throw new Error("Qualification authorizer key is not trusted");
+  const nowMs = options.now.getTime();
+  if (nowMs < Date.parse(key.notBefore) || nowMs > Date.parse(key.notAfter)) {
+    throw new Error("Qualification authorizer key is outside its validity window");
+  }
+  if (key.revokedAt && Date.parse(key.revokedAt) <= nowMs) {
+    throw new Error("Qualification authorizer key is revoked");
+  }
+  const notBefore = Date.parse(signed.document.notBefore);
+  const end = Date.parse("expiresAt" in signed.document ? signed.document.expiresAt : signed.document.completeBy);
+  if (nowMs < notBefore || nowMs > end) {
+    throw new Error("Qualification authorization is outside its validity window");
+  }
+  const rawKey = Buffer.from(key.publicKeyBase64, "base64");
+  const rawSignature = Buffer.from(signature.signatureBase64, "base64");
+  if (rawKey.length !== 32 || rawSignature.length !== 64
+    || rawKey.toString("base64") !== key.publicKeyBase64
+    || rawSignature.toString("base64") !== signature.signatureBase64) {
+    throw new Error("Qualification authorization key or signature encoding is invalid");
+  }
+  const publicKey = createPublicKey({
+    key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), rawKey]),
+    format: "der",
+    type: "spki",
+  });
+  if (!verify(null, Buffer.from(canonicalJson(signed.document)), publicKey, rawSignature)) {
+    throw new Error("Qualification authorization Ed25519 signature is invalid");
+  }
+  return signed;
+}
+
+export function validateQualificationRegistration(options: {
+  journal: unknown;
+  signedAuthorization: unknown;
+  trustPolicy: unknown;
+  now: Date;
+}): { authorization: z.infer<typeof qualificationAuthorizationSchema>; digest: string } {
+  const signed = verifySignedQualificationAuthorization({
+    signed: options.signedAuthorization,
+    trustPolicy: options.trustPolicy,
+    now: options.now,
+  });
+  if (signed.document.schemaVersion !== "qualification-authorization.v1") {
+    throw new Error("Qualification mode authorization cannot be registered as a run authorization");
+  }
+  const journal = validateActivationJournal(options.journal);
+  const head = journal.at(-1)!.record;
+  if (head.state !== "qualification_only") {
+    throw new Error("Qualification run authorization is unavailable outside qualification_only");
+  }
+  const digest = qualificationAuthorizationDigest(signed.document);
+  const registration = journal.filter(({ record }) =>
+    record.operation === "register_qualification_authorization"
+    && record.authorizationDigest === digest);
+  if (registration.length !== 1) {
+    throw new Error("Qualification run authorization is not registered exactly once");
+  }
+  const record = registration[0].record;
+  if (record.generation !== signed.document.generation
+    || record.generation !== head.generation
+    || canonicalJson(record.release) !== canonicalJson(signed.document.release)
+    || canonicalJson(record.release) !== canonicalJson(head.release)) {
+    throw new Error("Qualification registration generation or release binding mismatch");
+  }
+  return { authorization: signed.document, digest };
 }
 
 export function activationEnvelopeDigest(envelope: ActivationJournalEnvelope): string {

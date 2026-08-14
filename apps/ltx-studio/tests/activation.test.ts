@@ -4,10 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   activationEnvelopeDigest,
   activationRecordDigest,
+  qualificationAuthorizationDigest,
   qualificationAuthorizationSchema,
   runtimeActivationSnapshot,
   validateActivationJournal,
+  validateQualificationRegistration,
   verifyActivationEnvelopeSignature,
+  verifySignedQualificationAuthorization,
   type ActivationJournalEnvelope,
   type ActivationJournalRecord,
 } from "../shared/activation.js";
@@ -62,36 +65,40 @@ function bootstrap(): ActivationJournalEnvelope {
   });
 }
 
+function validQualificationAuthorization() {
+  return qualificationAuthorizationSchema.parse({
+    schemaVersion: "qualification-authorization.v1",
+    authorizationId: "qualification-r0l-001",
+    generation: 1,
+    release: release(),
+    signerKeyId: "qualification-authorizer-001",
+    signerRole: "qualification-authorizer",
+    issuedAt: "2026-08-15T00:00:00Z",
+    notBefore: "2026-08-15T00:01:00Z",
+    startBy: "2026-08-15T00:10:00Z",
+    completeBy: "2026-08-15T00:30:00Z",
+    nonce: "a".repeat(32),
+    purposeId: "r0l-live-canary",
+    phaseId: "r0l",
+    matrixDigest: sha("matrix"),
+    allowedRecoveryDigest: sha("recovery"),
+    revocationSourceDigest: sha("revocations"),
+    sameSeriesSuccessorAllowed: true,
+    totalBudget: { jobCount: 1, gpuSeconds: 120, outputBytes: 1024 },
+    runTickets: [{
+      ticketId: "r0l-ticket-001",
+      nonce: "b".repeat(32),
+      surfaceEntryId: "native-generation.text-to-video",
+      inputDigest: sha("input"),
+      seed: 42,
+      budget: { jobCount: 1, gpuSeconds: 100, outputBytes: 1000 },
+    }],
+  });
+}
+
 describe("activation contracts", () => {
   it("accepts a bounded, sorted qualification authorization", () => {
-    expect(qualificationAuthorizationSchema.parse({
-      schemaVersion: "qualification-authorization.v1",
-      authorizationId: "qualification-r0l-001",
-      generation: 1,
-      release: release(),
-      signerKeyId: "qualification-authorizer-001",
-      signerRole: "qualification-authorizer",
-      issuedAt: "2026-08-15T00:00:00Z",
-      notBefore: "2026-08-15T00:01:00Z",
-      startBy: "2026-08-15T00:10:00Z",
-      completeBy: "2026-08-15T00:30:00Z",
-      nonce: "a".repeat(32),
-      purposeId: "r0l-live-canary",
-      phaseId: "r0l",
-      matrixDigest: sha("matrix"),
-      allowedRecoveryDigest: sha("recovery"),
-      revocationSourceDigest: sha("revocations"),
-      sameSeriesSuccessorAllowed: true,
-      totalBudget: { jobCount: 1, gpuSeconds: 120, outputBytes: 1024 },
-      runTickets: [{
-        ticketId: "r0l-ticket-001",
-        nonce: "b".repeat(32),
-        surfaceEntryId: "native-generation.text-to-video",
-        inputDigest: sha("input"),
-        seed: 42,
-        budget: { jobCount: 1, gpuSeconds: 100, outputBytes: 1000 },
-      }],
-    }).runTickets).toHaveLength(1);
+    expect(validQualificationAuthorization().runTickets).toHaveLength(1);
   });
 
   it("rejects inconsistent time windows and aggregate ticket budgets", () => {
@@ -270,5 +277,79 @@ describe("activation contracts", () => {
       rightsCurrent: true,
       releasedSurfaceEntryIds: ["native-generation.text-to-video"],
     });
+  });
+
+  it("verifies a dedicated qualification signer and exact journal registration", () => {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const authorization = validQualificationAuthorization();
+    const authorizationDigest = qualificationAuthorizationDigest(authorization);
+    const signed = {
+      document: authorization,
+      signature: {
+        schemaVersion: "ltx-studio-detached-signature.v1",
+        algorithm: "ed25519",
+        role: "qualification-authorizer",
+        keyId: authorization.signerKeyId,
+        payloadSha256: authorizationDigest,
+        signatureBase64: sign(
+          null,
+          Buffer.from(canonicalJson(authorization)),
+          privateKey,
+        ).toString("base64"),
+      },
+    };
+    const policy = {
+      schemaVersion: "ltx-studio-qualification-authorizer-trust.v1",
+      policyId: "qualification-trust-001",
+      keys: [{
+        keyId: authorization.signerKeyId,
+        algorithm: "ed25519",
+        role: "qualification-authorizer",
+        publicKeyBase64: publicKey.export({ format: "der", type: "spki" }).subarray(-32).toString("base64"),
+        notBefore: "2026-08-14T00:00:00Z",
+        notAfter: "2026-08-16T00:00:00Z",
+        revokedAt: null,
+      }],
+    };
+    const first = bootstrap();
+    const mode = envelope({
+      ...first.record,
+      recordId: "00000000-0000-4000-8000-000000000008",
+      sequence: 1,
+      previousRecordSha256: activationEnvelopeDigest(first),
+      previousState: "blocked",
+      state: "qualification_only",
+      operation: "activate_qualification_mode",
+      authorizationDigest: sha("mode-authorization"),
+      recordedAt: "2026-08-15T00:01:00Z",
+    });
+    const registration = envelope({
+      ...mode.record,
+      recordId: "00000000-0000-4000-8000-000000000009",
+      sequence: 2,
+      previousRecordSha256: activationEnvelopeDigest(mode),
+      previousState: "qualification_only",
+      operation: "register_qualification_authorization",
+      authorizationDigest,
+      recordedAt: "2026-08-15T00:02:00Z",
+    });
+
+    expect(verifySignedQualificationAuthorization({
+      signed,
+      trustPolicy: policy,
+      now: new Date("2026-08-15T00:05:00Z"),
+    }).document).toEqual(authorization);
+    expect(validateQualificationRegistration({
+      journal: [first, mode, registration],
+      signedAuthorization: signed,
+      trustPolicy: policy,
+      now: new Date("2026-08-15T00:05:00Z"),
+    })).toEqual({ authorization, digest: authorizationDigest });
+    expect(() => validateQualificationRegistration({
+      journal: [first, mode],
+      signedAuthorization: signed,
+      trustPolicy: policy,
+      now: new Date("2026-08-15T00:05:00Z"),
+    })).toThrow(/not registered exactly once/);
   });
 });
