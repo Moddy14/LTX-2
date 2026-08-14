@@ -54,6 +54,7 @@ describe("bootstrap job-start enforcer", () => {
     });
 
     expect(enforcer.decide(context)).toMatchObject({ allowed: true, mode: "production_provisional", generation: 3 });
+    expect(enforcer.inspect()).toMatchObject({ productStartsAllowed: true, mode: "production_provisional" });
     expect(enforcer.decide({ ...context, surfaceEntryId: "blocked.surface.entry" })).toMatchObject({
       allowed: false,
       mode: "production_provisional",
@@ -76,6 +77,8 @@ describe("bootstrap job-start enforcer", () => {
     };
     expect(activationJobStartEnforcer({ ...options, activation: { read: () => snapshot } }).decide(context))
       .toMatchObject({ allowed: false, mode: "qualification_only" });
+    expect(activationJobStartEnforcer({ ...options, activation: { read: () => snapshot } }).inspect())
+      .toMatchObject({ productStartsAllowed: false, mode: "qualification_only" });
     expect(activationJobStartEnforcer({
       ...options,
       activation: { read: () => ({ ...snapshot, state: "production_stable", rightsCurrent: false }) },

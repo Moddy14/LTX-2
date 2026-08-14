@@ -981,6 +981,10 @@ export class JobManager extends EventEmitter {
     return job ? publicJob(job) : undefined;
   }
 
+  activationStatus() {
+    return this.startEnforcer.inspect();
+  }
+
   create(
     request: GenerationRequest,
     metadata: JobCreateMetadata = {},

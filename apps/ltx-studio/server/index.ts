@@ -303,6 +303,7 @@ app.get("/api/config", (_request, response) => {
 
 app.get("/api/health", async (_request, response) => {
   const resources = readResourceSnapshot();
+  const activation = jobs.activationStatus();
   const phonemeVisemeState = phonemeVisemeEvaluatorStates.get();
   const phonemeViseme = phonemeVisemeState.result;
   let runtimeStatus;
@@ -314,8 +315,9 @@ app.get("/api/health", async (_request, response) => {
     runtimeStatus = { overall: "unknown", qwen: "offline" as const, workloads: [] };
   }
   response.json({
-    state: resources.outputFreeGiB !== null ? "ready" : "blocked",
+    state: resources.outputFreeGiB !== null && activation.productStartsAllowed ? "ready" : "blocked",
     release: releaseIdentity,
+    activation,
     resources,
     engine: pythonRuntimeAvailable(rendererPythonExecutable, { isolated: true }) ? "available" : "missing",
     analysisEngine: analysisRuntimeAvailable(analysisPythonExecutable, { isolated: sealedRelease })
