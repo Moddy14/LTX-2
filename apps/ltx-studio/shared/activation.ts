@@ -159,6 +159,9 @@ export const signedQualificationAuthorizationSchema = z.object({
 }).strict();
 
 export type SignedQualificationAuthorization = z.infer<typeof signedQualificationAuthorizationSchema>;
+export type QualificationAuthorization = z.infer<typeof qualificationAuthorizationSchema>;
+export type QualificationRunTicket = z.infer<typeof qualificationRunTicketSchema>;
+export type QualificationAuthorizerTrustPolicy = z.infer<typeof qualificationAuthorizerTrustPolicySchema>;
 
 export const activationOperations = [
   "bootstrap_generation",
@@ -394,6 +397,7 @@ export function verifySignedQualificationAuthorization(options: {
   signed: unknown;
   trustPolicy: unknown;
   now: Date;
+  enforceAuthorizationWindow?: boolean;
 }): SignedQualificationAuthorization {
   const signed = signedQualificationAuthorizationSchema.parse(options.signed);
   const policy = qualificationAuthorizerTrustPolicySchema.parse(options.trustPolicy);
@@ -411,10 +415,12 @@ export function verifySignedQualificationAuthorization(options: {
   if (key.revokedAt && Date.parse(key.revokedAt) <= nowMs) {
     throw new Error("Qualification authorizer key is revoked");
   }
-  const notBefore = Date.parse(signed.document.notBefore);
-  const end = Date.parse("expiresAt" in signed.document ? signed.document.expiresAt : signed.document.completeBy);
-  if (nowMs < notBefore || nowMs > end) {
-    throw new Error("Qualification authorization is outside its validity window");
+  if (options.enforceAuthorizationWindow !== false) {
+    const notBefore = Date.parse(signed.document.notBefore);
+    const end = Date.parse("expiresAt" in signed.document ? signed.document.expiresAt : signed.document.completeBy);
+    if (nowMs < notBefore || nowMs > end) {
+      throw new Error("Qualification authorization is outside its validity window");
+    }
   }
   const rawKey = Buffer.from(key.publicKeyBase64, "base64");
   const rawSignature = Buffer.from(signature.signatureBase64, "base64");
@@ -456,6 +462,7 @@ export function validateQualificationRegistration(options: {
   const digest = qualificationAuthorizationDigest(signed.document);
   const registration = journal.filter(({ record }) =>
     record.operation === "register_qualification_authorization"
+    && record.generation === head.generation
     && record.authorizationDigest === digest);
   if (registration.length !== 1) {
     throw new Error("Qualification run authorization is not registered exactly once");
@@ -548,7 +555,7 @@ export function verifyRuntimeRightsSnapshot(options: {
 export function validateActivationJournal(raw: unknown): ActivationJournalEnvelope[] {
   const envelopes = z.array(activationJournalEnvelopeSchema).min(1).parse(raw);
   const registeredAuthorizations = new Set<string>();
-  const tickets = new Map<string, QualificationTicketState>();
+  const tickets = new Map<string, { authorizationDigest: string; state: QualificationTicketState }>();
   for (const [index, envelope] of envelopes.entries()) {
     const previous = envelopes[index - 1];
     const expectedPreviousHash = previous ? activationEnvelopeDigest(previous) : null;
@@ -588,6 +595,10 @@ export function validateActivationJournal(raw: unknown): ActivationJournalEnvelo
         throw new Error(`Activation record ${index} changed released surface entries outside promotion`);
       }
     }
+    if (envelope.record.operation === "supersede_release_generation") {
+      registeredAuthorizations.clear();
+      tickets.clear();
+    }
     if (envelope.record.operation === "register_qualification_authorization") {
       const digest = envelope.record.authorizationDigest!;
       if (registeredAuthorizations.has(digest)) {
@@ -600,7 +611,11 @@ export function validateActivationJournal(raw: unknown): ActivationJournalEnvelo
       if (!registeredAuthorizations.has(authorizationDigest)) {
         throw new Error(`Activation record ${index} used an unregistered run authorization`);
       }
-      const previousTicketState = tickets.get(envelope.record.ticketId);
+      const previousTicket = tickets.get(envelope.record.ticketId);
+      if (previousTicket && previousTicket.authorizationDigest !== authorizationDigest) {
+        throw new Error(`Activation record ${index} moved a ticket across run authorizations`);
+      }
+      const previousTicketState = previousTicket?.state;
       const nextTicketState = envelope.record.ticketState!;
       const validTicketTransition = nextTicketState === "accepted"
         ? previousTicketState === undefined
@@ -614,7 +629,7 @@ export function validateActivationJournal(raw: unknown): ActivationJournalEnvelo
       if (!validTicketTransition) {
         throw new Error(`Activation record ${index} ticket transition mismatch`);
       }
-      tickets.set(envelope.record.ticketId, nextTicketState);
+      tickets.set(envelope.record.ticketId, { authorizationDigest, state: nextTicketState });
     }
   }
   return envelopes;
