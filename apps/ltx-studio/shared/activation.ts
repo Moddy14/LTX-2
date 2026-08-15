@@ -39,6 +39,7 @@ export const activationReleaseBindingSchema = z.object({
   surfaceDigest: sha256Schema,
   rights: rightsSeriesBindingSchema,
 }).strict();
+export type ActivationReleaseBinding = z.infer<typeof activationReleaseBindingSchema>;
 
 const runBudgetSchema = z.object({
   jobCount: z.number().int().positive(),

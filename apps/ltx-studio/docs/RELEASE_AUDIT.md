@@ -56,8 +56,9 @@ npm run audit:finalize -- \
   --finalizer-private-key /secure/operator/audit-finalizer.pk8.pem
 ```
 
-The authorization binds the release, preregistration, Q2 report, evidence
-package, and rights-attestation digests. At the actual finalization instant,
+The authorization binds the activation generation, release and surface,
+the exact sorted released-surface entry set, preregistration, Q2 report,
+evidence package, and rights-attestation digests. At the actual finalization instant,
 the command re-verifies the release tree, rights validity, authorization
 validity, trusted keys, revocation state, and key-role separation. Only then
 does it write the signed `ltx-studio-release-audit.v1` envelope containing

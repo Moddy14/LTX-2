@@ -4,11 +4,19 @@ import { describe, expect, it } from "vitest";
 
 import { canonicalJson } from "../shared/canonicalJson.js";
 import {
+  activationEnvelopeDigest,
+  activationRecordDigest,
+  type ActivationJournalEnvelope,
+  type ActivationJournalRecord,
+} from "../shared/activation.js";
+import { validateReleasePromotion } from "../server/releasePromotion.js";
+import {
   collectReleaseEvidence,
   finalizeReleaseAudit,
   qualificationGateOwnership,
   qualificationKinds,
   releaseEvidenceSchema,
+  verifyReleasePromotionBundle,
   type QualificationKind,
   type ReleaseEvidenceInput,
   trustedKeyPolicySchema,
@@ -437,11 +445,14 @@ describe("release audit finalizer", () => {
     if (!q2ReportDigest) throw new Error("missing Q2 fixture digest");
     const authorization = {
       schemaVersion: "ltx-studio-release-authorization.v1",
+      activationGeneration: 1,
       releaseDigest: evidence.releaseDigest,
+      surfaceDigest: evidence.surfaceDigest,
       preregistrationDigest: evidence.preregistrationDigest,
       q2ReportDigest,
       releaseEvidenceDigest: evidenceDigest,
       rightsAttestationDigest: evidence.rightsAttestationDigest,
+      releasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
       notBefore: timestamp(-1),
       expiresAt: timestamp(1),
     };
@@ -462,12 +473,137 @@ describe("release audit finalizer", () => {
     });
 
     expect(envelope.audit).toMatchObject({
+      activationGeneration: 1,
       production_overall: "go",
       sota_overall: "go",
       releaseEvidenceDigest: evidenceDigest,
       releaseAuthorizationDigest: hash(authorization),
     });
     expect(envelope.signature.payloadSha256).toBe(hash(envelope.audit));
+    expect(verifyReleasePromotionBundle({
+      now: NOW,
+      expectedGeneration: 1,
+      expectedReleaseDigest: evidence.releaseDigest,
+      expectedSurfaceDigest: evidence.surfaceDigest,
+      expectedRightsPolicyEvidenceDigest: DIGEST.catalog,
+      expectedReleasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+      evidence,
+      evidenceDigest,
+      authorization: {
+        document: authorization,
+        signature: input.signDocument(authorization),
+      },
+      auditEnvelope: envelope,
+      rightsAttestation: input.rightsAttestation,
+      trustPolicy: input.trustPolicy,
+      trustPolicyDigest: input.trustPolicyDigest,
+    })).toEqual({
+      authorizationDigest: hash(authorization),
+      auditEnvelopeDigest: hash(envelope),
+      rightsAttestationDigest: evidence.rightsAttestationDigest,
+      releasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+    });
+    expect(() => verifyReleasePromotionBundle({
+      now: NOW,
+      expectedGeneration: 2,
+      expectedReleaseDigest: evidence.releaseDigest,
+      expectedSurfaceDigest: evidence.surfaceDigest,
+      expectedRightsPolicyEvidenceDigest: DIGEST.catalog,
+      expectedReleasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+      evidence,
+      evidenceDigest,
+      authorization: {
+        document: authorization,
+        signature: input.signDocument(authorization),
+      },
+      auditEnvelope: envelope,
+      rightsAttestation: input.rightsAttestation,
+      trustPolicy: input.trustPolicy,
+      trustPolicyDigest: input.trustPolicyDigest,
+    })).toThrow(/binding mismatch/);
+
+    const activationRelease = {
+      releaseDigest: evidence.releaseDigest,
+      surfaceDigest: evidence.surfaceDigest,
+      rights: {
+        policyEvidenceDigest: DIGEST.catalog,
+        attestationSeriesId: "rights-series-001",
+        minimumSnapshotVersion: 1,
+      },
+    };
+    const activationEnvelope = (record: ActivationJournalRecord): ActivationJournalEnvelope => ({
+      record,
+      signature: {
+        schemaVersion: "ltx-studio-detached-signature.v1",
+        algorithm: "ed25519",
+        role: "activation-journal-writer",
+        keyId: record.writerKeyId,
+        payloadSha256: activationRecordDigest(record),
+        signatureBase64: "promotion-structural-signature",
+      },
+    });
+    const blocked = activationEnvelope({
+      schemaVersion: "ltx-studio-activation-journal-record.v1",
+      recordId: "00000000-0000-4000-8000-000000000401",
+      sequence: 0,
+      generation: 1,
+      previousRecordSha256: null,
+      previousState: null,
+      state: "blocked",
+      operation: "bootstrap_generation",
+      release: activationRelease,
+      releasedSurfaceEntryIds: [],
+      authorizationDigest: null,
+      auditEnvelopeDigest: null,
+      evidenceDigest: null,
+      ticketId: null,
+      ticketState: null,
+      ticketTerminal: null,
+      supersedePreflight: null,
+      recordedAt: timestamp(-0.5),
+      writerKeyId: "activation-writer-001",
+    });
+    const qualification = activationEnvelope({
+      ...blocked.record,
+      recordId: "00000000-0000-4000-8000-000000000402",
+      sequence: 1,
+      previousRecordSha256: activationEnvelopeDigest(blocked),
+      previousState: "blocked",
+      state: "qualification_only",
+      operation: "activate_qualification_mode",
+      authorizationDigest: hash("qualification-mode"),
+      recordedAt: timestamp(-0.4),
+    });
+    const promotion = activationEnvelope({
+      ...qualification.record,
+      recordId: "00000000-0000-4000-8000-000000000403",
+      sequence: 2,
+      previousRecordSha256: activationEnvelopeDigest(qualification),
+      previousState: "qualification_only",
+      state: "production_provisional",
+      operation: "promote_production",
+      releasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+      authorizationDigest: hash(authorization),
+      auditEnvelopeDigest: hash(envelope),
+      recordedAt: timestamp(-0.3),
+    });
+    const promotionInput = {
+      now: NOW,
+      expectedGeneration: 1,
+      expectedRelease: activationRelease,
+      expectedReleasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+      evidence,
+      evidenceDigest,
+      authorization: { document: authorization, signature: input.signDocument(authorization) },
+      auditEnvelope: envelope,
+      rightsAttestation: input.rightsAttestation,
+      trustPolicy: input.trustPolicy,
+      trustPolicyDigest: input.trustPolicyDigest,
+    };
+    expect(validateReleasePromotion({ ...promotionInput, journal: [blocked, qualification, promotion] }))
+      .toMatchObject({ authorizationDigest: hash(authorization), auditEnvelopeDigest: hash(envelope) });
+    expect(() => validateReleasePromotion({ ...promotionInput, journal: [blocked, qualification] }))
+      .toThrow(/not consumed exactly once/);
   });
 
   it("rechecks authorization bindings and rights freshness at finalization", () => {
@@ -480,11 +616,14 @@ describe("release audit finalizer", () => {
     if (!q2ReportDigest) throw new Error("missing Q2 fixture digest");
     const authorization = {
       schemaVersion: "ltx-studio-release-authorization.v1",
+      activationGeneration: 1,
       releaseDigest: evidence.releaseDigest,
+      surfaceDigest: evidence.surfaceDigest,
       preregistrationDigest: evidence.preregistrationDigest,
       q2ReportDigest,
       releaseEvidenceDigest: "f".repeat(64),
       rightsAttestationDigest: evidence.rightsAttestationDigest,
+      releasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
       notBefore: timestamp(-1),
       expiresAt: timestamp(1),
     };

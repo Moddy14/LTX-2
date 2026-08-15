@@ -472,16 +472,27 @@ export const releaseEvidenceSchema = z
 export const releaseAuthorizationSchema = z
   .object({
     schemaVersion: z.literal("ltx-studio-release-authorization.v1"),
+    activationGeneration: z.number().int().positive(),
     releaseDigest: sha256Schema,
+    surfaceDigest: sha256Schema,
     preregistrationDigest: sha256Schema,
     q2ReportDigest: sha256Schema,
     releaseEvidenceDigest: sha256Schema,
     rightsAttestationDigest: sha256Schema,
+    releasedSurfaceEntryIds: z.array(identifierSchema).min(1),
     notBefore: timestampSchema,
     expiresAt: timestampSchema,
   })
   .strict()
   .superRefine((authorization, context) => {
+    if (new Set(authorization.releasedSurfaceEntryIds).size !== authorization.releasedSurfaceEntryIds.length
+      || !sameArray(authorization.releasedSurfaceEntryIds, [...authorization.releasedSurfaceEntryIds].sort())) {
+      context.addIssue({
+        code: "custom",
+        path: ["releasedSurfaceEntryIds"],
+        message: "released surface entries must be unique and sorted",
+      });
+    }
     if (
       parseTimestamp(authorization.notBefore) >=
       parseTimestamp(authorization.expiresAt)
@@ -497,7 +508,9 @@ export const releaseAuthorizationSchema = z
 export const releaseAuditPayloadSchema = z
   .object({
     schemaVersion: z.literal("ltx-studio-release-audit-payload.v1"),
+    activationGeneration: z.number().int().positive(),
     releaseDigest: sha256Schema,
+    surfaceDigest: sha256Schema,
     preregistrationDigest: sha256Schema,
     q2ReportDigest: sha256Schema,
     rightsAttestationDigest: sha256Schema,
@@ -510,7 +523,17 @@ export const releaseAuditPayloadSchema = z
     production_overall: z.literal("go"),
     sota_overall: z.literal("go"),
   })
-  .strict();
+  .strict()
+  .superRefine((audit, context) => {
+    if (new Set(audit.releasedSurfaceEntryIds).size !== audit.releasedSurfaceEntryIds.length
+      || !sameArray(audit.releasedSurfaceEntryIds, [...audit.releasedSurfaceEntryIds].sort())) {
+      context.addIssue({
+        code: "custom",
+        path: ["releasedSurfaceEntryIds"],
+        message: "released surface entries must be unique and sorted",
+      });
+    }
+  });
 
 export const releaseAuditEnvelopeSchema = z
   .object({
@@ -889,11 +912,14 @@ export function finalizeReleaseAudit(
   if (!q2ReportDigest)
     throw new Error("Release evidence has no Q2 report digest");
   if (
+    authorization.activationGeneration < 1 ||
     authorization.releaseDigest !== evidence.releaseDigest ||
+    authorization.surfaceDigest !== evidence.surfaceDigest ||
     authorization.preregistrationDigest !== evidence.preregistrationDigest ||
     authorization.q2ReportDigest !== q2ReportDigest ||
     authorization.releaseEvidenceDigest !== raw.evidenceDigest ||
-    authorization.rightsAttestationDigest !== rightsDigest
+    authorization.rightsAttestationDigest !== rightsDigest ||
+    !sameArray(authorization.releasedSurfaceEntryIds, evidence.candidateSurfaceEntryIds)
   ) {
     throw new Error("Release authorization binding mismatch");
   }
@@ -906,7 +932,9 @@ export function finalizeReleaseAudit(
 
   const payload = releaseAuditPayloadSchema.parse({
     schemaVersion: "ltx-studio-release-audit-payload.v1",
+    activationGeneration: authorization.activationGeneration,
     releaseDigest: evidence.releaseDigest,
+    surfaceDigest: evidence.surfaceDigest,
     preregistrationDigest: evidence.preregistrationDigest,
     q2ReportDigest,
     rightsAttestationDigest: rightsDigest,
@@ -914,7 +942,7 @@ export function finalizeReleaseAudit(
     releaseAuthorizationDigest: authorizationDigest,
     trustPolicyDigest: raw.trustPolicyDigest,
     targetSotaClaimIds: evidence.targetSotaClaimIds,
-    releasedSurfaceEntryIds: evidence.candidateSurfaceEntryIds,
+    releasedSurfaceEntryIds: authorization.releasedSurfaceEntryIds,
     finalizedAt: new Date(Math.floor(raw.now.getTime() / 1000) * 1000)
       .toISOString()
       .replace(".000Z", "Z"),
@@ -963,4 +991,105 @@ export function finalizeReleaseAudit(
     audit: payload,
     signature,
   });
+}
+
+export function verifyReleasePromotionBundle(raw: {
+  now: Date;
+  expectedGeneration: number;
+  expectedReleaseDigest: string;
+  expectedSurfaceDigest: string;
+  expectedRightsPolicyEvidenceDigest: string;
+  expectedReleasedSurfaceEntryIds: readonly string[];
+  evidence: unknown;
+  evidenceDigest: string;
+  authorization: SignedDocument;
+  auditEnvelope: unknown;
+  rightsAttestation: SignedDocument;
+  trustPolicy: unknown;
+  trustPolicyDigest: string;
+}): {
+  authorizationDigest: string;
+  auditEnvelopeDigest: string;
+  rightsAttestationDigest: string;
+  releasedSurfaceEntryIds: string[];
+} {
+  const policy = trustedKeyPolicySchema.parse(raw.trustPolicy);
+  if (sha256(policy) !== raw.trustPolicyDigest) {
+    throw new Error("Promotion trusted-key policy digest mismatch");
+  }
+  const evidence = releaseEvidenceSchema.parse(raw.evidence);
+  if (sha256(evidence) !== raw.evidenceDigest) {
+    throw new Error("Promotion release-evidence digest mismatch");
+  }
+  const authorization = releaseAuthorizationSchema.parse(raw.authorization.document);
+  const authorizationSignature = detachedSignatureSchema.parse(raw.authorization.signature);
+  const authorizationDigest = verifyDetachedSignature(
+    authorization,
+    authorizationSignature,
+    policy,
+    "release-authorizer",
+    raw.now,
+  );
+  assertCurrentWindow(authorization.notBefore, authorization.expiresAt, raw.now, "Release authorization");
+
+  const auditEnvelope = releaseAuditEnvelopeSchema.parse(raw.auditEnvelope);
+  verifyDetachedSignature(
+    auditEnvelope.audit,
+    auditEnvelope.signature,
+    policy,
+    "audit-finalizer",
+    raw.now,
+  );
+  if (auditEnvelope.signature.keyId === authorizationSignature.keyId) {
+    throw new Error("Promotion release-authorizer and audit-finalizer keys must differ");
+  }
+  if (Date.parse(auditEnvelope.audit.finalizedAt) > raw.now.getTime()) {
+    throw new Error("Promotion audit finalization time is in the future");
+  }
+
+  const rights = rightsAttestationSchema.parse(raw.rightsAttestation.document);
+  const rightsDigest = verifyDetachedSignature(
+    rights,
+    raw.rightsAttestation.signature,
+    policy,
+    "rights-attestor",
+    raw.now,
+  );
+  assertCurrentWindow(rights.validAt, rights.expiresAt, raw.now, "Rights attestation");
+  const q2ReportDigest = evidence.reports.find(({ kind }) => kind === "q2-holdout")?.sha256;
+  const expectedEntries = [...raw.expectedReleasedSurfaceEntryIds];
+  if (!q2ReportDigest
+    || raw.expectedGeneration !== authorization.activationGeneration
+    || raw.expectedReleaseDigest !== evidence.releaseDigest
+    || raw.expectedSurfaceDigest !== evidence.surfaceDigest
+    || raw.expectedRightsPolicyEvidenceDigest !== rights.evidenceCatalogDigest
+    || rights.releaseDigest !== raw.expectedReleaseDigest
+    || rights.surfaceDigest !== raw.expectedSurfaceDigest
+    || evidence.rightsAttestationDigest !== rightsDigest
+    || authorization.releaseDigest !== evidence.releaseDigest
+    || authorization.surfaceDigest !== evidence.surfaceDigest
+    || authorization.preregistrationDigest !== evidence.preregistrationDigest
+    || authorization.q2ReportDigest !== q2ReportDigest
+    || authorization.releaseEvidenceDigest !== raw.evidenceDigest
+    || authorization.rightsAttestationDigest !== rightsDigest
+    || !sameArray(authorization.releasedSurfaceEntryIds, expectedEntries)
+    || auditEnvelope.audit.activationGeneration !== authorization.activationGeneration
+    || auditEnvelope.audit.releaseDigest !== authorization.releaseDigest
+    || auditEnvelope.audit.surfaceDigest !== authorization.surfaceDigest
+    || auditEnvelope.audit.preregistrationDigest !== authorization.preregistrationDigest
+    || auditEnvelope.audit.q2ReportDigest !== authorization.q2ReportDigest
+    || auditEnvelope.audit.rightsAttestationDigest !== rightsDigest
+    || auditEnvelope.audit.releaseEvidenceDigest !== raw.evidenceDigest
+    || auditEnvelope.audit.releaseAuthorizationDigest !== authorizationDigest
+    || auditEnvelope.audit.trustPolicyDigest !== raw.trustPolicyDigest
+    || !sameArray(auditEnvelope.audit.targetSotaClaimIds, evidence.targetSotaClaimIds)
+    || !sameArray(auditEnvelope.audit.releasedSurfaceEntryIds, expectedEntries)) {
+    throw new Error("Promotion authorization, audit, rights, or release binding mismatch");
+  }
+  return {
+    authorizationDigest,
+    auditEnvelopeDigest: sha256(auditEnvelope),
+    rightsAttestationDigest: rightsDigest,
+    releasedSurfaceEntryIds: [...authorization.releasedSurfaceEntryIds],
+  };
 }
