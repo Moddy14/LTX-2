@@ -287,6 +287,18 @@ describe("qualification ticket registry", () => {
     expect(() => validateActivationJournal(crossAuthorizationArm)).toThrow(/across run authorizations/);
   });
 
+  it("rejects reuse of a durable transaction id", () => {
+    const data = fixture();
+    const accepted = append(data.journal, "accept_run_ticket", {
+      authorizationDigest: data.authorizationDigest,
+      ticketId: data.claim.ticketId,
+    });
+    const duplicate = structuredClone(accepted);
+    duplicate.at(-1)!.record.recordId = duplicate.at(-2)!.record.recordId;
+    duplicate.at(-1)!.signature.payloadSha256 = activationRecordDigest(duplicate.at(-1)!.record);
+    expect(() => validateActivationJournal(duplicate)).toThrow(/reused transaction id/);
+  });
+
   it("opens a fresh authorization and ticket namespace after release supersede", () => {
     const data = fixture();
     const accepted = append(data.journal, "accept_run_ticket", {

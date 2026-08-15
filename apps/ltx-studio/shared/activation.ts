@@ -554,9 +554,14 @@ export function verifyRuntimeRightsSnapshot(options: {
 
 export function validateActivationJournal(raw: unknown): ActivationJournalEnvelope[] {
   const envelopes = z.array(activationJournalEnvelopeSchema).min(1).parse(raw);
+  const recordIds = new Set<string>();
   const registeredAuthorizations = new Set<string>();
   const tickets = new Map<string, { authorizationDigest: string; state: QualificationTicketState }>();
   for (const [index, envelope] of envelopes.entries()) {
+    if (recordIds.has(envelope.record.recordId)) {
+      throw new Error(`Activation record ${index} reused transaction id ${envelope.record.recordId}`);
+    }
+    recordIds.add(envelope.record.recordId);
     const previous = envelopes[index - 1];
     const expectedPreviousHash = previous ? activationEnvelopeDigest(previous) : null;
     if (envelope.signature.payloadSha256 !== activationRecordDigest(envelope.record)) {
