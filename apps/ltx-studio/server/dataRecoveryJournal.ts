@@ -145,7 +145,7 @@ function fileDigest(path: string): string | null {
 }
 
 function normalizedTimestamp(): string {
-  return new Date().toISOString().replace(".000Z", "Z");
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export class DataRecoveryCoordinator {
@@ -174,10 +174,14 @@ export class DataRecoveryCoordinator {
   commitJson(options: {
     targetKind: DataRecoveryJournalRecord["targetKind"];
     targetRelativePath: string;
+    expectedAbsolutePath?: string;
     value: unknown;
   }): { transactionId: string; afterSha256: string; journalHeadSha256: string } {
     return this.withTransactionLock(() => {
       const target = this.safeTarget(options.targetRelativePath);
+      if (options.expectedAbsolutePath !== undefined && resolve(options.expectedAbsolutePath) !== target) {
+        throw new DataRecoveryHoldError("Data recovery target does not match the store path");
+      }
       const payloadCanonicalJson = canonicalJson(options.value);
       const afterSha256 = createHash("sha256").update(payloadCanonicalJson).digest("hex");
       const transactionId = this.id();

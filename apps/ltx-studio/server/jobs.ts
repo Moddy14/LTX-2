@@ -125,8 +125,17 @@ import {
   type JobStartSource,
 } from "./startEnforcer.js";
 import { configuredJobStartEnforcer } from "./configuredStartEnforcer.js";
+import { DataRecoveryCoordinator } from "./dataRecoveryJournal.js";
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
+
+export type JobManagerStorage = {
+  path: string;
+  recovery: {
+    coordinator: DataRecoveryCoordinator;
+    targetRelativePath: string;
+  };
+};
 
 export type ThermalProfile = {
   baselineC: number;
@@ -920,6 +929,8 @@ function thermalProfileFromLogs(logs: unknown): ThermalProfile | null {
 }
 
 export class JobManager extends EventEmitter {
+  private readonly storagePath: string;
+  private readonly recovery: JobManagerStorage["recovery"] | null;
   private readonly jobs = new Map<string, RuntimeJob>();
   private readonly queue: string[] = [];
   private runningId: string | null = null;
@@ -936,7 +947,7 @@ export class JobManager extends EventEmitter {
   private reusableBaseSource: ReusableLtxBaseSource | null = null;
 
   constructor(
-    private readonly storagePath = statePath,
+    storage: string | JobManagerStorage = statePath,
     private readonly autoStart = true,
     private readonly assets: AssetStore | null = null,
     private readonly identityEvidenceOperations: IdentityEvidenceOperations = {
@@ -967,6 +978,12 @@ export class JobManager extends EventEmitter {
     private readonly startEnforcer: JobStartEnforcer = configuredJobStartEnforcer(),
   ) {
     super();
+    this.storagePath = typeof storage === "string" ? storage : storage.path;
+    this.recovery = typeof storage === "string" ? null : storage.recovery;
+    if (this.recovery) {
+      this.recovery.coordinator.recover();
+      this.recovery.coordinator.verifyCommittedTargets();
+    }
     this.restore();
     for (const job of this.jobs.values()) {
       this.scheduleLocalProcessGroupReconciliation(job, 0);
@@ -3907,10 +3924,19 @@ export class JobManager extends EventEmitter {
   }
 
   private persist(): void {
-    const temporaryPath = `${this.storagePath}.tmp`;
     const values = [...this.jobs.values()]
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .map(persistedJob);
+    if (this.recovery) {
+      this.recovery.coordinator.commitJson({
+        targetKind: "job",
+        targetRelativePath: this.recovery.targetRelativePath,
+        expectedAbsolutePath: this.storagePath,
+        value: values,
+      });
+      return;
+    }
+    const temporaryPath = `${this.storagePath}.tmp`;
     writeFileSync(temporaryPath, JSON.stringify(values, null, 2), { mode: 0o600 });
     chmodSync(temporaryPath, 0o600);
     renameSync(temporaryPath, this.storagePath);
