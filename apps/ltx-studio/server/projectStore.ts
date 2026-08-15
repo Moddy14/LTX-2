@@ -38,6 +38,7 @@ import {
   type ProjectShotRevisionInput,
   type StudioProject,
 } from "../shared/projects.js";
+import { DataRecoveryCoordinator } from "./dataRecoveryJournal.js";
 
 const PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REVISION_FILE_PATTERN = /^(\d{8})\.json$/;
@@ -55,7 +56,7 @@ export function projectValueSha256(value: unknown): string {
 }
 
 function canonicalDocument(value: unknown): string {
-  return `${canonicalJson(value)}\n`;
+  return canonicalJson(value);
 }
 
 function assertRealDirectory(path: string, context: string): void {
@@ -235,10 +236,27 @@ function assertRevisionTransition(
   throw new ProjectConflictError("Unbekannte Projektmutation.");
 }
 
+export type ProjectStoreStorage = {
+  root: string;
+  recovery: {
+    coordinator: DataRecoveryCoordinator;
+    targetPrefix: string;
+  };
+};
+
 export class ProjectStore {
-  constructor(private readonly root: string) {
-    mkdirSync(root, { recursive: true, mode: 0o700 });
-    assertRealDirectory(root, "Projekt-Root");
+  private readonly root: string;
+  private readonly recovery: ProjectStoreStorage["recovery"] | null;
+
+  constructor(storage: string | ProjectStoreStorage) {
+    this.root = typeof storage === "string" ? storage : storage.root;
+    this.recovery = typeof storage === "string" ? null : storage.recovery;
+    mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    assertRealDirectory(this.root, "Projekt-Root");
+    if (this.recovery) {
+      this.recovery.coordinator.recover();
+      this.recovery.coordinator.verifyCommittedTargets();
+    }
   }
 
   listAvailable(): { projects: ProjectRevisionEnvelope[]; warnings: string[] } {
@@ -352,7 +370,8 @@ export class ProjectStore {
         throw new ProjectConflictError(`Projekt-Revision ${entry.name} enthält kein gültiges JSON.`);
       }
       const parsed = projectRevisionEnvelopeSchema.safeParse(decoded);
-      if (!parsed.success || payload !== canonicalDocument(parsed.data)) {
+      const canonical = canonicalDocument(parsed.success ? parsed.data : decoded);
+      if (!parsed.success || (payload !== canonical && payload !== `${canonical}\n`)) {
         throw new ProjectConflictError(`Projekt-Revision ${entry.name} ist nicht kanonisch oder schema-valid.`);
       }
       if (parsed.data.projectId !== id || parsed.data.revision !== expectedRevision) {
@@ -631,6 +650,22 @@ export class ProjectStore {
     const parsed = projectRevisionEnvelopeSchema.parse(envelope);
     const target = join(directory, revisionFileName(parsed.revision));
     if (existsSync(target)) throw new ProjectConflictError("Projekt-Revision existiert bereits.");
+    if (this.recovery) {
+      this.recovery.coordinator.commitJson({
+        targetKind: "project",
+        targetRelativePath: [
+          this.recovery.targetPrefix.replace(/\/$/, ""),
+          parsed.projectId,
+          revisionFileName(parsed.revision),
+        ].filter(Boolean).join("/"),
+        expectedAbsolutePath: target,
+        value: parsed,
+      });
+      if ((statSync(target).mode & 0o077) !== 0) {
+        throw new ProjectConflictError("Persistierte Projekt-Revision ist nicht owner-only geschützt.");
+      }
+      return;
+    }
     const temporary = join(directory, `.${revisionFileName(parsed.revision)}.${randomUUID()}.tmp`);
     let descriptor: number | null = null;
     try {
