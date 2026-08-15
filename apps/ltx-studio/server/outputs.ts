@@ -45,6 +45,7 @@ import { readOutputAnalysis } from "./analysisStore.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import { normalizeRunProvenance } from "./runProvenance.js";
 import { sha256Json } from "./experimentStore.js";
+import { DataRecoveryCoordinator } from "./dataRecoveryJournal.js";
 
 const SIDECAR_SUFFIX = ".ltx-settings.json";
 const MAX_OUTPUTS = 500;
@@ -219,10 +220,17 @@ function readRecord(root: string, outputName: string): OutputSettingsRecord | nu
   }
 }
 
-function writeRecord(root: string, record: OutputSettingsRecord): void {
-  const path = settingsPath(root, record.outputName);
-  const temporaryPath = `${path}.tmp`;
-  const serialized = hasStrongRevision(record)
+function serializedRecord(record: OutputSettingsRecord): OutputSettingsRecord | {
+  schemaVersion: "ltx-studio-output.v2";
+  outputName: string;
+  jobId: string;
+  completedAt: string;
+  sizeBytes: number;
+  modifiedAtMs: number;
+  request: GenerationRequest;
+  qualityReview: JobQualityReview | null;
+} {
+  return hasStrongRevision(record)
     ? record
     : {
         schemaVersion: "ltx-studio-output.v2",
@@ -234,6 +242,12 @@ function writeRecord(root: string, record: OutputSettingsRecord): void {
         request: record.request,
         qualityReview: record.qualityReview,
       };
+}
+
+function writeRecord(root: string, record: OutputSettingsRecord): void {
+  const path = settingsPath(root, record.outputName);
+  const temporaryPath = `${path}.tmp`;
+  const serialized = serializedRecord(record);
   writeFileSync(temporaryPath, `${JSON.stringify(serialized, null, 2)}\n`, { mode: 0o600 });
   chmodSync(temporaryPath, 0o600);
   renameSync(temporaryPath, path);
@@ -257,8 +271,26 @@ export function supportsSpeechQuality(request: GenerationRequest): boolean {
   return request.mode !== "text-to-audio" && usesOfficialSpeechStack(request);
 }
 
+export type OutputLibraryStorage = {
+  root: string;
+  recovery: {
+    coordinator: DataRecoveryCoordinator;
+    targetPrefix: string;
+  };
+};
+
 export class OutputLibrary {
-  constructor(private readonly root: string) {}
+  private readonly root: string;
+  private readonly recovery: OutputLibraryStorage["recovery"] | null;
+
+  constructor(storage: string | OutputLibraryStorage) {
+    this.root = typeof storage === "string" ? storage : storage.root;
+    this.recovery = typeof storage === "string" ? null : storage.recovery;
+    if (this.recovery) {
+      this.recovery.coordinator.recover();
+      this.recovery.coordinator.verifyCommittedTargets();
+    }
+  }
 
   delete(outputName: string, jobs: readonly StudioJob[]): DeletedStudioOutput {
     if (!outputNameSchema.safeParse(outputName).success) {
@@ -311,7 +343,7 @@ export class OutputLibrary {
         if (!hasStrongRevision(existing)
           && existing.jobId === job.id
           && recordMatchesFile(existing, stats)) {
-          writeRecord(this.root, {
+          this.writeRecord({
             ...existing,
             schemaVersion: "ltx-studio-output.v7",
             changedAtMs: stats.ctimeMs,
@@ -341,7 +373,7 @@ export class OutputLibrary {
         experiment: job.experiment,
         project: job.project,
       };
-      writeRecord(this.root, record);
+      this.writeRecord(record);
     }
   }
 
@@ -369,7 +401,7 @@ export class OutputLibrary {
     if (!supportsSpeechQuality(record.request)) {
       throw new OutputQualityError("Nur ein fertiges Sprachvideo kann mit der LipSync-Scorecard bewertet werden.", 409);
     }
-    writeRecord(this.root, {
+    this.writeRecord({
       ...record,
       schemaVersion: "ltx-studio-output.v7",
       qualityReview: {
@@ -383,6 +415,23 @@ export class OutputLibrary {
       throw new OutputQualityError("Ausgabe ist nach dem Speichern nicht mehr unverändert verfügbar.", 409);
     }
     return updated;
+  }
+
+  private writeRecord(record: OutputSettingsRecord): void {
+    if (!this.recovery) {
+      writeRecord(this.root, record);
+      return;
+    }
+    const path = settingsPath(this.root, record.outputName);
+    this.recovery.coordinator.commitJson({
+      targetKind: "provenance",
+      targetRelativePath: [
+        this.recovery.targetPrefix.replace(/\/$/, ""),
+        `${record.outputName}${SIDECAR_SUFFIX}`,
+      ].filter(Boolean).join("/"),
+      expectedAbsolutePath: path,
+      value: serializedRecord(record),
+    });
   }
 
   reusableLtxBaseCandidates(): ReusableLtxBaseCandidate[] {
