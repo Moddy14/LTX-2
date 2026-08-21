@@ -42,17 +42,22 @@ export function needsGemmaAbliteratedLora(mode: PipelineMode): boolean {
 }
 
 export function supportsGemmaAbliteratedLoraForRequest(
-  input: { mode: PipelineMode; icLora: { profile: ICLoraProfile } },
+  input: {
+    mode: PipelineMode;
+    icLora: { profile: ICLoraProfile };
+    models: { layout: ModelLayout };
+  },
 ): boolean {
-  return needsGemmaAbliteratedLora(input.mode)
-    || (input.mode === "ic-lora" && input.icLora.profile === "union-control");
+  return input.models.layout === "monolith"
+    && (needsGemmaAbliteratedLora(input.mode)
+      || (input.mode === "ic-lora" && input.icLora.profile === "union-control"));
 }
 
 export function needsGemmaAbliteratedLoraForRequest(
   input: {
     mode: PipelineMode;
     icLora: { profile: ICLoraProfile };
-    models: { gemmaLora: { enabled: boolean } };
+    models: { layout: ModelLayout; gemmaLora: { enabled: boolean } };
   },
 ): boolean {
   return supportsGemmaAbliteratedLoraForRequest(input) && input.models.gemmaLora.enabled;

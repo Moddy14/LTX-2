@@ -12,10 +12,20 @@ import {
 } from "../shared/releaseSurface.js";
 import { generationRequestSchema } from "../shared/pipelines.js";
 import { supportsCooperativeCheckpoint } from "../server/admission.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 function requestFor(entry: ReturnType<typeof deriveReleaseSurfaceEntries>[number]) {
-  const request = validRequest(entry.request.mode);
+  const split = entry.request.modelProfile !== "ltx23-monolith";
+  if (split && !["distilled", "text-to-audio", "ic-lora"].includes(entry.request.mode)) {
+    throw new Error(`Unexpected LTX-2.5 release mode: ${entry.request.mode}`);
+  }
+  const request = split
+    ? validLtx25SplitRequest(entry.request.mode as "distilled" | "text-to-audio" | "ic-lora")
+    : validRequest(entry.request.mode);
+  if (entry.request.mode === "distilled" && split) {
+    request.distilled.singleStage = entry.request.modelProfile === "ltx25-split-bf16-single-stage";
+  }
+  if (entry.request.unionControlType) request.icLora.controlType = entry.request.unionControlType;
   request.models.gemmaLora.enabled = entry.request.promptEncoderProfile === "abliterated-lora";
   if (entry.request.sourceMode !== "not-applicable") {
     request.sourceMode = entry.request.sourceMode;
@@ -143,5 +153,24 @@ describe("candidate release surface", () => {
       && rights.evidenceIds.includes("comfy-ltx2-abliterated-lora-license-undeclared"))).toBe(true);
     expect(baseEntries.some(({ request, targetStatus }) =>
       request.postprocessor === "none" && targetStatus === "candidate")).toBe(true);
+  });
+
+  it("declares each native LTX-2.5 BF16 core path as its own conditional surface", () => {
+    const entries = deriveReleaseSurfaceEntries().filter(({ request }) =>
+      request.modelProfile !== "ltx23-monolith");
+    expect(entries).toHaveLength(11);
+    expect(entries.every(({ request, rights, targetStatus }) =>
+      request.postprocessor === "none"
+      && request.promptEncoderProfile === "not-applicable"
+      && rights.status === "conditional"
+      && rights.evidenceIds.includes("ltx25-community-license-model-card-2026-08-21")
+      && targetStatus === "candidate")).toBe(true);
+    expect(entries
+      .filter(({ request }) => request.icLoraProfile === "union-control")
+      .map(({ request }) => request.unionControlType)
+      .sort()).toEqual(["canny", "depth", "pose"]);
+    expect(entries
+      .filter(({ request }) => request.modelProfile === "ltx25-split-bf16-two-stage"))
+      .toHaveLength(2);
   });
 });

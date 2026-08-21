@@ -46,6 +46,16 @@ export const promptEncoderProfiles = [
 ] as const;
 export type PromptEncoderProfile = (typeof promptEncoderProfiles)[number];
 
+export const releaseModelProfiles = [
+  "ltx23-monolith",
+  "ltx25-split-bf16-single-stage",
+  "ltx25-split-bf16-two-stage",
+] as const;
+export type ReleaseModelProfile = (typeof releaseModelProfiles)[number];
+
+export const releaseUnionControlTypes = ["depth", "canny", "pose"] as const;
+export type ReleaseUnionControlType = (typeof releaseUnionControlTypes)[number];
+
 export function promptEncoderProfileForRequest(
   request: Pick<GenerationRequest, "mode" | "icLora" | "models">,
 ): PromptEncoderProfile {
@@ -69,6 +79,8 @@ export const releaseSurfaceEntrySchema = z.object({
     icLoraProfile: z.enum(icLoraProfiles).nullable(),
     lipDubPipelineProfile: z.enum(lipDubPipelineProfiles).nullable(),
     retakeCheckpoint: z.enum(["dev", "distilled"]).nullable(),
+    modelProfile: z.enum(releaseModelProfiles),
+    unionControlType: z.enum(releaseUnionControlTypes).nullable(),
     promptEncoderProfile: z.enum(promptEncoderProfiles),
     dialogueIntent: z.enum(["required", "optional", "not-applicable"]),
     postprocessor: z.enum(postprocessorIds),
@@ -107,8 +119,9 @@ export const releaseSurfaceEntrySchema = z.object({
       message: "blocked rights and blocked target status must agree",
     });
   }
-  const supportsOptionalLora = needsGemmaAbliteratedLora(entry.request.mode)
-    || (entry.request.mode === "ic-lora" && entry.request.icLoraProfile === "union-control");
+  const supportsOptionalLora = entry.request.modelProfile === "ltx23-monolith"
+    && (needsGemmaAbliteratedLora(entry.request.mode)
+      || (entry.request.mode === "ic-lora" && entry.request.icLoraProfile === "union-control"));
   if (supportsOptionalLora === (entry.request.promptEncoderProfile === "not-applicable")) {
     context.addIssue({
       code: "custom",
@@ -171,6 +184,8 @@ type BaseVariant = {
   icLoraProfile: ICLoraProfile | null;
   lipDubPipelineProfile: LipDubPipelineProfile | null;
   retakeCheckpoint: "dev" | "distilled" | null;
+  modelProfile: ReleaseModelProfile;
+  unionControlType: ReleaseUnionControlType | null;
   inputContract: string[];
   dialogueIntent: "required" | "optional" | "not-applicable";
   identityReference: boolean;
@@ -190,6 +205,8 @@ function baseVariants(): BaseVariant[] {
         icLoraProfile: null,
         lipDubPipelineProfile: null,
         retakeCheckpoint: null,
+        modelProfile: "ltx23-monolith",
+        unionControlType: null,
         inputContract: sourceMode === "image" ? ["prompt", "one-or-more-reference-images"] : ["prompt"],
         dialogueIntent: "optional",
         identityReference: sourceMode === "image",
@@ -204,6 +221,8 @@ function baseVariants(): BaseVariant[] {
     icLoraProfile: null,
     lipDubPipelineProfile: null,
     retakeCheckpoint: null,
+    modelProfile: "ltx23-monolith",
+    unionControlType: null,
     inputContract: ["prompt"],
     dialogueIntent: "optional",
     identityReference: false,
@@ -219,6 +238,8 @@ function baseVariants(): BaseVariant[] {
       icLoraProfile: profile,
       lipDubPipelineProfile: null,
       retakeCheckpoint: null,
+      modelProfile: "ltx23-monolith",
+      unionControlType: null,
       inputContract: ["prompt", ...(needsImage ? ["reference-image"] : []), ...(needsVideo ? ["control-video"] : [])],
       dialogueIntent: "optional",
       identityReference: needsImage || needsVideo,
@@ -232,6 +253,8 @@ function baseVariants(): BaseVariant[] {
     icLoraProfile: null,
     lipDubPipelineProfile: null,
     retakeCheckpoint: null,
+    modelProfile: "ltx23-monolith",
+    unionControlType: null,
     inputContract: ["prompt-with-exact-dialogue", "reference-image", "reference-audio"],
     dialogueIntent: "required",
     identityReference: true,
@@ -244,6 +267,8 @@ function baseVariants(): BaseVariant[] {
     icLoraProfile: null,
     lipDubPipelineProfile: null,
     retakeCheckpoint: null,
+    modelProfile: "ltx23-monolith",
+    unionControlType: null,
     inputContract: ["prompt", "first-frame-image", "last-frame-image"],
     dialogueIntent: "optional",
     identityReference: true,
@@ -257,6 +282,8 @@ function baseVariants(): BaseVariant[] {
       icLoraProfile: null,
       lipDubPipelineProfile: null,
       retakeCheckpoint: null,
+      modelProfile: "ltx23-monolith",
+      unionControlType: null,
       inputContract: mode === "image-audio-to-video" ? ["prompt", "reference-image", "driving-audio"] : ["prompt", "driving-audio"],
       dialogueIntent: "required",
       identityReference: mode === "image-audio-to-video",
@@ -271,6 +298,8 @@ function baseVariants(): BaseVariant[] {
       icLoraProfile: null,
       lipDubPipelineProfile: profile,
       retakeCheckpoint: null,
+      modelProfile: "ltx23-monolith",
+      unionControlType: null,
       inputContract: ["reference-video", "exact-target-dialogue", "target-language", "single-speaker-acknowledgement"],
       dialogueIntent: "required",
       identityReference: true,
@@ -285,7 +314,85 @@ function baseVariants(): BaseVariant[] {
       icLoraProfile: null,
       lipDubPipelineProfile: null,
       retakeCheckpoint: checkpoint,
+      modelProfile: "ltx23-monolith",
+      unionControlType: null,
       inputContract: ["source-video", "time-range", "at-least-one-of-video-or-audio-regeneration"],
+      dialogueIntent: "optional",
+      identityReference: true,
+    });
+  }
+  return variants;
+}
+
+function ltx25Variants(): BaseVariant[] {
+  const variants: BaseVariant[] = [];
+  for (const sourceMode of ["text", "image"] as const) {
+    for (const stage of ["two-stage", "single-stage"] as const) {
+      variants.push({
+        id: `ltx25.distilled.${sourceMode}.${stage}`,
+        claimId: `native-generation.ltx25.${sourceMode}-to-video.${stage}`,
+        mode: "distilled",
+        sourceMode,
+        icLoraProfile: null,
+        lipDubPipelineProfile: null,
+        retakeCheckpoint: null,
+        modelProfile: stage === "two-stage"
+          ? "ltx25-split-bf16-two-stage"
+          : "ltx25-split-bf16-single-stage",
+        unionControlType: null,
+        inputContract: sourceMode === "image" ? ["prompt", "one-or-more-reference-images"] : ["prompt"],
+        dialogueIntent: "optional",
+        identityReference: sourceMode === "image",
+      });
+    }
+  }
+  variants.push({
+    id: "ltx25.text-to-audio.single-stage",
+    claimId: "native-generation.ltx25.text-to-audio.single-stage",
+    mode: "text-to-audio",
+    sourceMode: "not-applicable",
+    icLoraProfile: null,
+    lipDubPipelineProfile: null,
+    retakeCheckpoint: null,
+    modelProfile: "ltx25-split-bf16-single-stage",
+    unionControlType: null,
+    inputContract: ["prompt"],
+    dialogueIntent: "optional",
+    identityReference: false,
+  });
+  for (const controlType of releaseUnionControlTypes) {
+    variants.push({
+      id: `ltx25.ic-lora.union-control.${controlType}`,
+      claimId: `controlled-video.ltx25.ic-lora.union-control.${controlType}`,
+      mode: "ic-lora",
+      sourceMode: "not-applicable",
+      icLoraProfile: "union-control",
+      lipDubPipelineProfile: null,
+      retakeCheckpoint: null,
+      modelProfile: "ltx25-split-bf16-single-stage",
+      unionControlType: controlType,
+      inputContract: ["prompt", "reference-image", "control-video"],
+      dialogueIntent: "optional",
+      identityReference: true,
+    });
+  }
+  for (const profile of ["ingredients", "motion-track", "v2v-instant-shave"] as const) {
+    const ingredients = profile === "ingredients";
+    variants.push({
+      id: `ltx25.ic-lora.${profile}`,
+      claimId: `controlled-video.ltx25.ic-lora.${profile}`,
+      mode: "ic-lora",
+      sourceMode: "not-applicable",
+      icLoraProfile: profile,
+      lipDubPipelineProfile: null,
+      retakeCheckpoint: null,
+      modelProfile: "ltx25-split-bf16-single-stage",
+      unionControlType: null,
+      inputContract: [
+        "prompt",
+        ...(profile === "v2v-instant-shave" ? [] : ["reference-image"]),
+        ...(ingredients ? [] : ["control-video"]),
+      ],
       dialogueIntent: "optional",
       identityReference: true,
     });
@@ -299,8 +406,9 @@ const blockedBaseEvidence = new Set([
 ]);
 
 function supportsOptionalGemmaLora(variant: BaseVariant): boolean {
-  return needsGemmaAbliteratedLora(variant.mode)
-    || (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control");
+  return variant.modelProfile === "ltx23-monolith"
+    && (needsGemmaAbliteratedLora(variant.mode)
+      || (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control"));
 }
 
 function promptEncoderProfilesFor(variant: BaseVariant): PromptEncoderProfile[] {
@@ -313,9 +421,15 @@ function baseRightsFor(
   variant: BaseVariant,
   promptEncoderProfile: PromptEncoderProfile,
 ): ReleaseSurfaceEntry["rights"] {
-  const evidenceIds = ["ltx2-community-license-2026-01-05"];
+  const ltx25 = variant.modelProfile !== "ltx23-monolith";
+  const evidenceIds = ltx25
+    ? ["ltx25-community-license-model-card-2026-08-21"]
+    : ["ltx2-community-license-2026-01-05"];
   if (!(variant.mode === "ic-lora" && variant.icLoraProfile === "hdr")) {
     evidenceIds.push("gemma-terms-model-card");
+  }
+  if (ltx25 && variant.mode === "ic-lora") {
+    evidenceIds.push("ltx2-community-license-2026-01-05");
   }
   if (promptEncoderProfile === "abliterated-lora") {
     evidenceIds.push("comfy-ltx2-abliterated-lora-license-undeclared");
@@ -323,7 +437,9 @@ function baseRightsFor(
   if (variant.mode === "id-lora") {
     evidenceIds.push("ltx23-id-lora-talkvid-data-rights-undeclared");
   }
-  if (variant.mode === "ic-lora" && variant.icLoraProfile === "union-control") {
+  if (variant.mode === "ic-lora"
+    && variant.icLoraProfile === "union-control"
+    && (!ltx25 || variant.unionControlType === "depth")) {
     evidenceIds.push("moge-mit-model-card");
   }
   const blocked = evidenceIds.some((evidenceId) => blockedBaseEvidence.has(evidenceId));
@@ -332,7 +448,9 @@ function baseRightsFor(
     evidenceIds,
     reason: blocked
       ? "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable."
-      : "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+      : ltx25
+        ? "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls."
+        : "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
   };
 }
 
@@ -430,6 +548,8 @@ function entryFor(
       icLoraProfile: variant.icLoraProfile,
       lipDubPipelineProfile: variant.lipDubPipelineProfile,
       retakeCheckpoint: variant.retakeCheckpoint,
+      modelProfile: variant.modelProfile,
+      unionControlType: variant.unionControlType,
       promptEncoderProfile,
       dialogueIntent: postprocessor === "none" ? variant.dialogueIntent : "required",
       postprocessor,
@@ -452,9 +572,10 @@ function entryFor(
 
 export function deriveReleaseSurfaceEntries(): ReleaseSurfaceEntry[] {
   const entries: ReleaseSurfaceEntry[] = [];
-  for (const variant of baseVariants()) {
+  for (const variant of [...baseVariants(), ...ltx25Variants()]) {
     for (const promptEncoderProfile of promptEncoderProfilesFor(variant)) {
       entries.push(entryFor(variant, promptEncoderProfile, "none"));
+      if (variant.modelProfile !== "ltx23-monolith") continue;
       if (variant.mode === "text-to-audio") continue;
       if (["image-audio-to-video", "audio-to-video"].includes(variant.mode)) {
         entries.push(entryFor(variant, promptEncoderProfile, "longcat-lipsync"));
@@ -477,6 +598,17 @@ export function releaseSurfaceEntryForRequest(request: GenerationRequest): Relea
   const retakeCheckpoint = request.mode === "retake"
     ? request.retake.distilled ? "distilled" : "dev"
     : null;
+  const modelProfile: ReleaseModelProfile = request.models.layout === "monolith"
+    ? "ltx23-monolith"
+    : request.mode === "distilled" && !request.distilled.singleStage
+      ? "ltx25-split-bf16-two-stage"
+      : "ltx25-split-bf16-single-stage";
+  const unionControlType = request.models.layout === "split"
+    && request.mode === "ic-lora"
+    && request.icLora.profile === "union-control"
+    && releaseUnionControlTypes.includes(request.icLora.controlType as ReleaseUnionControlType)
+    ? request.icLora.controlType as ReleaseUnionControlType
+    : null;
   const promptEncoderProfile = promptEncoderProfileForRequest(request);
   const postprocessor = postprocessorForRequest(request);
   const result = deriveReleaseSurfaceEntries().find(({ request: entry }) =>
@@ -485,6 +617,8 @@ export function releaseSurfaceEntryForRequest(request: GenerationRequest): Relea
     && entry.icLoraProfile === icLoraProfile
     && entry.lipDubPipelineProfile === lipDubPipelineProfile
     && entry.retakeCheckpoint === retakeCheckpoint
+    && entry.modelProfile === modelProfile
+    && entry.unionControlType === unionControlType
     && entry.promptEncoderProfile === promptEncoderProfile
     && entry.postprocessor === postprocessor);
   if (!result) throw new Error("Generation request is outside the declared release surface");

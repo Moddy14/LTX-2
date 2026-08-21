@@ -42,10 +42,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -98,10 +100,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -154,10 +158,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -210,10 +216,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "longcat-lipsync",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -265,10 +273,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -321,10 +331,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -375,10 +387,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -430,10 +444,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -485,10 +501,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -540,10 +558,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "longcat-lipsync",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -594,10 +614,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -649,10 +671,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -695,10 +719,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -743,10 +769,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -791,10 +819,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -839,10 +869,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -897,10 +929,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -949,10 +983,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1003,10 +1039,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1057,10 +1095,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1111,10 +1151,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1174,10 +1216,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "distilled",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1220,10 +1264,12 @@
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1267,10 +1313,12 @@
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1314,10 +1362,12 @@
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1361,10 +1411,12 @@
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1418,10 +1470,12 @@
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1463,10 +1517,12 @@
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1511,10 +1567,12 @@
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1559,10 +1617,12 @@
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1607,10 +1667,12 @@
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1665,10 +1727,12 @@
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1711,10 +1775,12 @@
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1759,10 +1825,12 @@
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1807,10 +1875,12 @@
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1855,10 +1925,12 @@
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1913,10 +1985,12 @@
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -1960,10 +2034,12 @@
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2009,10 +2085,12 @@
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2058,10 +2136,12 @@
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2107,10 +2187,12 @@
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2166,10 +2248,12 @@
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2212,10 +2296,12 @@
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2260,10 +2346,12 @@
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2308,10 +2396,12 @@
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2356,10 +2446,12 @@
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2414,10 +2506,12 @@
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2460,10 +2554,12 @@
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2508,10 +2604,12 @@
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2556,10 +2654,12 @@
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2604,10 +2704,12 @@
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2662,10 +2764,12 @@
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2709,10 +2813,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2760,10 +2866,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2811,10 +2919,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2862,10 +2972,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2923,10 +3035,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -2972,10 +3086,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3022,10 +3138,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3072,10 +3190,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3122,10 +3242,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3182,10 +3304,12 @@
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3229,10 +3353,12 @@
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3277,10 +3403,12 @@
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3325,10 +3453,12 @@
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3373,10 +3503,12 @@
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3431,10 +3563,12 @@
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3478,10 +3612,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3528,10 +3664,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3578,10 +3716,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3628,10 +3768,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3678,10 +3820,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "id-lora",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3726,10 +3870,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3776,10 +3922,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3826,10 +3974,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3876,10 +4026,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "longcat-lipsync",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3925,10 +4077,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -3975,10 +4129,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4023,10 +4179,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4072,10 +4230,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4121,10 +4281,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4170,10 +4332,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "longcat-lipsync",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4218,10 +4382,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4267,10 +4433,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "image-audio-to-video",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4314,10 +4482,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4363,10 +4533,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4412,10 +4584,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4461,10 +4635,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4520,10 +4696,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "keyframes",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4568,10 +4746,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4618,10 +4798,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4668,10 +4850,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4718,10 +4902,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4768,10 +4954,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4816,10 +5004,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4866,10 +5056,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4916,10 +5108,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -4966,10 +5160,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5016,10 +5212,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
         "mode": "lipdub",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5027,6 +5225,665 @@
           "gemma-terms-model-card"
         ],
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.image-to-video.single-stage",
+      "cooperativeCheckpoint": true,
+      "id": "ltx25.distilled.image.single-stage.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "distilled",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.image-to-video.two-stage",
+      "cooperativeCheckpoint": true,
+      "id": "ltx25.distilled.image.two-stage.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "distilled",
+        "modelProfile": "ltx25-split-bf16-two-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.text-to-video.single-stage",
+      "cooperativeCheckpoint": true,
+      "id": "ltx25.distilled.text.single-stage.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "distilled",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.text-to-video.two-stage",
+      "cooperativeCheckpoint": true,
+      "id": "ltx25.distilled.text.two-stage.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "distilled",
+        "modelProfile": "ltx25-split-bf16-two-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ltx25.ic-lora.ingredients",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.ic-lora.ingredients.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "ingredients",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "ltx2-community-license-2026-01-05"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ltx25.ic-lora.motion-track",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.ic-lora.motion-track.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "motion-track",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "ltx2-community-license-2026-01-05"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ltx25.ic-lora.union-control.canny",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.ic-lora.union-control.canny.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": "canny"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "ltx2-community-license-2026-01-05"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ltx25.ic-lora.union-control.depth",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.ic-lora.union-control.depth.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": "depth"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "ltx2-community-license-2026-01-05",
+          "moge-mit-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ltx25.ic-lora.union-control.pose",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.ic-lora.union-control.pose.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "control-video"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "union-control",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": "pose"
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "ltx2-community-license-2026-01-05"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "controlled-video.ltx25.ic-lora.v2v-instant-shave",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.ic-lora.v2v-instant-shave.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "control-video"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": "v2v-instant-shave",
+        "lipDubPipelineProfile": null,
+        "mode": "ic-lora",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "ltx2-community-license-2026-01-05"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.text-to-audio.single-stage",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.text-to-audio.single-stage.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt"
+      ],
+      "notApplicable": [
+        {
+          "gate": "av-sync",
+          "reason": "Audio-only output has no video timeline."
+        },
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "sharpness",
+          "reason": "Audio-only output has no image sharpness dimension."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "Audio-only output is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "audio/wav",
+      "request": {
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "text-to-audio",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
       "targetStatus": "candidate"
@@ -5062,10 +5919,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5110,10 +5969,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5158,10 +6019,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5206,10 +6069,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5264,10 +6129,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5316,10 +6183,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5370,10 +6239,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5424,10 +6295,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5478,10 +6351,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5541,10 +6416,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "one-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5588,10 +6465,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5637,10 +6516,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5686,10 +6567,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5735,10 +6618,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5794,10 +6679,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "dev",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5841,10 +6728,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5890,10 +6779,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5939,10 +6830,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -5988,10 +6881,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6047,10 +6942,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "retake",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": "distilled",
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6113,10 +7010,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "text-to-audio",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
-        "sourceMode": "not-applicable"
+        "sourceMode": "not-applicable",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6159,10 +7058,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6208,10 +7109,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6257,10 +7160,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6306,10 +7211,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6365,10 +7272,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6412,10 +7321,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6460,10 +7371,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6508,10 +7421,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6556,10 +7471,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6614,10 +7531,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6666,10 +7585,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6721,10 +7642,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6776,10 +7699,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6831,10 +7756,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6895,10 +7822,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -6948,10 +7877,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7002,10 +7933,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7056,10 +7989,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7110,10 +8045,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7173,10 +8110,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage-hq",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7219,10 +8158,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7268,10 +8209,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7317,10 +8260,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7366,10 +8311,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7425,10 +8372,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7472,10 +8421,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7520,10 +8471,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7568,10 +8521,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7616,10 +8571,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7674,10 +8631,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "image"
+        "sourceMode": "image",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7726,10 +8685,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7781,10 +8742,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7836,10 +8799,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7891,10 +8856,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -7955,10 +8922,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "abliterated-lora",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -8008,10 +8977,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "latentsync-1.6",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -8062,10 +9033,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-streaming-taehv",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -8116,10 +9089,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "lipforcing-14b-wan-vae",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -8170,10 +9145,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "musetalk-1.5",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -8233,10 +9210,12 @@
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
         "mode": "two-stage",
+        "modelProfile": "ltx23-monolith",
         "postprocessor": "none",
         "promptEncoderProfile": "base-gemma",
         "retakeCheckpoint": null,
-        "sourceMode": "text"
+        "sourceMode": "text",
+        "unionControlType": null
       },
       "rights": {
         "evidenceIds": [
@@ -8252,11 +9231,11 @@
   "inputs": {
     "capabilityMatrix": {
       "path": "shared/releaseSurface.ts",
-      "sha256": "1c1298a361198995b56f637bc5a18d82a0450bbf825adfa1bafb728f4906f3e6"
+      "sha256": "625f7c3558b927f239c1282c7eef8e2fa91ee0d9ad6658def4c2d4c064a086f9"
     },
     "requestSchema": {
       "path": "shared/pipelines.ts",
-      "sha256": "98ba3140c06852130f2fc5be863ba14ee52f04d9a6462bbfd204c898bd05ec87"
+      "sha256": "6e4132c339e0d2bf8c1ad40c183d05afbdf2d027cc1e5cb3244d2b38e4fce784"
     }
   },
   "policyVersion": "ltx-studio-release-rights.v1",

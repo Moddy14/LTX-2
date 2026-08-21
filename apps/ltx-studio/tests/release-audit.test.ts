@@ -144,6 +144,8 @@ function fixture(): Fixture {
           icLoraProfile: null,
           lipDubPipelineProfile: "official-comfy-hq",
           retakeCheckpoint: null,
+          modelProfile: "ltx23-monolith",
+          unionControlType: null,
           promptEncoderProfile: "not-applicable",
           dialogueIntent: "required",
           postprocessor: "none",
