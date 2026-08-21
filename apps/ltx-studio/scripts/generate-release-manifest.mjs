@@ -50,11 +50,15 @@ function visitNodeDependencies(dependencies = {}) {
 visitNodeDependencies(npmTree.dependencies);
 
 const modelsModule = await import(pathToFileURL(join(releaseAppRoot, "shared", "models.js")));
+const ltx25CatalogModule = await import(
+  pathToFileURL(join(releaseAppRoot, "shared", "ltx25Catalog.js"))
+);
 const releaseSurfaceModule = await import(pathToFileURL(join(releaseAppRoot, "shared", "releaseSurface.js")));
 const rightsEvidenceModule = await import(pathToFileURL(join(releaseAppRoot, "shared", "rightsEvidence.js")));
 const models = modelsModule.recommendedModelAssets.map((asset) => ({
   id: asset.id,
   repository: asset.repoId,
+  ...(asset.revision ? { revision: asset.revision } : {}),
   access: asset.access,
   mountPath: asset.localPath,
   ...(asset.expectedContents
@@ -63,8 +67,26 @@ const models = modelsModule.recommendedModelAssets.map((asset) => ({
         sizeBytes: file.expectedSizeBytes,
         sha256: file.expectedSha256,
       })) }
-    : { files: [{ path: asset.filename, sizeBytes: asset.expectedSizeBytes, sha256: asset.expectedSha256 }] }),
+    : { files: [{
+        path: asset.sourcePath ?? asset.filename,
+        sizeBytes: asset.expectedSizeBytes,
+        sha256: asset.expectedSha256,
+      }] }),
 }));
+const workflows = {
+  repository: ltx25CatalogModule.LTX25_WORKFLOW_REPOSITORY,
+  revision: ltx25CatalogModule.LTX25_WORKFLOW_COMMIT,
+  readme: {
+    path: `${ltx25CatalogModule.LTX25_WORKFLOW_ROOT}/README.md`,
+    sha256: ltx25CatalogModule.LTX25_WORKFLOW_README_SHA256,
+  },
+  files: ltx25CatalogModule.LTX25_WORKFLOW_CATALOG.map((workflow) => ({
+    id: workflow.id,
+    nativeStatus: workflow.nativeStatus,
+    path: `${ltx25CatalogModule.LTX25_WORKFLOW_ROOT}/${workflow.filename}`,
+    sha256: workflow.sha256,
+  })),
+};
 
 const longcatRoot = process.env.LTX_STUDIO_LONGCAT_ROOT ?? "/home/moddy/projects/longcat-video-avatar-dgx";
 let longcat;
@@ -134,6 +156,7 @@ const manifest = {
     longcat,
   },
   models,
+  workflows,
   rights: {
     policyVersion: "ltx-studio-release-rights.v1",
     ltx2CommunityLicenseSha256: sha256File(join(releaseRoot, "LICENSE")),
@@ -147,7 +170,18 @@ const manifest = {
     schemaVersion: "ltx-studio-static-sbom.v1",
     nodeComponents: uniqueComponents(nodeComponents),
     pythonComponents: uniqueComponents(pythonInventory.components),
-    modelComponents: models.map(({ id, repository, access, files }) => ({ id, repository, access, files })),
+    modelComponents: models.map(({ id, repository, revision, access, files }) => ({
+      id,
+      repository,
+      ...(revision ? { revision } : {}),
+      access,
+      files,
+    })),
+    workflowComponents: workflows.files.map((workflow) => ({
+      ...workflow,
+      repository: workflows.repository,
+      revision: workflows.revision,
+    })),
   },
   artifacts,
   qualification: {
