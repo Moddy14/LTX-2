@@ -67,6 +67,7 @@ execFileSync("uv", [
   "--no-dev",
   "--no-editable",
   "--compile-bytecode",
+  "--no-config",
 ], { cwd: releaseRoot, env: releaseEnvironment, stdio: "inherit" });
 const releasePython = join(runtimeRoot, ".venv", "bin", "python");
 execFileSync(releasePython, [join(runtimeRoot, "normalize_cusparselt_wheel.py")], {

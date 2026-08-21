@@ -23,6 +23,10 @@ dependencies = [
 package = false
 environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
 no-sources-package = ["torch", "torchaudio"]
+# Torch 2.13's cu132 metadata pins cuDNN 9.20, whose AArch64 wheel omits the
+# tensor-IR sublibrary required by the DGX Spark host stack. Keep the release
+# runtime self-contained instead of inheriting this override from the repo root.
+override-dependencies = ["nvidia-cudnn-cu13==9.21.1.3"]
 
 [tool.uv.workspace]
 members = []
