@@ -67,8 +67,16 @@ for (const entry of surface.entries) {
   }
 }
 const releasePython = join(releaseAppRoot, "runtime", ".venv", "bin", "python");
+const releaseEnvironment = {
+  ...process.env,
+  HF_HUB_OFFLINE: "1",
+  PYTHONNOUSERSITE: "1",
+  TRANSFORMERS_OFFLINE: "1",
+};
+delete releaseEnvironment.VIRTUAL_ENV;
 execFileSync(releasePython, ["-I", join(releaseAppRoot, "runtime", "verify_runtime.py")], {
   cwd: releaseRoot,
+  env: releaseEnvironment,
   stdio: "inherit",
 });
 process.stdout.write(`${JSON.stringify({ releaseDigest: actualDigest, artifacts: actualArtifacts.length, verdict: "ok" })}\n`);
