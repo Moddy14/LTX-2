@@ -64,6 +64,16 @@ describe("Python CLI source contract", () => {
     expect(flfSource).not.toContain("STAGE_2_DISTILLED_SIGMAS");
   });
 
+  it("exposes the official distilled single-stage layout without requiring an upscaler", () => {
+    const distilledSource = source("distilled.py");
+    expect(distilledSource).toContain('"--skip-stage-2"');
+    expect(distilledSource).toContain("skip_stage_2=args.skip_stage_2");
+    expect(distilledSource).toContain("action.required = False");
+    expect(distilledSource).toContain(
+      'parser.error("--spatial-upsampler-path is required unless --skip-stage-2 is selected")',
+    );
+  });
+
   it("keeps T2A audio-only while matching the official fixed sampler", () => {
     const t2aSource = source("t2a_one_stage.py");
     expect(t2aSource).toContain("LTXAudioOnlyModelConfigurator");

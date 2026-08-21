@@ -11,7 +11,7 @@ import {
 } from "../server/command.js";
 import { recommendedModelAssets, type ModelInventory } from "../shared/models.js";
 import * as mediaProbe from "../server/mediaProbe.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 const expectedModules = {
   "two-stage": "ltx_pipelines.ti2vid_two_stages",
@@ -57,6 +57,114 @@ describe("buildCommand", () => {
       "0.5",
     ]);
     expect(plan.args[plan.args.indexOf("--prompt") + 1]).toContain("Bitte öffne die Tür.");
+  });
+
+  it("emits an XOR-clean LTX-2.5 split-pack CLI and provenance path set", () => {
+    const request = validLtx25SplitRequest("distilled");
+    const plan = buildCommand(request);
+
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--transformer-path",
+      request.models.transformerPath,
+      "--text-encoder-path",
+      request.models.textEncoderPath,
+      "--video-vae-path",
+      request.models.videoVaePath,
+      "--audio-vae-path",
+      request.models.audioVaePath,
+      "--duration-head-path",
+      request.models.durationHeadPath,
+      "--prompt-enhancer-gemma-root",
+      request.models.promptEnhancerGemmaRoot,
+    ]));
+    expect(plan.args).not.toContain("--checkpoint-path");
+    expect(plan.args).not.toContain("--distilled-checkpoint-path");
+    expect(plan.args).not.toContain("--gemma-root");
+    expect(plan.requiredPaths).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: request.models.transformerPath, label: "LTX-2.5 Transformer", kind: "file" }),
+      expect.objectContaining({ path: request.models.textEncoderPath, label: "LTX-2.5 Textencoder", kind: "file" }),
+      expect.objectContaining({ path: request.models.videoVaePath, label: "LTX-2.5 Video-VAE", kind: "file" }),
+      expect.objectContaining({ path: request.models.audioVaePath, label: "LTX-2.5 Audio-VAE", kind: "file" }),
+      expect.objectContaining({ path: request.models.durationHeadPath, label: "LTX-2.5 Duration-Head", kind: "file" }),
+    ]));
+    expect(plan.requiredPaths.find(({ label }) => label === "LTX-2.5 Transformer")).toMatchObject({
+      expectedSizeBytes: 42_018_190_584,
+      expectedSha256: "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
+    });
+  });
+
+  it("emits the official single-stage preview without upscaler provenance", () => {
+    const request = validLtx25SplitRequest("distilled");
+    request.distilled.singleStage = true;
+    request.models.spatialUpscalerPath = "";
+    const plan = buildCommand(request);
+
+    expect(plan.args).toContain("--skip-stage-2");
+    expect(plan.args).not.toContain("--spatial-upsampler-path");
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Spatial Upscaler" }));
+  });
+
+  it("keeps LTX-2.5 T2A audio-only and does not reapply the distilled LoRA", () => {
+    const request = validLtx25SplitRequest("text-to-audio");
+    const plan = buildCommand(request);
+
+    expect(plan.args).toContain("--transformer-path");
+    expect(plan.args).not.toContain("--video-vae-path");
+    expect(plan.args).not.toContain(request.models.videoVaePath);
+    expect(plan.args).not.toContain(request.models.distilledLora.path);
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "LTX-2.5 Video-VAE" }));
+  });
+
+  it("does not stack the legacy distilled LoRA onto official LTX-2.5 IC-LoRA", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    request.icLora.profile = "ingredients";
+    request.icLora.videoConditioning = [];
+    request.icLora.lora.path = recommendedModelAssets.find(({ id }) => id === "ltx23-ingredients-lora")!.localPath;
+    const plan = buildCommand(request);
+
+    expect(plan.args).toContain("--official-comfy-workflow");
+    expect(plan.args).toContain(request.icLora.lora.path);
+    expect(plan.args).not.toContain(request.models.distilledLora.path);
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
+    expect(plan.requiredPaths).toContainEqual(expect.objectContaining({
+      label: "LTX-2.3 Ingredients IC-LoRA",
+      expectedSha256: "515e4e139001ac6282357a5b35372e42e98b3affd5fcc886a52242abeed19559",
+    }));
+  });
+
+  it("rejects an unpinned IC-LoRA even when the LTX-2.5 backbone is a split pack", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    request.icLora.profile = "ingredients";
+    request.icLora.videoConditioning = [];
+
+    expect(validateRequestPlan(request, buildCommand(request))).toContain(
+      "LTX-2.3 Ingredients IC-LoRA: der offizielle LTX-2.5-Split-Pack-Vertrag verlangt "
+      + `${recommendedModelAssets.find(({ id }) => id === "ltx23-ingredients-lora")!.localPath}; `
+      + "ausgewählt ist /models/ltx/ic-lora.safetensors.",
+    );
+  });
+
+  it("keeps reused IC-LoRA integrity in the LTX-2.5 split-pack inventory gate", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    request.icLora.profile = "ingredients";
+    const inventory: ModelInventory = {
+      roots: [],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: recommendedModelAssets.map((asset) => ({
+        ...asset,
+        present: true,
+        integrity: asset.id === "ltx23-ingredients-lora" ? "sha256-mismatch" as const : "verified" as const,
+      })),
+    };
+
+    expect(validateOfficialSpeechInventory(request, inventory)).toEqual([
+      "LTX-2.3 Ingredients IC-LoRA: offizielles Asset ist nicht vollständig SHA-256-verifiziert "
+      + "(Status: sha256-mismatch).",
+    ]);
   });
 
   it("builds FLF2V with only the official distilled checkpoint and two guide images", () => {
@@ -269,11 +377,11 @@ describe("buildCommand", () => {
 
     expect(loraPaths.filter((path) => path === request.icLora.lora.path)).toHaveLength(1);
     expect(loraPaths).toContain("/models/ltx/style-lora.safetensors");
-    expect(plan.requiredPaths).toContainEqual({
+    expect(plan.requiredPaths).toContainEqual(expect.objectContaining({
       path: request.icLora.lora.path,
       label: "LTX-2.3 Union-Control IC-LoRA",
       kind: "file",
-    });
+    }));
     expect(plan.args).toContain("--official-comfy-workflow");
     expect(plan.args).toEqual(expect.arrayContaining([
       "--distilled-checkpoint-path",
@@ -333,11 +441,11 @@ describe("buildCommand", () => {
     expect(args).not.toContain("--conditioning-attention-mask");
     expect(args).not.toContain("--gemma-lora");
     expect(args).not.toContain("--image");
-    expect(plan.requiredPaths).toContainEqual({
+    expect(plan.requiredPaths).toContainEqual(expect.objectContaining({
       path: request.icLora.lora.path,
       label: "LTX-2.3 Ingredients IC-LoRA",
       kind: "file",
-    });
+    }));
   });
 
   it.each([

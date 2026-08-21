@@ -15,11 +15,13 @@ import {
   isAudioConditionedMode,
   isNativeDialogueRequest,
   needsGemmaAbliteratedLoraForRequest,
+  usesSplitModelPack,
   usesOfficialComfyLipDub,
   type GenerationRequest,
   type PipelineMode,
 } from "../shared/pipelines.js";
 import type { PlanSuggestion } from "../shared/plan.js";
+import { LTX25_MODEL_COMPONENTS } from "../shared/ltx25Catalog.js";
 import { outputRoot, rendererPythonExecutable } from "./config.js";
 import {
   inspectLipDubReference,
@@ -50,6 +52,8 @@ export type PathRequirement = {
   path: string;
   label: string;
   kind: "file" | "directory";
+  expectedSizeBytes?: number;
+  expectedSha256?: string;
 };
 
 export type CommandPlan = {
@@ -66,6 +70,99 @@ function appendFlag(args: string[], flag: string, value: string | number): void 
 
 function appendBoolean(args: string[], enabled: boolean, flag: string): void {
   if (enabled) args.push(flag);
+}
+
+function appendModelPackArgs(
+  request: GenerationRequest,
+  args: string[],
+  monolithFlag: "--checkpoint-path" | "--distilled-checkpoint-path",
+  monolithPath: string,
+  options: { video: boolean } = { video: true },
+): void {
+  if (!usesSplitModelPack(request)) {
+    appendFlag(args, monolithFlag, monolithPath);
+    appendFlag(args, "--gemma-root", request.models.gemmaRoot);
+    return;
+  }
+
+  appendFlag(args, "--transformer-path", request.models.transformerPath);
+  appendFlag(args, "--text-encoder-path", request.models.textEncoderPath);
+  if (options.video && request.models.videoVaePath) {
+    appendFlag(args, "--video-vae-path", request.models.videoVaePath);
+  }
+  appendFlag(args, "--audio-vae-path", request.models.audioVaePath);
+  if (request.models.durationHeadPath) appendFlag(args, "--duration-head-path", request.models.durationHeadPath);
+  if (request.enhancePrompt) {
+    appendFlag(args, "--prompt-enhancer-gemma-root", request.models.promptEnhancerGemmaRoot);
+  }
+}
+
+function modelPackRequirements(
+  request: GenerationRequest,
+  monolithPath: string,
+  monolithLabel: string,
+  options: { video: boolean } = { video: true },
+): PathRequirement[] {
+  if (!usesSplitModelPack(request)) {
+    return [
+      { path: monolithPath, label: monolithLabel, kind: "file" },
+      { path: request.models.gemmaRoot, label: "Gemma Root", kind: "directory" },
+      ...(request.enhancePrompt ? [{
+        path: join(request.models.gemmaRoot, "preprocessor_config.json"),
+        label: "Gemma Prozessorkonfiguration für Promptverbesserung",
+        kind: "file" as const,
+      }] : []),
+    ];
+  }
+
+  const selectedVideoVae = request.models.videoVaePath.endsWith(
+    LTX25_MODEL_COMPONENTS.videoVaeConv.path.split("/").at(-1)!,
+  )
+    ? LTX25_MODEL_COMPONENTS.videoVaeConv
+    : LTX25_MODEL_COMPONENTS.videoVaeDiffusion;
+
+  return [
+    {
+      path: request.models.transformerPath,
+      label: "LTX-2.5 Transformer",
+      kind: "file",
+      expectedSizeBytes: LTX25_MODEL_COMPONENTS.transformer.sizeBytes,
+      expectedSha256: LTX25_MODEL_COMPONENTS.transformer.sha256,
+    },
+    {
+      path: request.models.textEncoderPath,
+      label: "LTX-2.5 Textencoder",
+      kind: "file",
+      expectedSizeBytes: LTX25_MODEL_COMPONENTS.textEncoder.sizeBytes,
+      expectedSha256: LTX25_MODEL_COMPONENTS.textEncoder.sha256,
+    },
+    ...(options.video ? [{
+      path: request.models.videoVaePath,
+      label: "LTX-2.5 Video-VAE",
+      kind: "file" as const,
+      expectedSizeBytes: selectedVideoVae.sizeBytes,
+      expectedSha256: selectedVideoVae.sha256,
+    }] : []),
+    {
+      path: request.models.audioVaePath,
+      label: "LTX-2.5 Audio-VAE",
+      kind: "file",
+      expectedSizeBytes: LTX25_MODEL_COMPONENTS.audioVae.sizeBytes,
+      expectedSha256: LTX25_MODEL_COMPONENTS.audioVae.sha256,
+    },
+    ...(request.models.durationHeadPath ? [{
+      path: request.models.durationHeadPath,
+      label: "LTX-2.5 Duration-Head",
+      kind: "file" as const,
+      expectedSizeBytes: LTX25_MODEL_COMPONENTS.durationHead.sizeBytes,
+      expectedSha256: LTX25_MODEL_COMPONENTS.durationHead.sha256,
+    }] : []),
+    ...(request.enhancePrompt ? [{
+      path: request.models.promptEnhancerGemmaRoot,
+      label: "Prompt-Enhancer Gemma Root",
+      kind: "directory" as const,
+    }] : []),
+  ];
 }
 
 function shellQuote(value: string): string {
@@ -110,7 +207,6 @@ export function renderPrompt(request: GenerationRequest): string {
 }
 
 function appendCommonGenerationArgs(request: GenerationRequest, args: string[]): void {
-  appendFlag(args, "--gemma-root", request.models.gemmaRoot);
   appendFlag(args, "--prompt", renderPrompt(request));
   appendFlag(args, "--output-path", join(outputRoot, request.outputName));
   appendFlag(args, "--seed", request.seed);
@@ -134,7 +230,9 @@ function appendCommonGenerationArgs(request: GenerationRequest, args: string[]):
   }
   const loras = request.mode === "ic-lora"
     ? [
-        ...(request.icLora.profile === "union-control" ? [] : [request.models.distilledLora]),
+        ...(request.icLora.profile === "union-control" || usesSplitModelPack(request)
+          ? []
+          : [request.models.distilledLora]),
         request.icLora.lora,
         ...request.models.loras,
       ]
@@ -223,7 +321,10 @@ function validateOfficialSpeechAssets(request: GenerationRequest): string[] {
     const expected = recommendedModelAsset(id);
     if (resolve(selectedPath) !== resolve(expected.localPath)) {
       errors.push(
-        `${label}: die offizielle LTX-2.3-Pipeline verlangt ${expected.localPath}; ausgewählt ist ${selectedPath || "nichts"}.`,
+        `${label}: ${usesSplitModelPack(request)
+          ? "der offizielle LTX-2.5-Split-Pack-Vertrag"
+          : "die offizielle LTX-2.3-Pipeline"} verlangt ${expected.localPath}; `
+        + `ausgewählt ist ${selectedPath || "nichts"}.`,
       );
     }
   };
@@ -256,6 +357,9 @@ function validateOfficialSpeechAssets(request: GenerationRequest): string[] {
   if (request.mode === "id-lora") {
     requireAsset("ltx23-id-lora-talkvid", request.idLora.lora.path, "ID-LoRA TalkVid");
   }
+  // Split packs replace the monolithic 2.3 checkpoint/text-encoder contract, but the published
+  // 2.5 IC graphs deliberately reuse the pinned 2.3 IC-LoRAs (and MoGe for depth control).
+  if (usesSplitModelPack(request)) return errors;
   if (!usesOfficialSpeechStack(request) && !documentedCheckpoint) return errors;
 
   const officialComfyLipDub = usesOfficialComfyLipDub(request);
@@ -310,7 +414,17 @@ export function validateOfficialSpeechInventory(
   request: GenerationRequest,
   inventory: ModelInventory,
 ): string[] {
-  return requiredOfficialSpeechAssetIds(request).flatMap((id) => {
+  const requiredAssetIds = usesSplitModelPack(request)
+    ? request.mode === "ic-lora"
+      ? [
+          icLoraModelAssetId(request),
+          ...(request.icLora.profile === "union-control" && request.icLora.controlType === "depth"
+            ? ["ltx23-moge" as const]
+            : []),
+        ]
+      : []
+    : requiredOfficialSpeechAssetIds(request);
+  return requiredAssetIds.flatMap((id) => {
     const expected = recommendedModelAsset(id);
     const actual = inventory.recommendations.find((asset) => asset.id === id);
     if (actual?.present && actual.integrity === "verified") return [];
@@ -347,16 +461,7 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
         ? "ltx_pipelines.inoutpaint"
         : MODULES[request.mode],
   ];
-  const requiredPaths: PathRequirement[] = hdrICLora
-    ? []
-    : [{ path: request.models.gemmaRoot, label: "Gemma Root", kind: "directory" }];
-  if (request.enhancePrompt && !hdrICLora) {
-    requiredPaths.push({
-      path: join(request.models.gemmaRoot, "preprocessor_config.json"),
-      label: "Gemma Prozessorkonfiguration für Promptverbesserung",
-      kind: "file",
-    });
-  }
+  const requiredPaths: PathRequirement[] = [];
 
   if (hdrICLora) {
     const sourceVideo = request.icLora.videoConditioning[0];
@@ -397,10 +502,6 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
   } else if (inOutpaintICLora) {
     const sourceVideo = request.icLora.videoConditioning[0];
     args.push(
-      "--checkpoint-path",
-      request.models.checkpointPath,
-      "--gemma-root",
-      request.models.gemmaRoot,
       "--prompt",
       renderPrompt(request),
       "--negative-prompt",
@@ -430,6 +531,7 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       request.icLora.lora.path,
       String(request.icLora.lora.strength),
     );
+    appendModelPackArgs(request, args, "--checkpoint-path", request.models.checkpointPath);
     if (request.icLora.profile === "inpainting") {
       args.push("--mask-video", request.icLora.attentionMaskPath);
     }
@@ -442,7 +544,7 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       args.push("--quantization", request.quantization.mode);
     }
     requiredPaths.push(
-      { path: request.models.checkpointPath, label: "Dev Checkpoint", kind: "file" },
+      ...modelPackRequirements(request, request.models.checkpointPath, "Dev Checkpoint"),
       { path: request.models.distilledLora.path, label: "Distilled LoRA", kind: "file" },
       { path: request.icLora.lora.path, label: "In-/Outpainting IC-LoRA", kind: "file" },
       { path: sourceVideo?.path ?? "", label: "Quellvideo", kind: "file" },
@@ -456,10 +558,6 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
     }
   } else if (request.mode === "text-to-audio") {
     args.push(
-      "--checkpoint-path",
-      request.models.checkpointPath,
-      "--gemma-root",
-      request.models.gemmaRoot,
       "--prompt",
       renderPrompt(request),
       "--negative-prompt",
@@ -475,9 +573,6 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       "--num-inference-steps",
       "8",
       "--official-comfy-workflow",
-      "--lora",
-      request.models.distilledLora.path,
-      String(request.models.distilledLora.strength),
       "--audio-cfg-guidance-scale",
       String(request.audioGuidance.cfgScale),
       "--audio-stg-guidance-scale",
@@ -487,6 +582,10 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       "--audio-skip-step",
       String(request.audioGuidance.skipStep),
     );
+    appendModelPackArgs(request, args, "--checkpoint-path", request.models.checkpointPath, { video: false });
+    if (!usesSplitModelPack(request)) {
+      args.push("--lora", request.models.distilledLora.path, String(request.models.distilledLora.strength));
+    }
     if (request.audioGuidance.stgBlocks.length > 0) {
       args.push("--audio-stg-blocks", ...request.audioGuidance.stgBlocks.map(String));
     }
@@ -497,10 +596,15 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
     if (request.quantization.mode !== "none") {
       args.push("--quantization", request.quantization.mode);
     }
-    requiredPaths.push(
-      { path: request.models.checkpointPath, label: "Dev Checkpoint", kind: "file" },
-      { path: request.models.distilledLora.path, label: "Distilled LoRA", kind: "file" },
-    );
+    requiredPaths.push(...modelPackRequirements(
+      request,
+      request.models.checkpointPath,
+      "Dev Checkpoint",
+      { video: false },
+    ));
+    if (!usesSplitModelPack(request)) {
+      requiredPaths.push({ path: request.models.distilledLora.path, label: "Distilled LoRA", kind: "file" });
+    }
   } else if (request.mode === "lipdub") {
     const officialComfyLipDub = usesOfficialComfyLipDub(request);
     args.push(
@@ -600,12 +704,24 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
     const nativeUnionControl = request.mode === "ic-lora" && request.icLora.profile === "union-control";
     const distilled = ["distilled", "keyframes"].includes(request.mode) || nativeUnionControl;
     const checkpointPath = distilled ? request.models.distilledCheckpointPath : request.models.checkpointPath;
-    appendFlag(args, distilled ? "--distilled-checkpoint-path" : "--checkpoint-path", checkpointPath);
+    appendModelPackArgs(
+      request,
+      args,
+      distilled ? "--distilled-checkpoint-path" : "--checkpoint-path",
+      checkpointPath,
+    );
     appendCommonGenerationArgs(request, args);
     if (["two-stage", "ic-lora", "image-audio-to-video"].includes(request.mode)) {
       args.push("--official-comfy-workflow");
     }
-    requiredPaths.push({ path: checkpointPath, label: distilled ? "Distilled Checkpoint" : "Checkpoint", kind: "file" });
+    if (request.mode === "distilled") {
+      appendBoolean(args, request.distilled.singleStage, "--skip-stage-2");
+    }
+    requiredPaths.push(...modelPackRequirements(
+      request,
+      checkpointPath,
+      distilled ? "Distilled Checkpoint" : "Checkpoint",
+    ));
 
     if (["two-stage", "two-stage-hq", "one-stage", "audio-to-video"].includes(request.mode)) {
       appendFlag(args, "--negative-prompt", request.negativePrompt);
@@ -620,9 +736,18 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       args.push("--distilled-lora", request.models.distilledLora.path, String(distilledLoraStrength));
       requiredPaths.push({ path: request.models.distilledLora.path, label: "Distilled LoRA", kind: "file" });
     }
-    if (!["one-stage", "ic-lora", "keyframes"].includes(request.mode)) {
+    if (!["one-stage", "ic-lora", "keyframes"].includes(request.mode)
+      && !(request.mode === "distilled" && request.distilled.singleStage)) {
       appendFlag(args, "--spatial-upsampler-path", request.models.spatialUpscalerPath);
-      requiredPaths.push({ path: request.models.spatialUpscalerPath, label: "Spatial Upscaler", kind: "file" });
+      requiredPaths.push({
+        path: request.models.spatialUpscalerPath,
+        label: "Spatial Upscaler",
+        kind: "file",
+        ...(usesSplitModelPack(request) ? {
+          expectedSizeBytes: LTX25_MODEL_COMPONENTS.spatialUpscaler.sizeBytes,
+          expectedSha256: LTX25_MODEL_COMPONENTS.spatialUpscaler.sha256,
+        } : {}),
+      });
     }
     if (request.mode === "two-stage-hq") {
       appendFlag(args, "--distilled-lora-strength-stage-1", request.hq.distilledLoraStrengthStage1);
@@ -633,12 +758,15 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       const unionControl = request.icLora.profile === "union-control";
       const pixelUpscaler = request.icLora.profile === "pixel-upscaler";
       const freezeControlAudio = ["pixel-upscaler", "v2v-instant-shave"].includes(request.icLora.profile);
+      const controlAsset: RecommendedModelAsset = recommendedModelAsset(icLoraModelAssetId(request));
       requiredPaths.push({
         path: request.icLora.lora.path,
-        label: recommendedModelAsset(icLoraModelAssetId(request)).label,
+        label: controlAsset.label,
         kind: "file",
+        expectedSizeBytes: controlAsset.expectedSizeBytes,
+        expectedSha256: controlAsset.expectedSha256,
       });
-      if (!unionControl) {
+      if (!unionControl && !usesSplitModelPack(request)) {
         requiredPaths.push({
           path: request.models.distilledLora.path,
           label: "Distilled LoRA",
@@ -659,10 +787,13 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       }
       if (unionControl && request.icLora.controlType === "depth") {
         appendFlag(args, "--moge-model-path", request.icLora.mogeModelPath);
+        const mogeAsset: RecommendedModelAsset = recommendedModelAsset("ltx23-moge");
         requiredPaths.push({
           path: request.icLora.mogeModelPath,
           label: "MoGe-Geometriemodell",
           kind: "file",
+          expectedSizeBytes: mogeAsset.expectedSizeBytes,
+          expectedSha256: mogeAsset.expectedSha256,
         });
       }
       if (ingredients) {
@@ -754,6 +885,12 @@ export function validatePlanPaths(plan: CommandPlan): string[] {
       const stats = statSync(requirement.path);
       const matches = requirement.kind === "file" ? stats.isFile() : stats.isDirectory();
       if (!matches) errors.push(`${requirement.label}: falscher Pfadtyp (${requirement.path})`);
+      if (requirement.expectedSizeBytes !== undefined && stats.size !== requirement.expectedSizeBytes) {
+        errors.push(
+          `${requirement.label}: Dateigröße ${stats.size} weicht vom gepinnten Wert `
+          + `${requirement.expectedSizeBytes} ab (${requirement.path})`,
+        );
+      }
     } catch {
       errors.push(`${requirement.label}: nicht gefunden (${requirement.path})`);
     }

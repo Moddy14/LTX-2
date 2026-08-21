@@ -1,5 +1,6 @@
-import type { GenerationRequest, ICLoraProfile } from "./pipelines.js";
+import { usesSplitModelPack, type GenerationRequest, type ICLoraProfile } from "./pipelines.js";
 import type { ProvenanceUpstreamContract } from "./provenance.js";
+import { ltx25WorkflowContract, type Ltx25WorkflowId } from "./ltx25Catalog.js";
 
 // Two deliberately separate upstream sources: the ComfyUI documentation templates
 // (Comfy-Org, euler + CFG 1) are the binding contract for the native two-stage and
@@ -114,8 +115,27 @@ const IC_LORA_WORKFLOWS: Partial<Record<ICLoraProfile, ProvenanceUpstreamContrac
 };
 
 export function upstreamWorkflowContractsForRequest(
-  request: Pick<GenerationRequest, "mode" | "icLora" | "lipDub" | "images">,
+  request: Pick<GenerationRequest, "mode" | "icLora" | "lipDub" | "images" | "models" | "distilled">,
 ): ProvenanceUpstreamContract[] {
+  if (usesSplitModelPack(request)) {
+    if (request.mode === "distilled") {
+      return [ltx25WorkflowContract(
+        request.distilled.singleStage ? "t2v-i2v-single-stage" : "t2v-i2v-two-stage",
+      )];
+    }
+    if (request.mode === "text-to-audio") return [ltx25WorkflowContract("t2a-single-stage")];
+    if (request.mode === "ic-lora") {
+      const workflowByProfile: Partial<Record<ICLoraProfile, Ltx25WorkflowId>> = {
+        "union-control": "ic-lora-union-control",
+        ingredients: "ic-lora-ingredients",
+        "motion-track": "ic-lora-motion-track",
+        "v2v-instant-shave": "v2v-ic-lora",
+      };
+      const workflow = workflowByProfile[request.icLora.profile];
+      return workflow ? [ltx25WorkflowContract(workflow)] : [];
+    }
+    return [];
+  }
   if (request.mode === "two-stage") {
     return [structuredClone(request.images.length > 0 ? I2V_TEMPLATE : T2V_TEMPLATE)];
   }

@@ -84,17 +84,23 @@ def should_use_ancestral_sampler(transformer_path: str) -> bool:
     return detect_model_version(transformer_path) >= ANCESTRAL_SAMPLER_SINCE_VERSION
 
 
+def distilled_stage_1_resolution(*, height: int, width: int, skip_stage_2: bool) -> tuple[int, int]:
+    """Validate the selected official layout and return stage-1 ``(width, height)``."""
+    assert_resolution(height=height, width=width, is_two_stage=not skip_stage_2)
+    return (width, height) if skip_stage_2 else (width // 2, height // 2)
+
+
 class DistilledPipeline:
     """
-    Two-stage distilled video generation pipeline.
-    Stage 1 generates video at half of the target resolution, then Stage 2 upsamples
-    by 2x and refines with additional denoising steps for higher quality output.
+    Distilled video generation pipeline with official single- and two-stage layouts.
+    Two-stage generation starts at half resolution, then spatially upsamples and refines.
+    Single-stage generation samples and decodes directly at the requested resolution.
     """
 
     def __init__(  # noqa: PLR0913
         self,
         model_paths: ModelPaths,
-        spatial_upsampler_path: str,
+        spatial_upsampler_path: str | None,
         loras: list[LoraPathStrengthAndSDOps],
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
@@ -135,13 +141,17 @@ class DistilledPipeline:
             offload_mode=offload_mode,
             alloc_trim_strategy=alloc_trim_strategy,
         )
-        self.upsampler = VideoUpsampler(
-            model_paths.video_vae(),
-            spatial_upsampler_path,
-            self.dtype,
-            self.device,
-            registry=registry,
-            alloc_trim_strategy=alloc_trim_strategy,
+        self.upsampler = (
+            VideoUpsampler(
+                model_paths.video_vae(),
+                spatial_upsampler_path,
+                self.dtype,
+                self.device,
+                registry=registry,
+                alloc_trim_strategy=alloc_trim_strategy,
+            )
+            if spatial_upsampler_path is not None
+            else None
         )
         self.video_decoder = VideoDecoder(
             model_paths.video_vae(),
@@ -201,16 +211,24 @@ class DistilledPipeline:
         stage_2_sigmas: torch.Tensor = STAGE_2_DISTILLED_SIGMAS,
         color_space: HDRColorSpace | None = None,
         generated_keyframes: int | Sequence[int] = 0,
+        skip_stage_2: bool = False,
     ) -> tuple[Iterator[torch.Tensor], Audio, int, TilingConfig | None]:
         """Generate a video.
         Stage 1 samples with the ancestral (SDE) Euler sampler or the deterministic one according
-        to ``self.use_ancestral_sampler``, detected from the checkpoint generation. Stage 2 is
-        always deterministic -- its 3-step refinement schedule is too short to remove freshly
-        injected noise.
+        to ``self.use_ancestral_sampler``, detected from the checkpoint generation. With
+        ``skip_stage_2=True`` it runs at output resolution and is decoded directly. Otherwise,
+        stage 2 is always deterministic -- its 3-step refinement schedule is too short to remove
+        freshly injected noise.
         """
         require_num_frames_source(num_frames, self.duration_predictor)
+        if not skip_stage_2 and self.upsampler is None:
+            raise ValueError("Two-stage distilled generation requires a spatial upsampler.")
         images = self.image_conditioner.resolve_crf(images)
-        assert_resolution(height=height, width=width, is_two_stage=True)
+        stage_1_w, stage_1_h = distilled_stage_1_resolution(
+            height=height,
+            width=width,
+            skip_stage_2=skip_stage_2,
+        )
         if has_generated_keyframes(generated_keyframes):
             self.stage.assert_generated_keyframes_supported()
 
@@ -246,9 +264,8 @@ class DistilledPipeline:
             device=self.device,
         )
 
-        # Stage 1: Initial low resolution video generation.
+        # Stage 1: full resolution for the official preview graph, half resolution otherwise.
         stage_1_sigmas = stage_1_sigmas.to(dtype=torch.float32, device=self.device)
-        stage_1_w, stage_1_h = width // 2, height // 2
         stage_1_conditionings = self.image_conditioner(
             lambda enc: combined_image_conditionings(
                 images=images,
@@ -275,7 +292,13 @@ class DistilledPipeline:
             **self._stage_1_sampler_kwargs(seed),
         )
 
+        if skip_stage_2:
+            decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
+            decoded_audio = self.audio_decoder(audio_state.latent)
+            return decoded_video, decoded_audio, num_frames, tiling_config
+
         # Stage 2: Upsample and refine the video at higher resolution with distilled LORA.
+        assert self.upsampler is not None
         upscaled_video_latent = self.upsampler(video_state.latent[:1])
 
         stage_2_sigmas = stage_2_sigmas.to(dtype=torch.float32, device=self.device)
@@ -324,7 +347,18 @@ def main() -> None:
     parser = add_generated_keyframes_arg(
         default_2_stage_distilled_arg_parser(params=params, supports_auto_duration=True)
     )
+    for action in parser._actions:
+        if "--spatial-upsampler-path" in action.option_strings:
+            action.required = False
+            action.help = "Spatial upsampler for two-stage output; omit only with --skip-stage-2."
+    parser.add_argument(
+        "--skip-stage-2",
+        action="store_true",
+        help="Run the official single-stage distilled preview at the requested resolution.",
+    )
     args = parser.parse_args()
+    if not args.skip_stage_2 and args.spatial_upsampler_path is None:
+        parser.error("--spatial-upsampler-path is required unless --skip-stage-2 is selected")
     pipeline = DistilledPipeline(
         model_paths=args.model_paths,
         spatial_upsampler_path=args.spatial_upsampler_path,
@@ -351,6 +385,7 @@ def main() -> None:
         enhance_static_cache=args.enhance_static_cache,
         tiling_config=None if args.disable_tiling else AUTO_TILING,
         generated_keyframes=args.num_generated_keyframes,
+        skip_stage_2=args.skip_stage_2,
     )
 
     encode_video(

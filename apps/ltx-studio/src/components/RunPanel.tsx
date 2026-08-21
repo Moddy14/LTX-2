@@ -401,10 +401,12 @@ export function RunPanel({
                 }</strong></span>
                 <span>Schritte <strong>{
                   outputRequest.mode === "lipdub"
-                    ? "fest (8 + 4)"
+                    ? "fest (8 + 3)"
                     : ["id-lora", "two-stage", "image-audio-to-video"].includes(outputRequest.mode)
                       ? "fest (8 + 3)"
-                      : ["distilled", "ic-lora", "keyframes", "text-to-audio"].includes(outputRequest.mode)
+                      : outputRequest.mode === "distilled"
+                        ? outputRequest.distilled.singleStage ? "fest (8)" : "fest (8 + 3)"
+                      : ["ic-lora", "keyframes", "text-to-audio"].includes(outputRequest.mode)
                         ? "fest (8)"
                       : outputRequest.numInferenceSteps
                 }</strong></span>

@@ -10,7 +10,7 @@ import {
   withLongCatLipsyncDisabled,
   type GenerationRequest,
 } from "../shared/pipelines.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 describe("generationRequestSchema", () => {
   it("uses the official prompt-enhancement defaults", () => {
@@ -73,6 +73,74 @@ describe("generationRequestSchema", () => {
 
   it.each(pipelineModes)("accepts a complete %s request", (mode) => {
     expect(generationRequestSchema.safeParse(validRequest(mode)).success).toBe(true);
+  });
+
+  it.each(["distilled", "text-to-audio"] as const)(
+    "accepts the explicit LTX-2.5 split-pack contract for %s",
+    (mode) => {
+      expect(generationRequestSchema.safeParse(validLtx25SplitRequest(mode)).success).toBe(true);
+    },
+  );
+
+  it("models the official single-stage preview without requiring an upscaler", () => {
+    const request = validLtx25SplitRequest("distilled");
+    request.distilled.singleStage = true;
+    request.models.spatialUpscalerPath = "";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.distilled.singleStage = false;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it.each(["comfy-int8-convrot", "nvfp4"])(
+    "keeps the %s transformer outside the native BF16 contract",
+    (variant) => {
+      const request = validLtx25SplitRequest("distilled");
+      request.models.transformerPath = `/models/ltx-2.5/ltx-2.5-22b-distilled-transformer-${variant}.safetensors`;
+      expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    },
+  );
+
+  it("accepts only the verified official IC-LoRA subset with an LTX-2.5 split pack", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    request.icLora.profile = "inpainting";
+    request.images = [];
+    request.icLora.attentionMaskPath = "/inputs/mask.mp4";
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("fails closed when an LTX-2.5 split component is missing", () => {
+    const request = validLtx25SplitRequest("distilled");
+    request.models.audioVaePath = "";
+    const parsed = generationRequestSchema.safeParse(request);
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toContainEqual(expect.objectContaining({
+        path: ["models", "audioVaePath"],
+        message: "Audio-VAE fehlt.",
+      }));
+    }
+  });
+
+  it("migrates old projects to an explicit LTX-2.3 monolith contract", () => {
+    const legacy = structuredClone(validRequest("distilled")) as unknown as {
+      models: Partial<GenerationRequest["models"]>;
+    };
+    delete legacy.models.layout;
+    delete legacy.models.generation;
+    delete legacy.models.transformerPath;
+    delete legacy.models.textEncoderPath;
+    delete legacy.models.videoVaePath;
+    delete legacy.models.audioVaePath;
+    delete legacy.models.durationHeadPath;
+    delete legacy.models.promptEnhancerGemmaRoot;
+
+    const migrated = mergeGenerationRequest(legacy);
+    expect(migrated.models).toMatchObject({ layout: "monolith", generation: "2.3" });
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
   });
 
   it("rejects unsafe output names", () => {

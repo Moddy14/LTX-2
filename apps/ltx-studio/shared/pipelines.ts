@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { framesForDuration, videoDurationSeconds } from "./presets.js";
+import { LTX25_MODEL_COMPONENTS } from "./ltx25Catalog.js";
 
 export const pipelineModes = [
   "two-stage",
@@ -59,6 +60,18 @@ export function needsGemmaAbliteratedLoraForRequest(
 
 export const sourceModes = ["text", "image"] as const;
 export type SourceMode = (typeof sourceModes)[number];
+
+export const modelLayouts = ["monolith", "split"] as const;
+export type ModelLayout = (typeof modelLayouts)[number];
+
+export const modelGenerations = ["2.3", "2.5"] as const;
+export type ModelGeneration = (typeof modelGenerations)[number];
+
+export function usesSplitModelPack(
+  input: Pick<GenerationRequest, "models">,
+): boolean {
+  return input.models.layout === "split";
+}
 
 export const icLoraProfiles = [
   "union-control",
@@ -185,7 +198,7 @@ export const PIPELINES: readonly PipelineDefinition[] = [
     shortLabel: "Distilled",
     description: "Feste schnelle Sigma-Schedules für hohe Durchsatzleistung.",
     family: "generate",
-    quality: "8 + 4 Schritte",
+    quality: "8 + 3 Schritte",
     defaultHeight: 1024,
     defaultWidth: 1536,
     defaultSteps: 8,
@@ -374,9 +387,17 @@ export const generationRequestSchema = z
       notes: withoutNul(z.string().max(2_000)),
     }),
     models: z.object({
+      layout: z.enum(modelLayouts),
+      generation: z.enum(modelGenerations),
       checkpointPath: pathValue,
       distilledCheckpointPath: pathValue,
       gemmaRoot: pathValue,
+      transformerPath: pathValue,
+      textEncoderPath: pathValue,
+      videoVaePath: pathValue,
+      audioVaePath: pathValue,
+      durationHeadPath: pathValue,
+      promptEnhancerGemmaRoot: pathValue,
       gemmaLora: loraSchema.extend({ enabled: z.boolean() }),
       spatialUpscalerPath: pathValue,
       distilledLora: loraSchema,
@@ -392,6 +413,9 @@ export const generationRequestSchema = z
     hq: z.object({
       distilledLoraStrengthStage1: z.number().finite().min(0).max(2),
       distilledLoraStrengthStage2: z.number().finite().min(0).max(2),
+    }),
+    distilled: z.object({
+      singleStage: z.boolean(),
     }),
     icLora: z.object({
       profile: z.enum(icLoraProfiles).default("union-control"),
@@ -475,6 +499,22 @@ export const generationRequestSchema = z
     const requirePath = (path: string, field: (string | number)[], label: string) => {
       if (!path) context.addIssue({ code: "custom", path: field, message: `${label} fehlt.` });
     };
+    const requireFilename = (
+      path: string,
+      field: (string | number)[],
+      label: string,
+      allowed: readonly string[],
+    ) => {
+      if (!path) return;
+      const filename = path.replaceAll("\\", "/").split("/").at(-1) ?? "";
+      if (!allowed.includes(filename)) {
+        context.addIssue({
+          code: "custom",
+          path: field,
+          message: `${label} ist für den nativen LTX-2.5-Vertrag nicht freigegeben: ${filename}`,
+        });
+      }
+    };
 
     value.images.forEach((image, index) => requirePath(image.path, ["images", index, "path"], `Bild ${index + 1}`));
     value.models.loras.forEach((lora, index) => requirePath(lora.path, ["models", "loras", index, "path"], `LoRA ${index + 1}`));
@@ -482,13 +522,113 @@ export const generationRequestSchema = z
       requirePath(video.path, ["icLora", "videoConditioning", index, "path"], `Kontrollvideo ${index + 1}`),
     );
 
-    if (["distilled", "keyframes"].includes(value.mode)
-      || (value.mode === "ic-lora" && value.icLora.profile === "hdr")
-      || (value.mode === "lipdub" && value.lipDub.pipelineProfile === "native-distilled")
-      || (value.mode === "retake" && value.retake.distilled)) {
-      requirePath(value.models.distilledCheckpointPath, ["models", "distilledCheckpointPath"], "Distilled Checkpoint");
+    if (value.models.layout === "split") {
+      if (value.models.generation !== "2.5") {
+        context.addIssue({
+          code: "custom",
+          path: ["models", "generation"],
+          message: "Der Split-Pack-Vertrag ist derzeit ausschließlich für LTX-2.5 freigegeben.",
+        });
+      }
+      requirePath(value.models.transformerPath, ["models", "transformerPath"], "Transformer");
+      requirePath(value.models.textEncoderPath, ["models", "textEncoderPath"], "Textencoder");
+      if (value.mode !== "text-to-audio") {
+        requirePath(value.models.videoVaePath, ["models", "videoVaePath"], "Video-VAE");
+      }
+      requirePath(value.models.audioVaePath, ["models", "audioVaePath"], "Audio-VAE");
+      requireFilename(
+        value.models.transformerPath,
+        ["models", "transformerPath"],
+        "Transformer",
+        [LTX25_MODEL_COMPONENTS.transformer.path.split("/").at(-1)!],
+      );
+      requireFilename(
+        value.models.textEncoderPath,
+        ["models", "textEncoderPath"],
+        "Textencoder",
+        [LTX25_MODEL_COMPONENTS.textEncoder.path.split("/").at(-1)!],
+      );
+      requireFilename(
+        value.models.videoVaePath,
+        ["models", "videoVaePath"],
+        "Video-VAE",
+        [
+          LTX25_MODEL_COMPONENTS.videoVaeDiffusion.path.split("/").at(-1)!,
+          LTX25_MODEL_COMPONENTS.videoVaeConv.path.split("/").at(-1)!,
+        ],
+      );
+      requireFilename(
+        value.models.audioVaePath,
+        ["models", "audioVaePath"],
+        "Audio-VAE",
+        [LTX25_MODEL_COMPONENTS.audioVae.path.split("/").at(-1)!],
+      );
+      requireFilename(
+        value.models.durationHeadPath,
+        ["models", "durationHeadPath"],
+        "Duration-Head",
+        [LTX25_MODEL_COMPONENTS.durationHead.path.split("/").at(-1)!],
+      );
+      if (value.quantization.mode !== "none") {
+        context.addIssue({
+          code: "custom",
+          path: ["quantization", "mode"],
+          message: "Der freigegebene native LTX-2.5-BF16-Vertrag verwendet keine zusätzliche Quantisierung.",
+        });
+      }
+      if (value.models.gemmaLora.enabled) {
+        context.addIssue({
+          code: "custom",
+          path: ["models", "gemmaLora", "enabled"],
+          message: "Der offizielle LTX-2.5-Split-Pack-Vertrag verwendet keine Gemma Abliterated LoRA.",
+        });
+      }
+      if (value.enhancePrompt) {
+        requirePath(
+          value.models.promptEnhancerGemmaRoot,
+          ["models", "promptEnhancerGemmaRoot"],
+          "Prompt-Enhancer Gemma Root",
+        );
+      }
+      if (definition.needsSpatialUpscaler && !(value.mode === "distilled" && value.distilled.singleStage)) {
+        requireFilename(
+          value.models.spatialUpscalerPath,
+          ["models", "spatialUpscalerPath"],
+          "Spatial Upscaler",
+          [LTX25_MODEL_COMPONENTS.spatialUpscaler.path.split("/").at(-1)!],
+        );
+      }
+      const supportedOfficialProfile = value.mode === "ic-lora"
+        && ["union-control", "ingredients", "motion-track", "v2v-instant-shave"].includes(
+          value.icLora.profile,
+        );
+      if (!["distilled", "text-to-audio"].includes(value.mode) && !supportedOfficialProfile) {
+        context.addIssue({
+          code: "custom",
+          path: ["models", "layout"],
+          message: "Dieser Modus besitzt noch keinen verifizierten nativen LTX-2.5-Split-Pack-Vertrag.",
+        });
+      }
     } else {
-      requirePath(value.models.checkpointPath, ["models", "checkpointPath"], "Checkpoint");
+      if (value.models.generation !== "2.3") {
+        context.addIssue({
+          code: "custom",
+          path: ["models", "generation"],
+          message: "LTX-2.5 muss als explizites Split-Pack geladen werden.",
+        });
+      }
+      if (["distilled", "keyframes"].includes(value.mode)
+        || (value.mode === "ic-lora" && value.icLora.profile === "hdr")
+        || (value.mode === "lipdub" && value.lipDub.pipelineProfile === "native-distilled")
+        || (value.mode === "retake" && value.retake.distilled)) {
+        requirePath(
+          value.models.distilledCheckpointPath,
+          ["models", "distilledCheckpointPath"],
+          "Distilled Checkpoint",
+        );
+      } else {
+        requirePath(value.models.checkpointPath, ["models", "checkpointPath"], "Checkpoint");
+      }
     }
     if (["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(value.mode)) {
       if (value.sourceMode === "image" && value.images.length === 0) {
@@ -532,17 +672,18 @@ export const generationRequestSchema = z
         message: "Videopipelines benötigen eine MP4-Ausgabedatei.",
       });
     }
-    if (!(value.mode === "ic-lora" && value.icLora.profile === "hdr")) {
+    if (value.models.layout === "monolith" && !(value.mode === "ic-lora" && value.icLora.profile === "hdr")) {
       requirePath(value.models.gemmaRoot, ["models", "gemmaRoot"], "Gemma Root");
     }
     if (needsGemmaAbliteratedLoraForRequest(value)) {
       requirePath(value.models.gemmaLora.path, ["models", "gemmaLora", "path"], "Gemma Abliterated LoRA");
     }
-    if (definition.needsSpatialUpscaler) {
+    if (definition.needsSpatialUpscaler && !(value.mode === "distilled" && value.distilled.singleStage)) {
       requirePath(value.models.spatialUpscalerPath, ["models", "spatialUpscalerPath"], "Spatial Upscaler");
     }
     if (
       definition.needsDistilledLora
+      && value.models.layout === "monolith"
       && !(value.mode === "ic-lora" && ["hdr", "union-control"].includes(value.icLora.profile))
     ) {
       requirePath(value.models.distilledLora.path, ["models", "distilledLora", "path"], "Distilled LoRA");
@@ -901,9 +1042,17 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     longClipAcknowledged: false,
     continuity: { project: "", notes: "" },
     models: {
+      layout: "monolith",
+      generation: "2.3",
       checkpointPath: "",
       distilledCheckpointPath: "",
       gemmaRoot: "",
+      transformerPath: "",
+      textEncoderPath: "",
+      videoVaePath: "",
+      audioVaePath: "",
+      durationHeadPath: "",
+      promptEnhancerGemmaRoot: "",
       gemmaLora: { enabled: false, path: "", strength: 1 },
       spatialUpscalerPath: "",
       distilledLora: { path: "", strength: mode === "lipdub" ? 0.5 : 1 },
@@ -916,6 +1065,7 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
       ? { cfgScale: 1, stgScale: 0, rescaleScale: 0, modalityScale: 1, skipStep: 0, stgBlocks: [] }
       : { ...defaultGuidance, cfgScale: 7 },
     hq: { distilledLoraStrengthStage1: 0.25, distilledLoraStrengthStage2: 0.5 },
+    distilled: { singleStage: false },
     icLora: {
       profile: "union-control",
       controlType: "depth",
@@ -1052,6 +1202,7 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     videoGuidance: { ...defaults.videoGuidance, ...stored.videoGuidance },
     audioGuidance: { ...defaults.audioGuidance, ...stored.audioGuidance },
     hq: { ...defaults.hq, ...stored.hq },
+    distilled: { ...defaults.distilled, ...stored.distilled },
     icLora: {
       ...defaults.icLora,
       ...stored.icLora,

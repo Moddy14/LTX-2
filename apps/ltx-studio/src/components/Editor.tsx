@@ -1215,6 +1215,17 @@ export function Editor({
               lipDub: { ...request.lipDub, targetLanguage },
             })}
           />
+          {request.mode === "distilled" ? (
+            <Toggle
+              label="Single-Stage Preview"
+              hint="Offizieller schneller LTX-2.5-Previewpfad: acht Schritte direkt in Ausgabeauflösung, ohne Spatial Upscaler und ohne 3-Schritt-Refine."
+              checked={request.distilled.singleStage}
+              onChange={(singleStage) => onChange({
+                ...request,
+                distilled: { ...request.distilled, singleStage },
+              })}
+            />
+          ) : null}
           <Toggle
             label="Genau ein Sprecher bestätigt"
             hint={fieldHelp.lipDubSingleSpeaker}
@@ -1773,7 +1784,106 @@ export function Editor({
       <section className="editor-section">
         <SectionHeader title="Modelle" action={<Cpu size={18} />} />
         <div className="field-grid field-grid--2">
-          {["distilled", "keyframes"].includes(request.mode)
+          <Segmented
+            label="Modellpaket"
+            hint="Monolith erhält bestehende LTX-2.3-Projekte. Split-Pack bindet die offiziellen LTX-2.5-Komponenten einzeln und reproduzierbar."
+            value={request.models.layout}
+            options={[
+              { value: "monolith", label: "LTX-2.3 Monolith" },
+              { value: "split", label: "LTX-2.5 Split-Pack" },
+            ]}
+            onChange={(layout) => onChange({
+              ...request,
+              models: {
+                ...request.models,
+                layout,
+                generation: layout === "split" ? "2.5" : "2.3",
+                gemmaLora: layout === "split"
+                  ? { ...request.models.gemmaLora, enabled: false }
+                  : request.models.gemmaLora,
+              },
+            })}
+          />
+          {request.models.layout === "split" ? (
+            <>
+              <PathPicker
+                label="LTX-2.5 Transformer"
+                hint="Native BF16-Transformerdatei des offiziellen LTX-2.5-Split-Packs. Comfy-INT8 und NVFP4 sind erst nach einem getrennten Runtime-Nachweis zulässig."
+                value={request.models.transformerPath}
+                options={[...distilledCheckpointOptions, ...checkpointOptions]}
+                error={errors["models.transformerPath"]}
+                placeholder="/absoluter/pfad/ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+                onChange={(transformerPath) => onChange({
+                  ...request,
+                  models: { ...request.models, transformerPath },
+                })}
+              />
+              <PathPicker
+                label="LTX-2.5 Textencoder"
+                hint="Kombinierter Gemma-4-Textencoder mit LTX-2.5-Projektion als einzelne Safetensors-Datei."
+                value={request.models.textEncoderPath}
+                options={[]}
+                error={errors["models.textEncoderPath"]}
+                placeholder="/absoluter/pfad/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"
+                onChange={(textEncoderPath) => onChange({
+                  ...request,
+                  models: { ...request.models, textEncoderPath },
+                })}
+              />
+              {request.mode !== "text-to-audio" ? (
+                <PathPicker
+                  label="LTX-2.5 Video-VAE"
+                  hint="Offizielle Video-VAE. Die Diffusions-VAE ist die Qualitätsreferenz; die Conv-VAE wird separat als Geschwindigkeitsarm bewertet."
+                  value={request.models.videoVaePath}
+                  options={[]}
+                  error={errors["models.videoVaePath"]}
+                  placeholder="/absoluter/pfad/ltx-2.5-video-vae-bf16.safetensors"
+                  onChange={(videoVaePath) => onChange({
+                    ...request,
+                    models: { ...request.models, videoVaePath },
+                  })}
+                />
+              ) : null}
+              <PathPicker
+                label="LTX-2.5 Audio-VAE"
+                hint="Offizielle Audio-VAE samt Vocoder für den Split-Pack-Lauf."
+                value={request.models.audioVaePath}
+                options={[]}
+                error={errors["models.audioVaePath"]}
+                placeholder="/absoluter/pfad/ltx-2.5-audio-vae-bf16.safetensors"
+                onChange={(audioVaePath) => onChange({
+                  ...request,
+                  models: { ...request.models, audioVaePath },
+                })}
+              />
+              <PathPicker
+                label="Duration-Head (optional)"
+                hint="Optionaler offizieller Duration-Head. Ohne ihn bleibt die im Studio explizit gesetzte Framezahl maßgeblich."
+                value={request.models.durationHeadPath}
+                options={[]}
+                error={errors["models.durationHeadPath"]}
+                placeholder="/absoluter/pfad/ltx-2.5-duration-head-bf16.safetensors"
+                onChange={(durationHeadPath) => onChange({
+                  ...request,
+                  models: { ...request.models, durationHeadPath },
+                })}
+              />
+              {request.enhancePrompt ? (
+                <PathPicker
+                  label="Prompt-Enhancer Gemma Root"
+                  hint="Separater Hugging-Face-Modellordner für die optionale Promptverbesserung; er ist nicht der LTX-Textencoder."
+                  value={request.models.promptEnhancerGemmaRoot}
+                  options={gemmaOptions}
+                  error={errors["models.promptEnhancerGemmaRoot"]}
+                  placeholder="/absoluter/pfad/gemma-4-enhancer"
+                  onChange={(promptEnhancerGemmaRoot) => onChange({
+                    ...request,
+                    models: { ...request.models, promptEnhancerGemmaRoot },
+                  })}
+                />
+              ) : null}
+            </>
+          ) : ["distilled", "keyframes"].includes(request.mode)
             || (request.mode === "ic-lora" && ["hdr", "union-control"].includes(request.icLora.profile))
             || (isLipDub && !officialComfyLipDub)
             || (request.mode === "retake" && request.retake.distilled) ? (
@@ -1797,7 +1907,8 @@ export function Editor({
               onChange={(checkpointPath) => onChange({ ...request, models: { ...request.models, checkpointPath } })}
             />
           )}
-          {request.mode !== "ic-lora" || request.icLora.profile !== "hdr" ? (
+          {request.models.layout === "monolith"
+          && (request.mode !== "ic-lora" || request.icLora.profile !== "hdr") ? (
             <PathPicker
               label="Gemma Root"
               hint={fieldHelp.gemmaRoot}
@@ -1808,7 +1919,7 @@ export function Editor({
               onChange={(gemmaRoot) => onChange({ ...request, models: { ...request.models, gemmaRoot } })}
             />
           ) : null}
-          {supportsGemmaAbliteratedLoraForRequest(request) ? (
+          {request.models.layout === "monolith" && supportsGemmaAbliteratedLoraForRequest(request) ? (
             <>
               <Toggle
                 label="Optionale Gemma Abliterated LoRA"
@@ -1855,7 +1966,8 @@ export function Editor({
               ) : null}
             </>
           ) : null}
-          {definition.needsSpatialUpscaler
+          {(definition.needsSpatialUpscaler
+            && !(request.mode === "distilled" && request.distilled.singleStage))
             || (request.mode === "ic-lora" && request.icLora.profile === "hdr") ? (
             <PathPicker
               label="Spatial Upscaler"
@@ -1867,9 +1979,9 @@ export function Editor({
               onChange={(spatialUpscalerPath) => onChange({ ...request, models: { ...request.models, spatialUpscalerPath } })}
             />
           ) : null}
-          {(definition.needsDistilledLora
+          {request.models.layout === "monolith" && ((definition.needsDistilledLora
             && !(request.mode === "ic-lora" && ["hdr", "union-control"].includes(request.icLora.profile)))
-            || officialComfyLipDub ? (
+            || officialComfyLipDub) ? (
             <div className="paired-field">
               <PathPicker
                 label="Distilled LoRA"

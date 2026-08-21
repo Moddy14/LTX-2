@@ -9,12 +9,14 @@ import {
   bindRunProvenanceFile,
   captureGemmaManifest,
   captureProvenanceFile,
+  captureRunProvenance,
   normalizeRunProvenance,
   verifyProvenanceFileEvidence,
 } from "../server/runProvenance.js";
 import { createDefaultRequest } from "../shared/pipelines.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import { upstreamWorkflowContractsForRequest } from "../shared/upstreamWorkflowContracts.js";
+import { validLtx25SplitRequest } from "./fixtures.js";
 
 const roots: string[] = [];
 
@@ -48,6 +50,27 @@ describe("run provenance", () => {
 
     await writeFile(path, "changed-audio");
     expect(verifyProvenanceFileEvidence(evidence)).toContain("Dateirevision hat sich geändert");
+  });
+
+  it("rejects a split component before runtime capture when pinned size or digest differs", async () => {
+    const root = await temporaryRoot("ltx25-integrity-");
+    const path = join(root, "ltx-2.5-22b-distilled-transformer-bf16.safetensors");
+    await writeFile(path, "not-the-official-transformer");
+    const request = validLtx25SplitRequest("distilled");
+
+    await expect(captureRunProvenance(request, {
+      executable: process.execPath,
+      args: [],
+      displayCommand: process.execPath,
+      outputPath: join(root, "output.mp4"),
+      requiredPaths: [{
+        path,
+        label: "LTX-2.5 Transformer",
+        kind: "file",
+        expectedSizeBytes: 42_018_190_584,
+        expectedSha256: "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
+      }],
+    })).rejects.toThrow("weicht vom gepinnten Wert");
   });
 
   it("adds a reused LTX base as a pinned input and invalidates the prior verification", async () => {
@@ -201,6 +224,32 @@ describe("run provenance", () => {
     });
 
     expect(upstreamWorkflowContractsForRequest(createDefaultRequest("audio-to-video"))).toEqual([]);
+  });
+
+  it("pins exact LTX-2.5 workflow files only for explicit split-pack requests", () => {
+    expect(upstreamWorkflowContractsForRequest(validLtx25SplitRequest("distilled"))).toEqual([{
+      role: "official-workflow:ltx-2.5:t2v-i2v-two-stage",
+      repository: "https://github.com/Lightricks/ComfyUI-LTXVideo",
+      commit: "15d09abb5a187a8dcaea2fc31fe51ee96e6c9d0d",
+      path: "example_workflows/2.5/LTX-2.5_T2V_I2V_Two_Stage_Distilled.json",
+      sha256: "b8b8d79b5cb09519e828a3cd438348b492b448547f030ed7e1098ad86ea3010a",
+    }]);
+
+    const preview = validLtx25SplitRequest("distilled");
+    preview.distilled.singleStage = true;
+    expect(upstreamWorkflowContractsForRequest(preview)[0]).toMatchObject({
+      role: "official-workflow:ltx-2.5:t2v-i2v-single-stage",
+      path: "example_workflows/2.5/LTX-2.5_T2V_I2V_Single_Stage_Distilled.json",
+      sha256: "e264b203ec4b0ff1dfd448121c96ceb5d45dfe84b70fcac9a03e5bc700338f25",
+    });
+
+    const ingredients = validLtx25SplitRequest("ic-lora");
+    ingredients.icLora.profile = "ingredients";
+    expect(upstreamWorkflowContractsForRequest(ingredients)[0]).toMatchObject({
+      role: "official-workflow:ltx-2.5:ic-lora-ingredients",
+      path: "example_workflows/2.5/LTX-2.5_ICLoRA_Ingredients_Single_Stage_Distilled.json",
+      sha256: "afb34052b0569ffaa7930bfa2c854798b8121ce72240306eb7f49724efbe1f72",
+    });
   });
 
   it("accepts upstream contracts in new sidecars while preserving legacy v1 sidecars", () => {

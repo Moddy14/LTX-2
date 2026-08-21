@@ -273,6 +273,12 @@ export async function captureGemmaManifest(path: string, role = "model:gemma-roo
 function roleForRequirement(requirement: PathRequirement, index: number): string {
   const label = requirement.label.toLowerCase();
   if (label === "gemma root") return "model:gemma-root";
+  if (label === "prompt-enhancer gemma root") return "model:prompt-enhancer-gemma-root";
+  if (label.includes("ltx-2.5 transformer")) return "model:ltx-2.5-transformer";
+  if (label.includes("ltx-2.5 textencoder")) return "model:ltx-2.5-text-encoder";
+  if (label.includes("ltx-2.5 video-vae")) return "model:ltx-2.5-video-vae";
+  if (label.includes("ltx-2.5 audio-vae")) return "model:ltx-2.5-audio-vae";
+  if (label.includes("ltx-2.5 duration-head")) return "model:ltx-2.5-duration-head";
   if (label.includes("checkpoint")) return `model:checkpoint:${index}`;
   if (label.includes("upscaler")) return `model:spatial-upscaler:${index}`;
   if (label.includes("lora")) return `model:lora:${index}`;
@@ -302,7 +308,20 @@ async function captureRequiredFiles(requirements: readonly PathRequirement[]): P
     if (requirement.kind === "directory") {
       evidence.push(await captureGemmaManifest(requirement.path, role));
     } else {
-      evidence.push(await captureProvenanceFile(requirement.path, role));
+      const file = await captureProvenanceFile(requirement.path, role);
+      if (requirement.expectedSizeBytes !== undefined && file.sizeBytes !== requirement.expectedSizeBytes) {
+        throw new Error(
+          `${requirement.label}: Größe ${file.sizeBytes} weicht vom gepinnten Wert `
+          + `${requirement.expectedSizeBytes} ab.`,
+        );
+      }
+      if (requirement.expectedSha256 !== undefined && file.sha256 !== requirement.expectedSha256) {
+        throw new Error(
+          `${requirement.label}: SHA-256 ${file.sha256} weicht vom gepinnten Wert `
+          + `${requirement.expectedSha256} ab.`,
+        );
+      }
+      evidence.push(file);
     }
   }
   return evidence;
