@@ -91,11 +91,28 @@ const workflows = {
 const longcatRoot = process.env.LTX_STUDIO_LONGCAT_ROOT ?? "/home/moddy/projects/longcat-video-avatar-dgx";
 let longcat;
 try {
+  const sourceStatus = command("git", [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--",
+    ".",
+    ":(exclude)artifacts/**",
+  ], { cwd: longcatRoot });
+  const operationalArtifactStatus = command("git", [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=normal",
+    "--",
+    "artifacts",
+  ], { cwd: longcatRoot });
   longcat = {
     repository: "meituan-longcat/LongCat-Video",
     commit: command("git", ["rev-parse", "HEAD"], { cwd: longcatRoot }),
     tree: command("git", ["rev-parse", "HEAD^{tree}"], { cwd: longcatRoot }),
-    clean: command("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: longcatRoot }) === "",
+    clean: sourceStatus === "",
+    sourceStatusExcludes: ["artifacts/**"],
+    operationalArtifactsDirty: operationalArtifactStatus !== "",
     licenseSha256: sha256File(join(longcatRoot, "vendor", "LongCat-Video", "LICENSE")),
   };
 } catch (error) {
