@@ -141,7 +141,9 @@ export const thermalPollIntervalMs = numericSetting("LTX_STUDIO_THERMAL_POLL_INT
   maximum: 300_000,
 });
 
-export const modelRoots = (process.env.LTX_STUDIO_MODEL_ROOTS ?? "/home/moddy/LTX-2.3-max")
+export const modelRoots = (
+  process.env.LTX_STUDIO_MODEL_ROOTS ?? "/home/moddy/LTX-2.3-max:/home/moddy/LTX-2.5"
+)
   .split(delimiter)
   .map((root) => root.trim())
   .filter(Boolean)

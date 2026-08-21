@@ -28,7 +28,12 @@ describe("model discovery", () => {
 
     expect(normalizedT2a.models).toEqual(t2a.models);
     expect(normalizedT2a.quantization).toEqual({ mode: "none", amaxPath: "" });
-    expect(requiredOfficialSpeechAssetIds(normalizedT2a)).toEqual([]);
+    expect(requiredOfficialSpeechAssetIds(normalizedT2a)).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+    ]);
 
     const ingredients = validLtx25SplitRequest("ic-lora");
     ingredients.icLora.profile = "ingredients";
@@ -38,7 +43,82 @@ describe("model discovery", () => {
     expect(normalizedIngredients.icLora.lora.path).toBe(
       recommendedModelAsset("ltx23-ingredients-lora").localPath,
     );
-    expect(requiredOfficialSpeechAssetIds(normalizedIngredients)).toEqual(["ltx23-ingredients-lora"]);
+    expect(requiredOfficialSpeechAssetIds(normalizedIngredients)).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-video-vae-diffusion-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+      "ltx23-ingredients-lora",
+    ]);
+  });
+
+  it("pins and auto-selects the complete native LTX-2.5 BF16 model pack", () => {
+    const request = validLtx25SplitRequest("distilled");
+    request.models.transformerPath = "";
+    request.models.textEncoderPath = "";
+    request.models.videoVaePath = "";
+    request.models.audioVaePath = "";
+    request.models.durationHeadPath = "";
+    request.models.spatialUpscalerPath = "";
+    const inventory = {
+      roots: ["/home/moddy/LTX-2.5"],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: recommendedModelAssets.map((asset) => ({
+        ...asset,
+        present: true,
+        integrity: "verified" as const,
+        actualSha256: "expectedSha256" in asset ? asset.expectedSha256 : null,
+      })),
+    };
+
+    const resolved = withDiscoveredModelDefaults(request, inventory);
+    expect(resolved.models).toMatchObject({
+      transformerPath: recommendedModelAsset("ltx25-transformer-bf16").localPath,
+      textEncoderPath: recommendedModelAsset("ltx25-text-encoder-bf16").localPath,
+      videoVaePath: recommendedModelAsset("ltx25-video-vae-diffusion-bf16").localPath,
+      audioVaePath: recommendedModelAsset("ltx25-audio-vae-bf16").localPath,
+      durationHeadPath: recommendedModelAsset("ltx25-duration-head-bf16").localPath,
+      spatialUpscalerPath: recommendedModelAsset("ltx25-spatial-upscaler-bf16").localPath,
+    });
+    expect(recommendedModelAsset("ltx25-transformer-bf16")).toMatchObject({
+      revision: "6c7e5e573ac1667efc83407806fe9b0b93730e60",
+      sourcePath: "diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+      expectedSizeBytes: 42_018_190_584,
+      expectedSha256: "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
+    });
+  });
+
+  it("selects exactly the split-pack assets required by each official layout", () => {
+    const twoStage = validLtx25SplitRequest("distilled");
+    expect(requiredOfficialSpeechAssetIds(twoStage)).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-video-vae-diffusion-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+      "ltx25-spatial-upscaler-bf16",
+    ]);
+
+    twoStage.distilled.singleStage = true;
+    twoStage.models.videoVaePath = "/models/ltx-2.5/ltx-2.5-video-vae-conv-bf16.safetensors";
+    expect(requiredOfficialSpeechAssetIds(twoStage)).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-video-vae-conv-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+    ]);
+
+    expect(requiredOfficialSpeechAssetIds(validLtx25SplitRequest("text-to-audio"))).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+    ]);
   });
 
   it("classifies only supported LTX artifacts", () => {
@@ -47,6 +127,19 @@ describe("model discovery", () => {
     expect(classifyModelFile("/models/ltx-spatial-upscaler-x2.safetensors")).toBe("spatial-upscaler");
     expect(classifyModelFile("/models/ltx-distilled-lora.safetensors")).toBe("lora");
     expect(classifyModelFile("/models/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors")).toBe("lora");
+    expect(classifyModelFile("/models/ltx-2.5-22b-distilled-transformer-bf16.safetensors"))
+      .toBe("transformer");
+    expect(classifyModelFile("/models/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"))
+      .toBe("text-encoder");
+    expect(classifyModelFile("/models/ltx-2.5-video-vae-conv-bf16.safetensors")).toBe("video-vae");
+    expect(classifyModelFile("/models/ltx-2.5-audio-vae-bf16.safetensors")).toBe("audio-vae");
+    expect(classifyModelFile("/models/ltx-2.5-duration-head-bf16.safetensors")).toBe("duration-head");
+    expect(classifyModelFile("/models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"))
+      .toBe("spatial-upscaler");
+    expect(classifyModelFile("/models/ltx-2.5-22b-distilled-transformer-comfy-int8.safetensors"))
+      .toBeNull();
+    expect(classifyModelFile("/models/ltx-2.5-22b-distilled-transformer-nvfp4.safetensors"))
+      .toBeNull();
     expect(classifyModelFile("/models/model-00001-of-00005.safetensors")).toBeNull();
     expect(classifyModelFile("/models/ltx-temporal-upscaler.safetensors")).toBeNull();
   });

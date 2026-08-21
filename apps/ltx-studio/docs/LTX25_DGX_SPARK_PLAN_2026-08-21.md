@@ -63,6 +63,26 @@ JSON-Beispiels; beide LoRA-Arme müssen im Holdout getrennt benannt und abgenomm
 4. **NVFP4 als experimenteller Blackwell-Arm.** Freigabe erst nach Loader- und Kernel-Nachweis
    (`ltx-kernels`/GB10), deterministischem Smoke-Test und Qualitäts-Nichtunterlegenheitsprüfung.
 
+## Gepinnter BF16-Downloadplan
+
+Zielwurzel: `/home/moddy/LTX-2.5/Lightricks__LTX-2.5`. Das Studio scannt diese Wurzel
+zusätzlich zum bestehenden 2.3-Verzeichnis, klassifiziert jede Komponente getrennt und übernimmt
+nur vorhandene Dateien. Vor einem Lauf werden Größe und SHA-256 geprüft. Alle Links binden Revision
+`6c7e5e573ac1667efc83407806fe9b0b93730e60`:
+
+- [Transformer BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors)
+- [Gemma-4 Textencoder BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors)
+- [Diffusion Video-VAE BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/vae/ltx-2.5-video-vae-bf16.safetensors)
+- [Conv Video-VAE BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/vae/ltx-2.5-video-vae-conv-bf16.safetensors)
+- [Audio-VAE BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/vae/ltx-2.5-audio-vae-bf16.safetensors)
+- [Spatial Upscaler x2 BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors)
+- [Duration-Head BF16](https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/model_patches/ltx-2.5-duration-head-bf16.safetensors)
+
+Transformer, Textencoder, Diffusion-VAE, Audio-VAE, Upscaler und Duration-Head belegen zusammen
+etwa 71,1 GB. Mit zusätzlicher Conv-VAE sind es etwa 72,6 GB. Download und Lizenzannahme sind
+bewusste Betriebsaktionen und dürfen bei kritischer DGX-Thermik oder ohne Hugging-Face-Freigabe
+nicht automatisch erfolgen.
+
 ## Ausführungsplan bis zur belastbaren 10/10-Abnahme
 
 ### M0 — Integrität und Reproduzierbarkeit

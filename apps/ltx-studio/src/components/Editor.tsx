@@ -29,6 +29,7 @@ import {
 } from "../../shared/pipelines";
 import {
   documentedLtx23DistilledLoraAssetId,
+  requiredOfficialSpeechAssetIds,
   withOfficialSpeechModelPaths,
 } from "../../shared/models";
 import type { LipDubReferenceDiagnostics, PreparedLipDubReference } from "../../shared/plan";
@@ -394,6 +395,13 @@ export function Editor({
   const distilledCheckpointOptions = modelOptions(discoveredModels, "distilled-checkpoint");
   const gemmaOptions = modelOptions(discoveredModels, "gemma");
   const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
+  const transformerOptions = modelOptions(discoveredModels, "transformer");
+  const textEncoderOptions = modelOptions(discoveredModels, "text-encoder");
+  const videoVaeOptions = modelOptions(discoveredModels, "video-vae");
+  const audioVaeOptions = modelOptions(discoveredModels, "audio-vae");
+  const durationHeadOptions = modelOptions(discoveredModels, "duration-head");
+  const ltx25UpscalerOptions = upscalerOptions.filter((option) =>
+    option.path.endsWith("ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"));
   const loraOptions = modelOptions(discoveredModels, "lora");
   const geometryOptions = modelOptions(discoveredModels, "geometry");
   const lipDubRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-lora");
@@ -496,6 +504,15 @@ export function Editor({
     (item) => item.id === "ltx23-id-lora-talkvid",
   );
   const mogeRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-moge");
+  const requiredLtx25Assets = request.models.layout === "split" && modelInventory
+    ? requiredOfficialSpeechAssetIds(request)
+        .filter((id) => id.startsWith("ltx25-"))
+        .flatMap((id) => {
+          const asset = modelInventory.recommendations.find((item) => item.id === id);
+          return asset ? [asset] : [];
+        })
+    : [];
+  const missingLtx25Assets = requiredLtx25Assets.filter((asset) => !asset.present);
   const a2vRecommendations = [
     ltx23DevRecommendation,
     ltx23GemmaRecommendation,
@@ -1810,7 +1827,7 @@ export function Editor({
                 label="LTX-2.5 Transformer"
                 hint="Native BF16-Transformerdatei des offiziellen LTX-2.5-Split-Packs. Comfy-INT8 und NVFP4 sind erst nach einem getrennten Runtime-Nachweis zulässig."
                 value={request.models.transformerPath}
-                options={[...distilledCheckpointOptions, ...checkpointOptions]}
+                options={transformerOptions}
                 error={errors["models.transformerPath"]}
                 placeholder="/absoluter/pfad/ltx-2.5-22b-distilled-transformer-bf16.safetensors"
                 onChange={(transformerPath) => onChange({
@@ -1822,7 +1839,7 @@ export function Editor({
                 label="LTX-2.5 Textencoder"
                 hint="Kombinierter Gemma-4-Textencoder mit LTX-2.5-Projektion als einzelne Safetensors-Datei."
                 value={request.models.textEncoderPath}
-                options={[]}
+                options={textEncoderOptions}
                 error={errors["models.textEncoderPath"]}
                 placeholder="/absoluter/pfad/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"
                 onChange={(textEncoderPath) => onChange({
@@ -1835,7 +1852,7 @@ export function Editor({
                   label="LTX-2.5 Video-VAE"
                   hint="Offizielle Video-VAE. Die Diffusions-VAE ist die Qualitätsreferenz; die Conv-VAE wird separat als Geschwindigkeitsarm bewertet."
                   value={request.models.videoVaePath}
-                  options={[]}
+                  options={videoVaeOptions}
                   error={errors["models.videoVaePath"]}
                   placeholder="/absoluter/pfad/ltx-2.5-video-vae-bf16.safetensors"
                   onChange={(videoVaePath) => onChange({
@@ -1848,7 +1865,7 @@ export function Editor({
                 label="LTX-2.5 Audio-VAE"
                 hint="Offizielle Audio-VAE samt Vocoder für den Split-Pack-Lauf."
                 value={request.models.audioVaePath}
-                options={[]}
+                options={audioVaeOptions}
                 error={errors["models.audioVaePath"]}
                 placeholder="/absoluter/pfad/ltx-2.5-audio-vae-bf16.safetensors"
                 onChange={(audioVaePath) => onChange({
@@ -1860,7 +1877,7 @@ export function Editor({
                 label="Duration-Head (optional)"
                 hint="Optionaler offizieller Duration-Head. Ohne ihn bleibt die im Studio explizit gesetzte Framezahl maßgeblich."
                 value={request.models.durationHeadPath}
-                options={[]}
+                options={durationHeadOptions}
                 error={errors["models.durationHeadPath"]}
                 placeholder="/absoluter/pfad/ltx-2.5-duration-head-bf16.safetensors"
                 onChange={(durationHeadPath) => onChange({
@@ -1973,7 +1990,7 @@ export function Editor({
               label="Spatial Upscaler"
               hint={fieldHelp.spatialUpscaler}
               value={request.models.spatialUpscalerPath}
-              options={upscalerOptions}
+              options={request.models.layout === "split" ? ltx25UpscalerOptions : upscalerOptions}
               error={errors["models.spatialUpscalerPath"]}
               placeholder="/absoluter/pfad/upscaler.safetensors"
               onChange={(spatialUpscalerPath) => onChange({ ...request, models: { ...request.models, spatialUpscalerPath } })}
@@ -2081,6 +2098,25 @@ export function Editor({
           <p className="advisory advisory--warning">
             Der offizielle LTX-2.3-A2V-Referenzstack ist lokal unvollständig: {a2vMissingAssets.join(", ")}.
             Ein automatisch gewähltes Ersatzmodell ist kein offizieller Referenzlauf.
+          </p>
+        ) : null}
+        {missingLtx25Assets.length > 0 ? (
+          <p className="advisory advisory--warning">
+            Der gepinnte LTX-2.5-BF16-Stack ist lokal unvollständig: {missingLtx25Assets.map((asset, index) => (
+              <span key={asset.id}>
+                {index > 0 ? ", " : ""}
+                {asset.revision && asset.sourcePath ? (
+                  <a
+                    href={`https://huggingface.co/${asset.repoId}/resolve/${asset.revision}/${asset.sourcePath}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {asset.label}
+                  </a>
+                ) : asset.label}
+              </span>
+            ))}. Quelle: Lightricks/LTX-2.5@{missingLtx25Assets[0]?.revision};
+            Zugriff und Lizenz müssen vor dem Download im Hugging-Face-Account bestätigt sein.
           </p>
         ) : null}
         {modelInventory?.truncated ? (

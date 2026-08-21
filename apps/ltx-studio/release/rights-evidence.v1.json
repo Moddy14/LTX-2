@@ -407,6 +407,38 @@
     },
     {
       "componentIds": [
+        "model.ltx25-audio-vae-bf16",
+        "model.ltx25-duration-head-bf16",
+        "model.ltx25-spatial-upscaler-bf16",
+        "model.ltx25-text-encoder-bf16",
+        "model.ltx25-transformer-bf16",
+        "model.ltx25-video-vae-conv-bf16",
+        "model.ltx25-video-vae-diffusion-bf16"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "not-applicable",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "conditional"
+      },
+      "evidenceId": "ltx25-community-license-model-card-2026-08-21",
+      "reason": "The pinned gated LTX-2.5 model card declares the LTX-2 Community License Agreement; production use requires a current signed rights attest covering license, acceptable-use, consent, and commercial conditions.",
+      "sources": [
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "Lightricks/LTX-2.5",
+          "revision": "6c7e5e573ac1667efc83407806fe9b0b93730e60",
+          "sha256": "048eb99db3a4d1b76905778a9ef0b9ff3b35a763f293b8b62a50c46a56de4af8",
+          "sizeBytes": 27065,
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
         "model.ltx23-moge"
       ],
       "decision": "permitted",

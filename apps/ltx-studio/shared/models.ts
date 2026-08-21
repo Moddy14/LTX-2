@@ -7,6 +7,7 @@ import {
   usesOfficialComfyLipDub,
   type GenerationRequest,
 } from "./pipelines.js";
+import { LTX25_MODEL_COMPONENTS, LTX25_MODEL_REVISION } from "./ltx25Catalog.js";
 
 export type ModelKind =
   | "checkpoint"
@@ -15,7 +16,12 @@ export type ModelKind =
   | "lora"
   | "amax"
   | "gemma"
-  | "geometry";
+  | "geometry"
+  | "transformer"
+  | "text-encoder"
+  | "video-vae"
+  | "audio-vae"
+  | "duration-head";
 
 export type RecommendedModelAsset = {
   id:
@@ -39,10 +45,19 @@ export type RecommendedModelAsset = {
     | "ltx23-id-lora-talkvid"
     | "lipdub-lora"
     | "lipdub-distilled-checkpoint"
-    | "lipdub-spatial-upscaler";
+    | "lipdub-spatial-upscaler"
+    | "ltx25-transformer-bf16"
+    | "ltx25-text-encoder-bf16"
+    | "ltx25-video-vae-diffusion-bf16"
+    | "ltx25-video-vae-conv-bf16"
+    | "ltx25-audio-vae-bf16"
+    | "ltx25-spatial-upscaler-bf16"
+    | "ltx25-duration-head-bf16";
   kind: ModelKind;
   label: string;
   repoId: string;
+  revision?: string;
+  sourcePath?: string;
   filename: string;
   localPath: string;
   present: boolean;
@@ -57,6 +72,8 @@ export type RecommendedModelAsset = {
   actualSha256?: string | null;
   integrity: "verified" | "missing" | "unverified" | "size-mismatch" | "sha256-mismatch";
 };
+
+const LTX25_LOCAL_ROOT = "/home/moddy/LTX-2.5/Lightricks__LTX-2.5";
 
 export type ModelInventoryItem = {
   kind: ModelKind;
@@ -77,6 +94,111 @@ export type ModelInventory = {
 };
 
 export const recommendedModelAssets = [
+  {
+    id: "ltx25-transformer-bf16",
+    kind: "transformer",
+    label: "LTX-2.5 Distilled Transformer BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.transformer.path,
+    filename: LTX25_MODEL_COMPONENTS.transformer.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.transformer.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.transformer.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.transformer.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-text-encoder-bf16",
+    kind: "text-encoder",
+    label: "LTX-2.5 Gemma-4 Textencoder BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.textEncoder.path,
+    filename: LTX25_MODEL_COMPONENTS.textEncoder.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.textEncoder.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.textEncoder.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.textEncoder.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-video-vae-diffusion-bf16",
+    kind: "video-vae",
+    label: "LTX-2.5 Diffusion Video-VAE BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.videoVaeDiffusion.path,
+    filename: LTX25_MODEL_COMPONENTS.videoVaeDiffusion.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.videoVaeDiffusion.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.videoVaeDiffusion.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.videoVaeDiffusion.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-video-vae-conv-bf16",
+    kind: "video-vae",
+    label: "LTX-2.5 Conv Video-VAE BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.videoVaeConv.path,
+    filename: LTX25_MODEL_COMPONENTS.videoVaeConv.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.videoVaeConv.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.videoVaeConv.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.videoVaeConv.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-audio-vae-bf16",
+    kind: "audio-vae",
+    label: "LTX-2.5 Audio-VAE BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.audioVae.path,
+    filename: LTX25_MODEL_COMPONENTS.audioVae.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.audioVae.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.audioVae.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.audioVae.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-spatial-upscaler-bf16",
+    kind: "spatial-upscaler",
+    label: "LTX-2.5 Spatial Upscaler x2 BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.spatialUpscaler.path,
+    filename: LTX25_MODEL_COMPONENTS.spatialUpscaler.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.spatialUpscaler.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.spatialUpscaler.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.spatialUpscaler.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-duration-head-bf16",
+    kind: "duration-head",
+    label: "LTX-2.5 Duration-Head BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.durationHead.path,
+    filename: LTX25_MODEL_COMPONENTS.durationHead.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.durationHead.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.durationHead.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.durationHead.sha256,
+    integrity: "missing",
+  },
   {
     id: "ltx23-dev-checkpoint",
     kind: "checkpoint",
@@ -531,14 +653,29 @@ export function requiredOfficialSpeechAssetIds(
   request: GenerationRequest,
 ): RecommendedModelAsset["id"][] {
   if (usesSplitModelPack(request)) {
-    return request.mode === "ic-lora"
-      ? [
-          icLoraModelAssetId(request),
-          ...(request.icLora.profile === "union-control" && request.icLora.controlType === "depth"
-            ? ["ltx23-moge" as const]
-            : []),
-        ]
-      : [];
+    const selectedVideoVae = request.models.videoVaePath.endsWith(
+      LTX25_MODEL_COMPONENTS.videoVaeConv.path.split("/").at(-1)!,
+    )
+      ? "ltx25-video-vae-conv-bf16" as const
+      : "ltx25-video-vae-diffusion-bf16" as const;
+    return [
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      ...(request.mode === "text-to-audio" ? [] : [selectedVideoVae]),
+      "ltx25-audio-vae-bf16",
+      ...(request.models.durationHeadPath ? ["ltx25-duration-head-bf16" as const] : []),
+      ...(request.mode === "distilled" && !request.distilled.singleStage
+        ? ["ltx25-spatial-upscaler-bf16" as const]
+        : []),
+      ...(request.mode === "ic-lora"
+        ? [
+            icLoraModelAssetId(request),
+            ...(request.icLora.profile === "union-control" && request.icLora.controlType === "depth"
+              ? ["ltx23-moge" as const]
+              : []),
+          ]
+        : []),
+    ];
   }
   if (request.mode === "ic-lora" && request.icLora.profile === "hdr") {
     return [
@@ -716,6 +853,28 @@ export function withDiscoveredModelDefaults(
   request: GenerationRequest,
   inventory: ModelInventory,
 ): GenerationRequest {
+  const recommended = (id: RecommendedModelAsset["id"]) => {
+    const asset = inventory.recommendations.find((item) => item.id === id && item.present);
+    return asset?.localPath ?? "";
+  };
+  if (usesSplitModelPack(request)) {
+    const official = withOfficialSpeechModelPaths(request);
+    return {
+      ...official,
+      models: {
+        ...official.models,
+        transformerPath: request.models.transformerPath || recommended("ltx25-transformer-bf16"),
+        textEncoderPath: request.models.textEncoderPath || recommended("ltx25-text-encoder-bf16"),
+        videoVaePath: request.models.videoVaePath || recommended("ltx25-video-vae-diffusion-bf16"),
+        audioVaePath: request.models.audioVaePath || recommended("ltx25-audio-vae-bf16"),
+        durationHeadPath: request.models.durationHeadPath || recommended("ltx25-duration-head-bf16"),
+        spatialUpscalerPath: request.models.spatialUpscalerPath
+          || (request.mode === "distilled" && !request.distilled.singleStage
+            ? recommended("ltx25-spatial-upscaler-bf16")
+            : ""),
+      },
+    };
+  }
   if (usesOfficialSpeechStack(request)) {
     return withOfficialSpeechModelPaths(request);
   }
@@ -747,10 +906,6 @@ export function withDiscoveredModelDefaults(
   }
   const find = (kind: ModelKind, predicate: (name: string) => boolean = () => true) =>
     inventory.items.find((item) => item.kind === kind && predicate(item.name.toLowerCase()))?.path ?? "";
-  const recommended = (id: RecommendedModelAsset["id"]) => {
-    const asset = inventory.recommendations.find((item) => item.id === id && item.present);
-    return asset?.localPath ?? "";
-  };
   const officialUpscaler = request.mode === "lipdub"
     ? recommended("lipdub-spatial-upscaler")
     : recommended("ltx23-spatial-upscaler");
