@@ -414,17 +414,7 @@ export function validateOfficialSpeechInventory(
   request: GenerationRequest,
   inventory: ModelInventory,
 ): string[] {
-  const requiredAssetIds = usesSplitModelPack(request)
-    ? request.mode === "ic-lora"
-      ? [
-          icLoraModelAssetId(request),
-          ...(request.icLora.profile === "union-control" && request.icLora.controlType === "depth"
-            ? ["ltx23-moge" as const]
-            : []),
-        ]
-      : []
-    : requiredOfficialSpeechAssetIds(request);
-  return requiredAssetIds.flatMap((id) => {
+  return requiredOfficialSpeechAssetIds(request).flatMap((id) => {
     const expected = recommendedModelAsset(id);
     const actual = inventory.recommendations.find((asset) => asset.id === id);
     if (actual?.present && actual.integrity === "verified") return [];

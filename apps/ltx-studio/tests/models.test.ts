@@ -4,9 +4,16 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { recommendedModelAssets, withDiscoveredModelDefaults } from "../shared/models.js";
+import {
+  recommendedModelAsset,
+  recommendedModelAssets,
+  requiredOfficialSpeechAssetIds,
+  withDiscoveredModelDefaults,
+  withOfficialSpeechModelPaths,
+} from "../shared/models.js";
 import { createDefaultRequest } from "../shared/pipelines.js";
 import { classifyModelFile, discoverModels } from "../server/models.js";
+import { validLtx25SplitRequest } from "./fixtures.js";
 
 const temporaryRoots: string[] = [];
 
@@ -15,6 +22,25 @@ afterEach(async () => {
 });
 
 describe("model discovery", () => {
+  it("does not leak LTX-2.3 checkpoint or quantization defaults into split packs", () => {
+    const t2a = validLtx25SplitRequest("text-to-audio");
+    const normalizedT2a = withOfficialSpeechModelPaths(t2a);
+
+    expect(normalizedT2a.models).toEqual(t2a.models);
+    expect(normalizedT2a.quantization).toEqual({ mode: "none", amaxPath: "" });
+    expect(requiredOfficialSpeechAssetIds(normalizedT2a)).toEqual([]);
+
+    const ingredients = validLtx25SplitRequest("ic-lora");
+    ingredients.icLora.profile = "ingredients";
+    const normalizedIngredients = withOfficialSpeechModelPaths(ingredients);
+    expect(normalizedIngredients.models).toEqual(ingredients.models);
+    expect(normalizedIngredients.quantization).toEqual({ mode: "none", amaxPath: "" });
+    expect(normalizedIngredients.icLora.lora.path).toBe(
+      recommendedModelAsset("ltx23-ingredients-lora").localPath,
+    );
+    expect(requiredOfficialSpeechAssetIds(normalizedIngredients)).toEqual(["ltx23-ingredients-lora"]);
+  });
+
   it("classifies only supported LTX artifacts", () => {
     expect(classifyModelFile("/models/ltx-2.3-22b-dev.safetensors")).toBe("checkpoint");
     expect(classifyModelFile("/models/ltx-2.3-22b-distilled.safetensors")).toBe("distilled-checkpoint");

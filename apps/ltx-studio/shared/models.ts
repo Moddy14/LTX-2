@@ -3,6 +3,7 @@ import {
   isAudioConditionedMode,
   needsGemmaAbliteratedLoraForRequest,
   supportsGemmaAbliteratedLoraForRequest,
+  usesSplitModelPack,
   usesOfficialComfyLipDub,
   type GenerationRequest,
 } from "./pipelines.js";
@@ -529,6 +530,16 @@ export function icLoraModelAssetId(
 export function requiredOfficialSpeechAssetIds(
   request: GenerationRequest,
 ): RecommendedModelAsset["id"][] {
+  if (usesSplitModelPack(request)) {
+    return request.mode === "ic-lora"
+      ? [
+          icLoraModelAssetId(request),
+          ...(request.icLora.profile === "union-control" && request.icLora.controlType === "depth"
+            ? ["ltx23-moge" as const]
+            : []),
+        ]
+      : [];
+  }
   if (request.mode === "ic-lora" && request.icLora.profile === "hdr") {
     return [
       "lipdub-distilled-checkpoint",
@@ -579,6 +590,27 @@ export function requiredOfficialSpeechAssetIds(
 }
 
 export function withOfficialSpeechModelPaths(request: GenerationRequest): GenerationRequest {
+  if (usesSplitModelPack(request)) {
+    const icLora = request.mode === "ic-lora";
+    return {
+      ...request,
+      enhancePrompt: icLora || hasDialogueIntent(request) ? false : request.enhancePrompt,
+      icLora: {
+        ...request.icLora,
+        mogeModelPath: icLora
+          && request.icLora.profile === "union-control"
+          && request.icLora.controlType === "depth"
+          ? recommendedModelAsset("ltx23-moge").localPath
+          : request.icLora.mogeModelPath,
+        lora: {
+          ...request.icLora.lora,
+          path: icLora
+            ? recommendedModelAsset(icLoraModelAssetId(request)).localPath
+            : request.icLora.lora.path,
+        },
+      },
+    };
+  }
   if (!usesOfficialSpeechStack(request) && !usesDocumentedLtx23Workflow(request)) return request;
   const officialComfyLipDub = usesOfficialComfyLipDub(request);
   const hdrICLora = request.mode === "ic-lora" && request.icLora.profile === "hdr";
