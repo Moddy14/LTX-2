@@ -14,6 +14,7 @@ EXPECTED_DISTRIBUTIONS = (
     "kornia",
     "ltx-core",
     "ltx-pipelines",
+    "nvidia-cudnn-cu13",
     "openai-whisper",
     "requests",
     "setuptools",
@@ -25,6 +26,7 @@ EXPECTED_VERSIONS = {
     "kornia": "0.8.2",
     "ltx-core": "1.2.0",
     "ltx-pipelines": "1.2.0",
+    "nvidia-cudnn-cu13": "9.21.1.3",
     "openai-whisper": "20250625",
     "requests": "2.34.2",
     "setuptools": "84.0.0",
@@ -34,6 +36,9 @@ EXPECTED_VERSIONS = {
 }
 EXPECTED_CUSPARSELT_VERSION = "0.8.1"
 EXPECTED_CUSPARSELT_TAG = "Tag: py3-none-manylinux2014_aarch64\n"
+EXPECTED_TORCH_CUDNN_REQUIREMENT = (
+    'Requires-Dist: nvidia-cudnn-cu13==9.21.1.3; platform_system == "Linux"\n'
+)
 
 
 def verify_cusparselt_metadata() -> None:
@@ -56,8 +61,27 @@ def verify_cusparselt_metadata() -> None:
         raise SystemExit("cuSPARSELt normalized WHEEL hash is not bound in RECORD")
 
 
+def verify_torch_cudnn_metadata() -> None:
+    distribution = importlib.metadata.distribution("torch")
+    files = distribution.files or ()
+    metadata_relative = next((entry for entry in files if str(entry).endswith(".dist-info/METADATA")), None)
+    record_relative = next((entry for entry in files if str(entry).endswith(".dist-info/RECORD")), None)
+    if metadata_relative is None or record_relative is None:
+        raise SystemExit("Torch wheel metadata is incomplete")
+    metadata_content = Path(distribution.locate_file(metadata_relative)).read_bytes()
+    if metadata_content.decode().count(EXPECTED_TORCH_CUDNN_REQUIREMENT) != 1:
+        raise SystemExit("Torch does not carry the normalized cuDNN requirement")
+    digest = base64.urlsafe_b64encode(hashlib.sha256(metadata_content).digest()).rstrip(b"=").decode()
+    expected_record = (f"sha256={digest}", str(len(metadata_content)))
+    with Path(distribution.locate_file(record_relative)).open(newline="") as handle:
+        rows = [row for row in csv.reader(handle) if row and row[0] == str(metadata_relative)]
+    if len(rows) != 1 or tuple(rows[0][1:]) != expected_record:
+        raise SystemExit("Torch normalized METADATA hash is not bound in RECORD")
+
+
 def main() -> None:
     verify_cusparselt_metadata()
+    verify_torch_cudnn_metadata()
     for variable in ("HF_HUB_OFFLINE", "PYTHONNOUSERSITE", "TRANSFORMERS_OFFLINE"):
         if os.environ.get(variable) != "1":
             raise SystemExit(f"{variable}=1 is required in the native release runtime")

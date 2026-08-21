@@ -60,6 +60,9 @@ execFileSync("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no
 const runtimeRoot = join(releaseAppRoot, "runtime");
 const releaseEnvironment = { ...process.env };
 delete releaseEnvironment.VIRTUAL_ENV;
+releaseEnvironment.HF_HUB_OFFLINE = "1";
+releaseEnvironment.PYTHONNOUSERSITE = "1";
+releaseEnvironment.TRANSFORMERS_OFFLINE = "1";
 execFileSync("uv", [
   "sync",
   "--project", runtimeRoot,
@@ -70,8 +73,14 @@ execFileSync("uv", [
   "--no-config",
 ], { cwd: releaseRoot, env: releaseEnvironment, stdio: "inherit" });
 const releasePython = join(runtimeRoot, ".venv", "bin", "python");
-execFileSync(releasePython, [join(runtimeRoot, "normalize_cusparselt_wheel.py")], {
+execFileSync(releasePython, ["-I", join(runtimeRoot, "normalize_cusparselt_wheel.py")], {
   cwd: releaseRoot,
+  env: releaseEnvironment,
+  stdio: "inherit",
+});
+execFileSync(releasePython, ["-I", join(runtimeRoot, "normalize_torch_cudnn_requirement.py")], {
+  cwd: releaseRoot,
+  env: releaseEnvironment,
   stdio: "inherit",
 });
 execFileSync("uv", ["pip", "check", "--python", releasePython], {
@@ -81,6 +90,7 @@ execFileSync("uv", ["pip", "check", "--python", releasePython], {
 });
 execFileSync(releasePython, ["-I", join(runtimeRoot, "verify_runtime.py")], {
   cwd: releaseRoot,
+  env: releaseEnvironment,
   stdio: "inherit",
 });
 const packagePath = join(releaseAppRoot, "package.json");

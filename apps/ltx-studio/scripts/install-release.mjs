@@ -33,9 +33,16 @@ if (basename(destination) !== digest || destination === "/" || destination === r
 if (existsSync(destination)) throw new Error(`Release destination already exists: ${destination}`);
 const parent = dirname(destination);
 if (!existsSync(parent)) throw new Error(`Release parent does not exist: ${parent}`);
+const releaseEnvironment = {
+  ...process.env,
+  HF_HUB_OFFLINE: "1",
+  PYTHONNOUSERSITE: "1",
+  TRANSFORMERS_OFFLINE: "1",
+};
+delete releaseEnvironment.VIRTUAL_ENV;
 
 function run(executable, args, cwd = destination) {
-  execFileSync(executable, args, { cwd, env: process.env, stdio: "inherit" });
+  execFileSync(executable, args, { cwd, env: releaseEnvironment, stdio: "inherit" });
 }
 
 function makeReadOnly(path) {
@@ -96,9 +103,11 @@ try {
   const runtimeRoot = join(destination, "apps", "ltx-studio", "runtime");
   run("uv", [
     "sync", "--project", runtimeRoot, "--locked", "--no-dev", "--no-editable", "--compile-bytecode",
+    "--no-config",
   ]);
   const python = join(runtimeRoot, ".venv", "bin", "python");
-  run(python, [join(runtimeRoot, "normalize_cusparselt_wheel.py")]);
+  run(python, ["-I", join(runtimeRoot, "normalize_cusparselt_wheel.py")]);
+  run(python, ["-I", join(runtimeRoot, "normalize_torch_cudnn_requirement.py")]);
   run("uv", ["pip", "check", "--python", python]);
   run(python, ["-I", join(runtimeRoot, "verify_runtime.py")]);
   run(process.execPath, [

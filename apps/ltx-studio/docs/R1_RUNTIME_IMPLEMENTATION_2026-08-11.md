@@ -2,6 +2,14 @@
 
 ## Urteil
 
+Aktualisierung 21.08.2026: Der aktuelle Releasevertrag verwendet
+`torch==2.13.0+cu132`, `torchaudio==2.11.0+cu132`, `requests==2.34.2`,
+`nvidia-cusparselt-cu13==0.8.1` und `nvidia-cudnn-cu13==9.21.1.3`. Der
+Runtime-Lock ist mit `--no-config` vom Entwicklungs-Workspace isoliert. Die
+exakte Torch-cuDNN-Metadatenabweichung wird wie der cuSPARSELt-Tag fail-closed
+normalisiert und im Wheel-`RECORD` neu gebunden. Die ursprünglichen Messwerte
+dieses historischen Berichts bleiben unten als Stand vom 11.08.2026 erhalten.
+
 Der isolierte native Python-Stack aus R1 ist als reproduzierbarer
 Engineering-Baustein **bestanden**. R1 insgesamt bleibt **hold**, weil
 ein aktuelles signiertes Rights-Attest, der Digest-gebundene GPU-Cold-Canary
