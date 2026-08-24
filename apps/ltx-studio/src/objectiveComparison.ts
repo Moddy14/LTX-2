@@ -80,6 +80,8 @@ const settingLabels: Record<string, string> = {
   "postprocess.latentSync.guidance": "LatentSync-Audioführung",
   "postprocess.lipForcing.enabled": "LipForcing-14B-Nachbearbeitung",
   "postprocess.lipForcing.decoder": "LipForcing-Decoder",
+  "postprocess.lipForcing.mouthDelayMs": "LipForcing-Modellsteuerung",
+  "postprocess.lipForcing.programAudioDelayMs": "LipForcing-Tonversatz",
 };
 
 type FlatSetting = {

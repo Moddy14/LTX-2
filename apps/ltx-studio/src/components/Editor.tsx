@@ -281,7 +281,8 @@ function MuseTalkControls({
 function LipForcingControls({
   request,
   onChange,
-}: Pick<EditorProps, "request" | "onChange">) {
+  errors,
+}: Pick<EditorProps, "request" | "onChange" | "errors">) {
   return (
     <>
       <Toggle
@@ -309,22 +310,59 @@ function LipForcingControls({
         })}
       />
       {request.postprocess.lipForcing.enabled ? (
-        <Segmented
-          label="LipForcing-Decoder"
-          hint={fieldHelp.lipForcingDecoder}
-          value={request.postprocess.lipForcing.decoder}
-          options={[
-            { value: "wan-vae", label: "Maximale Qualität" },
-            { value: "streaming-taehv", label: "Schneller Test" },
-          ]}
-          onChange={(decoder) => onChange({
-            ...request,
-            postprocess: {
-              ...request.postprocess,
-              lipForcing: { ...request.postprocess.lipForcing, decoder },
-            },
-          })}
-        />
+        <div className="field-grid field-grid--2">
+          <Segmented
+            label="LipForcing-Decoder"
+            hint={fieldHelp.lipForcingDecoder}
+            value={request.postprocess.lipForcing.decoder}
+            options={[
+              { value: "wan-vae", label: "Maximale Qualität" },
+              { value: "streaming-taehv", label: "Schneller Test" },
+            ]}
+            onChange={(decoder) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                lipForcing: { ...request.postprocess.lipForcing, decoder },
+              },
+            })}
+          />
+          <NumberField
+            label="Modell-Steuerung (ms)"
+            hint={fieldHelp.lipForcingMouthDelay}
+            min={-500}
+            max={500}
+            step={1}
+            value={request.postprocess.lipForcing.mouthDelayMs}
+            error={errors["postprocess.lipForcing.mouthDelayMs"]}
+            onChange={(mouthDelayMs) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                lipForcing: { ...request.postprocess.lipForcing, mouthDelayMs: mouthDelayMs ?? 0 },
+              },
+            })}
+          />
+          <NumberField
+            label="Hörbarer Tonversatz (ms)"
+            hint={fieldHelp.lipForcingProgramAudioDelay}
+            min={-500}
+            max={500}
+            step={1}
+            value={request.postprocess.lipForcing.programAudioDelayMs}
+            error={errors["postprocess.lipForcing.programAudioDelayMs"]}
+            onChange={(programAudioDelayMs) => onChange({
+              ...request,
+              postprocess: {
+                ...request.postprocess,
+                lipForcing: {
+                  ...request.postprocess.lipForcing,
+                  programAudioDelayMs: programAudioDelayMs ?? 0,
+                },
+              },
+            })}
+          />
+        </div>
       ) : null}
     </>
   );
@@ -1043,7 +1081,7 @@ export function Editor({
           ) : null}
           <LatentSyncControls request={request} onChange={onChange} errors={errors} />
           <MuseTalkControls request={request} onChange={onChange} errors={errors} />
-          <LipForcingControls request={request} onChange={onChange} />
+          <LipForcingControls request={request} onChange={onChange} errors={errors} />
         </section>
       ) : null}
 
@@ -1052,7 +1090,7 @@ export function Editor({
           <SectionHeader title="Lippen-Synchronität" />
           <LatentSyncControls request={request} onChange={onChange} errors={errors} />
           <MuseTalkControls request={request} onChange={onChange} errors={errors} />
-          <LipForcingControls request={request} onChange={onChange} />
+          <LipForcingControls request={request} onChange={onChange} errors={errors} />
         </section>
       ) : null}
 

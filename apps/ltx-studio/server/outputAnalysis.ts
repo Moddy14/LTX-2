@@ -67,7 +67,11 @@ import { verifyProvenanceFileEvidence } from "./runProvenance.js";
 
 const MAX_STDOUT_BYTES = 256 * 1024;
 const MAX_STDERR_BYTES = 32 * 1024;
-const ANALYSIS_TIMEOUT_MS = 120_000;
+// Full 1024x1024, 10-second outputs can exceed two minutes on the CPU-only
+// face/identity/Whisper path before the separately sandboxed viseme evaluator
+// even starts. Keep the analysis bounded, but leave enough headroom for the
+// production resolution that Studio exposes.
+const ANALYSIS_TIMEOUT_MS = 300_000;
 const PHONEME_VISEME_TIMEOUT_MS = 180_000;
 const TERMINATION_GRACE_MS = 2_000;
 const SYSTEMD_STOP_DEADLINE_MS = 10_000;

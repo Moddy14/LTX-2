@@ -1,6 +1,8 @@
 import { Activity, Cpu, FolderClock, MemoryStick, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import packageJson from "../package.json";
+
 import {
   createDefaultRequest,
   generationRequestSchema,
@@ -789,7 +791,7 @@ export function App() {
         <div className="brand-lockup">
           <span className="brand-mark"><Sparkles size={19} /></span>
           <strong>LTX Studio</strong>
-          <span className="version-mark">2.3</span>
+          <span className="version-mark">{packageJson.version}</span>
         </div>
         <div className="topbar__context">
           <span>{activePipeline.shortLabel}</span>

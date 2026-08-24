@@ -75,7 +75,12 @@ def restore_timeline(
     source: Path,
     output: Path,
     driving_audio: Path | None = None,
+    program_audio_delay_ms: int = 0,
 ) -> VideoTimeline:
+    if not isinstance(program_audio_delay_ms, int) or isinstance(program_audio_delay_ms, bool):
+        raise RuntimeError("LipForcing program audio delay must be an integer number of milliseconds.")
+    if program_audio_delay_ms < -500 or program_audio_delay_ms > 500:
+        raise RuntimeError("LipForcing program audio delay must be between -500 and 500 ms.")
     source_timeline = probe_video(source)
     refined_timeline = probe_video(refined)
     if not source_timeline.has_audio:
@@ -118,9 +123,19 @@ def restore_timeline(
             "-i", str(resolved_audio),
             "-map", "0:v:0", "-map", "2:a:0",
         ])
+        if program_audio_delay_ms > 0:
+            timing_filter = f"adelay={program_audio_delay_ms}:all=1,"
+        elif program_audio_delay_ms < 0:
+            timing_filter = (
+                f"atrim=start={abs(program_audio_delay_ms) / 1000:.9f},"
+                "asetpts=PTS-STARTPTS,"
+            )
+        else:
+            timing_filter = ""
         audio_arguments = [
             "-af",
-            f"aresample=48000,apad,atrim=duration={duration_seconds:.9f},asetpts=PTS-STARTPTS",
+            f"{timing_filter}aresample=48000,apad,"
+            f"atrim=duration={duration_seconds:.9f},asetpts=PTS-STARTPTS",
             "-c:a", "aac", "-b:a", "192k",
         ]
     command.extend([
@@ -147,6 +162,7 @@ def main() -> int:
     parser.add_argument("--refined", required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--audio")
+    parser.add_argument("--program-audio-delay-ms", type=int, default=0)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     timeline = restore_timeline(
@@ -154,6 +170,7 @@ def main() -> int:
         Path(args.source),
         Path(args.output),
         Path(args.audio) if args.audio else None,
+        args.program_audio_delay_ms,
     )
     print(json.dumps({
         "frame_rate": f"{timeline.frame_rate.numerator}/{timeline.frame_rate.denominator}",

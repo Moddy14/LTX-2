@@ -5836,6 +5836,108 @@
         "audio-quality",
         "mos"
       ],
+      "claimId": "audio-driven-video.ltx25.image-audio-to-video.two-stage.refined.lipforcing-14b-streaming-taehv",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.image-audio-to-video.two-stage.prompt.not-applicable.post.lipforcing-14b-streaming-taehv",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "modelProfile": "ltx25-split-bf16-two-stage",
+        "postprocessor": "lipforcing-14b-streaming-taehv",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.ltx25.image-audio-to-video.two-stage.refined.lipforcing-14b-wan-vae",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.image-audio-to-video.two-stage.prompt.not-applicable.post.lipforcing-14b-wan-vae",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio",
+        "speech-audio-or-native-dialogue-track"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "modelProfile": "ltx25-split-bf16-two-stage",
+        "postprocessor": "lipforcing-14b-wan-vae",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card",
+          "insightface-buffalo-l-noncommercial-model-policy-2025-11-24",
+          "lipforcing-apache-2.0"
+        ],
+        "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
+        "status": "blocked"
+      },
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
       "claimId": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
       "cooperativeCheckpoint": true,
       "id": "ltx25.image-audio-to-video.two-stage.prompt.not-applicable.post.none",
@@ -9279,11 +9381,11 @@
   "inputs": {
     "capabilityMatrix": {
       "path": "shared/releaseSurface.ts",
-      "sha256": "ba45662e47f48bd67fc23b99da40eb2f0828a2f45c1f5d01a77259ab73d4856f"
+      "sha256": "3acea87dda6441c9369efb16b71a41eb19d23c3054ed7edabaa30b8fda10c8a3"
     },
     "requestSchema": {
       "path": "shared/pipelines.ts",
-      "sha256": "2a882b28e600fa7a4c7e5ec0b11dd9f5dd4ea01939bd73187e1c56d06f733a9f"
+      "sha256": "8d3481e6cb3b0081777d6b60e0dbdc807de3144b5d1988d47bdb4048bc7f1573"
     }
   },
   "policyVersion": "ltx-studio-release-rights.v1",

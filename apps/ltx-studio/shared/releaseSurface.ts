@@ -589,7 +589,13 @@ export function deriveReleaseSurfaceEntries(): ReleaseSurfaceEntry[] {
   for (const variant of [...baseVariants(), ...ltx25Variants()]) {
     for (const promptEncoderProfile of promptEncoderProfilesFor(variant)) {
       entries.push(entryFor(variant, promptEncoderProfile, "none"));
-      if (variant.modelProfile !== "ltx23-monolith") continue;
+      if (variant.modelProfile !== "ltx23-monolith") {
+        if (variant.mode === "image-audio-to-video") {
+          entries.push(entryFor(variant, promptEncoderProfile, "lipforcing-14b-wan-vae"));
+          entries.push(entryFor(variant, promptEncoderProfile, "lipforcing-14b-streaming-taehv"));
+        }
+        continue;
+      }
       if (variant.mode === "text-to-audio") continue;
       if (["image-audio-to-video", "audio-to-video"].includes(variant.mode)) {
         entries.push(entryFor(variant, promptEncoderProfile, "longcat-lipsync"));

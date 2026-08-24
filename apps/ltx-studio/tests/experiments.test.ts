@@ -77,6 +77,8 @@ describe("controlled experiment contract", () => {
     expect(candidate.postprocess.lipForcing).toEqual({
       enabled: true,
       decoder: "wan-vae",
+      mouthDelayMs: 0,
+      programAudioDelayMs: 0,
     });
     expect(validateControlledExperimentDifference(
       baseline,

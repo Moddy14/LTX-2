@@ -153,8 +153,13 @@ describe("LipForcing 14B refiner contract", () => {
     expect(timeline).toContain('"1:a:0"');
     expect(timeline).toContain("source_timeline.frame_count");
     expect(adapter).toContain("prepare_driving_audio(");
+    expect(adapter).toContain("prepare_control_audio(");
     expect(adapter).toContain("atrim=start=");
     expect(jobs).toContain("lipForcingArgs.push(...lipForcingAudioArgs)");
+    expect(jobs).toContain('"--mouth-delay-ms"');
+    expect(jobs).toContain('"--program-audio-delay-ms"');
+    expect(adapter).toContain('parser.add_argument("--program-audio-delay-ms"');
+    expect(adapter).toContain("LipForcing-Tonversatz muss zwischen -500 und 500 ms liegen.");
   });
 
   it("normalizes LTX cadence to the official 25 fps input domain before face alignment", () => {
@@ -246,6 +251,38 @@ describe("LipForcing 14B refiner contract", () => {
     }
   });
 
+  it("delays only the model control audio by the measured correction", () => {
+    const root = mkdtempSync(join(tmpdir(), "ltx-lipforcing-control-audio-"));
+    const programAudio = join(root, "program.wav");
+    const controlAudio = join(root, "control.wav");
+    const adapter = resolve(appRoot, "scripts/lipforcing-refiner.py");
+    try {
+      run("ffmpeg", [
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000:duration=1",
+        "-c:a", "pcm_s16le", programAudio,
+      ]);
+      run("python3", [
+        "-c",
+        [
+          "import importlib.util, pathlib, sys",
+          "spec=importlib.util.spec_from_file_location('lipforcing_refiner', sys.argv[1])",
+          "module=importlib.util.module_from_spec(spec)",
+          "spec.loader.exec_module(module)",
+          "module.prepare_control_audio(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]), 1.0, 125)",
+        ].join(";"),
+        adapter,
+        programAudio,
+        controlAudio,
+      ]);
+      expect(pcmPeak(programAudio, 0.02, 0.05)).toBeGreaterThan(1_000);
+      expect(pcmPeak(controlAudio, 0.02, 0.05)).toBeLessThan(100);
+      expect(pcmPeak(controlAudio, 0.15, 0.05)).toBeGreaterThan(1_000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("restores exact LTX frames, rate, resolution, and selected driving audio from the 25 fps result", () => {
     const root = mkdtempSync(join(tmpdir(), "ltx-lipforcing-timeline-"));
     const sourceVideo = join(root, "source.mp4");
@@ -280,6 +317,7 @@ describe("LipForcing 14B refiner contract", () => {
         "--refined", refinedVideo,
         "--source", sourceVideo,
         "--audio", drivingAudio,
+        "--program-audio-delay-ms", "125",
         "--output", restoredVideo,
       ]);
 
@@ -295,6 +333,7 @@ describe("LipForcing 14B refiner contract", () => {
         height: 240,
       });
       expect(streams.some((stream: { codec_type: string }) => stream.codec_type === "audio")).toBe(true);
+      expect(pcmPeak(restoredVideo, 0.02, 0.05)).toBeLessThan(100);
       expect(pcmPeak(restoredVideo, 0.25, 0.5)).toBeGreaterThan(1_000);
       expect(pcmPeak(restoredVideo, 3, 0.5)).toBeLessThan(100);
     } finally {

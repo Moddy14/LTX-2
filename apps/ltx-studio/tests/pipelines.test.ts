@@ -599,11 +599,21 @@ describe("generationRequestSchema", () => {
     expect(request.postprocess.lipForcing).toEqual({
       enabled: false,
       decoder: "wan-vae",
+      mouthDelayMs: 0,
+      programAudioDelayMs: 0,
     });
     request.postprocess.lipForcing.enabled = true;
     expect(generationRequestSchema.safeParse(request).success).toBe(true);
 
     request.postprocess.lipForcing.decoder = "streaming-taehv";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    request.postprocess.lipForcing.mouthDelayMs = 501;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.postprocess.lipForcing.mouthDelayMs = 125;
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    request.postprocess.lipForcing.programAudioDelayMs = -501;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.postprocess.lipForcing.programAudioDelayMs = 125;
     expect(generationRequestSchema.safeParse(request).success).toBe(true);
     request.postprocess.museTalk.enabled = true;
     expect(generationRequestSchema.safeParse(request).success).toBe(false);

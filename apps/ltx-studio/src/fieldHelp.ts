@@ -83,6 +83,10 @@ export const fieldHelp = {
     "Wofür: Regeneriert den Mundbereich mit dem offiziellen LipForcing-14B-Modell. Eine vorhandene saubere Konditionierungs-Sprachspur wird mit derselben Startzeit und Maximaldauer zugeschnitten, steuert die Lippen und bleibt bis zum optionalen späteren Musik-Endmix die hörbare Spur. Ohne separate Führung wird der LTX-Ton verwendet. Die Person wird pro Bild mit InsightFace ausgerichtet; Kopfbewegung, Körper, Hintergrund, Bildzahl und Bildrate bleiben erhalten. Empfehlung: nur für kontrollierte Qualitätsvergleiche einschalten und standardmäßig AUS lassen, bis das konkrete Ergebnis die native Version bei P/B/M-Verschluss, Identität und Pausenruhe messbar übertrifft.",
   lipForcingDecoder:
     "Wofür: Wählt die Bilddekodierung des LipForcing-Ergebnisses. „Maximale Qualität“ verwendet die offizielle vollständige Wan-VAE und ist langsamer; „Schneller Test“ verwendet den kleinen Streaming-TAEHV-Decoder und kann sichtbar weichere oder unruhigere Munddetails erzeugen. Empfehlung: für die Endbeurteilung maximale Qualität.",
+  lipForcingMouthDelay:
+    "Wofür: Verschiebt nur die Sprachspur, die das LipForcing-Modell steuert; der hörbare Ton bleibt davon unberührt. Positiv bedeutet eine spätere Modellführung, negativ eine frühere. Die Wirkung auf die erzeugte Mundbewegung muss am konkreten Clip gemessen werden. Empfehlung: 0 ms als allgemeiner Standard; nur kontrolliert verändern.",
+  lipForcingProgramAudioDelay:
+    "Wofür: Verschiebt nur den hörbaren Sprachinhalt im fertigen LipForcing-Video, ohne Bildframes oder Modellsteuerung erneut zu verändern. Positiv verzögert den Ton, negativ zieht ihn vor. Empfehlung: 0 ms als Standard; für den aktuellen Referenzclip korrigieren +125 ms den gemessenen Laut-/Lippen-Offset auf 0 ms.",
   retakeStart:
     "Wofür: Beginn des zu regenerierenden Bereichs im Quellvideo. Gute Eingabe: Zeit in Sekunden ab Videostart; für saubere Übergänge etwas vor der problematischen Stelle beginnen.",
   retakeEnd:

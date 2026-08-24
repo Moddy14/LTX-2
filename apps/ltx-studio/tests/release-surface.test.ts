@@ -160,19 +160,28 @@ describe("candidate release surface", () => {
   it("declares each native LTX-2.5 BF16 core path as its own conditional surface", () => {
     const entries = deriveReleaseSurfaceEntries().filter(({ request }) =>
       request.modelProfile !== "ltx23-monolith");
-    expect(entries).toHaveLength(12);
-    expect(entries.every(({ request, rights, targetStatus }) =>
+    expect(entries).toHaveLength(14);
+    const nativeEntries = entries.filter(({ request }) => request.postprocessor === "none");
+    expect(nativeEntries).toHaveLength(12);
+    expect(nativeEntries.every(({ request, rights, targetStatus }) =>
       request.postprocessor === "none"
       && request.promptEncoderProfile === "not-applicable"
       && rights.status === "conditional"
       && rights.evidenceIds.includes("ltx25-community-license-model-card-2026-08-21")
       && targetStatus === "candidate")).toBe(true);
+    const lipForcingEntries = entries.filter(({ request }) =>
+      request.postprocessor.startsWith("lipforcing-14b"));
+    expect(lipForcingEntries).toHaveLength(2);
+    expect(lipForcingEntries.every(({ request, rights, targetStatus }) =>
+      request.mode === "image-audio-to-video"
+      && rights.evidenceIds.includes("lipforcing-apache-2.0")
+      && targetStatus === "blocked")).toBe(true);
     expect(entries
       .filter(({ request }) => request.icLoraProfile === "union-control")
       .map(({ request }) => request.unionControlType)
       .sort()).toEqual(["canny", "depth", "pose"]);
     expect(entries
       .filter(({ request }) => request.modelProfile === "ltx25-split-bf16-two-stage"))
-      .toHaveLength(3);
+      .toHaveLength(5);
   });
 });

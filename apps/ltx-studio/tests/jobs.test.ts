@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildLipForcingAudioRetimeArgs,
   buildRefinerAudioArgs,
   describeLipForcingFailure,
   isActiveJobStatus,
@@ -16,9 +17,11 @@ import {
   PipelineProgressTracker,
   progressFromPipelineLog,
   publishedOutputIsReusableLtxBase,
+  publishedOutputIsReusableLipForcingVisual,
   quarantineUnreleasedArtifact,
   runProvenanceSharesLtxBase,
   requestsShareLtxBase,
+  requestsShareLipForcingVisual,
   resolveRenderOutputPaths,
 } from "../server/jobs.js";
 import { hybridRoot, repoRoot } from "../server/config.js";
@@ -340,6 +343,32 @@ describe("job persistence and reservations", () => {
     expect(publishedOutputIsReusableLtxBase(original, hybrid)).toBe(true);
     hybrid.seed += 1;
     expect(requestsShareLtxBase(original, hybrid)).toBe(false);
+  });
+
+  it("reuses a LipForcing picture stream only when the audible timing is the sole change", () => {
+    const source = validRequest();
+    source.postprocess.lipForcing.enabled = true;
+    source.postprocess.lipForcing.mouthDelayMs = 125;
+    const target = structuredClone(source);
+    target.outputName = "retimed.mp4";
+    target.postprocess.lipForcing.programAudioDelayMs = 125;
+
+    expect(requestsShareLipForcingVisual(source, target)).toBe(true);
+    expect(publishedOutputIsReusableLipForcingVisual(source, target)).toBe(true);
+    target.postprocess.lipForcing.mouthDelayMs = 0;
+    expect(requestsShareLipForcingVisual(source, target)).toBe(false);
+    expect(publishedOutputIsReusableLipForcingVisual(source, target)).toBe(false);
+  });
+
+  it("builds a video-copy-only remux for positive and negative speech timing corrections", () => {
+    const delayed = buildLipForcingAudioRetimeArgs("source.mp4", "target.mp4", 125);
+    expect(delayed).toContain("copy");
+    expect(delayed).toContain("adelay=125:all=1,aresample=48000,apad");
+    expect(delayed).toContain("-shortest");
+
+    const advanced = buildLipForcingAudioRetimeArgs("source.mp4", "target.mp4", -125);
+    expect(advanced).toContain("atrim=start=0.125000000,asetpts=PTS-STARTPTS,aresample=48000,apad");
+    expect(() => buildLipForcingAudioRetimeArgs("source.mp4", "target.mp4", 1_001)).toThrow();
   });
 
   it("reuses a rendered LTX base with matching verified model and runtime provenance", () => {

@@ -484,6 +484,8 @@ export const generationRequestSchema = z
       lipForcing: z.object({
         enabled: z.boolean(),
         decoder: z.enum(["wan-vae", "streaming-taehv"]),
+        mouthDelayMs: z.number().int().min(-500).max(500),
+        programAudioDelayMs: z.number().int().min(-500).max(500),
       }),
     }),
     retake: z.object({
@@ -1117,7 +1119,12 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
         audioPaddingLeft: 2,
         audioPaddingRight: 2,
       },
-      lipForcing: { enabled: false, decoder: "wan-vae" },
+      lipForcing: {
+        enabled: false,
+        decoder: "wan-vae",
+        mouthDelayMs: 0,
+        programAudioDelayMs: 0,
+      },
     },
     retake: {
       videoPath: "",

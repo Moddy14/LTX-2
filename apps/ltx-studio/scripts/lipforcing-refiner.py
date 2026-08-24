@@ -192,6 +192,39 @@ def prepare_driving_audio(
     return require_file(output, "vorbereitete LipForcing-Führungsaudiospur")
 
 
+def prepare_control_audio(
+    program_audio: Path,
+    output: Path,
+    target_duration_seconds: float,
+    mouth_delay_ms: int,
+) -> Path:
+    """Shift only model conditioning while leaving the audible program track intact."""
+    if not isinstance(mouth_delay_ms, int) or isinstance(mouth_delay_ms, bool):
+        raise RuntimeError("LipForcing-Lippenverzögerung muss eine ganze Millisekundenzahl sein.")
+    if mouth_delay_ms < -500 or mouth_delay_ms > 500:
+        raise RuntimeError("LipForcing-Lippenverzögerung muss zwischen -500 und 500 ms liegen.")
+    program_audio = require_file(program_audio, "LipForcing-Programmaudio")
+    if mouth_delay_ms == 0:
+        return program_audio
+    if mouth_delay_ms > 0:
+        shift_filter = f"adelay={mouth_delay_ms}:all=1"
+    else:
+        shift_filter = f"atrim=start={abs(mouth_delay_ms) / 1000:.9f},asetpts=PTS-STARTPTS"
+    audio_filter = (
+        f"{shift_filter},apad,atrim=duration={target_duration_seconds:.9f},"
+        "asetpts=PTS-STARTPTS"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.unlink(missing_ok=True)
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(program_audio), "-map", "0:a:0", "-vn",
+        "-af", audio_filter,
+        "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(output),
+    ], check=True)
+    return require_file(output, "zeitkorrigierte LipForcing-Modellführung")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", required=True)
@@ -205,8 +238,13 @@ def main() -> int:
     parser.add_argument("--image", default="ltx-studio-lipforcing:14b-cu131")
     parser.add_argument("--container-name")
     parser.add_argument("--decoder", choices=["wan-vae", "streaming-taehv"], default="wan-vae")
+    parser.add_argument("--mouth-delay-ms", type=int, default=0)
+    parser.add_argument("--program-audio-delay-ms", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
+
+    if args.program_audio_delay_ms < -500 or args.program_audio_delay_ms > 500:
+        raise RuntimeError("LipForcing-Tonversatz muss zwischen -500 und 500 ms liegen.")
 
     video = require_file(Path(args.video), "LipForcing-Eingabevideo")
     output = Path(args.output).resolve()
@@ -254,13 +292,24 @@ def main() -> int:
     )
     verify_image_revision(args.image)
 
-    audio = prepare_driving_audio(
+    program_audio = prepare_driving_audio(
         Path(args.audio).resolve() if args.audio else video,
         video,
-        stage_root / "lipforcing-audio.wav",
+        stage_root / "lipforcing-program-audio.wav",
         args.audio_start if args.audio else 0,
         args.audio_duration if args.audio else None,
     )
+    control_audio = prepare_control_audio(
+        program_audio,
+        stage_root / "lipforcing-control-audio.wav",
+        video_duration_seconds(video),
+        args.mouth_delay_ms,
+    )
+    if args.mouth_delay_ms:
+        log(
+            f"Modellführung um {args.mouth_delay_ms:+d} ms verschoben; "
+            "die hörbare Sprachspur bleibt unverändert."
+        )
     normalized_video = prepare_source_video(
         video,
         stage_root / "lipforcing-source-25fps.mp4",
@@ -294,7 +343,7 @@ def main() -> int:
         "-e", "LIPFORCING_INSIGHTFACE_ROOT=/models/insightface",
         "--user", f"{os.getuid()}:{os.getgid()}",
         "-v", f"{normalized_video}:/input/video.mp4:ro",
-        "-v", f"{audio}:/input/audio.wav:ro",
+        "-v", f"{control_audio}:/input/audio.wav:ro",
         "-v", f"{raw_output.parent}:/output",
         "-v", f"{work_root}:/work",
         "-v", f"{model_root}:/models/lipforcing:ro",
@@ -349,8 +398,17 @@ def main() -> int:
             "--output", str(final_output),
         ]
         if args.audio:
-            timeline_command.extend(["--audio", str(audio)])
+            timeline_command.extend(["--audio", str(program_audio)])
+        elif args.program_audio_delay_ms:
+            timeline_command.extend(["--audio", str(program_audio)])
+        timeline_command.extend([
+            "--program-audio-delay-ms", str(args.program_audio_delay_ms),
+        ])
         subprocess.run(timeline_command, check=True)
+        if args.program_audio_delay_ms:
+            log(
+                f"hörbare Sprachspur im Endmix um {args.program_audio_delay_ms:+d} ms verschoben."
+            )
         require_file(final_output, "LipForcing-Ausgabe mit LTX-Zeitachse")
         final_output.replace(output)
         log(f"verfeinertes Video fertig: {output}")

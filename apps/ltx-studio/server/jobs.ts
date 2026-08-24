@@ -404,6 +404,33 @@ export function publishedOutputIsReusableLtxBase(
     && requestsShareLtxBase(source, target);
 }
 
+function lipForcingVisualComparable(request: GenerationRequest): object {
+  const comparable: Partial<GenerationRequest> = structuredClone(request);
+  delete comparable.outputName;
+  if (comparable.postprocess) {
+    comparable.postprocess.lipForcing.programAudioDelayMs = 0;
+  }
+  return comparable;
+}
+
+export function requestsShareLipForcingVisual(
+  left: GenerationRequest,
+  right: GenerationRequest,
+): boolean {
+  return isDeepStrictEqual(lipForcingVisualComparable(left), lipForcingVisualComparable(right));
+}
+
+export function publishedOutputIsReusableLipForcingVisual(
+  source: GenerationRequest,
+  target: GenerationRequest,
+): boolean {
+  return source.postprocess.lipForcing.enabled
+    && target.postprocess.lipForcing.enabled
+    && !source.audio.finalMix.path
+    && !target.audio.finalMix.path
+    && requestsShareLipForcingVisual(source, target);
+}
+
 export function runProvenanceSharesLtxBase(
   source: RunProvenance | null,
   target: RunProvenance | null,
@@ -448,6 +475,10 @@ type ReusableLtxBase = {
   id: string;
   outputPath: string;
   description: string;
+};
+
+type ReusableLipForcingOutput = ReusableLtxBase & {
+  programAudioDelayMs: number;
 };
 
 export function identityEvidenceMatches(
@@ -501,6 +532,59 @@ export function reusableLtxBaseFromSidecars(
     outputPath: match.outputPath,
     description: `persistierter Ausgabe „${match.outputName}" (Job ${match.jobId})`,
   };
+}
+
+export function reusableLipForcingOutputFromSidecars(
+  candidates: readonly ReusableLtxBaseCandidate[],
+  target: {
+    id: string;
+    request: GenerationRequest;
+    identityEvidence: IdentityInputEvidence | null;
+  },
+  fileReady: (path: string) => boolean,
+): ReusableLipForcingOutput | undefined {
+  const match = candidates.find((candidate) =>
+    candidate.jobId !== target.id
+    && Boolean(candidate.runProvenance.verifiedAt)
+    && publishedOutputIsReusableLipForcingVisual(candidate.request, target.request)
+    && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
+    && fileReady(candidate.outputPath));
+  if (!match) return undefined;
+  return {
+    id: match.jobId,
+    outputPath: match.outputPath,
+    description: `LipForcing-Ausgabe „${match.outputName}" (Job ${match.jobId})`,
+    programAudioDelayMs: match.request.postprocess.lipForcing.programAudioDelayMs,
+  };
+}
+
+export function buildLipForcingAudioRetimeArgs(
+  inputPath: string,
+  outputPath: string,
+  deltaMs: number,
+): string[] {
+  if (!Number.isInteger(deltaMs) || deltaMs < -1_000 || deltaMs > 1_000) {
+    throw new Error("LipForcing-Tonversatzdifferenz muss ganzzahlig zwischen -1000 und 1000 ms liegen.");
+  }
+  const common = [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-i", inputPath,
+    "-map", "0:v:0", "-map", "0:a:0",
+    "-c:v", "copy",
+  ];
+  if (deltaMs === 0) {
+    return [...common, "-c:a", "copy", "-movflags", "+faststart", outputPath];
+  }
+  const timingFilter = deltaMs > 0
+    ? `adelay=${deltaMs}:all=1`
+    : `atrim=start=${(Math.abs(deltaMs) / 1_000).toFixed(9)},asetpts=PTS-STARTPTS`;
+  return [
+    ...common,
+    "-af", `${timingFilter},aresample=48000,apad`,
+    "-c:a", "aac", "-b:a", "192k",
+    "-shortest", "-movflags", "+faststart",
+    outputPath,
+  ];
 }
 
 export function resolveRenderOutputPaths(
@@ -1720,6 +1804,12 @@ export class JobManager extends EventEmitter {
     );
     this.changed();
 
+    const reusableLipForcingOutput = this.findReusableLipForcingOutput(job);
+    if (reusableLipForcingOutput) {
+      await this.runReusedLipForcingAudioRetime(job, reusableLipForcingOutput);
+      return;
+    }
+
     const stageRoot = join(hybridRoot, job.id);
     const longcatOutput = join(stageRoot, "longcat.mp4");
     const { ltxOutput, compositeOutput, refinedOutput, remuxInput } = resolveRenderOutputPaths(
@@ -2308,6 +2398,8 @@ export class JobManager extends EventEmitter {
         "--image", lipForcingImage,
         "--container-name", containerName,
         "--decoder", job.request.postprocess.lipForcing.decoder,
+        "--mouth-delay-ms", String(job.request.postprocess.lipForcing.mouthDelayMs),
+        "--program-audio-delay-ms", String(job.request.postprocess.lipForcing.programAudioDelayMs),
         "--seed", String(job.request.seed),
       ];
       const lipForcingAudioArgs = buildRefinerAudioArgs(job.request);
@@ -2575,6 +2667,115 @@ export class JobManager extends EventEmitter {
       return undefined;
     }
     return reusableLtxBaseFromSidecars(candidates, job, (path) => this.fileReady(path));
+  }
+
+  private findReusableLipForcingOutput(job: RuntimeJob): ReusableLipForcingOutput | undefined {
+    if (!this.reusableBaseSource || !job.request.postprocess.lipForcing.enabled) return undefined;
+    let candidates: readonly ReusableLtxBaseCandidate[];
+    try {
+      candidates = this.reusableBaseSource.reusableLtxBaseCandidates();
+    } catch {
+      return undefined;
+    }
+    return reusableLipForcingOutputFromSidecars(candidates, job, (path) => this.fileReady(path));
+  }
+
+  private async runReusedLipForcingAudioRetime(
+    job: RuntimeJob,
+    reusable: ReusableLipForcingOutput,
+  ): Promise<void> {
+    const stageRoot = join(hybridRoot, job.id);
+    const pinnedInput = join(stageRoot, "reused-lipforcing-output.mp4");
+    const temporaryOutput = join(stageRoot, "retimed-lipforcing-output.tmp.mp4");
+    mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
+    copyFileSync(reusable.outputPath, pinnedInput);
+    if (!this.fileReady(pinnedInput) || !job.runProvenance) {
+      this.failJob(job, "Die persistierte LipForcing-Ausgabe konnte nicht sicher übernommen werden.");
+      return;
+    }
+    try {
+      const bindFile = this.runProvenanceOperations.bindFile ?? bindRunProvenanceFile;
+      job.runProvenance = await bindFile(
+        job.runProvenance,
+        pinnedInput,
+        `input:reused-lipforcing-output:${reusable.id}`,
+      );
+    } catch (error) {
+      this.failJob(
+        job,
+        `Die wiederverwendete LipForcing-Ausgabe konnte nicht kryptografisch gebunden werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!await this.verifyJobIdentityEvidence(job, "vor der Audio-only-Zeitkorrektur")) return;
+    if (!await this.verifyJobRunProvenance(job, "vor der Audio-only-Zeitkorrektur")) return;
+
+    const targetDelayMs = job.request.postprocess.lipForcing.programAudioDelayMs;
+    const deltaMs = targetDelayMs - reusable.programAudioDelayMs;
+    const args = buildLipForcingAudioRetimeArgs(pinnedInput, temporaryOutput, deltaMs);
+    rmSync(temporaryOutput, { force: true });
+    job.status = "running";
+    job.startedAt = now();
+    job.progress = 90;
+    this.appendLog(
+      job,
+      `Visuell identische ${reusable.description} kryptografisch gebunden; `
+        + `nur der hörbare Ton wird um ${deltaMs >= 0 ? "+" : ""}${deltaMs} ms relativ verschoben. `
+        + "Kein LTX- oder LipForcing-GPU-Lauf erforderlich.",
+    );
+    this.changed();
+    const result = await this.runLoggedProcess(job, "ffmpeg", args, {
+      cwd: repoRoot,
+      env: { ...process.env },
+    });
+    if (this.jobShouldStop(job)) {
+      rmSync(temporaryOutput, { force: true });
+      return;
+    }
+    if (result.error || result.code !== 0 || !this.fileReady(temporaryOutput)) {
+      rmSync(temporaryOutput, { force: true });
+      this.failJob(
+        job,
+        result.error?.message
+          ?? `Audio-only-Zeitkorrektur endete mit Code ${String(result.code)}`
+            + `${result.signal ? ` (${result.signal})` : ""}.`,
+      );
+      return;
+    }
+    renameSync(temporaryOutput, job.plan.outputPath);
+    if (!await this.verifyJobIdentityEvidence(job, "nach der Audio-only-Zeitkorrektur")) return;
+    if (!await this.verifyJobRunProvenance(job, "nach der Audio-only-Zeitkorrektur")) return;
+    const outputReleaseDecision = this.jobStartDecision(job);
+    if (!outputReleaseDecision.allowed) {
+      quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+      this.failJob(
+        job,
+        `Ausgabe bleibt wegen des aktuellen Activation-/Rights-Gates unveröffentlicht: ${outputReleaseDecision.reason}`,
+      );
+      return;
+    }
+
+    this.prepareDgxTerminalDelivery(job, "completed", {
+      current_step: "provenance-bound LipForcing audio-only retiming completed",
+      artifact: {
+        type: "video",
+        path: job.plan.outputPath,
+        note: "final LTX Studio LipForcing output with audio-only timing correction",
+      },
+    });
+    job.status = "completed";
+    job.progress = 100;
+    job.outputUrl = `/api/jobs/${job.id}/output`;
+    job.finishedAt = now();
+    job.runtimeMs = Date.now() - Date.parse(job.startedAt);
+    this.appendLog(
+      job,
+      "LipForcing-Bildstrom unverändert wiederverwendet und hörbare Sprachspur erfolgreich neu getimt.",
+    );
+    this.changed();
+    await this.flushDgxTerminalDelivery(job);
   }
 
   private async waitForDelay(job: RuntimeJob, delayMs: number): Promise<boolean> {
