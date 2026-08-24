@@ -20,6 +20,7 @@ EXPECTED_DISTRIBUTIONS = (
     "setuptools",
     "torch",
     "torchaudio",
+    "torchvision",
     "transformers",
 )
 EXPECTED_VERSIONS = {
@@ -32,6 +33,7 @@ EXPECTED_VERSIONS = {
     "setuptools": "84.0.0",
     "torch": "2.13.0+cu132",
     "torchaudio": "2.11.0+cu132",
+    "torchvision": "0.28.0+cu132",
     "transformers": "5.14.1",
 }
 EXPECTED_CUSPARSELT_VERSION = "0.8.1"
@@ -110,6 +112,8 @@ def main() -> None:
 
     import cv2  # noqa: F401, PLC0415
     import torch  # noqa: PLC0415
+    from torchvision.transforms.v2 import functional as torchvision_functional  # noqa: F401, PLC0415
+    from transformers import Gemma4UnifiedProcessor  # noqa: F401, PLC0415
     import whisper  # noqa: F401, PLC0415
 
     import ltx_core  # noqa: F401, PLC0415

@@ -16,13 +16,14 @@ dependencies = [
     "setuptools==84.0.0",
     "torch @ https://download-r2.pytorch.org/whl/cu132/torch-2.13.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=184f88e91546a2087aee2e5e71012ea6182aaf9d6bc81c28375be2816c349a49",
     "torchaudio @ https://download-r2.pytorch.org/whl/test/cu132/torchaudio-2.11.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=06dcecc6ccd6746fc9f497c0587f67cb5c79cbc7160034e82c97353583cf9d3d",
+    "torchvision @ https://download-r2.pytorch.org/whl/cu132/torchvision-0.28.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=0064cb501e3e083b095b998541226cd82059e29339dab6907ef942218cfe91db",
     "transformers==5.14.1",
 ]
 
 [tool.uv]
 package = false
 environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
-no-sources-package = ["torch", "torchaudio"]
+no-sources-package = ["torch", "torchaudio", "torchvision"]
 # Torch 2.13's cu132 metadata pins cuDNN 9.20, whose AArch64 wheel omits the
 # tensor-IR sublibrary required by the DGX Spark host stack. Keep the release
 # runtime self-contained instead of inheriting this override from the repo root.

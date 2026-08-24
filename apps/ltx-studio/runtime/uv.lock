@@ -390,6 +390,7 @@ dependencies = [
     { name = "setuptools" },
     { name = "torch" },
     { name = "torchaudio" },
+    { name = "torchvision" },
     { name = "transformers" },
 ]
 
@@ -407,6 +408,7 @@ requires-dist = [
     { name = "setuptools", specifier = "==84.0.0" },
     { name = "torch", url = "https://download-r2.pytorch.org/whl/cu132/torch-2.13.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl" },
     { name = "torchaudio", url = "https://download-r2.pytorch.org/whl/test/cu132/torchaudio-2.11.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl" },
+    { name = "torchvision", url = "https://download-r2.pytorch.org/whl/cu132/torchvision-0.28.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl" },
     { name = "transformers", specifier = "==5.14.1" },
 ]
 
@@ -885,6 +887,29 @@ source = { url = "https://download-r2.pytorch.org/whl/test/cu132/torchaudio-2.11
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/test/cu132/torchaudio-2.11.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:06dcecc6ccd6746fc9f497c0587f67cb5c79cbc7160034e82c97353583cf9d3d" },
 ]
+
+[[package]]
+name = "torchvision"
+version = "0.28.0+cu132"
+source = { url = "https://download-r2.pytorch.org/whl/cu132/torchvision-0.28.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "torch" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu132/torchvision-0.28.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:0064cb501e3e083b095b998541226cd82059e29339dab6907ef942218cfe91db" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gdown", marker = "extra == 'gdown'", specifier = ">=4.7.3" },
+    { name = "numpy" },
+    { name = "pillow", specifier = ">=5.3.0,!=8.3.*" },
+    { name = "scipy", marker = "extra == 'scipy'" },
+    { name = "torch", specifier = "==2.13.0" },
+]
+provides-extras = ["gdown", "scipy"]
 
 [[package]]
 name = "tqdm"
