@@ -6,6 +6,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -41,6 +42,22 @@ EXPECTED_CUSPARSELT_TAG = "Tag: py3-none-manylinux2014_aarch64\n"
 EXPECTED_TORCH_CUDNN_REQUIREMENT = (
     'Requires-Dist: nvidia-cudnn-cu13==9.21.1.3; platform_system == "Linux"\n'
 )
+
+
+def verify_ltx25_cli_contract() -> None:
+    result = subprocess.run(
+        [sys.executable, "-I", "-m", "ltx_pipelines.distilled", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit("LTX distilled CLI help smoke failed")
+    if "[--skip-stage-2]" not in result.stdout:
+        raise SystemExit("installed ltx-pipelines is missing the LTX 2.5 single-stage CLI contract")
+    if "[--spatial-upsampler-path SPATIAL_UPSAMPLER_PATH]" not in result.stdout:
+        raise SystemExit("installed ltx-pipelines still requires the stage-2 upsampler for single-stage runs")
 
 
 def verify_cusparselt_metadata() -> None:
@@ -84,6 +101,7 @@ def verify_torch_cudnn_metadata() -> None:
 def main() -> None:
     verify_cusparselt_metadata()
     verify_torch_cudnn_metadata()
+    verify_ltx25_cli_contract()
     for variable in ("HF_HUB_OFFLINE", "PYTHONNOUSERSITE", "TRANSFORMERS_OFFLINE"):
         if os.environ.get(variable) != "1":
             raise SystemExit(f"{variable}=1 is required in the native release runtime")
