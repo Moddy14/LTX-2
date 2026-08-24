@@ -664,7 +664,8 @@ export function requiredOfficialSpeechAssetIds(
       ...(request.mode === "text-to-audio" ? [] : [selectedVideoVae]),
       "ltx25-audio-vae-bf16",
       ...(request.models.durationHeadPath ? ["ltx25-duration-head-bf16" as const] : []),
-      ...(request.mode === "distilled" && !request.distilled.singleStage
+      ...((request.mode === "distilled" && !request.distilled.singleStage)
+        || request.mode === "image-audio-to-video"
         ? ["ltx25-spatial-upscaler-bf16" as const]
         : []),
       ...(request.mode === "ic-lora"

@@ -63,8 +63,8 @@ export const LTX25_WORKFLOW_CATALOG = [
     stages: 2,
     spatialUpscale: true,
     recommendation: "specialty",
-    nativeBinding: null,
-    nativeStatus: "implementation-required",
+    nativeBinding: { mode: "image-audio-to-video" },
+    nativeStatus: "implemented-contract",
   },
   {
     id: "t2a-single-stage",

@@ -273,13 +273,13 @@ export const PIPELINES: readonly PipelineDefinition[] = [
     id: "image-audio-to-video",
     label: "Bild + Audio zu Video",
     shortLabel: "IA2V",
-    description: "Offizieller LTX-2.3-IA2V-Pfad mit Referenzbild und fester Audiospur.",
+    description: "Offizieller Two-Stage-A2V-Pfad mit Referenzbild und unveränderter Audiospur.",
     family: "condition",
     quality: "LipSync",
     defaultHeight: 704,
     defaultWidth: 1280,
     defaultSteps: 30,
-    needsNegativePrompt: false,
+    needsNegativePrompt: true,
     needsSpatialUpscaler: true,
     needsDistilledLora: true,
   },
@@ -607,7 +607,8 @@ export const generationRequestSchema = z
         && ["union-control", "ingredients", "motion-track", "v2v-instant-shave"].includes(
           value.icLora.profile,
         );
-      if (!["distilled", "text-to-audio"].includes(value.mode) && !supportedOfficialProfile) {
+      if (!["distilled", "text-to-audio", "image-audio-to-video"].includes(value.mode)
+        && !supportedOfficialProfile) {
         context.addIssue({
           code: "custom",
           path: ["models", "layout"],

@@ -243,6 +243,14 @@ describe("run provenance", () => {
       sha256: "e264b203ec4b0ff1dfd448121c96ceb5d45dfe84b70fcac9a03e5bc700338f25",
     });
 
+    expect(upstreamWorkflowContractsForRequest(
+      validLtx25SplitRequest("image-audio-to-video"),
+    )[0]).toMatchObject({
+      role: "official-workflow:ltx-2.5:a2v-two-stage",
+      path: "example_workflows/2.5/LTX-2.5_A2V_Two_Stage_Distilled.json",
+      sha256: "871b56bd602b9e3854b00f0454d48375fb2d08a9618d7be44dec0fe4faba04a3",
+    });
+
     const ingredients = validLtx25SplitRequest("ic-lora");
     ingredients.icLora.profile = "ingredients";
     expect(upstreamWorkflowContractsForRequest(ingredients)[0]).toMatchObject({

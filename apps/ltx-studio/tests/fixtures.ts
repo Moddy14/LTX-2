@@ -94,7 +94,7 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
 }
 
 export function validLtx25SplitRequest(
-  mode: "distilled" | "text-to-audio" | "ic-lora" = "distilled",
+  mode: "distilled" | "text-to-audio" | "ic-lora" | "image-audio-to-video" = "distilled",
 ): GenerationRequest {
   const request = validRequest(mode);
   request.models = {

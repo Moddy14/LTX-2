@@ -16,11 +16,13 @@ import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 function requestFor(entry: ReturnType<typeof deriveReleaseSurfaceEntries>[number]) {
   const split = entry.request.modelProfile !== "ltx23-monolith";
-  if (split && !["distilled", "text-to-audio", "ic-lora"].includes(entry.request.mode)) {
+  if (split && !["distilled", "text-to-audio", "ic-lora", "image-audio-to-video"].includes(entry.request.mode)) {
     throw new Error(`Unexpected LTX-2.5 release mode: ${entry.request.mode}`);
   }
   const request = split
-    ? validLtx25SplitRequest(entry.request.mode as "distilled" | "text-to-audio" | "ic-lora")
+    ? validLtx25SplitRequest(
+        entry.request.mode as "distilled" | "text-to-audio" | "ic-lora" | "image-audio-to-video",
+      )
     : validRequest(entry.request.mode);
   if (entry.request.mode === "distilled" && split) {
     request.distilled.singleStage = entry.request.modelProfile === "ltx25-split-bf16-single-stage";
@@ -158,7 +160,7 @@ describe("candidate release surface", () => {
   it("declares each native LTX-2.5 BF16 core path as its own conditional surface", () => {
     const entries = deriveReleaseSurfaceEntries().filter(({ request }) =>
       request.modelProfile !== "ltx23-monolith");
-    expect(entries).toHaveLength(11);
+    expect(entries).toHaveLength(12);
     expect(entries.every(({ request, rights, targetStatus }) =>
       request.postprocessor === "none"
       && request.promptEncoderProfile === "not-applicable"
@@ -171,6 +173,6 @@ describe("candidate release surface", () => {
       .sort()).toEqual(["canny", "depth", "pose"]);
     expect(entries
       .filter(({ request }) => request.modelProfile === "ltx25-split-bf16-two-stage"))
-      .toHaveLength(2);
+      .toHaveLength(3);
   });
 });

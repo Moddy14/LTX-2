@@ -123,6 +123,9 @@ export function upstreamWorkflowContractsForRequest(
         request.distilled.singleStage ? "t2v-i2v-single-stage" : "t2v-i2v-two-stage",
       )];
     }
+    if (request.mode === "image-audio-to-video") {
+      return [ltx25WorkflowContract("a2v-two-stage")];
+    }
     if (request.mode === "text-to-audio") return [ltx25WorkflowContract("t2a-single-stage")];
     if (request.mode === "ic-lora") {
       const workflowByProfile: Partial<Record<ICLoraProfile, Ltx25WorkflowId>> = {

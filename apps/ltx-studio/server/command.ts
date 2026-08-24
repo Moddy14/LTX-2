@@ -713,13 +713,14 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       distilled ? "Distilled Checkpoint" : "Checkpoint",
     ));
 
-    if (["two-stage", "two-stage-hq", "one-stage", "audio-to-video"].includes(request.mode)) {
+    if (["two-stage", "two-stage-hq", "one-stage", "image-audio-to-video", "audio-to-video"].includes(request.mode)) {
       appendFlag(args, "--negative-prompt", request.negativePrompt);
     }
     if (["two-stage-hq", "one-stage", "audio-to-video"].includes(request.mode)) {
       appendGuidanceArgs(request, args, !isAudioConditionedMode(request.mode));
     }
-    if (["two-stage", "two-stage-hq", "image-audio-to-video", "audio-to-video", "id-lora"].includes(request.mode)) {
+    if (["two-stage", "two-stage-hq", "image-audio-to-video", "audio-to-video", "id-lora"].includes(request.mode)
+      && !(request.mode === "image-audio-to-video" && usesSplitModelPack(request))) {
       const distilledLoraStrength = request.mode === "id-lora"
         ? request.idLora.distilledLoraStrength
         : request.models.distilledLora.strength;

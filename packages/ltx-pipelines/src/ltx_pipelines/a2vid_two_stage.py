@@ -352,7 +352,10 @@ class A2VidPipelineTwoStage:
 @torch.inference_mode()
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    parser = default_2_stage_arg_parser(params=resolve_cli_params())
+    parser = default_2_stage_arg_parser(
+        params=resolve_cli_params(),
+        requires_distilled_lora=False,
+    )
     parser.add_argument(
         "--official-comfy-workflow",
         action="store_true",
@@ -377,9 +380,11 @@ def main() -> None:
         help="Maximum audio duration in seconds. Defaults to video duration (num_frames / frame_rate).",
     )
     args = parser.parse_args()
+    if args.model_paths.mode == "monolith" and not args.distilled_lora:
+        parser.error("--distilled-lora is required with a monolithic LTX-2.3 checkpoint")
     pipeline = A2VidPipelineTwoStage(
         model_paths=args.model_paths,
-        distilled_lora=args.distilled_lora,
+        distilled_lora=list(args.distilled_lora or ()),
         spatial_upsampler_path=args.spatial_upsampler_path,
         loras=tuple(args.lora) if args.lora else (),
         gemma_loras=tuple(args.gemma_lora) if args.gemma_lora else (),

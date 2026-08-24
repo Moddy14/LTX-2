@@ -75,7 +75,7 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(validRequest(mode)).success).toBe(true);
   });
 
-  it.each(["distilled", "text-to-audio"] as const)(
+  it.each(["distilled", "text-to-audio", "image-audio-to-video"] as const)(
     "accepts the explicit LTX-2.5 split-pack contract for %s",
     (mode) => {
       expect(generationRequestSchema.safeParse(validLtx25SplitRequest(mode)).success).toBe(true);

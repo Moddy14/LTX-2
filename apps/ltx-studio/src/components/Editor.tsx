@@ -519,11 +519,12 @@ export function Editor({
     documentedDistilledLoraRecommendation,
     ltx23UpscalerRecommendation,
   ];
-  const a2vMissingAssets = isAudioToVideo && modelInventory
+  const legacyA2v = isAudioToVideo && request.models.layout === "monolith";
+  const a2vMissingAssets = legacyA2v && modelInventory
     ? a2vRecommendations
         .flatMap((item) => item && !item.present ? [item.label] : [])
     : [];
-  const a2vStackMismatches = isAudioToVideo
+  const a2vStackMismatches = legacyA2v
     ? [
         ltx23DevRecommendation?.present
           && request.models.checkpointPath !== ltx23DevRecommendation.localPath
@@ -846,7 +847,7 @@ export function Editor({
           checked={request.enhancePrompt}
           onChange={(enhancePrompt) => onChange({ ...request, enhancePrompt })}
         />
-        {dialogueIntent ? (
+        {dialogueIntent && !isAudioToVideo ? (
           <p className="advisory advisory--warning">
             Dialog erkannt: LTX erzeugt eine neue Stimme. Eine exakte Sprecheridentität oder Stimmklon-Treue ist nicht garantiert;
             verwende nur freigegebene Stimmen und prüfe den Wortlaut im Ergebnis. Für eine feste vorhandene Tonspur nutze Audio zu Video.

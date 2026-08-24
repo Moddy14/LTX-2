@@ -188,16 +188,28 @@ describe("buildCommand", () => {
       expect(args).toContain("--official-comfy-workflow");
       expect(args).not.toContain("--num-inference-steps");
       expect(args).not.toContain("--video-cfg-guidance-scale");
-      if (mode === "two-stage") {
-        expect(args).toEqual(expect.arrayContaining(["--negative-prompt", request.negativePrompt]));
-      } else {
-        expect(args).not.toContain("--negative-prompt");
-      }
+      expect(args).toEqual(expect.arrayContaining(["--negative-prompt", request.negativePrompt]));
       expect(args.slice(loraIndex + 1, loraIndex + 3)).toEqual([
         request.models.distilledLora.path,
         "0.5",
       ]);
     }
+  });
+
+  it("builds official LTX-2.5 IA2V with frozen source audio and no legacy LoRA", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    const plan = buildCommand(request);
+
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "-m", "ltx_pipelines.a2vid_two_stage",
+      "--official-comfy-workflow",
+      "--audio-path", request.audio.path,
+      "--spatial-upsampler-path", request.models.spatialUpscalerPath,
+      "--negative-prompt", request.negativePrompt,
+    ]));
+    expect(plan.args).not.toContain("--checkpoint-path");
+    expect(plan.args).not.toContain("--distilled-lora");
+    expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
   });
 
   it("passes the official Gemma LoRA separately from transformer LoRAs", () => {

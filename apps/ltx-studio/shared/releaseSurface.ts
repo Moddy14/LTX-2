@@ -347,6 +347,20 @@ function ltx25Variants(): BaseVariant[] {
     }
   }
   variants.push({
+    id: "ltx25.image-audio-to-video.two-stage",
+    claimId: "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+    mode: "image-audio-to-video",
+    sourceMode: "not-applicable",
+    icLoraProfile: null,
+    lipDubPipelineProfile: null,
+    retakeCheckpoint: null,
+    modelProfile: "ltx25-split-bf16-two-stage",
+    unionControlType: null,
+    inputContract: ["prompt", "reference-image", "driving-audio"],
+    dialogueIntent: "required",
+    identityReference: true,
+  });
+  variants.push({
     id: "ltx25.text-to-audio.single-stage",
     claimId: "native-generation.ltx25.text-to-audio.single-stage",
     mode: "text-to-audio",
@@ -600,7 +614,8 @@ export function releaseSurfaceEntryForRequest(request: GenerationRequest): Relea
     : null;
   const modelProfile: ReleaseModelProfile = request.models.layout === "monolith"
     ? "ltx23-monolith"
-    : request.mode === "distilled" && !request.distilled.singleStage
+    : (request.mode === "image-audio-to-video"
+      || (request.mode === "distilled" && !request.distilled.singleStage))
       ? "ltx25-split-bf16-two-stage"
       : "ltx25-split-bf16-single-stage";
   const unionControlType = request.models.layout === "split"

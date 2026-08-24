@@ -2,6 +2,7 @@ import torch
 
 from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_pipelines.a2vid_two_stage import _stage_1_denoiser
+from ltx_pipelines.utils.args import default_2_stage_arg_parser
 from ltx_pipelines.utils.denoisers import GuidedDenoiser, SimpleDenoiser
 
 
@@ -34,3 +35,17 @@ def test_legacy_stage_one_keeps_guided_denoising() -> None:
 
     assert isinstance(denoiser, GuidedDenoiser)
     assert callable(denoiser)
+
+
+def test_split_a2v_parser_can_use_the_distilled_transformer_without_a_legacy_lora() -> None:
+    parser = default_2_stage_arg_parser(requires_distilled_lora=False)
+    action = parser._option_string_actions["--distilled-lora"]
+
+    assert action.required is False
+    assert action.default == []
+
+
+def test_other_two_stage_pipelines_still_require_the_distilled_lora() -> None:
+    parser = default_2_stage_arg_parser()
+
+    assert parser._option_string_actions["--distilled-lora"].required is True

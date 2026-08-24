@@ -1195,6 +1195,7 @@ def default_1_stage_t2a_arg_parser(params: PipelineParams = LTX_2_3_PARAMS) -> a
 def default_2_stage_arg_parser(
     params: PipelineParams = LTX_2_3_PARAMS,
     supports_auto_duration: bool = False,
+    requires_distilled_lora: bool = True,
 ) -> argparse.ArgumentParser:
     parser = default_1_stage_arg_parser(params=params, supports_auto_duration=supports_auto_duration)
     parser.set_defaults(height=params.stage_2_height, width=params.stage_2_width)
@@ -1215,7 +1216,8 @@ def default_2_stage_arg_parser(
         action=LoraAction,
         nargs="+",  # Accept 1-2 arguments per use (path and optional strength); validation is handled in LoraAction
         metavar=("PATH", "STRENGTH"),
-        required=True,
+        required=requires_distilled_lora,
+        default=[],
         help=(
             "Distilled LoRA (Low-Rank Adaptation) model used in the second stage (upscaling and refinement): "
             f"path to model file and optional strength (default strength: {DEFAULT_LORA_STRENGTH}). "

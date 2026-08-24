@@ -119,6 +119,15 @@ describe("model discovery", () => {
       "ltx25-audio-vae-bf16",
       "ltx25-duration-head-bf16",
     ]);
+
+    expect(requiredOfficialSpeechAssetIds(validLtx25SplitRequest("image-audio-to-video"))).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-video-vae-diffusion-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+      "ltx25-spatial-upscaler-bf16",
+    ]);
   });
 
   it("classifies only supported LTX artifacts", () => {

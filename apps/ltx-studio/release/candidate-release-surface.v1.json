@@ -5826,6 +5826,54 @@
         "cold-canary",
         "playable-output",
         "provenance",
+        "av-sync",
+        "phoneme-viseme",
+        "mouth-artifact",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+      "cooperativeCheckpoint": true,
+      "id": "ltx25.image-audio-to-video.two-stage.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "reference-image",
+        "driving-audio"
+      ],
+      "notApplicable": [],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "image-audio-to-video",
+        "modelProfile": "ltx25-split-bf16-two-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
         "audio-quality",
         "mos"
       ],
@@ -9231,11 +9279,11 @@
   "inputs": {
     "capabilityMatrix": {
       "path": "shared/releaseSurface.ts",
-      "sha256": "625f7c3558b927f239c1282c7eef8e2fa91ee0d9ad6658def4c2d4c064a086f9"
+      "sha256": "ba45662e47f48bd67fc23b99da40eb2f0828a2f45c1f5d01a77259ab73d4856f"
     },
     "requestSchema": {
       "path": "shared/pipelines.ts",
-      "sha256": "6e4132c339e0d2bf8c1ad40c183d05afbdf2d027cc1e5cb3244d2b38e4fce784"
+      "sha256": "2a882b28e600fa7a4c7e5ec0b11dd9f5dd4ea01939bd73187e1c56d06f733a9f"
     }
   },
   "policyVersion": "ltx-studio-release-rights.v1",
