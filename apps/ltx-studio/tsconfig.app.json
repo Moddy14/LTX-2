@@ -20,6 +20,7 @@
     "src",
     "shared",
     "tests/audio-quality-panel.test.ts",
+    "tests/editor-stage-preview.test.ts",
     "tests/mode-rail.test.ts",
     "tests/run-panel.test.ts"
   ]

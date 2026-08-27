@@ -97,7 +97,7 @@ coverage/
 test-results/
 playwright-report/
 *.tsbuildinfo
-.ltx-studio/
+/.ltx-studio*/
 !apps/ltx-studio/*.json
 !apps/ltx-studio/evaluators/phoneme-viseme/*.json
 !apps/ltx-studio/release/rights-evidence.v1.json

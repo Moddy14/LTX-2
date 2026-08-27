@@ -81,6 +81,7 @@ import {
 import {
   assertAuthoritativeQueueList,
   buildAdmissionRequests,
+  cooperativeQueueContractConfirmed,
   decisionMessage,
   decideSegmentBoundary,
   cooperativeCheckpointPath,
@@ -433,6 +434,13 @@ type RuntimeJob = StudioJob & {
   dgxTerminalRetry?: NodeJS.Timeout;
   dgxOwnerHeartbeat?: DgxOwnerHeartbeatState;
 };
+
+class DgxCooperativeQueueContractError extends Error {
+  constructor(message: string, readonly observedRemoteState: QueueJobState) {
+    super(message);
+    this.name = "DgxCooperativeQueueContractError";
+  }
+}
 
 type RawOutputCandidateAuthorityJob = Pick<
   RuntimeJob,
@@ -2746,6 +2754,35 @@ function requireDgxLeaseAuthority(job: RuntimeJob): DgxLeaseReceipt {
     );
   }
   return receipt;
+}
+
+function dgxCooperativeFlagLabel(value: boolean | undefined): string {
+  return value === true ? "true" : value === false ? "false" : "fehlend";
+}
+
+function assertDgxCooperativeQueueContract(
+  job: RuntimeJob,
+  remote: QueueJobSummary,
+  boundary: string,
+): void {
+  const admission = requireDgxLeaseAuthority(job).preparedAdmission;
+  if (cooperativeQueueContractConfirmed(admission, remote)) return;
+  throw new DgxCooperativeQueueContractError(
+    `DGX-Orchestrator-Vertragsabweichung ${boundary}: Der kooperative LTX-Request verlangt `
+      + "durable_waiter=true und segment_waiter=true, der positive Record meldet "
+      + `durable_waiter=${dgxCooperativeFlagLabel(remote.durable_waiter)} und `
+      + `segment_waiter=${dgxCooperativeFlagLabel(remote.segment_waiter)}. `
+      + "Lokale GPU-Allokation bleibt fail-closed gesperrt; der Remote-Record wird terminal bereinigt.",
+    remote.state,
+  );
+}
+
+function dgxCooperativeContractTerminalState(
+  remoteState: QueueJobState,
+): Extract<DgxTerminalState, "cancelled" | "failed"> {
+  return remoteState === "accepted" || remoteState === "queued" || remoteState === "paused"
+    ? "cancelled"
+    : "failed";
 }
 
 function normalizeDgxTerminalReceipt(value: unknown): DgxTerminalReceipt | undefined {
@@ -8582,6 +8619,36 @@ export class JobManager extends EventEmitter {
     }
   }
 
+  private async settleDgxCooperativeQueueContractError(
+    job: RuntimeJob,
+    error: DgxCooperativeQueueContractError,
+  ): Promise<false> {
+    const terminalState = dgxCooperativeContractTerminalState(error.observedRemoteState);
+    await this.failDgxJob(
+      job,
+      error.message,
+      "cooperative orchestrator contract mismatch before LTX allocation",
+      terminalState,
+    );
+    return false;
+  }
+
+  private async confirmDgxCooperativeQueueContract(
+    job: RuntimeJob,
+    remote: QueueJobSummary,
+    boundary: string,
+  ): Promise<boolean> {
+    try {
+      assertDgxCooperativeQueueContract(job, remote, boundary);
+      return true;
+    } catch (error) {
+      if (error instanceof DgxCooperativeQueueContractError) {
+        return this.settleDgxCooperativeQueueContractError(job, error);
+      }
+      throw error;
+    }
+  }
+
   private async waitForDgxQueueStart(
     job: RuntimeJob,
     estimatedMemoryGiBOverride?: number,
@@ -8596,8 +8663,14 @@ export class JobManager extends EventEmitter {
         const recovered = await this.reconcilePendingDgxSubmit(job);
         if (recovered === undefined) return false;
         if (recovered) {
+          if (DGX_POSITIVE_DISCOVERY_STATES.has(recovered.state)
+            && !await this.confirmDgxCooperativeQueueContract(
+              job,
+              recovered,
+              "in der positiven Submit-Recovery",
+            )) return false;
           if (recovered.state === "accepted") {
-            const outcome = await this.startAcceptedDgxJob(job);
+            const outcome = await this.startAcceptedDgxJob(job, recovered);
             if (outcome === "started") return true;
             if (outcome === "stopped") return false;
           } else if (recovered.state === "queued") {
@@ -8719,6 +8792,11 @@ export class JobManager extends EventEmitter {
       }
       if (responseLeaseReceipt) {
         this.commitDgxLeaseReceipt(job, queueJob, responseLeaseReceipt, false);
+        if (!await this.confirmDgxCooperativeQueueContract(
+          job,
+          queueJob,
+          "in der positiven Queue-Submit-Antwort",
+        )) return false;
       }
       this.appendLog(
         job,
@@ -8726,7 +8804,7 @@ export class JobManager extends EventEmitter {
           + `${admission.reason ? ` - ${admission.reason}` : ""}.`,
       );
       if (queueJob.state === "accepted" && admission.decision === "accepted") {
-        const outcome = await this.startAcceptedDgxJob(job);
+        const outcome = await this.startAcceptedDgxJob(job, queueJob);
         if (outcome === "started") return true;
         if (outcome === "stopped") return false;
         if (outcome === "queued") {
@@ -8810,9 +8888,15 @@ export class JobManager extends EventEmitter {
         continue;
       }
       if (this.jobShouldStop(job)) return "stopped";
+      if (DGX_POSITIVE_DISCOVERY_STATES.has(queueJob.state)
+        && !await this.confirmDgxCooperativeQueueContract(
+          job,
+          queueJob,
+          "im positiven Queue-Poll",
+        )) return "stopped";
       this.appendLog(job, `DGX-Queue-Status: ${queueJob.job_id} ${queueJob.state}${queueJob.reason ? ` - ${queueJob.reason}` : ""}.`);
       if (queueJob.state === "accepted") {
-        const outcome = await this.startAcceptedDgxJob(job);
+        const outcome = await this.startAcceptedDgxJob(job, queueJob);
         if (outcome === "queued") {
           delayMs = DGX_START_FENCE_RETRY_MS;
           continue;
@@ -8854,7 +8938,15 @@ export class JobManager extends EventEmitter {
     return "stopped";
   }
 
-  private async startAcceptedDgxJob(job: RuntimeJob): Promise<DgxStartOutcome> {
+  private async startAcceptedDgxJob(
+    job: RuntimeJob,
+    acceptedQueueJob: QueueJobSummary,
+  ): Promise<DgxStartOutcome> {
+    if (!await this.confirmDgxCooperativeQueueContract(
+      job,
+      acceptedQueueJob,
+      "vor dem autoritativen Start-Fence",
+    )) return "stopped";
     const snapshot = this.readStartResourceSnapshot();
     this.appendLog(
       job,
@@ -8864,9 +8956,18 @@ export class JobManager extends EventEmitter {
         + `${snapshot.outputFreeGiB?.toFixed(2) ?? "unbekannt"} GiB Ausgabeplatz frei.`,
     );
     this.changed();
-    const started = await this.transitionDgxJob(job, "starting", {
-      current_step: "thermal start gate before LTX allocation",
-    });
+    let started: boolean;
+    try {
+      started = await this.transitionDgxJob(job, "starting", {
+        current_step: "thermal start gate before LTX allocation",
+      });
+    } catch (error) {
+      if (error instanceof DgxCooperativeQueueContractError) {
+        await this.settleDgxCooperativeQueueContractError(job, error);
+        return "stopped";
+      }
+      throw error;
+    }
     if (started) return isActiveJobStatus(job.status) ? "started" : "stopped";
     if (this.jobShouldStop(job)) return "stopped";
     const message = "DGX-Queue-Start-Fence wurde nicht freigegeben.";
@@ -8957,6 +9058,13 @@ export class JobManager extends EventEmitter {
             );
           }
           if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+          if (state === "starting" || state === "resuming") {
+            assertDgxCooperativeQueueContract(
+              job,
+              current,
+              `im letzten ${state}-GET vor lokaler LTX-Allokation`,
+            );
+          }
           const alreadyApplied = current.state === state
             || ((state === "starting" || state === "resuming") && current.state === "running");
           if (alreadyApplied) {
@@ -8991,6 +9099,13 @@ export class JobManager extends EventEmitter {
               `DGX-State-PATCH bestätigte ${state} nicht exakt callergebunden.`,
             );
           }
+          if (state === "starting" || state === "resuming") {
+            assertDgxCooperativeQueueContract(
+              job,
+              applied,
+              `in der positiven ${state}-PATCH-Antwort vor lokaler LTX-Allokation`,
+            );
+          }
           this.appendLog(job, `DGX-Queue-State: ${applied.job_id} -> ${applied.state}.`);
           if (state === "starting" || state === "running" || state === "pausing" || state === "resuming") {
             this.startDgxOwnerHeartbeat(job, state === "running" ? "ltx_rendering" : state);
@@ -8999,6 +9114,7 @@ export class JobManager extends EventEmitter {
           return true;
         } catch (error) {
           if (this.persistenceHold || isJobPersistenceHoldError(error)) return false;
+          if (error instanceof DgxCooperativeQueueContractError) throw error;
           if (error instanceof DgxLeaseAuthorityError) {
             this.enterPersistenceHold(error, `DGX-${state}-Fence verlor seine Lease-Autorität`);
             return false;
@@ -9020,6 +9136,13 @@ export class JobManager extends EventEmitter {
                 );
               }
               if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+              if (state === "starting" || state === "resuming") {
+                assertDgxCooperativeQueueContract(
+                  job,
+                  remote,
+                  `im ${state}-Statusabgleich vor lokaler LTX-Allokation`,
+                );
+              }
               if (remote.state === state
                 || ((state === "starting" || state === "resuming") && remote.state === "running")) {
                 this.appendLog(
@@ -9037,6 +9160,7 @@ export class JobManager extends EventEmitter {
               }
             } catch (readBackError) {
               if (this.persistenceHold || isJobPersistenceHoldError(readBackError)) return false;
+              if (readBackError instanceof DgxCooperativeQueueContractError) throw readBackError;
               if (readBackError instanceof DgxLeaseAuthorityError) {
                 this.enterPersistenceHold(
                   readBackError,
@@ -9149,6 +9273,11 @@ export class JobManager extends EventEmitter {
         continue;
       }
       if (this.jobShouldStop(job)) return "failed";
+      assertDgxCooperativeQueueContract(
+        job,
+        remote,
+        `im wiederholten ${targetState}-Statusabgleich vor lokaler LTX-Allokation`,
+      );
       if (remote.state === targetState || remote.state === "running") {
         this.appendLog(
           job,
@@ -9578,12 +9707,16 @@ export class JobManager extends EventEmitter {
     job.dgxTerminalRetry.unref();
   }
 
-  private failJob(job: RuntimeJob, message: string): void {
+  private failJob(
+    job: RuntimeJob,
+    message: string,
+    remoteTerminalState: DgxTerminalState = "failed",
+  ): void {
     // Every terminal state is monotone. In particular, an error from the
     // remote-completion receipt path must never downgrade already published
     // local output from completed to failed.
     if (!isActiveJobStatus(job.status)) return;
-    this.prepareDgxTerminalDelivery(job, "failed", {
+    this.prepareDgxTerminalDelivery(job, remoteTerminalState, {
       current_step: "LTX Studio job failed",
       last_error: message,
     });
@@ -9596,13 +9729,18 @@ export class JobManager extends EventEmitter {
     this.scheduleDgxTerminalRetry(job, 0);
   }
 
-  private async failDgxJob(job: RuntimeJob, message: string, currentStep: string): Promise<void> {
+  private async failDgxJob(
+    job: RuntimeJob,
+    message: string,
+    currentStep: string,
+    remoteTerminalState: DgxTerminalState = "failed",
+  ): Promise<void> {
     if (!isActiveJobStatus(job.status)) return;
-    this.prepareDgxTerminalDelivery(job, "failed", {
+    this.prepareDgxTerminalDelivery(job, remoteTerminalState, {
       current_step: currentStep,
       last_error: message,
     });
-    this.failJob(job, message);
+    this.failJob(job, message, remoteTerminalState);
     await this.flushDgxTerminalDelivery(job);
   }
 
@@ -10408,10 +10546,20 @@ export class JobManager extends EventEmitter {
     if (!await this.waitForSchedulerResume(job)) return false;
 
     while (!this.shuttingDown && isActiveJobStatus(job.status)) {
-      if (await this.transitionDgxJob(job, "resuming", {
-        current_step: "fresh start gate before resuming durable LTX checkpoint",
-        artifact,
-      })) break;
+      let resumed: boolean;
+      try {
+        resumed = await this.transitionDgxJob(job, "resuming", {
+          current_step: "fresh start gate before resuming durable LTX checkpoint",
+          artifact,
+        });
+      } catch (error) {
+        if (error instanceof DgxCooperativeQueueContractError) {
+          await this.settleDgxCooperativeQueueContractError(job, error);
+          return false;
+        }
+        throw error;
+      }
+      if (resumed) break;
       if (this.jobShouldStop(job)) return false;
       if (!await this.waitForDelay(job, DGX_START_FENCE_RETRY_MS)) return false;
     }

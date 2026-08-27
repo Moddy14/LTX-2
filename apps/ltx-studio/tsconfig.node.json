@@ -12,6 +12,7 @@
   "include": ["server", "shared", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "tests"],
   "exclude": [
     "tests/audio-quality-panel.test.ts",
+    "tests/editor-stage-preview.test.ts",
     "tests/mode-rail.test.ts",
     "tests/persistence-hold-banner.test.ts",
     "tests/run-panel.test.ts"

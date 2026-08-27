@@ -27,6 +27,23 @@ test("a fresh editor is latest-first while explicit legacy projects remain selec
   await expect(page.getByRole("textbox", { name: "LTX-2.5 Transformer Pfad" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "LTX-2.5 Transformer Pfad" })).toHaveValue("");
   await expect(page.getByLabel("Beim Start mit Gemma verbessern")).not.toBeChecked();
+  const previewToggle = page.getByRole("checkbox", { name: "Single-Stage Preview", exact: true });
+  const spatialUpscaler = page.getByRole("textbox", { name: "Spatial Upscaler Pfad", exact: true });
+  const qualityBadge = page.locator(".quality-mark");
+  await expect(previewToggle).toBeVisible();
+  await expect(previewToggle).not.toBeChecked();
+  await expect(spatialUpscaler).toBeVisible();
+  await expect(qualityBadge).toHaveText("Offiziell · 8 + 3");
+
+  await previewToggle.check();
+  await expect(previewToggle).toBeChecked();
+  await expect(spatialUpscaler).toHaveCount(0);
+  await expect(qualityBadge).toHaveText("Offiziell · 8 · Preview");
+
+  await previewToggle.uncheck();
+  await expect(previewToggle).not.toBeChecked();
+  await expect(spatialUpscaler).toBeVisible();
+  await expect(qualityBadge).toHaveText("Offiziell · 8 + 3");
 
   const prompt = page.getByRole("textbox", { name: "Positive Beschreibung" });
   await prompt.fill("A stable close-up portrait with exact native dialogue.");

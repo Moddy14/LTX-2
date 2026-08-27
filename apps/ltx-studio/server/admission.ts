@@ -102,6 +102,13 @@ export type QueueJobSummary = {
   exclusive_runtime?: string;
   created_at?: string;
   started_at?: string | null;
+  /**
+   * Public scheduler capabilities projected by the current Runtime API.
+   * They remain optional at the transport boundary so an older/drifted
+   * orchestrator is represented honestly and can be rejected fail-closed.
+   */
+  durable_waiter?: boolean;
+  segment_waiter?: boolean;
   reservation_active?: boolean;
   queue_position?: number | null;
   decision?: string;
@@ -114,6 +121,16 @@ export type QueueJobSummary = {
   runtime_status?: Record<string, unknown> | null;
   idempotency_key?: string | null;
 };
+
+export function cooperativeQueueContractConfirmed(
+  admission: AdmissionRequest,
+  remote: Pick<QueueJobSummary, "durable_waiter" | "segment_waiter"> | null | undefined,
+): boolean {
+  const cooperative = admission.resumability === "required"
+    && admission.scheduling?.mode === "segmented";
+  return !cooperative
+    || (remote?.durable_waiter === true && remote.segment_waiter === true);
+}
 
 /**
  * A resource-free durable retry order projected by GET /dgx/queue.

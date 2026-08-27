@@ -510,6 +510,11 @@ export function Editor({
   const documentedDistilledLoraRecommendation = modelInventory?.recommendations.find(
     (item) => item.id === documentedLtx23DistilledLoraAssetId(request),
   );
+  const isLtx25Split = request.models.layout === "split"
+    && request.models.generation === "2.5";
+  const qualityLabel = request.mode === "distilled" && request.distilled.singleStage
+    ? isLtx25Split ? "Offiziell · 8 · Preview" : "Legacy · Single-Stage"
+    : definition.quality;
   const ltx23UpscalerRecommendation = modelInventory?.recommendations.find((item) => item.id === "ltx23-spatial-upscaler");
   const unionControlRecommendation = modelInventory?.recommendations.find(
     (item) => item.id === "ltx23-union-control-lora",
@@ -837,7 +842,7 @@ export function Editor({
           <h1>{definition.label}</h1>
         </div>
         <div className="editor__title-marks">
-          <span className="quality-mark">{definition.quality}</span>
+          <span className="quality-mark">{qualityLabel}</span>
           <span
             className={`model-generation-mark ${request.models.generation === "2.5" ? "is-current" : "is-legacy"}`}
             aria-label="Aktive Modellgeneration"
@@ -1359,17 +1364,6 @@ export function Editor({
               lipDub: { ...request.lipDub, targetLanguage },
             })}
           />
-          {request.mode === "distilled" ? (
-            <Toggle
-              label="Single-Stage Preview"
-              hint="Offizieller schneller LTX-2.5-Previewpfad: acht Schritte direkt in Ausgabeauflösung, ohne Spatial Upscaler und ohne 3-Schritt-Refine."
-              checked={request.distilled.singleStage}
-              onChange={(singleStage) => onChange({
-                ...request,
-                distilled: { ...request.distilled, singleStage },
-              })}
-            />
-          ) : null}
           <Toggle
             label="Genau ein Sprecher bestätigt"
             hint={fieldHelp.lipDubSingleSpeaker}
@@ -2076,6 +2070,19 @@ export function Editor({
                 : changed);
             }}
           />
+          {request.mode === "distilled" ? (
+            <Toggle
+              label={isLtx25Split ? "Single-Stage Preview" : "Legacy Single-Stage"}
+              hint={isLtx25Split
+                ? "Offizieller schneller LTX-2.5-Previewpfad: acht Schritte direkt in Ausgabeauflösung, ohne Spatial Upscaler und ohne 3-Schritt-Refine."
+                : "Bestehender LTX-2.3-Monolithpfad ohne zweite Upscale-/Refine-Stufe; für neue Läufe wird das LTX-2.5-Split-Pack empfohlen."}
+              checked={request.distilled.singleStage}
+              onChange={(singleStage) => onChange({
+                ...request,
+                distilled: { ...request.distilled, singleStage },
+              })}
+            />
+          ) : null}
           {request.models.layout === "split" ? (
             <>
               <PathPicker

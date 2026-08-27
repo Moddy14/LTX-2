@@ -131,6 +131,8 @@ function boundDgxJob(
     exclusive_runtime: "ltx2_native",
     created_at: new Date().toISOString(),
     started_at: null,
+    durable_waiter: true,
+    segment_waiter: true,
     reservation_active: state === "accepted",
     idempotency_key: caller,
     ...overrides,
@@ -160,6 +162,31 @@ function boundDgxHeartbeat(studioJobId: string, dgxJobId: string, state: QueueJo
   };
 }
 
+const STATE_SENSITIVE_DGX_TRANSITIONS: Partial<
+  Record<QueueJobState, ReadonlySet<QueueTransitionState>>
+> = {
+  accepted: new Set(["starting", "cancelled"]),
+  queued: new Set(["starting", "cancelled"]),
+  starting: new Set(["running", "failed"]),
+  running: new Set(["pausing", "completed", "failed", "cancelled"]),
+  pausing: new Set(["paused", "failed"]),
+  paused: new Set(["resuming", "cancelled"]),
+  resuming: new Set(["running", "failed"]),
+};
+
+function applyStateSensitiveDgxTransition(
+  current: QueueJobState,
+  requested: QueueTransitionState,
+): QueueJobState {
+  if (current === requested && !["completed", "failed", "cancelled"].includes(current)) {
+    return current;
+  }
+  if (!STATE_SENSITIVE_DGX_TRANSITIONS[current]?.has(requested)) {
+    throw new Error(`invalid transition ${current} -> ${requested}`);
+  }
+  return requested;
+}
+
 function dgxJobIdentityFromAdmission(
   admissionRequest: AdmissionRequest,
 ): Partial<QueueJobSummary> {
@@ -171,6 +198,8 @@ function dgxJobIdentityFromAdmission(
     priority: admissionRequest.priority,
     exclusive_runtime: admissionRequest.resource_profile.exclusive_runtime,
     idempotency_key: admissionRequest.idempotency_key,
+    durable_waiter: admissionRequest.scheduling?.mode === "segmented",
+    segment_waiter: admissionRequest.scheduling?.mode === "segmented",
   };
 }
 
@@ -6186,15 +6215,321 @@ describe("job persistence and reservations", () => {
       return true;
     });
 
-    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<string>;
+    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (
+      job: unknown,
+      acceptedQueueJob: QueueJobSummary,
+    ) => Promise<string>;
 
-    expect(await startAccepted.call(manager, runtimeJob)).toBe("started");
+    expect(await startAccepted.call(
+      manager,
+      runtimeJob,
+      boundDgxJob(created.id, runtimeJob.dgxJobId as string, "accepted"),
+    )).toBe("started");
     expect(transitions).toEqual(["starting"]);
     expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
       expect.stringContaining("Start-Fence wird jetzt autoritativ beim Orchestrator geprüft"),
       expect.stringContaining("40.00 GiB RAM"),
       expect.stringContaining("0.25 GiB Swap"),
     ]));
+  });
+
+  it("starts a cooperative LTX allocation only after explicit true/true waiter confirmation", async () => {
+    const dgxJobId = testDgxJobId("cooperative-true-true");
+    let studioJobId = "";
+    let remoteState: QueueJobState = "accepted";
+    const transitions: QueueTransitionState[] = [];
+    const submit = vi.fn(async (admissionRequest: AdmissionRequest) =>
+      boundDgxSubmit(studioJobId, dgxJobId, "accepted", admissionRequest));
+    const read = vi.fn(async (jobId: string) =>
+      boundDgxRead(studioJobId, jobId, remoteState));
+    const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+      transitions.push(state);
+      remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+      return boundDgxTransition(studioJobId, jobId, remoteState);
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      { read, transition },
+      null,
+      { submit },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    Reflect.set(manager, "waitForLocalPreAdmissionResources", async () => true);
+    const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+      job: unknown,
+    ) => Promise<boolean>;
+
+    await expect(waitForDgxQueueStart.call(manager, active)).resolves.toBe(true);
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledOnce();
+    expect(transitions).toEqual(["starting"]);
+    expect(active).not.toHaveProperty("process");
+    expect(manager.get(created.id)).toMatchObject({ status: "queued", dgxJobId });
+  });
+
+  it.each([
+    ["accepted", "missing"],
+    ["accepted", "mismatched"],
+    ["queued", "missing"],
+    ["queued", "mismatched"],
+  ] as const)(
+    "fails closed and cancels a cooperative %s record with %s waiter markers",
+    async (initialState, contractShape) => {
+      const dgxJobId = testDgxJobId(`cooperative-${initialState}-${contractShape}`);
+      let studioJobId = "";
+      let remoteState: QueueJobState = initialState;
+      const transitions: QueueTransitionState[] = [];
+      const submit = vi.fn(async (admissionRequest: AdmissionRequest) => {
+        const response = boundDgxSubmit(
+          studioJobId,
+          dgxJobId,
+          initialState,
+          admissionRequest,
+        );
+        if (contractShape === "missing") {
+          delete response.job.durable_waiter;
+          delete response.job.segment_waiter;
+        } else {
+          response.job.durable_waiter = true;
+          response.job.segment_waiter = false;
+        }
+        return response;
+      });
+      const applyContractShape = (remote: QueueJobSummary): void => {
+        if (contractShape === "missing") {
+          delete remote.durable_waiter;
+          delete remote.segment_waiter;
+        } else {
+          remote.durable_waiter = true;
+          remote.segment_waiter = false;
+        }
+      };
+      const read = vi.fn(async (jobId: string) => {
+        const response = boundDgxRead(studioJobId, jobId, remoteState);
+        applyContractShape(response.job);
+        return response;
+      });
+      const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+        transitions.push(state);
+        remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+        const response = boundDgxTransition(studioJobId, jobId, remoteState);
+        applyContractShape(response.job);
+        return response;
+      });
+      const manager = new JobManager(
+        await statePath(),
+        false,
+        null,
+        undefined,
+        { read, transition },
+        null,
+        { submit },
+      );
+      const created = manager.create(validRequest());
+      studioJobId = created.id;
+      const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+        .get(created.id)!;
+      Reflect.set(manager, "waitForLocalPreAdmissionResources", async () => true);
+      const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+        job: unknown,
+      ) => Promise<boolean>;
+
+      await expect(waitForDgxQueueStart.call(manager, active)).resolves.toBe(false);
+
+      expect(submit).toHaveBeenCalledOnce();
+      expect(read).toHaveBeenCalledOnce();
+      expect(transitions).toEqual(["cancelled"]);
+      expect(active).not.toHaveProperty("process");
+      expect(active).not.toHaveProperty("localProcessSpawnPending");
+      expect(active).not.toHaveProperty("localProcessGroupPending");
+      expect(active).toMatchObject({
+        status: "failed",
+        dgxJobId,
+        dgxJobTerminal: true,
+        dgxTerminalReceipt: {
+          remoteTerminalState: "cancelled",
+        },
+      });
+      expect(manager.get(created.id)?.error).toContain(
+        "durable_waiter=true und segment_waiter=true",
+      );
+      expect(manager.get(created.id)?.logs.join("\n")).toContain(
+        "Lokale GPU-Allokation bleibt fail-closed gesperrt",
+      );
+    },
+  );
+
+  it("cancels an accepted record whose true/true contract drifts at the last prestart GET", async () => {
+    const dgxJobId = testDgxJobId("cooperative-start-fence-drift");
+    let studioJobId = "";
+    let remoteState: QueueJobState = "accepted";
+    const transitions: QueueTransitionState[] = [];
+    const submit = vi.fn(async (admissionRequest: AdmissionRequest) =>
+      boundDgxSubmit(studioJobId, dgxJobId, "accepted", admissionRequest));
+    const read = vi.fn(async (jobId: string) => {
+      const response = boundDgxRead(studioJobId, jobId, remoteState);
+      delete response.job.durable_waiter;
+      delete response.job.segment_waiter;
+      return response;
+    });
+    const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+      transitions.push(state);
+      remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+      return boundDgxTransition(studioJobId, jobId, remoteState);
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      { read, transition },
+      null,
+      { submit },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    Reflect.set(manager, "waitForLocalPreAdmissionResources", async () => true);
+    const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+      job: unknown,
+    ) => Promise<boolean>;
+
+    await expect(waitForDgxQueueStart.call(manager, active)).resolves.toBe(false);
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(transitions).toEqual(["cancelled"]);
+    expect(active).not.toHaveProperty("process");
+    expect(active).toMatchObject({
+      status: "failed",
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: { remoteTerminalState: "cancelled" },
+    });
+    expect(manager.get(created.id)?.error).toContain("im letzten starting-GET");
+  });
+
+  it("fails a starting record whose positive PATCH response loses the cooperative contract", async () => {
+    const dgxJobId = testDgxJobId("cooperative-starting-patch-drift");
+    let studioJobId = "";
+    let remoteState: QueueJobState = "accepted";
+    const transitions: QueueTransitionState[] = [];
+    const submit = vi.fn(async (admissionRequest: AdmissionRequest) =>
+      boundDgxSubmit(studioJobId, dgxJobId, "accepted", admissionRequest));
+    const read = vi.fn(async (jobId: string) => {
+      const response = boundDgxRead(studioJobId, jobId, remoteState);
+      if (remoteState === "starting") {
+        delete response.job.durable_waiter;
+        delete response.job.segment_waiter;
+      }
+      return response;
+    });
+    const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+      transitions.push(state);
+      remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+      const response = boundDgxTransition(studioJobId, jobId, remoteState);
+      if (remoteState === "starting") {
+        delete response.job.durable_waiter;
+        delete response.job.segment_waiter;
+      }
+      return response;
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      { read, transition },
+      null,
+      { submit },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    Reflect.set(manager, "waitForLocalPreAdmissionResources", async () => true);
+    const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+      job: unknown,
+    ) => Promise<boolean>;
+
+    await expect(waitForDgxQueueStart.call(manager, active)).resolves.toBe(false);
+
+    expect(transitions).toEqual(["starting", "failed"]);
+    expect(active).not.toHaveProperty("process");
+    expect(active).not.toHaveProperty("localProcessSpawnPending");
+    expect(active).toMatchObject({
+      status: "failed",
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: { remoteTerminalState: "failed" },
+    });
+    expect(manager.get(created.id)?.error).toContain("positiven starting-PATCH-Antwort");
+  });
+
+  it("fails a resuming record whose positive PATCH response loses the cooperative contract", async () => {
+    const dgxJobId = testDgxJobId("cooperative-resuming-patch-drift");
+    let studioJobId = "";
+    let remoteState: QueueJobState = "running";
+    const transitions: QueueTransitionState[] = [];
+    const read = vi.fn(async (jobId: string) => {
+      const response = boundDgxRead(studioJobId, jobId, remoteState);
+      if (remoteState === "resuming") {
+        delete response.job.durable_waiter;
+        delete response.job.segment_waiter;
+      }
+      return response;
+    });
+    const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+      transitions.push(state);
+      remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+      const response = boundDgxTransition(studioJobId, jobId, remoteState);
+      if (remoteState === "resuming") {
+        delete response.job.durable_waiter;
+        delete response.job.segment_waiter;
+      }
+      return response;
+    });
+    const manager = new JobManager(await statePath(), false, null, undefined, {
+      read,
+      transition,
+    });
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    active.status = "running";
+    bindTestDgxLease(
+      active,
+      created.id,
+      dgxJobId,
+      active.request as ReturnType<typeof validRequest>,
+    );
+    Reflect.set(manager, "waitForSchedulerResume", async () => true);
+    const pauseAndResume = Reflect.get(manager, "pauseAndResumeDgxSlice") as (
+      job: unknown,
+      artifact: { type: string; path: string },
+    ) => Promise<boolean>;
+
+    await expect(pauseAndResume.call(manager, active, {
+      type: "ltx-cooperative-checkpoint",
+      path: "/checkpoints/job/manifest.json",
+    })).resolves.toBe(false);
+
+    expect(transitions).toEqual(["pausing", "paused", "resuming", "failed"]);
+    expect(active).not.toHaveProperty("process");
+    expect(active).not.toHaveProperty("localProcessSpawnPending");
+    expect(active).toMatchObject({
+      status: "failed",
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: { remoteTerminalState: "failed" },
+    });
+    expect(manager.get(created.id)?.error).toContain("positiven resuming-PATCH-Antwort");
   });
 
   it("wakes a DGX retry delay immediately on HOLD without another GET or persistence mutation", async () => {
@@ -7694,9 +8029,16 @@ describe("job persistence and reservations", () => {
       swapTotalGiB: 16,
       outputFreeGiB: 100,
     }));
-    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<string>;
+    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (
+      job: unknown,
+      acceptedQueueJob: QueueJobSummary,
+    ) => Promise<string>;
 
-    expect(await startAccepted.call(manager, runtimeJob)).toBe("stopped");
+    expect(await startAccepted.call(
+      manager,
+      runtimeJob,
+      boundDgxJob(created.id, runtimeJob.dgxJobId as string, "accepted"),
+    )).toBe("stopped");
     expect(transitions).toEqual(["starting", "cancelled"]);
     expect(manager.get(created.id)).toMatchObject({
       status: "failed",
@@ -9038,8 +9380,15 @@ describe("job persistence and reservations", () => {
       outputFreeGiB: 100,
     }));
 
-    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (job: unknown) => Promise<string>;
-    const starting = startAccepted.call(manager, runtimeJob);
+    const startAccepted = Reflect.get(manager, "startAcceptedDgxJob") as (
+      job: unknown,
+      acceptedQueueJob: QueueJobSummary,
+    ) => Promise<string>;
+    const starting = startAccepted.call(
+      manager,
+      runtimeJob,
+      boundDgxJob(created.id, dgxJobId, "accepted"),
+    );
     await startingTransition;
     expect(manager.cancel(created.id)?.status).toBe("cancelled");
     releaseStartingResolve();
