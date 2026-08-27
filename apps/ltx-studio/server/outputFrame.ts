@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from "
 import { join } from "node:path";
 
 import { outputNameSchema } from "../shared/pipelines.js";
-import { uploadRoot } from "./config.js";
+import { hostTcbExecutables, uploadRoot } from "./config.js";
 import { probeVideoMetadata } from "./mediaProbe.js";
 import { matchesUploadSignature } from "./uploads.js";
 import type { AssetFile } from "./assets.js";
@@ -40,7 +40,7 @@ function shellQuote(value: string): string {
 
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(hostTcbExecutables.ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     let timedOut = false;
     const timeout = setTimeout(() => {

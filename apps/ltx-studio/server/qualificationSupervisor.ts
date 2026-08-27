@@ -129,7 +129,7 @@ export class QualificationSupervisor {
   ): QualificationBrokerRequest {
     const snapshot = this.options.activation.read();
     return qualificationBrokerRequestSchema.parse({
-      schemaVersion: "ltx-studio-qualification-broker-request.v1",
+      schemaVersion: "ltx-studio-qualification-broker-request.v3",
       requestId,
       action,
       requestedAt: this.now().toISOString().replace(/\.\d{3}Z$/, "Z"),
@@ -137,6 +137,11 @@ export class QualificationSupervisor {
       expectedHeadSha256: snapshot.activationHeadSha256,
       expectedReleaseDigest: snapshot.releaseDigest,
       expectedSurfaceDigest: snapshot.surfaceDigest,
+      expectedRuntimeInstallSealSha256: snapshot.runtimeInstallSealSha256,
+      expectedRuntimeTreeSha256: snapshot.runtimeTreeSha256,
+      expectedRuntimePolicySha256: snapshot.runtimePolicySha256,
+      expectedNodeExecutableSha256: snapshot.nodeExecutableSha256,
+      expectedRuntimeTrust: snapshot.runtimeTrust,
       claim: plan.claim,
       terminal,
     });

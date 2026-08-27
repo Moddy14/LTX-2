@@ -4,16 +4,22 @@ import { z } from "zod";
 
 import { canonicalJson } from "./canonicalJson.js";
 import { trustedKeyPolicySchema, verifyDetachedSignature } from "./releaseAudit.js";
+import { runtimeTrustBindingSchema } from "./runtimeTrust.js";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const identifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/);
 const timestampSchema = z.string().datetime({ offset: false, precision: 0 });
 
 export const evaluationAuthorizationSchema = z.object({
-  schemaVersion: z.literal("ltx-studio-evaluation-authorization.v1"),
+  schemaVersion: z.literal("ltx-studio-evaluation-authorization.v3"),
   authorizationId: identifierSchema,
   releaseDigest: sha256Schema,
   surfaceDigest: sha256Schema,
+  runtimeInstallSealSha256: sha256Schema,
+  runtimeTreeSha256: sha256Schema,
+  runtimePolicySha256: sha256Schema,
+  nodeExecutableSha256: sha256Schema,
+  runtimeTrust: runtimeTrustBindingSchema,
   preregistrationDigest: sha256Schema,
   q2RunnerDigest: sha256Schema,
   q2RunnerContractDigest: sha256Schema,

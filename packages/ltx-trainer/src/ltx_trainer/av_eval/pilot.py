@@ -7,11 +7,15 @@ from collections import defaultdict
 from statistics import NormalDist, fmean, stdev
 from typing import Any
 
+from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
 from .design import DesignError, build_power_report, document_sha256
 
-PILOT_SCHEMA = "ltx-sota-design-pilot-observations.v1"
-PILOT_REPORT_SCHEMA = "ltx-sota-design-pilot-report.v1"
-PILOT_BINDING_SCHEMA = "ltx-sota-design-pilot-binding.v1"
+LEGACY_PILOT_SCHEMA = "ltx-sota-design-pilot-observations.v1"
+LEGACY_PILOT_REPORT_SCHEMA = "ltx-sota-design-pilot-report.v1"
+LEGACY_PILOT_BINDING_SCHEMA = "ltx-sota-design-pilot-binding.v1"
+PILOT_SCHEMA = "ltx-sota-design-pilot-observations.v2"
+PILOT_REPORT_SCHEMA = "ltx-sota-design-pilot-report.v2"
+PILOT_BINDING_SCHEMA = "ltx-sota-design-pilot-binding.v2"
 SPLIT_ROLE = "design-pilot"
 ARMS = ("candidate", "reference")
 ENDPOINT_MODELS = {"binomial-lower", "binomial-upper", "paired-mean"}
@@ -500,6 +504,8 @@ def build_design_pilot_binding_report(observations: object, design: object) -> d
         power_report = build_power_report(design)
     except DesignError as error:
         raise PilotError(f"power design is invalid: {error}") from error
+    if power_report["schema_version"] != DESIGN_REPORT_SCHEMA:
+        raise PilotError("power design uses a legacy report schema")
     if not isinstance(design, dict):
         raise PilotError("power design must be an object")
     endpoint_catalog = [
@@ -549,6 +555,8 @@ def build_design_pilot_binding_report(observations: object, design: object) -> d
         "evaluator_bundle_digest": pilot_report["bindings"]["evaluator_bundle_digest"],
         "design_digest": document_sha256(design),
         "power_report_digest": document_sha256(power_report),
+        "surface_digest": power_report["surface_digest"],
+        "candidate_surface_binding_digest": power_report["candidate_surface_binding_digest"],
         "required_independent_units": power_report["required_independent_units"],
         "required_clips": power_report["required_clips"],
         "planning_hypothesis_count": power_report["planning_hypothesis_count"],
@@ -573,6 +581,8 @@ def validate_design_pilot_binding_report(raw: object) -> dict[str, Any]:
             "evaluator_bundle_digest",
             "design_digest",
             "power_report_digest",
+            "surface_digest",
+            "candidate_surface_binding_digest",
             "required_independent_units",
             "required_clips",
             "planning_hypothesis_count",
@@ -591,6 +601,8 @@ def validate_design_pilot_binding_report(raw: object) -> dict[str, Any]:
         "evaluator_bundle_digest",
         "design_digest",
         "power_report_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
     ):
         _sha256(raw[field], f"pilot binding report.{field}")
     required_units = raw["required_independent_units"]

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +29,6 @@ from ltx_trainer.av_eval import (
     GovernanceError,
     HoldoutDecisionError,
     IdentityMeasurementError,
-    OffsetMeasurementError,
     PilotError,
     ReadinessError,
     SharpnessMeasurementError,
@@ -51,6 +52,7 @@ from ltx_trainer.av_eval import (
     build_fixed_d1_report,
     build_identity_measurements,
     build_offset_measurements,
+    build_offset_observations,
     build_operational_readiness_evidence,
     build_power_report,
     build_product_readiness_report,
@@ -60,14 +62,89 @@ from ltx_trainer.av_eval import (
     build_vbench_measurements,
     build_vbench_runtime_report,
     build_vbench_source_report,
+    fit_speaker_disjoint_isotonic,
     freeze_dataset,
     load_split_seed,
 )
 
+MAX_OFFSET_JSON_BYTES = 256 * 1024 * 1024
+MAX_OFFSET_JSON_NESTING_DEPTH = 128
 
-def _run_design_check(path: Path) -> int:
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant is forbidden: {value}")
+
+
+def _validate_offset_json_nesting(payload: bytes) -> None:
+    """Reject structurally deep JSON before the recursive decoder sees it."""
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for value in payload:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif value == ord("\\"):
+                escaped = True
+            elif value == ord('"'):
+                in_string = False
+            continue
+        if value == ord('"'):
+            in_string = True
+        elif value in (ord("["), ord("{")):
+            depth += 1
+            if depth > MAX_OFFSET_JSON_NESTING_DEPTH:
+                raise ValueError(
+                    f"offset input exceeds the supported JSON nesting depth of {MAX_OFFSET_JSON_NESTING_DEPTH}"
+                )
+        elif value in (ord("]"), ord("}")):
+            depth -= 1
+
+
+def _read_bounded_offset_json(path: Path) -> object:
+    """Read one regular, non-symlink JSON artifact through a bounded descriptor."""
+
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
     try:
-        report = build_power_report(json.loads(path.read_text(encoding="utf-8")))
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"offset input must be a regular file: {path}")
+        if before.st_size > MAX_OFFSET_JSON_BYTES:
+            raise ValueError(f"offset input exceeds {MAX_OFFSET_JSON_BYTES} bytes: {path}")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(1024 * 1024, MAX_OFFSET_JSON_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > MAX_OFFSET_JSON_BYTES:
+                raise ValueError(f"offset input exceeds {MAX_OFFSET_JSON_BYTES} bytes: {path}")
+        after = os.fstat(descriptor)
+        if (
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+        ):
+            raise ValueError(f"offset input changed while it was read: {path}")
+        payload = b"".join(chunks)
+        _validate_offset_json_nesting(payload)
+        try:
+            return json.loads(payload, parse_constant=_reject_json_constant)
+        except RecursionError as error:
+            raise ValueError("offset input exceeds the supported JSON nesting depth") from error
+    finally:
+        os.close(descriptor)
+
+
+def _run_design_check(path: Path, surface_path: Path) -> int:
+    try:
+        report = build_power_report(
+            json.loads(path.read_text(encoding="utf-8")),
+            release_surface=json.loads(surface_path.read_text(encoding="utf-8")),
+        )
     except (OSError, json.JSONDecodeError, DesignError) as error:
         logger.error("D0a design rejected: %s", error)
         return 2
@@ -250,13 +327,71 @@ def _run_identity_score(path: Path) -> int:
     return 0
 
 
-def _run_offset_score(path: Path) -> int:
+def _run_offset_score(
+    path: Path,
+    deck_path: Path,
+    calibrator_path: Path,
+    expected_dataset_digest: str,
+    trusted_preregistration_digest: str,
+) -> int:
     try:
-        report = build_offset_measurements(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, OffsetMeasurementError) as error:
+        report = build_offset_measurements(
+            _read_bounded_offset_json(path),
+            control_deck=_read_bounded_offset_json(deck_path),
+            calibrator=_read_bounded_offset_json(calibrator_path),
+            expected_dataset_digest=expected_dataset_digest,
+            trusted_preregistration_digest=trusted_preregistration_digest,
+        )
+    except (OSError, ValueError) as error:
         logger.error("Offset observations rejected: %s", error)
         return 2
     sys.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
+def _write_canonical_json(document: object) -> None:
+    sys.stdout.write(
+        json.dumps(document, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+
+
+def _run_offset_calibrate(
+    path: Path,
+    expected_dataset_digest: str,
+    trusted_preregistration_digest: str,
+) -> int:
+    try:
+        calibrator = fit_speaker_disjoint_isotonic(
+            _read_bounded_offset_json(path),
+            expected_dataset_digest=expected_dataset_digest,
+            trusted_preregistration_digest=trusted_preregistration_digest,
+        )
+    except (OSError, ValueError) as error:
+        logger.error("Offset calibration deck rejected: %s", error)
+        return 2
+    _write_canonical_json(calibrator)
+    return 0
+
+
+def _run_offset_observations_build(
+    deck_path: Path,
+    calibrator_path: Path,
+    observation_deck_path: Path,
+    expected_dataset_digest: str,
+    trusted_preregistration_digest: str,
+) -> int:
+    try:
+        observations = build_offset_observations(
+            _read_bounded_offset_json(deck_path),
+            _read_bounded_offset_json(calibrator_path),
+            _read_bounded_offset_json(observation_deck_path),
+            expected_dataset_digest=expected_dataset_digest,
+            trusted_preregistration_digest=trusted_preregistration_digest,
+        )
+    except (OSError, ValueError) as error:
+        logger.error("Offset observation build rejected: %s", error)
+        return 2
+    _write_canonical_json(observations)
     return 0
 
 
@@ -525,11 +660,12 @@ def main() -> int:  # noqa: PLR0915
     freeze.add_argument("--output-root", type=Path, required=True)
     freeze.add_argument("--split-seed-file", type=Path, required=True)
     freeze.add_argument("--profile", choices=["development", "product"], default="product")
-    fixed_d1 = subcommands.add_parser("fixed-d1", help="assemble the 37 non-VBench D1 gates")
+    fixed_d1 = subcommands.add_parser("fixed-d1", help="assemble the 44 non-VBench D1 gates")
     fixed_d1.add_argument("--bundle", type=Path, required=True)
     fixed_d1.add_argument("--catalog", type=Path, required=True)
     design_check = subcommands.add_parser("design-check", help="validate D0a gates and compute fixed sample sizes")
     design_check.add_argument("--design", type=Path, required=True)
+    design_check.add_argument("--surface", type=Path, required=True)
     pilot_score = subcommands.add_parser(
         "pilot-score",
         help="estimate repeatability and cluster effects from paired D0a observations",
@@ -545,7 +681,7 @@ def main() -> int:  # noqa: PLR0915
     calibration_check.add_argument("--catalog", type=Path, required=True)
     content_score = subcommands.add_parser("content-score", help="score mouth-content and transition observations")
     content_score.add_argument("--observations", type=Path, required=True)
-    complete_d1 = subcommands.add_parser("complete-d1", help="assemble and revalidate all 109 D1 gates")
+    complete_d1 = subcommands.add_parser("complete-d1", help="assemble and revalidate all 188 D1 gates")
     complete_d1.add_argument("--bundle", type=Path, required=True)
     complete_d1.add_argument("--catalog", type=Path, required=True)
     complete_d1.add_argument("--design", type=Path, required=True)
@@ -557,6 +693,26 @@ def main() -> int:  # noqa: PLR0915
     identity_score.add_argument("--pairs", type=Path, required=True)
     offset_score = subcommands.add_parser("offset-score", help="score AV offset and abstention observations")
     offset_score.add_argument("--observations", type=Path, required=True)
+    offset_score.add_argument("--deck", type=Path, required=True)
+    offset_score.add_argument("--calibrator", type=Path, required=True)
+    offset_score.add_argument("--expected-dataset-digest", required=True)
+    offset_score.add_argument("--trusted-preregistration-digest", required=True)
+    offset_calibrate = subcommands.add_parser(
+        "offset-calibrate",
+        help="fit the preregistered speaker-disjoint isotonic offset calibrator",
+    )
+    offset_calibrate.add_argument("--deck", type=Path, required=True)
+    offset_calibrate.add_argument("--expected-dataset-digest", required=True)
+    offset_calibrate.add_argument("--trusted-preregistration-digest", required=True)
+    offset_observations = subcommands.add_parser(
+        "offset-observations-build",
+        help="apply a frozen offset calibrator and build offset-score observations",
+    )
+    offset_observations.add_argument("--deck", type=Path, required=True)
+    offset_observations.add_argument("--calibrator", type=Path, required=True)
+    offset_observations.add_argument("--observation-deck", type=Path, required=True)
+    offset_observations.add_argument("--expected-dataset-digest", required=True)
+    offset_observations.add_argument("--trusted-preregistration-digest", required=True)
     sharpness_score = subcommands.add_parser("sharpness-score", help="score normalized face-crop sharpness")
     sharpness_score.add_argument("--observations", type=Path, required=True)
     vbench_score = subcommands.add_parser("vbench-score", help="score paired VBench observations with Holm control")
@@ -618,12 +774,30 @@ def main() -> int:  # noqa: PLR0915
         "complete-d1": lambda: _run_complete_d1(args.bundle, args.catalog, args.design),
         "cross-shot-check": lambda: _run_cross_shot_check(args.protocol, args.design_report),
         "cross-shot-score": lambda: _run_cross_shot_score(args.results, args.protocol, args.design),
-        "design-check": lambda: _run_design_check(args.design),
+        "design-check": lambda: _run_design_check(args.design, args.surface),
         "freeze": lambda: _run_freeze(args),
         "fixed-d1": lambda: _run_fixed_d1(args.bundle, args.catalog),
         "f0-check": lambda: _run_f0_check(args),
         "identity-score": lambda: _run_identity_score(args.pairs),
-        "offset-score": lambda: _run_offset_score(args.observations),
+        "offset-calibrate": lambda: _run_offset_calibrate(
+            args.deck,
+            args.expected_dataset_digest,
+            args.trusted_preregistration_digest,
+        ),
+        "offset-observations-build": lambda: _run_offset_observations_build(
+            args.deck,
+            args.calibrator,
+            args.observation_deck,
+            args.expected_dataset_digest,
+            args.trusted_preregistration_digest,
+        ),
+        "offset-score": lambda: _run_offset_score(
+            args.observations,
+            args.deck,
+            args.calibrator,
+            args.expected_dataset_digest,
+            args.trusted_preregistration_digest,
+        ),
         "pilot-score": lambda: _run_pilot_score(args.observations),
         "pilot-freeze-check": lambda: _run_pilot_freeze_check(args.observations, args.design),
         "operational-readiness-check": lambda: _run_operational_readiness_check(args),

@@ -16,7 +16,12 @@ export default defineConfig({
       ignored: ["**/build/**", "**/release/**", "**/.venv/**"],
     },
     proxy: {
-      "/api": `http://127.0.0.1:${apiPort}`,
+      "/api": {
+        target: `http://127.0.0.1:${apiPort}`,
+        // The API enforces an exact loopback Host authority. Rewrite the
+        // development proxy's UI-port Host to the configured API origin.
+        changeOrigin: true,
+      },
     },
   },
   preview: {

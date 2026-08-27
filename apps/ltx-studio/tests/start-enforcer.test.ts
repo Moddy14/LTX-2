@@ -5,6 +5,9 @@ import {
   bootstrapJobStartEnforcer,
   jobStartSources,
 } from "../server/startEnforcer.js";
+import { releaseSurfaceEntryForRequest } from "../shared/releaseSurface.js";
+import { validLtx25SplitRequest } from "./fixtures.js";
+import { runtimeTrustFixture, sameUidRuntimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const digest = (character: string) => character.repeat(64);
 const context = {
@@ -21,7 +24,7 @@ describe("bootstrap job-start enforcer", () => {
       expect(enforcer.decide({ ...context, source })).toMatchObject({
         allowed: false,
         mode: "blocked",
-        schemaVersion: "ltx-studio-bootstrap-start-enforcer.v1",
+        schemaVersion: "ltx-studio-bootstrap-start-enforcer.v3",
       });
     }
   });
@@ -40,6 +43,11 @@ describe("bootstrap job-start enforcer", () => {
     const enforcer = activationJobStartEnforcer({
       expectedReleaseDigest: digest("b"),
       expectedSurfaceDigest: digest("c"),
+      expectedRuntimeInstallSealSha256: digest("1"),
+      expectedRuntimeTreeSha256: digest("2"),
+      expectedRuntimePolicySha256: digest("3"),
+      expectedNodeExecutableSha256: digest("4"),
+      expectedRuntimeTrust: runtimeTrustFixture,
       activation: {
         read: () => ({
           state: "production_provisional",
@@ -47,6 +55,11 @@ describe("bootstrap job-start enforcer", () => {
           activationHeadSha256: digest("d"),
           releaseDigest: digest("b"),
           surfaceDigest: digest("c"),
+          runtimeInstallSealSha256: digest("1"),
+          runtimeTreeSha256: digest("2"),
+          runtimePolicySha256: digest("3"),
+          nodeExecutableSha256: digest("4"),
+          runtimeTrust: runtimeTrustFixture,
           rightsCurrent: true,
           releasedSurfaceEntryIds: [context.surfaceEntryId],
         }),
@@ -61,6 +74,90 @@ describe("bootstrap job-start enforcer", () => {
     });
   });
 
+  it("rejects a blocked release-surface target even when an activation names its id", () => {
+    const blockedEntry = releaseSurfaceEntryForRequest(validLtx25SplitRequest("dfr"));
+    expect(blockedEntry.targetStatus).toBe("blocked");
+    const enforcer = activationJobStartEnforcer({
+      expectedReleaseDigest: digest("b"),
+      expectedSurfaceDigest: digest("c"),
+      expectedRuntimeInstallSealSha256: digest("1"),
+      expectedRuntimeTreeSha256: digest("2"),
+      expectedRuntimePolicySha256: digest("3"),
+      expectedNodeExecutableSha256: digest("4"),
+      expectedRuntimeTrust: runtimeTrustFixture,
+      activation: {
+        read: () => ({
+          state: "production_stable",
+          generation: 4,
+          activationHeadSha256: digest("d"),
+          releaseDigest: digest("b"),
+          surfaceDigest: digest("c"),
+          runtimeInstallSealSha256: digest("1"),
+          runtimeTreeSha256: digest("2"),
+          runtimePolicySha256: digest("3"),
+          nodeExecutableSha256: digest("4"),
+          runtimeTrust: runtimeTrustFixture,
+          rightsCurrent: true,
+          releasedSurfaceEntryIds: [blockedEntry.id],
+        }),
+      },
+    });
+
+    expect(enforcer.inspect()).toMatchObject({ productStartsAllowed: false, mode: "hold" });
+    expect(enforcer.decide({ ...context, surfaceEntryId: blockedEntry.id })).toMatchObject({
+      allowed: false,
+      mode: "hold",
+      reason: expect.stringContaining("blockierten"),
+    });
+  });
+
+  it("does not let a released generic T2A surface authorize a verbatim-dialogue request", () => {
+    const genericRequest = validLtx25SplitRequest("text-to-audio");
+    genericRequest.promptParts.dialogue = "";
+    const exactRequest = structuredClone(genericRequest);
+    exactRequest.promptParts.dialogue = "Dieser Wortlaut muss exakt gesprochen werden.";
+    const genericSurfaceEntryId = releaseSurfaceEntryForRequest(genericRequest).id;
+    const exactSurfaceEntryId = releaseSurfaceEntryForRequest(exactRequest).id;
+    expect(exactSurfaceEntryId).not.toBe(genericSurfaceEntryId);
+
+    const enforcer = activationJobStartEnforcer({
+      expectedReleaseDigest: digest("b"),
+      expectedSurfaceDigest: digest("c"),
+      expectedRuntimeInstallSealSha256: digest("1"),
+      expectedRuntimeTreeSha256: digest("2"),
+      expectedRuntimePolicySha256: digest("3"),
+      expectedNodeExecutableSha256: digest("4"),
+      expectedRuntimeTrust: runtimeTrustFixture,
+      activation: {
+        read: () => ({
+          state: "production_provisional",
+          generation: 3,
+          activationHeadSha256: digest("d"),
+          releaseDigest: digest("b"),
+          surfaceDigest: digest("c"),
+          runtimeInstallSealSha256: digest("1"),
+          runtimeTreeSha256: digest("2"),
+          runtimePolicySha256: digest("3"),
+          nodeExecutableSha256: digest("4"),
+          runtimeTrust: runtimeTrustFixture,
+          rightsCurrent: true,
+          releasedSurfaceEntryIds: [genericSurfaceEntryId],
+        }),
+      },
+    });
+
+    expect(enforcer.decide({
+      requestSha256: digest("e"),
+      surfaceEntryId: genericSurfaceEntryId,
+      source: "direct",
+    })).toMatchObject({ allowed: true, mode: "production_provisional" });
+    expect(enforcer.decide({
+      requestSha256: digest("f"),
+      surfaceEntryId: exactSurfaceEntryId,
+      source: "direct",
+    })).toMatchObject({ allowed: false, mode: "production_provisional" });
+  });
+
   it("fails closed on qualification-only, stale rights, binding drift, or unreadable state", () => {
     const snapshot = {
       state: "qualification_only" as const,
@@ -68,12 +165,22 @@ describe("bootstrap job-start enforcer", () => {
       activationHeadSha256: digest("d"),
       releaseDigest: digest("b"),
       surfaceDigest: digest("c"),
+      runtimeInstallSealSha256: digest("1"),
+      runtimeTreeSha256: digest("2"),
+      runtimePolicySha256: digest("3"),
+      nodeExecutableSha256: digest("4"),
+      runtimeTrust: runtimeTrustFixture,
       rightsCurrent: true,
       releasedSurfaceEntryIds: [] as string[],
     };
     const options = {
       expectedReleaseDigest: digest("b"),
       expectedSurfaceDigest: digest("c"),
+      expectedRuntimeInstallSealSha256: digest("1"),
+      expectedRuntimeTreeSha256: digest("2"),
+      expectedRuntimePolicySha256: digest("3"),
+      expectedNodeExecutableSha256: digest("4"),
+      expectedRuntimeTrust: runtimeTrustFixture,
     };
     expect(activationJobStartEnforcer({ ...options, activation: { read: () => snapshot } }).decide(context))
       .toMatchObject({ allowed: false, mode: "qualification_only" });
@@ -83,13 +190,86 @@ describe("bootstrap job-start enforcer", () => {
       ...options,
       activation: { read: () => ({ ...snapshot, state: "production_stable", rightsCurrent: false }) },
     }).decide(context)).toMatchObject({ allowed: false, mode: "hold" });
+    for (const field of [
+      "releaseDigest",
+      "surfaceDigest",
+      "runtimeInstallSealSha256",
+      "runtimeTreeSha256",
+      "runtimePolicySha256",
+      "nodeExecutableSha256",
+    ] as const) {
+      expect(activationJobStartEnforcer({
+        ...options,
+        activation: { read: () => ({ ...snapshot, [field]: digest("e") }) },
+      }).decide(context), field).toMatchObject({ allowed: false, mode: "hold" });
+    }
     expect(activationJobStartEnforcer({
       ...options,
-      activation: { read: () => ({ ...snapshot, releaseDigest: digest("e") }) },
+      activation: { read: () => ({
+        ...snapshot,
+        runtimeTrust: { ...runtimeTrustFixture, hostTcbAttestationSha256: digest("e") },
+      }) },
     }).decide(context)).toMatchObject({ allowed: false, mode: "hold" });
+    for (const policy of [
+      "release",
+      "activationWriter",
+      "qualificationAuthorizer",
+      "runtimeRights",
+      "bootstrapAuthority",
+    ] as const) {
+      expect(activationJobStartEnforcer({
+        ...options,
+        activation: { read: () => ({
+          ...snapshot,
+          runtimeTrust: {
+            ...runtimeTrustFixture,
+            trustPolicyDigests: {
+              ...runtimeTrustFixture.trustPolicyDigests,
+              [policy]: digest("e"),
+            },
+          },
+        }) },
+      }).decide(context), policy).toMatchObject({ allowed: false, mode: "hold" });
+    }
     expect(activationJobStartEnforcer({
       ...options,
       activation: { read: () => { throw new Error("anchor mismatch"); } },
     }).decide(context)).toMatchObject({ allowed: false, mode: "hold", generation: null });
+  });
+
+  it("blocks Product starts while execution/publication authority shares the local Studio UID", () => {
+    const snapshot = {
+      state: "production_stable" as const,
+      generation: 4,
+      activationHeadSha256: digest("d"),
+      releaseDigest: digest("b"),
+      surfaceDigest: digest("c"),
+      runtimeInstallSealSha256: digest("1"),
+      runtimeTreeSha256: digest("2"),
+      runtimePolicySha256: digest("3"),
+      nodeExecutableSha256: digest("4"),
+      runtimeTrust: sameUidRuntimeTrustFixture,
+      rightsCurrent: true,
+      releasedSurfaceEntryIds: [context.surfaceEntryId],
+    };
+    const enforcer = activationJobStartEnforcer({
+      expectedReleaseDigest: snapshot.releaseDigest,
+      expectedSurfaceDigest: snapshot.surfaceDigest,
+      expectedRuntimeInstallSealSha256: snapshot.runtimeInstallSealSha256,
+      expectedRuntimeTreeSha256: snapshot.runtimeTreeSha256,
+      expectedRuntimePolicySha256: snapshot.runtimePolicySha256,
+      expectedNodeExecutableSha256: snapshot.nodeExecutableSha256,
+      expectedRuntimeTrust: sameUidRuntimeTrustFixture,
+      activation: { read: () => snapshot },
+    });
+    expect(enforcer.decide(context)).toMatchObject({
+      allowed: false,
+      mode: "hold",
+      generation: null,
+    });
+    expect(enforcer.inspect()).toMatchObject({
+      productStartsAllowed: false,
+      mode: "hold",
+    });
   });
 });

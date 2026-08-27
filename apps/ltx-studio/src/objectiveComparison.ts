@@ -1,7 +1,10 @@
 import type { GenerationRequest } from "../shared/pipelines.js";
-import type { ObjectiveQualityAnalysis } from "../shared/objectiveQuality.js";
+import { effectiveA2vTimeline } from "../shared/a2vDuration.js";
 import { mouthSkinMeasurementIsSufficient } from "../shared/mouthSkinSufficiency.js";
-import type { StudioOutput } from "../shared/outputs.js";
+import type {
+  PublicObjectiveQualityAnalysis as ObjectiveQualityAnalysis,
+  PublicStudioOutput as StudioOutput,
+} from "../shared/outputPublic.js";
 import { generationRequestDiffPaths } from "../shared/experiments.js";
 
 export type ComparisonDirection = "higher" | "lower" | "neutral";
@@ -38,7 +41,7 @@ export function protocolOrderedComparisonOutputs(
   const sameProtocol = firstBinding
     && secondBinding
     && firstBinding.experimentId === secondBinding.experimentId
-    && firstBinding.protocolSha256 === secondBinding.protocolSha256;
+    && firstBinding.protocolEqualityToken === secondBinding.protocolEqualityToken;
   if (!sameProtocol) return [...outputs];
   if (firstBinding.arm === "candidate" && secondBinding.arm === "baseline") {
     return [second, first];
@@ -80,6 +83,7 @@ const settingLabels: Record<string, string> = {
   "postprocess.latentSync.guidance": "LatentSync-Audioführung",
   "postprocess.lipForcing.enabled": "LipForcing-14B-Nachbearbeitung",
   "postprocess.lipForcing.decoder": "LipForcing-Decoder",
+  "postprocess.lipForcing.rawOutputProfile": "LipForcing-Rohvideo-Mux",
   "postprocess.lipForcing.mouthDelayMs": "LipForcing-Modellsteuerung",
   "postprocess.lipForcing.programAudioDelayMs": "LipForcing-Tonversatz",
 };
@@ -134,6 +138,8 @@ export function settingsDifferences(
   right: GenerationRequest | null,
 ): SettingsDifference[] {
   if (!left || !right) return [];
+  const audioControlsEitherFrameCount = effectiveA2vTimeline(left)?.derivesFramesFromAudio === true
+    || effectiveA2vTimeline(right)?.derivesFramesFromAudio === true;
   const leftSettings = flattenSettings(left);
   const rightSettings = flattenSettings(right);
   return [...new Set([...leftSettings.keys(), ...rightSettings.keys()])]
@@ -144,7 +150,9 @@ export function settingsDifferences(
       if (leftValue?.raw === rightValue?.raw) return [];
       return [{
         id: path,
-        label: settingLabel(path),
+        label: path === "numFrames" && audioControlsEitherFrameCount
+          ? "Expliziter Framewert (inaktiv · Audio-Maximaldauer steuert)"
+          : settingLabel(path),
         left: leftValue?.display ?? "Nicht gesetzt",
         right: rightValue?.display ?? "Nicht gesetzt",
       }];
@@ -161,14 +169,23 @@ function identityReferencePaths(request: GenerationRequest | null): string[] {
   return request.images.map((image) => image.path).filter(Boolean);
 }
 
-function evidenceFingerprint(output: StudioOutput, rolePrefixes: readonly string[]): string | null {
-  const provenance = output.provenance;
-  if (!provenance) return null;
-  const evidence = provenance.files
-    .filter((file) => rolePrefixes.some((prefix) => file.role.startsWith(prefix)))
-    .map((file) => ({ role: file.role, sha256: file.sha256 }))
-    .sort((left, right) => left.role.localeCompare(right.role));
-  return evidence.length > 0 ? JSON.stringify(evidence) : null;
+function effectiveComparisonTiming(output: StudioOutput): {
+  frames: number | null;
+  fps: number | null;
+} {
+  const technical = completedResult(output)?.technical;
+  if (technical?.frames !== null && technical?.frames !== undefined && technical.frames > 0
+    && technical.fps !== null && technical.fps !== undefined && technical.fps > 0) {
+    return { frames: technical.frames, fps: technical.fps };
+  }
+
+  const request = output.request;
+  if (!request) return { frames: null, fps: null };
+  const timeline = effectiveA2vTimeline(request);
+  return {
+    frames: timeline?.frameCount ?? request.numFrames,
+    fps: request.frameRate,
+  };
 }
 
 export function comparisonCompatibility(
@@ -188,23 +205,13 @@ export function comparisonCompatibility(
   if (left.analyzerVersion !== right.analyzerVersion) {
     reasons.push("Analyzer-Versionen unterscheiden sich.");
   }
-  const leftFingerprint = leftOutput.analysis && "evaluatorFingerprint" in leftOutput.analysis
-    ? leftOutput.analysis.evaluatorFingerprint
-    : null;
-  const rightFingerprint = rightOutput.analysis && "evaluatorFingerprint" in rightOutput.analysis
-    ? rightOutput.analysis.evaluatorFingerprint
-    : null;
+  const leftFingerprint = leftOutput.analysis?.equality.evaluator ?? null;
+  const rightFingerprint = rightOutput.analysis?.equality.evaluator ?? null;
   if (!leftFingerprint || !rightFingerprint || leftFingerprint !== rightFingerprint) {
     reasons.push("Evaluator-Fingerprints sind nicht identisch belegt.");
   }
-  const leftDialogueSha = leftOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
-    || leftOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v7"
-    ? leftOutput.analysis.expectedDialogueSha256
-    : null;
-  const rightDialogueSha = rightOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v6"
-    || rightOutput.analysis?.schemaVersion === "ltx-studio-output-analysis.v7"
-    ? rightOutput.analysis.expectedDialogueSha256
-    : null;
+  const leftDialogueSha = leftOutput.analysis?.equality.expectedDialogue ?? null;
+  const rightDialogueSha = rightOutput.analysis?.equality.expectedDialogue ?? null;
   if ((leftDialogueSha || rightDialogueSha)
     && (!leftDialogueSha || !rightDialogueSha || leftDialogueSha !== rightDialogueSha)) {
     reasons.push("Die gebundenen Dialogtexte sind nicht identisch.");
@@ -214,7 +221,8 @@ export function comparisonCompatibility(
   if (
     !leftIdentity
     || !rightIdentity
-    || leftIdentity.modelSha256 !== rightIdentity.modelSha256
+    || !leftOutput.analysis?.equality.identityModel
+    || leftOutput.analysis.equality.identityModel !== rightOutput.analysis?.equality.identityModel
     || leftIdentity.preprocessingVersion !== rightIdentity.preprocessingVersion
   ) {
     reasons.push("Identitätsmodell oder Vorverarbeitung unterscheiden sich.");
@@ -230,7 +238,7 @@ export function comparisonCompatibility(
     reasons.push("Die gespeicherten Requests stimmen nicht mit ihren eingefrorenen Request-Hashes überein.");
   } else if (
     leftExperiment.experimentId !== rightExperiment.experimentId
-    || leftExperiment.protocolSha256 !== rightExperiment.protocolSha256
+    || leftExperiment.protocolEqualityToken !== rightExperiment.protocolEqualityToken
   ) {
     reasons.push("Experiment-ID oder eingefrorener Protokoll-Hash unterscheiden sich.");
   } else {
@@ -253,7 +261,8 @@ export function comparisonCompatibility(
       if (
         baseline.binding.variableId !== candidate.binding.variableId
         || baseline.binding.kind !== candidate.binding.kind
-        || baseline.binding.baselineRequestSha256 !== candidate.binding.baselineRequestSha256
+        || baseline.binding.baselineRequestEqualityToken
+          !== candidate.binding.baselineRequestEqualityToken
       ) {
         reasons.push("Die Experimentbindungen beschreiben nicht dieselbe kontrollierte Variable.");
       }
@@ -279,45 +288,33 @@ export function comparisonCompatibility(
   if (effectiveOutputAudio(leftOutput.request) !== effectiveOutputAudio(rightOutput.request)) {
     reasons.push("Ausgewertete Tonspuren unterscheiden sich.");
   }
-  const leftInputEvidence = evidenceFingerprint(leftOutput, [
-    "input:conditioning-audio",
-    "input:final-audio-mix",
-    "input:reference-image",
-    "input:reference-video",
-  ]);
-  const rightInputEvidence = evidenceFingerprint(rightOutput, [
-    "input:conditioning-audio",
-    "input:final-audio-mix",
-    "input:reference-image",
-    "input:reference-video",
-  ]);
+  const leftInputEvidence = leftOutput.provenanceSummary?.equality.inputs ?? null;
+  const rightInputEvidence = rightOutput.provenanceSummary?.equality.inputs ?? null;
   if (!leftInputEvidence || !rightInputEvidence || leftInputEvidence !== rightInputEvidence) {
     reasons.push("Inhalts-Hashes der ausgewerteten Eingaben sind nicht identisch belegt.");
   }
-  const leftModels = evidenceFingerprint(leftOutput, ["model:"]);
-  const rightModels = evidenceFingerprint(rightOutput, ["model:"]);
+  const leftModels = leftOutput.provenanceSummary?.equality.models ?? null;
+  const rightModels = rightOutput.provenanceSummary?.equality.models ?? null;
   if (!leftModels || !rightModels || leftModels !== rightModels) {
     reasons.push("Generationsmodelle oder deren Inhalts-Hashes sind nicht identisch belegt.");
   }
   if (
-    !leftOutput.provenance
-    || !rightOutput.provenance
-    || JSON.stringify(leftOutput.provenance.code.map((item) => item.fingerprint))
-      !== JSON.stringify(rightOutput.provenance.code.map((item) => item.fingerprint))
+    !leftOutput.provenanceSummary?.equality.code
+    || leftOutput.provenanceSummary.equality.code
+      !== rightOutput.provenanceSummary?.equality.code
   ) {
     reasons.push("Codezustände sind nicht identisch belegt.");
   }
   if (
-    !leftOutput.provenance
-    || !rightOutput.provenance
-    || leftOutput.provenance.runtime.fingerprint !== rightOutput.provenance.runtime.fingerprint
+    !leftOutput.provenanceSummary?.equality.runtime
+    || leftOutput.provenanceSummary.equality.runtime
+      !== rightOutput.provenanceSummary?.equality.runtime
   ) {
     reasons.push("Runtime-Versionen sind nicht identisch belegt.");
   }
-  if (
-    leftOutput.request?.numFrames !== rightOutput.request?.numFrames
-    || leftOutput.request?.frameRate !== rightOutput.request?.frameRate
-  ) {
+  const leftTiming = effectiveComparisonTiming(leftOutput);
+  const rightTiming = effectiveComparisonTiming(rightOutput);
+  if (leftTiming.frames !== rightTiming.frames || leftTiming.fps !== rightTiming.fps) {
     reasons.push("Dauer oder Bildrate unterscheiden sich.");
   }
   return { comparable: reasons.length === 0, reasons };
@@ -343,6 +340,12 @@ export function objectiveComparisonMetrics(
   const rightDialogue = "dialogue" in right && typeof right.dialogue === "object"
     ? right.dialogue
     : null;
+  const leftPhonemeViseme = "phonemeViseme" in left ? left.phonemeViseme : null;
+  const rightPhonemeViseme = "phonemeViseme" in right ? right.phonemeViseme : null;
+  const leftPhonemeVisemeMeasurement = leftPhonemeViseme?.measurement ?? null;
+  const rightPhonemeVisemeMeasurement = rightPhonemeViseme?.measurement ?? null;
+  const phonemeVisemeDirection = leftPhonemeViseme?.productGo.status === "passed"
+    && rightPhonemeViseme?.productGo.status === "passed";
   const leftArtifactDiagnostics = left.schemaVersion === "ltx-studio-objective-quality.v7"
     ? left.face
     : null;
@@ -554,6 +557,75 @@ export function objectiveComparisonMetrics(
       digits: 0,
       unit: " ms",
       direction: "lower",
+    },
+    {
+      id: "phoneme-viseme-absolute-lag",
+      label: "Laut-/Lippen-Rohversatz",
+      left: leftPhonemeVisemeMeasurement?.globalAvLagMilliseconds === null
+        || leftPhonemeVisemeMeasurement?.globalAvLagMilliseconds === undefined
+        ? null
+        : Math.abs(leftPhonemeVisemeMeasurement.globalAvLagMilliseconds),
+      right: rightPhonemeVisemeMeasurement?.globalAvLagMilliseconds === null
+        || rightPhonemeVisemeMeasurement?.globalAvLagMilliseconds === undefined
+        ? null
+        : Math.abs(rightPhonemeVisemeMeasurement.globalAvLagMilliseconds),
+      digits: 0,
+      unit: " ms",
+      direction: phonemeVisemeDirection ? "lower" : "neutral",
+    },
+    {
+      id: "phoneme-viseme-lag-confidence",
+      label: "Laut-/Lippen-Rohkonfidenz",
+      left: leftPhonemeVisemeMeasurement?.lagConfidence ?? null,
+      right: rightPhonemeVisemeMeasurement?.lagConfidence ?? null,
+      digits: 3,
+      unit: "",
+      direction: "neutral",
+    },
+    {
+      id: "phoneme-viseme-bilabial-closure",
+      label: "P/B/M-Lippenschluss (Rohwert)",
+      left: leftPhonemeVisemeMeasurement?.bilabialClosureF1 ?? null,
+      right: rightPhonemeVisemeMeasurement?.bilabialClosureF1 ?? null,
+      digits: 3,
+      unit: "",
+      direction: phonemeVisemeDirection ? "higher" : "neutral",
+    },
+    {
+      id: "phoneme-viseme-opening-correlation",
+      label: "Mundöffnungskorrelation (Rohwert)",
+      left: leftPhonemeVisemeMeasurement?.openingCorrelation ?? null,
+      right: rightPhonemeVisemeMeasurement?.openingCorrelation ?? null,
+      digits: 3,
+      unit: "",
+      direction: phonemeVisemeDirection ? "higher" : "neutral",
+    },
+    {
+      id: "phoneme-viseme-rounding-correlation",
+      label: "Lippenrundungskorrelation (Rohwert)",
+      left: leftPhonemeVisemeMeasurement?.roundingCorrelation ?? null,
+      right: rightPhonemeVisemeMeasurement?.roundingCorrelation ?? null,
+      digits: 3,
+      unit: "",
+      direction: phonemeVisemeDirection ? "higher" : "neutral",
+    },
+    {
+      id: "phoneme-viseme-speech-motion-recall",
+      label: "Sprechbewegungs-Recall (Rohwert)",
+      left: leftPhonemeVisemeMeasurement?.speechMotionRecall ?? null,
+      right: rightPhonemeVisemeMeasurement?.speechMotionRecall ?? null,
+      digits: 3,
+      unit: "",
+      direction: phonemeVisemeDirection ? "higher" : "neutral",
+    },
+    {
+      id: "phoneme-viseme-pause-leak",
+      label: "Pausenbewegungsleck (Rohwert)",
+      left: leftPhonemeVisemeMeasurement?.pauseLeakRatio ?? null,
+      right: rightPhonemeVisemeMeasurement?.pauseLeakRatio ?? null,
+      digits: 3,
+      unit: "",
+      direction: phonemeVisemeDirection ? "lower" : "neutral",
     },
     {
       id: "dialogue-word-error-rate",

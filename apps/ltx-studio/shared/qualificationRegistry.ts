@@ -134,7 +134,7 @@ function buildCatalog(options: {
       now: options.now,
       enforceAuthorizationWindow: false,
     });
-    if (signed.document.schemaVersion !== "qualification-authorization.v1") {
+    if (signed.document.schemaVersion !== "qualification-authorization.v3") {
       throw new Error("Qualification mode authorization cannot appear in the run authorization catalog");
     }
     const authorization = signed.document;

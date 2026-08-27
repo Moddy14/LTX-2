@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { canonicalJson } from "./canonicalJson.js";
 import { trustedKeyPolicySchema, verifyDetachedSignature } from "./releaseAudit.js";
+import { runtimeIdentityBindingSchema, runtimeTrustBindingSchema } from "./runtimeTrust.js";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const identifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/);
@@ -34,9 +35,7 @@ export const rightsSeriesBindingSchema = z.object({
   minimumSnapshotVersion: z.number().int().nonnegative(),
 }).strict();
 
-export const activationReleaseBindingSchema = z.object({
-  releaseDigest: sha256Schema,
-  surfaceDigest: sha256Schema,
+export const activationReleaseBindingSchema = runtimeIdentityBindingSchema.extend({
   rights: rightsSeriesBindingSchema,
 }).strict();
 export type ActivationReleaseBinding = z.infer<typeof activationReleaseBindingSchema>;
@@ -57,7 +56,7 @@ export const qualificationRunTicketSchema = z.object({
 }).strict();
 
 export const qualificationAuthorizationSchema = z.object({
-  schemaVersion: z.literal("qualification-authorization.v1"),
+  schemaVersion: z.literal("qualification-authorization.v3"),
   authorizationId: identifierSchema,
   generation: z.number().int().positive(),
   release: activationReleaseBindingSchema,
@@ -104,7 +103,7 @@ export const qualificationAuthorizationSchema = z.object({
 });
 
 export const qualificationModeAuthorizationSchema = z.object({
-  schemaVersion: z.literal("qualification-mode-authorization.v1"),
+  schemaVersion: z.literal("qualification-mode-authorization.v3"),
   authorizationId: identifierSchema,
   generation: z.number().int().positive(),
   release: activationReleaseBindingSchema,
@@ -197,7 +196,7 @@ const supersedePreflightSchema = z.object({
 });
 
 export const activationJournalRecordSchema = z.object({
-  schemaVersion: z.literal("ltx-studio-activation-journal-record.v1"),
+  schemaVersion: z.literal("ltx-studio-activation-journal-record.v3"),
   recordId: z.uuid(),
   sequence: z.number().int().nonnegative(),
   generation: z.number().int().positive(),
@@ -356,9 +355,14 @@ export const activationWriterTrustPolicySchema = z.object({
 export type ActivationWriterTrustPolicy = z.infer<typeof activationWriterTrustPolicySchema>;
 
 export const runtimeRightsSnapshotSchema = z.object({
-  schemaVersion: z.literal("ltx-studio-runtime-rights-snapshot.v1"),
+  schemaVersion: z.literal("ltx-studio-runtime-rights-snapshot.v3"),
   releaseDigest: sha256Schema,
   surfaceDigest: sha256Schema,
+  runtimeInstallSealSha256: sha256Schema,
+  runtimeTreeSha256: sha256Schema,
+  runtimePolicySha256: sha256Schema,
+  nodeExecutableSha256: sha256Schema,
+  runtimeTrust: runtimeTrustBindingSchema,
   policyEvidenceDigest: sha256Schema,
   attestationSeriesId: identifierSchema,
   version: z.number().int().nonnegative(),
@@ -380,6 +384,11 @@ export type RuntimeActivationSnapshot = {
   activationHeadSha256: string;
   releaseDigest: string;
   surfaceDigest: string;
+  runtimeInstallSealSha256: string;
+  runtimeTreeSha256: string;
+  runtimePolicySha256: string;
+  nodeExecutableSha256: string;
+  runtimeTrust: z.infer<typeof runtimeTrustBindingSchema>;
   rightsCurrent: boolean;
   releasedSurfaceEntryIds: readonly string[];
 };
@@ -452,7 +461,7 @@ export function validateQualificationRegistration(options: {
     trustPolicy: options.trustPolicy,
     now: options.now,
   });
-  if (signed.document.schemaVersion !== "qualification-authorization.v1") {
+  if (signed.document.schemaVersion !== "qualification-authorization.v3") {
     throw new Error("Qualification mode authorization cannot be registered as a run authorization");
   }
   const journal = validateActivationJournal(options.journal);
@@ -538,6 +547,11 @@ export function verifyRuntimeRightsSnapshot(options: {
   );
   if (document.releaseDigest !== options.release.releaseDigest
     || document.surfaceDigest !== options.release.surfaceDigest
+    || document.runtimeInstallSealSha256 !== options.release.runtimeInstallSealSha256
+    || document.runtimeTreeSha256 !== options.release.runtimeTreeSha256
+    || document.runtimePolicySha256 !== options.release.runtimePolicySha256
+    || document.nodeExecutableSha256 !== options.release.nodeExecutableSha256
+    || canonicalJson(document.runtimeTrust) !== canonicalJson(options.release.runtimeTrust)
     || document.policyEvidenceDigest !== options.release.rights.policyEvidenceDigest
     || document.attestationSeriesId !== options.release.rights.attestationSeriesId
     || document.version < options.release.rights.minimumSnapshotVersion) {
@@ -653,6 +667,11 @@ export function runtimeActivationSnapshot(
     activationHeadSha256: activationEnvelopeDigest(last),
     releaseDigest: last.record.release.releaseDigest,
     surfaceDigest: last.record.release.surfaceDigest,
+    runtimeInstallSealSha256: last.record.release.runtimeInstallSealSha256,
+    runtimeTreeSha256: last.record.release.runtimeTreeSha256,
+    runtimePolicySha256: last.record.release.runtimePolicySha256,
+    nodeExecutableSha256: last.record.release.nodeExecutableSha256,
+    runtimeTrust: last.record.release.runtimeTrust,
     rightsCurrent,
     releasedSurfaceEntryIds: [...last.record.releasedSurfaceEntryIds],
   };

@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from .design import document_sha256
+from .design import (
+    CURRENT_PLANNING_HYPOTHESIS_COUNT,
+    CURRENT_VBENCH_CLAIM_COUNT,
+    CURRENT_VBENCH_GATE_COUNT,
+    document_sha256,
+)
+from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
 
-CROSS_SHOT_SCHEMA = "ltx-av-eval-cross-shot-protocol.v1"
-CROSS_SHOT_REPORT_SCHEMA = "ltx-av-eval-cross-shot-protocol-report.v1"
-DESIGN_REPORT_SCHEMA = "ltx-sota-power-report.v1"
+LEGACY_CROSS_SHOT_SCHEMA = "ltx-av-eval-cross-shot-protocol.v1"
+LEGACY_CROSS_SHOT_REPORT_SCHEMA = "ltx-av-eval-cross-shot-protocol-report.v1"
+CROSS_SHOT_SCHEMA = "ltx-av-eval-cross-shot-protocol.v2"
+CROSS_SHOT_REPORT_SCHEMA = "ltx-av-eval-cross-shot-protocol-report.v2"
 CLAIM_IDS = (
     "reference-video-redubbing.native-distilled",
     "reference-video-redubbing.official-comfy-hq",
@@ -90,6 +97,12 @@ DESIGN_REPORT_KEYS = {
     "required_independent_units",
     "required_clips",
     "strata_quotas_digest",
+    "surface_digest",
+    "candidate_surface_binding_digest",
+    "candidate_surface_entry_count",
+    "strata_quota_semantics_digest",
+    "vbench_claim_count",
+    "vbench_gate_count",
 }
 
 
@@ -254,6 +267,14 @@ def _validate_design_report(raw: object, protocol: dict[str, Any]) -> list[str]:
     _exact_keys(raw, DESIGN_REPORT_KEYS, "design report")
     if raw["schema_version"] != DESIGN_REPORT_SCHEMA or raw["status"] != "ready-to-freeze" or raw["blockers"] != []:
         raise CrossShotProtocolError("Q0 requires a complete ready-to-freeze D0a power report")
+    if (
+        raw["planning_hypothesis_count"] != CURRENT_PLANNING_HYPOTHESIS_COUNT
+        or raw["vbench_claim_count"] != CURRENT_VBENCH_CLAIM_COUNT
+        or raw["vbench_gate_count"] != CURRENT_VBENCH_GATE_COUNT
+    ):
+        raise CrossShotProtocolError("Q0 requires the complete current D0a planning family")
+    _sha256(raw["surface_digest"], "D0a full release surface")
+    _sha256(raw["candidate_surface_binding_digest"], "D0a candidate surface binding")
     required = raw["required_independent_units"]
     if not isinstance(required, int) or isinstance(required, bool) or required < 30:
         raise CrossShotProtocolError("D0a report has an invalid independent-unit requirement")

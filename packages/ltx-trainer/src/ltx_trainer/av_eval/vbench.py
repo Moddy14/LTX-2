@@ -8,10 +8,13 @@ from dataclasses import dataclass
 from statistics import NormalDist, stdev
 from typing import Any, Literal
 
+from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
 from .design import DesignError, build_power_report, document_sha256
 
-VBENCH_OBSERVATIONS_SCHEMA = "ltx-av-eval-vbench-observations.v1"
-VBENCH_MEASUREMENTS_SCHEMA = "ltx-av-eval-vbench-measurements.v1"
+LEGACY_VBENCH_OBSERVATIONS_SCHEMA = "ltx-av-eval-vbench-observations.v1"
+LEGACY_VBENCH_MEASUREMENTS_SCHEMA = "ltx-av-eval-vbench-measurements.v1"
+VBENCH_OBSERVATIONS_SCHEMA = "ltx-av-eval-vbench-observations.v2"
+VBENCH_MEASUREMENTS_SCHEMA = "ltx-av-eval-vbench-measurements.v2"
 BOOTSTRAP_REPLICATES = 10_000
 CONFIDENCE_LEVEL = 0.95
 FAMILYWISE_ALPHA = 0.05
@@ -117,12 +120,19 @@ def _validate_design(design: object, raw: dict[str, Any]) -> tuple[dict[str, Any
         report = build_power_report(design)
     except DesignError as error:
         raise VBenchMeasurementError(f"D0a design rejected: {error}") from error
+    if report["schema_version"] != DESIGN_REPORT_SCHEMA:
+        raise VBenchMeasurementError("D0a design uses a legacy power-report schema")
     if report["status"] != "ready-to-freeze" or design["status"] != "frozen":
         raise VBenchMeasurementError("D0a design is not frozen and ready-to-freeze")
     if report["design_digest"] != raw["design_digest"]:
         raise VBenchMeasurementError("design_digest mismatch")
     if report["vbench_gate_catalog_digest"] != raw["vbench_gate_catalog_digest"]:
         raise VBenchMeasurementError("vbench_gate_catalog_digest mismatch")
+    if (
+        report["surface_digest"] != raw["surface_digest"]
+        or report["candidate_surface_binding_digest"] != raw["candidate_surface_binding_digest"]
+    ):
+        raise VBenchMeasurementError("release surface binding mismatch")
     catalog = design["vbench_gate_catalog"]
     if catalog["commit"] != raw["repository_commit"] or catalog["config_sha256"] != raw["config_digest"]:
         raise VBenchMeasurementError("official VBench commit or config mismatch")
@@ -316,6 +326,8 @@ def build_vbench_measurements(raw: object, *, design: object) -> dict[str, Any]:
             "dataset_digest",
             "preregistration_digest",
             "release_digest",
+            "surface_digest",
+            "candidate_surface_binding_digest",
             "strata_plan_digest",
             "design_digest",
             "vbench_gate_catalog_digest",
@@ -334,6 +346,8 @@ def build_vbench_measurements(raw: object, *, design: object) -> dict[str, Any]:
         "dataset_digest",
         "preregistration_digest",
         "release_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
         "strata_plan_digest",
         "design_digest",
         "vbench_gate_catalog_digest",
@@ -396,6 +410,8 @@ def build_vbench_measurements(raw: object, *, design: object) -> dict[str, Any]:
         "dataset_digest": raw["dataset_digest"],
         "preregistration_digest": raw["preregistration_digest"],
         "release_digest": raw["release_digest"],
+        "surface_digest": raw["surface_digest"],
+        "candidate_surface_binding_digest": raw["candidate_surface_binding_digest"],
         "strata_plan_digest": raw["strata_plan_digest"],
         "design_digest": raw["design_digest"],
         "vbench_gate_catalog_digest": raw["vbench_gate_catalog_digest"],

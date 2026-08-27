@@ -1,0 +1,15 @@
+export const BUILD_TCB_SCHEMA: string;
+export const BUILD_TCB_POLICY_SCHEMA: string;
+export const BUILD_TCB_POLICY_PATH: string;
+export const REQUIRED_BUILD_PACKAGES: readonly string[];
+export function canonicalTreeInventory(root: string): unknown[];
+export function canonicalTreeSha256(root: string): string;
+export function canonicalMaterializedSourceInventory(root: string): unknown[];
+export function parseGitTreeInventory(raw: Uint8Array | string): Array<{ mode: string; oid: string; path: string }>;
+export function materializeGitTree(repoRoot: string, destination: string, options: Record<string, unknown>): any;
+export function hermeticBuildEnvironment(options: Record<string, unknown>): Record<string, string>;
+export function captureBuildTcb(options: Record<string, unknown>): any;
+export function buildTcbSha256(record: unknown): string;
+export function preflightBuildTcbPolicy(policy: unknown, expectedPolicySha256: string): any;
+export function verifyBuildTcbPolicy(policy: unknown, record: any, expectedPolicySha256: string): any;
+export function readExternalBuildTcbPolicy(path?: string, options?: Record<string, unknown>): { policy: unknown; sha256: string };

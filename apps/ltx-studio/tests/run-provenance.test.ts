@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -7,16 +8,24 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   bindRunProvenanceFile,
+  bindRunExecutionDecision,
   captureGemmaManifest,
+  capturePythonPackageManifest,
   captureProvenanceFile,
   captureRunProvenance,
+  forkVerifiedRunProvenanceForArtifactPromotion,
   normalizeRunProvenance,
+  runProvenanceFingerprintMatches,
   verifyProvenanceFileEvidence,
+  verifyPythonPackageBinding,
+  verifyRunProvenance,
 } from "../server/runProvenance.js";
+import { releaseIdentity } from "../server/releaseIdentity.js";
 import { createDefaultRequest } from "../shared/pipelines.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import { upstreamWorkflowContractsForRequest } from "../shared/upstreamWorkflowContracts.js";
 import { validLtx25SplitRequest } from "./fixtures.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const roots: string[] = [];
 
@@ -30,7 +39,99 @@ async function temporaryRoot(prefix: string): Promise<string> {
   return root;
 }
 
+async function temporaryPythonRuntime(prefix: string, marker: string): Promise<{
+  executable: string;
+  packageRoot: string;
+}> {
+  const root = await temporaryRoot(prefix);
+  const runtimeRoot = join(root, "runtime");
+  execFileSync("python3", ["-m", "venv", "--without-pip", runtimeRoot], {
+    timeout: 30_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const executable = join(runtimeRoot, "bin", "python");
+  const sitePackages = execFileSync(executable, [
+    "-I",
+    "-c",
+    "import sysconfig; print(sysconfig.get_paths()['purelib'])",
+  ], {
+    encoding: "utf8",
+    timeout: 10_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const packageRoot = join(sitePackages, "ltx_pipelines");
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(join(packageRoot, "__init__.py"), `MARKER = ${JSON.stringify(marker)}\n`);
+  await writeFile(join(packageRoot, "runner.py"), "VALUE = 1\n");
+  return { executable, packageRoot };
+}
+
 describe("run provenance", () => {
+  it("binds the exact ltx_pipelines package root resolved by the configured Python", async () => {
+    const runtime = await temporaryPythonRuntime("ltx-python-package-root-", "expected-runtime");
+
+    const evidence = await capturePythonPackageManifest(runtime.executable);
+
+    expect(evidence).toMatchObject({
+      role: "runtime:python-package:ltx_pipelines",
+      path: runtime.packageRoot,
+      kind: "python-package-manifest",
+    });
+    expect(evidence.entries.map((entry) => entry.relativePath)).toEqual([
+      "__init__.py",
+      "runner.py",
+    ]);
+    expect(verifyProvenanceFileEvidence(evidence)).toBeNull();
+    await expect(verifyPythonPackageBinding(evidence, runtime.executable)).resolves.toBeNull();
+  });
+
+  it("rejects an in-place ltx_pipelines mutation even when its distribution version is unchanged", async () => {
+    const runtime = await temporaryPythonRuntime("ltx-python-package-mutation-", "same-version");
+    const evidence = await capturePythonPackageManifest(runtime.executable);
+
+    await writeFile(join(runtime.packageRoot, "runner.py"), "VALUE = 2\n");
+
+    expect(verifyProvenanceFileEvidence(evidence)).toContain("Python-Paketrevision hat sich geändert");
+    await expect(verifyPythonPackageBinding(evidence, runtime.executable))
+      .resolves.toContain("Python-Paketinhalt hat sich geändert");
+  });
+
+  it("rejects a configured Python that resolves ltx_pipelines from another package root", async () => {
+    const capturedRuntime = await temporaryPythonRuntime("ltx-python-package-a-", "runtime-a");
+    const otherRuntime = await temporaryPythonRuntime("ltx-python-package-b-", "runtime-b");
+    const evidence = await capturePythonPackageManifest(capturedRuntime.executable);
+
+    await expect(verifyPythonPackageBinding(evidence, otherRuntime.executable))
+      .resolves.toContain("Python-Importpfad hat sich geändert");
+  });
+
+  it("fails closed when v2 run evidence has no imported ltx_pipelines manifest", async () => {
+    const result = await verifyRunProvenance({
+      schemaVersion: "ltx-studio-run-provenance.v2",
+      capturedAt: "2026-08-26T00:00:00.000Z",
+      verifiedAt: null,
+      files: [],
+      code: [],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "test",
+        nodeVersion: "test",
+        pythonExecutable: "/python",
+        pythonVersion: "test",
+        packages: { "ltx-pipelines": "1.2.0" },
+        ffmpegVersion: "test",
+        fingerprint: "a".repeat(64),
+      },
+      upstreamContracts: [],
+      release: releaseIdentity,
+      fingerprint: "b".repeat(64),
+    }, createDefaultRequest("distilled"));
+
+    expect(result.error).toContain("nicht eindeutig kryptografisch gebunden");
+    expect(result.evidence.verifiedAt).toBeNull();
+  });
+
   it("binds a regular file to its actual SHA-256 and revision", async () => {
     const root = await temporaryRoot("ltx-provenance-file-");
     const path = join(root, "speech.wav");
@@ -104,6 +205,7 @@ describe("run provenance", () => {
     );
 
     expect(bound.verifiedAt).toBeNull();
+    expect(Object.hasOwn(bound, "containerImages")).toBe(false);
     expect(bound.fingerprint).not.toBe(original.fingerprint);
     expect(bound.files).toHaveLength(1);
     expect(bound.files[0]).toMatchObject({
@@ -112,6 +214,98 @@ describe("run provenance", () => {
       sha256: createHash("sha256").update("immutable-base").digest("hex"),
     });
     expect(verifyProvenanceFileEvidence(bound.files[0])).toBeNull();
+  });
+
+  it("binds ExecutionDecision.v4 into the provenance fingerprint", () => {
+    const original: RunProvenance = {
+      schemaVersion: "ltx-studio-run-provenance.v1",
+      capturedAt: "2026-08-25T10:00:00.000Z",
+      verifiedAt: "2026-08-25T10:00:01.000Z",
+      files: [],
+      code: [],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "test",
+        nodeVersion: "test",
+        pythonExecutable: "/python",
+        pythonVersion: "test",
+        packages: {},
+        ffmpegVersion: "ffmpeg test",
+        fingerprint: "a".repeat(64),
+      },
+      fingerprint: "b".repeat(64),
+    };
+    const decision = {
+      schemaVersion: "ltx-studio-execution-decision.v5" as const,
+      executionClass: "dgx" as const,
+      decidedAt: "2026-08-25T10:00:02.000Z",
+      reason: "DGX plan requires orchestrated compute.",
+      requestSha256: "c".repeat(64),
+      protocolSha256: null,
+      cpuReuse: null,
+      operation: null,
+    };
+
+    const bound = bindRunExecutionDecision(original, decision);
+
+    expect(bound.executionDecision).toEqual(decision);
+    expect(bound.verifiedAt).toBeNull();
+    expect(Object.hasOwn(bound, "containerImages")).toBe(false);
+    expect(bound.fingerprint).not.toBe(original.fingerprint);
+    expect(normalizeRunProvenance(bound)?.executionDecision).toEqual(decision);
+    expect(runProvenanceFingerprintMatches(bound)).toBe(true);
+
+    const tampered = structuredClone(bound);
+    tampered.executionDecision!.reason = "Decision and sidecar were rewritten together.";
+    expect(runProvenanceFingerprintMatches(tampered)).toBe(false);
+  });
+
+  it("forks verified historical provenance for artifact promotion without recapturing DGX inputs", () => {
+    const original: RunProvenance = {
+      schemaVersion: "ltx-studio-run-provenance.v1",
+      capturedAt: "2026-08-26T10:00:00.000Z",
+      verifiedAt: null,
+      files: [],
+      code: [],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "historical",
+        nodeVersion: "historical",
+        pythonExecutable: "/historical/python",
+        pythonVersion: "historical",
+        packages: {},
+        ffmpegVersion: "historical",
+        fingerprint: "a".repeat(64),
+      },
+      fingerprint: "b".repeat(64),
+    };
+    const baselineDecision = {
+      schemaVersion: "ltx-studio-execution-decision.v5" as const,
+      executionClass: "dgx" as const,
+      decidedAt: "2026-08-26T10:00:01.000Z",
+      reason: "Historical baseline render.",
+      requestSha256: "c".repeat(64),
+      protocolSha256: "d".repeat(64),
+      cpuReuse: null,
+      operation: null,
+    };
+    const baseline = {
+      ...bindRunExecutionDecision(original, baselineDecision),
+      verifiedAt: "2026-08-26T10:00:02.000Z",
+    };
+
+    const fork = forkVerifiedRunProvenanceForArtifactPromotion(baseline);
+
+    expect(runProvenanceFingerprintMatches(fork)).toBe(true);
+    expect(fork.verifiedAt).toBeNull();
+    expect(fork.executionDecision).toBeUndefined();
+    expect(fork.runtime).toEqual(baseline.runtime);
+    expect(() => forkVerifiedRunProvenanceForArtifactPromotion({
+      ...baseline,
+      verifiedAt: null,
+    })).toThrow(/nicht verifiziert/u);
   });
 
   it("manifests only Gemma configuration and shards referenced by the HF index", async () => {
@@ -281,6 +475,7 @@ describe("run provenance", () => {
       fingerprint: "b".repeat(64),
     } satisfies RunProvenance;
     expect(normalizeRunProvenance(base)).not.toBeNull();
+    expect(normalizeRunProvenance({ ...base, containerImages: [] })).toBeNull();
 
     const withContract: RunProvenance = {
       ...base,
@@ -295,7 +490,14 @@ describe("run provenance", () => {
         verified: true,
         releaseDigest: "e".repeat(64),
         manifestSha256: "e".repeat(64),
+        surfaceDigest: "1".repeat(64),
         sourceCommit: "f".repeat(40),
+        runtimeInstallSealSha256: "2".repeat(64),
+        runtimeTreeSha256: "3".repeat(64),
+        runtimePolicySha256: "4".repeat(64),
+        nodeExecutableSha256: "5".repeat(64),
+        expectedHostTcbAttestationSha256: runtimeTrustFixture.hostTcbAttestationSha256,
+        runtimeTrust: runtimeTrustFixture,
       },
     })).not.toBeNull();
     expect(normalizeRunProvenance({

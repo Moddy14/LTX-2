@@ -13,6 +13,7 @@ import {
   validateEvaluationConsumption,
   type EvaluationConsumptionRecord,
 } from "../shared/evaluationAuthorization.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -20,10 +21,15 @@ function fixture() {
   const evaluationKey = generateKeyPairSync("ed25519");
   const holdoutKey = generateKeyPairSync("ed25519");
   const authorization = evaluationAuthorizationSchema.parse({
-    schemaVersion: "ltx-studio-evaluation-authorization.v1",
+    schemaVersion: "ltx-studio-evaluation-authorization.v3",
     authorizationId: "q2-evaluation-001",
     releaseDigest: sha("release"),
     surfaceDigest: sha("surface"),
+    runtimeInstallSealSha256: sha("runtime-seal"),
+    runtimeTreeSha256: sha("runtime-tree"),
+    runtimePolicySha256: sha("runtime-policy"),
+    nodeExecutableSha256: sha("node-executable"),
+    runtimeTrust: runtimeTrustFixture,
     preregistrationDigest: sha("preregistration"),
     q2RunnerDigest: sha("q2-runner"),
     q2RunnerContractDigest: sha("q2-runner-contract"),

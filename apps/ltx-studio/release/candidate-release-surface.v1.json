@@ -38,6 +38,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -60,6 +62,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -96,6 +99,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -118,6 +123,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -154,6 +160,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -176,6 +184,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -212,6 +221,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -233,6 +244,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable. Adding LongCat does not remove that block.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable. Adding LongCat does not remove that block.",
       "targetStatus": "blocked"
     },
     {
@@ -269,6 +281,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -292,6 +306,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -327,6 +342,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -347,6 +364,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -383,6 +401,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -404,6 +424,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -440,6 +461,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -461,6 +484,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -497,6 +521,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -518,6 +544,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -554,6 +581,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -574,6 +603,7 @@
         "reason": "LongCat is MIT-licensed, while activation still requires signed LTX-2, Gemma, and biometric-input attestations.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -610,6 +640,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -632,6 +664,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -667,6 +700,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -686,6 +721,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -715,6 +751,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -736,6 +774,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -765,6 +804,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -786,6 +827,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -815,6 +857,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -836,6 +880,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -865,6 +910,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -887,6 +934,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -925,6 +973,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -944,6 +994,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -979,6 +1030,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -1000,6 +1053,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1035,6 +1089,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -1056,6 +1112,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1091,6 +1148,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -1112,6 +1171,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1147,6 +1207,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -1169,6 +1231,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -1212,6 +1275,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -1231,6 +1296,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -1260,6 +1326,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
@@ -1280,6 +1348,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1309,6 +1378,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
@@ -1329,6 +1400,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1358,6 +1430,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
@@ -1378,6 +1452,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1407,6 +1482,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
@@ -1428,6 +1505,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -1466,6 +1544,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "hdr",
         "lipDubPipelineProfile": null,
@@ -1484,6 +1564,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -1513,6 +1594,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
@@ -1534,6 +1617,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1563,6 +1647,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
@@ -1584,6 +1670,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1613,6 +1700,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
@@ -1634,6 +1723,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1663,6 +1753,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
@@ -1685,6 +1777,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -1723,6 +1816,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
@@ -1742,6 +1837,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -1771,6 +1867,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
@@ -1792,6 +1890,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1821,6 +1920,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
@@ -1842,6 +1943,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1871,6 +1973,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
@@ -1892,6 +1996,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -1921,6 +2026,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
@@ -1943,6 +2050,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -1981,6 +2089,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "inpainting",
         "lipDubPipelineProfile": null,
@@ -2000,6 +2110,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -2030,6 +2141,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
@@ -2051,6 +2164,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2081,6 +2195,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
@@ -2102,6 +2218,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2132,6 +2249,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
@@ -2153,6 +2272,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2183,6 +2303,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
@@ -2205,6 +2327,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -2244,6 +2367,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
@@ -2263,6 +2388,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -2292,6 +2418,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
@@ -2313,6 +2441,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2342,6 +2471,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
@@ -2363,6 +2494,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2392,6 +2524,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
@@ -2413,6 +2547,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2442,6 +2577,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
@@ -2464,6 +2601,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -2502,6 +2640,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "outpainting",
         "lipDubPipelineProfile": null,
@@ -2521,6 +2661,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -2550,6 +2691,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
@@ -2571,6 +2714,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2600,6 +2744,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
@@ -2621,6 +2767,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2650,6 +2797,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
@@ -2671,6 +2820,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2700,6 +2850,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
@@ -2722,6 +2874,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -2760,6 +2913,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "pixel-upscaler",
         "lipDubPipelineProfile": null,
@@ -2779,6 +2934,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -2809,6 +2965,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -2832,6 +2990,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2862,6 +3021,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -2885,6 +3046,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2915,6 +3077,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -2938,6 +3102,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -2968,6 +3133,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -2992,6 +3159,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -3031,6 +3199,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -3052,6 +3222,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -3082,6 +3253,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -3104,6 +3277,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3134,6 +3308,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -3156,6 +3332,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3186,6 +3363,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -3208,6 +3387,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3238,6 +3418,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -3261,6 +3443,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -3300,6 +3483,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
@@ -3320,6 +3505,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -3349,6 +3535,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
@@ -3370,6 +3558,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3399,6 +3588,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
@@ -3420,6 +3611,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3449,6 +3641,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
@@ -3470,6 +3664,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3499,6 +3694,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
@@ -3521,6 +3718,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -3559,6 +3757,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "v2v-instant-shave",
         "lipDubPipelineProfile": null,
@@ -3578,6 +3778,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -3608,6 +3809,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3630,6 +3833,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3660,6 +3864,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3682,6 +3888,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3712,6 +3919,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3734,6 +3943,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3764,6 +3974,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3787,6 +3999,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -3816,6 +4029,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3836,6 +4051,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -3866,6 +4082,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3888,6 +4106,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3918,6 +4137,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3940,6 +4161,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -3970,6 +4192,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -3992,6 +4216,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4022,6 +4247,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4043,6 +4270,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable. Adding LongCat does not remove that block.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable. Adding LongCat does not remove that block.",
       "targetStatus": "blocked"
     },
     {
@@ -4073,6 +4301,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4096,6 +4326,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -4125,6 +4356,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4145,6 +4378,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -4175,6 +4409,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4196,6 +4432,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4226,6 +4463,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4247,6 +4486,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4277,6 +4517,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4298,6 +4540,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4328,6 +4571,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4348,6 +4593,7 @@
         "reason": "LongCat is MIT-licensed, while activation still requires signed LTX-2, Gemma, and biometric-input attestations.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -4378,6 +4624,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4400,6 +4648,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -4429,6 +4678,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4448,6 +4699,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -4478,6 +4730,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4499,6 +4753,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4529,6 +4784,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4550,6 +4807,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4580,6 +4838,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4601,6 +4861,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4631,6 +4892,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4653,6 +4916,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -4692,6 +4956,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -4711,6 +4977,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -4742,6 +5009,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
@@ -4763,6 +5032,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4794,6 +5064,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
@@ -4815,6 +5087,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4846,6 +5119,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
@@ -4867,6 +5142,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -4898,6 +5174,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
@@ -4920,6 +5198,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -4950,6 +5229,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "native-distilled",
@@ -4969,6 +5250,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5000,6 +5282,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
@@ -5021,6 +5305,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -5052,6 +5337,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
@@ -5073,6 +5360,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -5104,6 +5392,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
@@ -5125,6 +5415,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -5156,6 +5447,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
@@ -5178,6 +5471,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -5208,6 +5502,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": "official-comfy-hq",
@@ -5227,7 +5523,790 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.image.temporal-0.spatial-1.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "verified-dfr-detailing-ic-lora-fixed-0.5"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 1,
+        "dfrTemporalUpscalings": 0,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.image.temporal-0.spatial-2.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "verified-dfr-detailing-ic-lora-fixed-0.5"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 2,
+        "dfrTemporalUpscalings": 0,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.image.temporal-1.spatial-1.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 1,
+        "dfrTemporalUpscalings": 1,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.image.temporal-1.spatial-2.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 2,
+        "dfrTemporalUpscalings": 1,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.image.temporal-2.spatial-1.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 1,
+        "dfrTemporalUpscalings": 2,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "identity",
+        "sharpness",
+        "vbench-i2v",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.image-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.image.temporal-2.spatial-2.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "one-or-more-reference-images",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 2,
+        "dfrTemporalUpscalings": 2,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "image",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.text.temporal-0.spatial-1.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verified-dfr-detailing-ic-lora-fixed-0.5"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 1,
+        "dfrTemporalUpscalings": 0,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.text.temporal-0.spatial-2.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verified-dfr-detailing-ic-lora-fixed-0.5"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 2,
+        "dfrTemporalUpscalings": 0,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.text.temporal-1.spatial-1.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 1,
+        "dfrTemporalUpscalings": 1,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.text.temporal-1.spatial-2.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 2,
+        "dfrTemporalUpscalings": 1,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.text.temporal-2.spatial-1.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 1,
+        "dfrTemporalUpscalings": 2,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "av-sync",
+        "sharpness",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.dfr.text-to-video",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.dfr.text.temporal-2.spatial-2.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verified-dfr-detailing-ic-lora-fixed-0.5",
+        "verified-dfr-temporal-upscaler"
+      ],
+      "notApplicable": [
+        {
+          "gate": "phoneme-viseme",
+          "reason": "This surface entry makes no speech or lip-synchronization claim."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "This surface entry makes no mouth-rendering claim."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "This claim has no image/video reference input and is outside VBench-I2V's input contract."
+        },
+        {
+          "gate": "asr-critical-token",
+          "reason": "This surface entry makes no intelligible-speech claim."
+        }
+      ],
+      "outputMedia": "video/mp4",
+      "request": {
+        "dfrSpatialUpscalings": 2,
+        "dfrTemporalUpscalings": 2,
+        "dialogueIntent": "optional",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "dfr",
+        "modelProfile": "ltx25-split-bf16-dfr",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "text",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+      "targetStatus": "blocked"
     },
     {
       "applicableGates": [
@@ -5265,6 +6344,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5284,6 +6365,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5322,6 +6404,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5341,6 +6425,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5384,6 +6469,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5403,6 +6490,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5446,6 +6534,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5465,6 +6555,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5503,6 +6594,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "ingredients",
         "lipDubPipelineProfile": null,
@@ -5523,6 +6616,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5562,6 +6656,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "motion-track",
         "lipDubPipelineProfile": null,
@@ -5582,6 +6678,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5621,11 +6718,13 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
-        "modelProfile": "ltx25-split-bf16-single-stage",
+        "modelProfile": "ltx25-split-bf16-two-stage",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
@@ -5641,7 +6740,8 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
-      "targetStatus": "candidate"
+      "targetReason": "The pinned official LTX-2.5 Union Control workflow is two-stage, but the native Stage-2/spatial-upscaler implementation and executable contract proof are not implemented yet.",
+      "targetStatus": "blocked"
     },
     {
       "applicableGates": [
@@ -5680,11 +6780,13 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
-        "modelProfile": "ltx25-split-bf16-single-stage",
+        "modelProfile": "ltx25-split-bf16-two-stage",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
@@ -5701,7 +6803,8 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
-      "targetStatus": "candidate"
+      "targetReason": "The pinned official LTX-2.5 Union Control workflow is two-stage, but the native Stage-2/spatial-upscaler implementation and executable contract proof are not implemented yet.",
+      "targetStatus": "blocked"
     },
     {
       "applicableGates": [
@@ -5740,11 +6843,13 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": "union-control",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
-        "modelProfile": "ltx25-split-bf16-single-stage",
+        "modelProfile": "ltx25-split-bf16-two-stage",
         "postprocessor": "none",
         "promptEncoderProfile": "not-applicable",
         "retakeCheckpoint": null,
@@ -5760,7 +6865,8 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
-      "targetStatus": "candidate"
+      "targetReason": "The pinned official LTX-2.5 Union Control workflow is two-stage, but the native Stage-2/spatial-upscaler implementation and executable contract proof are not implemented yet.",
+      "targetStatus": "blocked"
     },
     {
       "applicableGates": [
@@ -5775,9 +6881,9 @@
         "audio-quality",
         "mos"
       ],
-      "claimId": "controlled-video.ltx25.ic-lora.v2v-instant-shave",
+      "claimId": "controlled-video.ltx25.ic-lora.v2v-deblur",
       "cooperativeCheckpoint": false,
-      "id": "ltx25.ic-lora.v2v-instant-shave.prompt.not-applicable.post.none",
+      "id": "ltx25.ic-lora.v2v-deblur.prompt.not-applicable.post.none",
       "inputContract": [
         "prompt",
         "control-video"
@@ -5798,8 +6904,10 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
-        "icLoraProfile": "v2v-instant-shave",
+        "icLoraProfile": "v2v-deblur",
         "lipDubPipelineProfile": null,
         "mode": "ic-lora",
         "modelProfile": "ltx25-split-bf16-single-stage",
@@ -5818,6 +6926,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5848,6 +6957,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5869,6 +6980,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -5899,6 +7011,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5920,6 +7034,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -5949,6 +7064,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -5968,6 +7085,7 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -5992,11 +7110,11 @@
         },
         {
           "gate": "phoneme-viseme",
-          "reason": "This surface entry makes no speech or lip-synchronization claim."
+          "reason": "Audio-only output has no visible phoneme-to-viseme alignment."
         },
         {
           "gate": "mouth-artifact",
-          "reason": "This surface entry makes no mouth-rendering claim."
+          "reason": "Audio-only output has no rendered mouth region."
         },
         {
           "gate": "identity",
@@ -6017,6 +7135,8 @@
       ],
       "outputMedia": "audio/wav",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6036,6 +7156,76 @@
         "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
+      "targetStatus": "candidate"
+    },
+    {
+      "applicableGates": [
+        "runtime-import",
+        "cold-canary",
+        "playable-output",
+        "provenance",
+        "asr-critical-token",
+        "audio-quality",
+        "mos"
+      ],
+      "claimId": "native-generation.ltx25.text-to-audio.single-stage.verbatim-dialogue",
+      "cooperativeCheckpoint": false,
+      "id": "ltx25.text-to-audio.single-stage.verbatim-dialogue.prompt.not-applicable.post.none",
+      "inputContract": [
+        "prompt",
+        "verbatim-dialogue"
+      ],
+      "notApplicable": [
+        {
+          "gate": "av-sync",
+          "reason": "Audio-only output has no video timeline."
+        },
+        {
+          "gate": "phoneme-viseme",
+          "reason": "Audio-only output has no visible phoneme-to-viseme alignment."
+        },
+        {
+          "gate": "mouth-artifact",
+          "reason": "Audio-only output has no rendered mouth region."
+        },
+        {
+          "gate": "identity",
+          "reason": "This surface entry has no identity-bearing visual reference."
+        },
+        {
+          "gate": "sharpness",
+          "reason": "Audio-only output has no image sharpness dimension."
+        },
+        {
+          "gate": "vbench-i2v",
+          "reason": "Audio-only output is outside VBench-I2V's input contract."
+        }
+      ],
+      "outputMedia": "audio/wav",
+      "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
+        "dialogueIntent": "required",
+        "icLoraProfile": null,
+        "lipDubPipelineProfile": null,
+        "mode": "text-to-audio",
+        "modelProfile": "ltx25-split-bf16-single-stage",
+        "postprocessor": "none",
+        "promptEncoderProfile": "not-applicable",
+        "retakeCheckpoint": null,
+        "sourceMode": "not-applicable",
+        "unionControlType": null
+      },
+      "rights": {
+        "evidenceIds": [
+          "ltx25-community-license-model-card-2026-08-21",
+          "gemma-terms-model-card"
+        ],
+        "reason": "Activation requires current signed attestations for the gated LTX-2.5 stack, reused LTX-2 IC-LoRAs where applicable, Gemma terms, commercial scope, acceptable-use, notice, and consent controls.",
+        "status": "conditional"
+      },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -6065,6 +7255,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6086,6 +7278,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6115,6 +7308,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6136,6 +7331,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6165,6 +7361,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6186,6 +7384,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6215,6 +7414,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6237,6 +7438,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -6275,6 +7477,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6294,6 +7498,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -6329,6 +7534,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6350,6 +7557,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6385,6 +7593,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6406,6 +7616,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6441,6 +7652,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6462,6 +7675,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6497,6 +7711,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6519,6 +7735,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -6562,6 +7779,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6581,6 +7800,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -6611,6 +7831,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6632,6 +7854,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6662,6 +7885,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6683,6 +7908,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6713,6 +7939,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6734,6 +7962,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6764,6 +7993,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6786,6 +8017,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -6825,6 +8057,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6844,6 +8078,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -6874,6 +8109,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6895,6 +8132,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6925,6 +8163,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6946,6 +8186,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -6976,6 +8217,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -6997,6 +8240,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7027,6 +8271,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7049,6 +8295,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -7088,6 +8335,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7107,6 +8356,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -7131,11 +8381,11 @@
         },
         {
           "gate": "phoneme-viseme",
-          "reason": "This surface entry makes no speech or lip-synchronization claim."
+          "reason": "Audio-only output has no visible phoneme-to-viseme alignment."
         },
         {
           "gate": "mouth-artifact",
-          "reason": "This surface entry makes no mouth-rendering claim."
+          "reason": "Audio-only output has no rendered mouth region."
         },
         {
           "gate": "identity",
@@ -7156,6 +8406,8 @@
       ],
       "outputMedia": "audio/wav",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7175,6 +8427,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -7204,6 +8457,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7226,6 +8481,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7255,6 +8511,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7277,6 +8535,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7306,6 +8565,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7328,6 +8589,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7357,6 +8619,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7380,6 +8644,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -7418,6 +8683,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7438,6 +8705,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -7467,6 +8735,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7488,6 +8758,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7517,6 +8788,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7538,6 +8811,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7567,6 +8841,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7588,6 +8864,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7617,6 +8894,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7639,6 +8918,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -7677,6 +8957,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7696,6 +8978,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -7731,6 +9014,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7753,6 +9038,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7788,6 +9074,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7810,6 +9098,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7845,6 +9134,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7867,6 +9158,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -7902,6 +9194,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7925,6 +9219,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -7968,6 +9263,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -7988,6 +9285,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -8023,6 +9321,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8044,6 +9344,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8079,6 +9380,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8100,6 +9403,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8135,6 +9439,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8156,6 +9462,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8191,6 +9498,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8213,6 +9522,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -8256,6 +9566,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8275,6 +9587,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -8304,6 +9617,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8326,6 +9641,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8355,6 +9671,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8377,6 +9695,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8406,6 +9725,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8428,6 +9749,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8457,6 +9779,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8480,6 +9804,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -8518,6 +9843,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8538,6 +9865,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -8567,6 +9895,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8588,6 +9918,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8617,6 +9948,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8638,6 +9971,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8667,6 +10001,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8688,6 +10024,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8717,6 +10054,8 @@
       "notApplicable": [],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8739,6 +10078,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -8777,6 +10117,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8796,6 +10138,7 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     },
     {
@@ -8831,6 +10174,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8853,6 +10198,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8888,6 +10234,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8910,6 +10258,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -8945,6 +10294,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -8967,6 +10318,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -9002,6 +10354,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9025,6 +10379,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -9068,6 +10423,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9088,6 +10445,7 @@
         "reason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
         "status": "blocked"
       },
+      "targetReason": "The fixed base recipe contains a model whose license, provenance, training-data, or biometric rights are not releaseable.",
       "targetStatus": "blocked"
     },
     {
@@ -9123,6 +10481,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9144,6 +10504,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -9179,6 +10540,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9200,6 +10563,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -9235,6 +10599,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9256,6 +10622,7 @@
         "reason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
         "status": "blocked"
       },
+      "targetReason": "The installed face detector/alignment weights are from InsightFace buffalo_l and are restricted upstream to non-commercial research until separately licensed or replaced.",
       "targetStatus": "blocked"
     },
     {
@@ -9291,6 +10658,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "required",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9313,6 +10682,7 @@
         "reason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
         "status": "blocked"
       },
+      "targetReason": "The installed path uses non-commercial InsightFace buffalo_l weights and a face-parsing weight whose upstream license is not declared.",
       "targetStatus": "blocked"
     },
     {
@@ -9356,6 +10726,8 @@
       ],
       "outputMedia": "video/mp4",
       "request": {
+        "dfrSpatialUpscalings": null,
+        "dfrTemporalUpscalings": null,
         "dialogueIntent": "optional",
         "icLoraProfile": null,
         "lipDubPipelineProfile": null,
@@ -9375,17 +10747,18 @@
         "reason": "Activation requires current signed attestations for LTX-2, Gemma where applicable, commercial scope, acceptable-use, notice, and consent controls.",
         "status": "conditional"
       },
+      "targetReason": null,
       "targetStatus": "candidate"
     }
   ],
   "inputs": {
     "capabilityMatrix": {
       "path": "shared/releaseSurface.ts",
-      "sha256": "3acea87dda6441c9369efb16b71a41eb19d23c3054ed7edabaa30b8fda10c8a3"
+      "sha256": "0c1064707cfc23abeadf789ed3ef38da0f475fec546c59258c3f99e8be64d416"
     },
     "requestSchema": {
       "path": "shared/pipelines.ts",
-      "sha256": "8d3481e6cb3b0081777d6b60e0dbdc807de3144b5d1988d47bdb4048bc7f1573"
+      "sha256": "ba9aec76f051ca860cb9d5aeb6cbd4c6bad0d7ce1a6c33c84b3c1caa1659ba8b"
     }
   },
   "policyVersion": "ltx-studio-release-rights.v1",

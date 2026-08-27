@@ -8,8 +8,22 @@ import math
 from statistics import NormalDist
 from typing import Any
 
-DESIGN_SCHEMA = "ltx-sota-design-pilot.v1"
-REPORT_SCHEMA = "ltx-sota-power-report.v1"
+from .surface_contract import (
+    CURRENT_VBENCH_CLAIM_IDS,
+    SURFACE_BINDING_SCHEMA,
+    SURFACE_SCHEMA,
+    SurfaceContractError,
+    validate_candidate_vbench_surface_binding,
+)
+
+LEGACY_DESIGN_SCHEMA = "ltx-sota-design-pilot.v1"
+DESIGN_SCHEMA = "ltx-sota-design-pilot.v2"
+LEGACY_REPORT_SCHEMA = "ltx-sota-power-report.v1"
+REPORT_SCHEMA = "ltx-sota-power-report.v2"
+REPORT_SCHEMA_BY_DESIGN_SCHEMA = {
+    LEGACY_DESIGN_SCHEMA: LEGACY_REPORT_SCHEMA,
+    DESIGN_SCHEMA: REPORT_SCHEMA,
+}
 INDEPENDENT_UNIT = "identity-speaker-and-transitive-leakage-component"
 ENDPOINT_MODELS = {"binomial-upper", "binomial-lower", "paired-mean"}
 TEST_KINDS = {"superiority", "noninferiority", "equivalence", "absolute"}
@@ -22,6 +36,10 @@ VBench_DIMENSIONS = {
     "aesthetic-quality",
     "imaging-quality",
 }
+STRATA_QUOTA_RELATIONSHIPS = {"overlapping", "disjoint", "partition"}
+CURRENT_VBENCH_CLAIM_COUNT = len(CURRENT_VBENCH_CLAIM_IDS)
+CURRENT_VBENCH_GATE_COUNT = CURRENT_VBENCH_CLAIM_COUNT * len(VBench_DIMENSIONS)
+CURRENT_PLANNING_HYPOTHESIS_COUNT = 13 + 2 * CURRENT_VBENCH_GATE_COUNT
 REQUIRED_VBENCH_ENDPOINT_IDS = {f"vbench-{dimension}" for dimension in VBench_DIMENSIONS}
 REQUIRED_CRITICAL_TOKEN_DELTA_IDS = {
     "asr-critical-name-accuracy",
@@ -149,16 +167,79 @@ def _validate_delta_catalog(raw: object, status: str) -> tuple[dict[str, Any], l
     return raw, blockers
 
 
-def _validate_vbench_catalog(raw: object, status: str) -> tuple[dict[str, Any], list[str]]:
+def _validate_candidate_surface(raw: object) -> tuple[dict[str, Any], list[str]]:
     if not isinstance(raw, dict):
-        raise DesignError("vbench_gate_catalog must be an object")
+        raise DesignError("candidate_surface must be an object")
     _exact_keys(
         raw,
-        {"schema_version", "repository", "commit", "config_sha256", "multiplicity", "confidence_level", "gates"},
+        {
+            "schema_version",
+            "surface_schema_version",
+            "surface_digest",
+            "projection_digest",
+            "candidate_entry_count",
+            "claim_ids",
+        },
+        "candidate_surface",
+    )
+    if (
+        raw["schema_version"] != SURFACE_BINDING_SCHEMA
+        or raw["surface_schema_version"] != SURFACE_SCHEMA
+    ):
+        raise DesignError("candidate_surface must use the current canonical surface binding")
+    _sha256(raw["surface_digest"], "candidate_surface.surface_digest")
+    _sha256(raw["projection_digest"], "candidate_surface.projection_digest")
+    candidate_entry_count = raw["candidate_entry_count"]
+    if (
+        isinstance(candidate_entry_count, bool)
+        or not isinstance(candidate_entry_count, int)
+        or candidate_entry_count < len(CURRENT_VBENCH_CLAIM_IDS)
+    ):
+        raise DesignError("candidate_surface must bind at least one entry for every current claim")
+    if not isinstance(raw["claim_ids"], list) or not raw["claim_ids"]:
+        raise DesignError("candidate_surface must enumerate claim_ids")
+    claim_ids = [
+        _identifier(claim_id, f"candidate_surface.claim_ids[{index}]")
+        for index, claim_id in enumerate(raw["claim_ids"])
+    ]
+    if claim_ids != sorted(set(claim_ids)):
+        raise DesignError("candidate_surface claim_ids must be unique and sorted")
+    if claim_ids != list(CURRENT_VBENCH_CLAIM_IDS):
+        raise DesignError("candidate_surface claim_ids do not match the current v2 contract")
+    return raw, claim_ids
+
+
+def _validate_vbench_catalog(  # noqa: PLR0912
+    raw: object,
+    status: str,
+    *,
+    design_schema: str,
+) -> tuple[dict[str, Any], list[str], int, dict[str, Any] | None]:
+    if not isinstance(raw, dict):
+        raise DesignError("vbench_gate_catalog must be an object")
+    catalog_schema = "vbench-gates.v2" if design_schema == DESIGN_SCHEMA else "vbench-gates.v1"
+    expected_keys = {
+        "schema_version",
+        "repository",
+        "commit",
+        "config_sha256",
+        "multiplicity",
+        "confidence_level",
+        "gates",
+    }
+    if design_schema == DESIGN_SCHEMA:
+        expected_keys.add("candidate_surface")
+    _exact_keys(
+        raw,
+        expected_keys,
         "vbench_gate_catalog",
     )
-    if raw["schema_version"] != "vbench-gates.v1" or raw["repository"] != "Vchitect/VBench":
+    if raw["schema_version"] != catalog_schema or raw["repository"] != "Vchitect/VBench":
         raise DesignError("unsupported VBench catalog")
+    candidate_surface: dict[str, Any] | None = None
+    candidate_claim_ids: list[str] | None = None
+    if design_schema == DESIGN_SCHEMA:
+        candidate_surface, candidate_claim_ids = _validate_candidate_surface(raw["candidate_surface"])
     commit = _revision(raw["commit"], "vbench commit", nullable=True)
     config_digest = _sha256(raw["config_sha256"], "vbench config", nullable=True)
     if raw["multiplicity"] != "holm" or raw["confidence_level"] != 0.95:
@@ -196,9 +277,18 @@ def _validate_vbench_catalog(raw: object, status: str) -> tuple[dict[str, Any], 
             blockers.append(f"vbench-basis-missing:{identity}")
     if identities != sorted(set(identities)):
         raise DesignError("VBench claim/dimension gates must be unique and sorted")
+    gate_claim_ids = sorted({identity.rsplit(":", 1)[0] for identity in identities})
+    if candidate_claim_ids is not None:
+        expected_identities = sorted(
+            f"{claim_id}:{dimension}"
+            for claim_id in candidate_claim_ids
+            for dimension in VBench_DIMENSIONS
+        )
+        if identities != expected_identities:
+            raise DesignError("VBench gates must exactly cover the candidate claim/dimension matrix")
     if status == "frozen" and blockers:
         raise DesignError(f"frozen VBench catalog is incomplete: {blockers}")
-    return raw, blockers
+    return raw, blockers, len(gate_claim_ids), candidate_surface
 
 
 def _endpoint_sample_size(endpoint: dict[str, Any], *, alpha: float, power: float, design_effect: float) -> int:
@@ -237,29 +327,33 @@ def _endpoint_sample_size(endpoint: dict[str, Any], *, alpha: float, power: floa
     return math.ceil(max(power_n, precision_n) * design_effect)
 
 
-def _validate_design_settings(raw: dict[str, Any]) -> tuple[str, float, float, float | None]:
+def _validate_design_settings(raw: dict[str, Any]) -> tuple[str, str, float, float, float | None]:
+    design_schema = raw.get("schema_version")
+    expected_keys = {
+        "schema_version",
+        "status",
+        "design_id",
+        "independent_unit",
+        "familywise_alpha",
+        "target_power",
+        "multiplicity",
+        "minimum_identities",
+        "clips_per_identity",
+        "design_effect",
+        "delta_catalog",
+        "vbench_gate_catalog",
+        "power_endpoints",
+        "strata_quotas",
+    }
+    if design_schema == DESIGN_SCHEMA:
+        expected_keys.add("strata_quota_semantics")
     _exact_keys(
         raw,
-        {
-            "schema_version",
-            "status",
-            "design_id",
-            "independent_unit",
-            "familywise_alpha",
-            "target_power",
-            "multiplicity",
-            "minimum_identities",
-            "clips_per_identity",
-            "design_effect",
-            "delta_catalog",
-            "vbench_gate_catalog",
-            "power_endpoints",
-            "strata_quotas",
-        },
+        expected_keys,
         "design",
     )
     status = raw["status"]
-    if raw["schema_version"] != DESIGN_SCHEMA or status not in {"draft", "frozen"}:
+    if design_schema not in REPORT_SCHEMA_BY_DESIGN_SCHEMA or status not in {"draft", "frozen"}:
         raise DesignError("unsupported design schema or status")
     _identifier(raw["design_id"], "design_id")
     if raw["independent_unit"] != INDEPENDENT_UNIT or raw["multiplicity"] != "holm":
@@ -273,7 +367,7 @@ def _validate_design_settings(raw: dict[str, Any]) -> tuple[str, float, float, f
     if not isinstance(raw["clips_per_identity"], int) or raw["clips_per_identity"] < 3:
         raise DesignError("clips_per_identity must be at least 3")
     design_effect = _number(raw["design_effect"], "design_effect", minimum=1, nullable=True)
-    return status, alpha, power, design_effect
+    return design_schema, status, alpha, power, design_effect
 
 
 def _validate_power_endpoints(
@@ -341,10 +435,11 @@ def _validate_power_endpoints(
     return requirements, blockers, per_endpoint_alpha, planning_hypothesis_count
 
 
-def _validate_strata_quotas(raw: object) -> list[str]:
+def _validate_strata_quotas(raw: object) -> tuple[list[str], dict[str, int | None]]:
     if not isinstance(raw, list) or not raw:
         raise DesignError("strata_quotas must be a non-empty quoted matrix")
     quota_ids: list[str] = []
+    quota_minimums: dict[str, int | None] = {}
     blockers: list[str] = []
     for index, quota in enumerate(raw):
         if not isinstance(quota, dict):
@@ -357,20 +452,98 @@ def _validate_strata_quotas(raw: object) -> list[str]:
             blockers.append(f"strata-quota-missing:{quota_id}")
         elif not isinstance(minimum, int) or minimum < 1:
             raise DesignError(f"strata quota {index} must require at least one independent unit")
+        quota_minimums[quota_id] = minimum
     if quota_ids != sorted(set(quota_ids)):
         raise DesignError("strata quotas must be unique and sorted")
-    return blockers
+    return blockers, quota_minimums
 
 
-def build_power_report(raw: object) -> dict[str, Any]:
+def _validate_strata_quota_semantics(  # noqa: PLR0912
+    raw: object,
+    *,
+    quota_minimums: dict[str, int | None],
+) -> tuple[dict[str, int], int]:
+    if not isinstance(raw, dict):
+        raise DesignError("strata_quota_semantics must be an object")
+    _exact_keys(
+        raw,
+        {"schema_version", "maximum_independent_units", "groups"},
+        "strata_quota_semantics",
+    )
+    if raw["schema_version"] != "ltx-strata-quota-semantics.v1":
+        raise DesignError("unsupported strata quota semantics schema")
+    maximum_independent_units = raw["maximum_independent_units"]
+    if (
+        isinstance(maximum_independent_units, bool)
+        or not isinstance(maximum_independent_units, int)
+        or maximum_independent_units < 1
+    ):
+        raise DesignError("strata quota maximum_independent_units must be a positive integer")
+    groups = raw["groups"]
+    if not isinstance(groups, list) or not groups:
+        raise DesignError("strata quota semantics must declare non-empty groups")
+    group_ids: list[str] = []
+    covered_strata: list[str] = []
+    aggregate_requirements: dict[str, int] = {}
+    for index, group in enumerate(groups):
+        if not isinstance(group, dict):
+            raise DesignError(f"strata quota group {index} must be an object")
+        _exact_keys(
+            group,
+            {"group_id", "relationship", "stratum_ids"},
+            f"strata quota group {index}",
+        )
+        group_id = _identifier(group["group_id"], f"strata quota group {index}.group_id")
+        group_ids.append(group_id)
+        relationship = group["relationship"]
+        if relationship not in STRATA_QUOTA_RELATIONSHIPS:
+            raise DesignError(f"strata quota group {group_id} has unsupported relationship semantics")
+        stratum_ids_raw = group["stratum_ids"]
+        if not isinstance(stratum_ids_raw, list) or not stratum_ids_raw:
+            raise DesignError(f"strata quota group {group_id} must enumerate stratum_ids")
+        stratum_ids = [
+            _identifier(stratum_id, f"strata quota group {group_id}.stratum_ids[{item_index}]")
+            for item_index, stratum_id in enumerate(stratum_ids_raw)
+        ]
+        if stratum_ids != sorted(set(stratum_ids)):
+            raise DesignError(f"strata quota group {group_id} stratum_ids must be unique and sorted")
+        unknown = sorted(set(stratum_ids) - quota_minimums.keys())
+        if unknown:
+            raise DesignError(f"strata quota group {group_id} references unknown strata: {unknown}")
+        covered_strata.extend(stratum_ids)
+        minimums = [quota_minimums[stratum_id] for stratum_id in stratum_ids]
+        if all(minimum is not None for minimum in minimums):
+            resolved_minimums = [minimum for minimum in minimums if minimum is not None]
+            aggregate_requirements[group_id] = (
+                sum(resolved_minimums)
+                if relationship in {"disjoint", "partition"}
+                else max(resolved_minimums)
+            )
+    if group_ids != sorted(set(group_ids)):
+        raise DesignError("strata quota groups must be unique and sorted")
+    if sorted(covered_strata) != sorted(quota_minimums):
+        raise DesignError("strata quota semantics must cover every quota exactly once")
+    return aggregate_requirements, maximum_independent_units
+
+
+def build_power_report(raw: object, *, release_surface: object | None = None) -> dict[str, Any]:
     """Validate a D0a artifact and compute deterministic independent-unit requirements."""
 
     if not isinstance(raw, dict):
         raise DesignError("design must be an object")
-    status, alpha, power, design_effect = _validate_design_settings(raw)
+    design_schema, status, alpha, power, design_effect = _validate_design_settings(raw)
     delta_catalog, blockers = _validate_delta_catalog(raw["delta_catalog"], status)
-    vbench_catalog, vbench_blockers = _validate_vbench_catalog(raw["vbench_gate_catalog"], status)
+    vbench_catalog, vbench_blockers, vbench_claim_count, candidate_surface = _validate_vbench_catalog(
+        raw["vbench_gate_catalog"],
+        status,
+        design_schema=design_schema,
+    )
     blockers.extend(vbench_blockers)
+    if design_schema == DESIGN_SCHEMA and release_surface is not None:
+        try:
+            validate_candidate_vbench_surface_binding(candidate_surface, surface=release_surface)
+        except SurfaceContractError as error:
+            raise DesignError(f"candidate release surface binding rejected: {error}") from error
     if design_effect is None:
         blockers.append("design-effect-missing")
     requirements, endpoint_blockers, per_endpoint_alpha, planning_hypothesis_count = _validate_power_endpoints(
@@ -380,17 +553,52 @@ def build_power_report(raw: object) -> dict[str, Any]:
         design_effect=design_effect,
         vbench_gate_count=len(vbench_catalog["gates"]),
     )
+    if design_schema == DESIGN_SCHEMA and planning_hypothesis_count != CURRENT_PLANNING_HYPOTHESIS_COUNT:
+        raise DesignError(
+            f"v2 planning family must contain exactly {CURRENT_PLANNING_HYPOTHESIS_COUNT} hypotheses"
+        )
     blockers.extend(endpoint_blockers)
     quotas = raw["strata_quotas"]
-    blockers.extend(_validate_strata_quotas(quotas))
+    quota_blockers, quota_minimums = _validate_strata_quotas(quotas)
+    blockers.extend(quota_blockers)
+    aggregate_quota_requirements: dict[str, int] = {}
+    maximum_independent_units: int | None = None
+    if design_schema == DESIGN_SCHEMA:
+        aggregate_quota_requirements, maximum_independent_units = _validate_strata_quota_semantics(
+            raw["strata_quota_semantics"],
+            quota_minimums=quota_minimums,
+        )
+        if maximum_independent_units < raw["minimum_identities"]:
+            raise DesignError("maximum_independent_units cannot be smaller than minimum_identities")
+    required_units = max(
+        [
+            raw["minimum_identities"],
+            *(item["independent_units"] for item in requirements),
+            *(minimum for minimum in quota_minimums.values() if minimum is not None),
+            *aggregate_quota_requirements.values(),
+        ],
+    )
+    if maximum_independent_units is not None:
+        blockers.extend(
+            f"strata-quota-exceeds-maximum:{quota_id}"
+            for quota_id, minimum in quota_minimums.items()
+            if minimum is not None and minimum > maximum_independent_units
+        )
+        blockers.extend(
+            f"strata-quota-group-exceeds-maximum:{group_id}"
+            for group_id, minimum in aggregate_quota_requirements.items()
+            if minimum > maximum_independent_units
+        )
+        if (
+            required_units > maximum_independent_units
+            and not any(blocker.startswith("strata-quota") and "exceeds-maximum" in blocker for blocker in blockers)
+        ):
+            blockers.append("power-requirement-exceeds-maximum-independent-units")
     blockers = sorted(set(blockers))
     if status == "frozen" and blockers:
         raise DesignError(f"frozen design is incomplete: {blockers}")
-    required_units = max(
-        [raw["minimum_identities"], *(item["independent_units"] for item in requirements)],
-    )
     report = {
-        "schema_version": REPORT_SCHEMA,
+        "schema_version": REPORT_SCHEMA_BY_DESIGN_SCHEMA[design_schema],
         "design_digest": document_sha256(raw),
         "delta_catalog_digest": document_sha256(delta_catalog),
         "vbench_gate_catalog_digest": document_sha256(vbench_catalog),
@@ -405,4 +613,17 @@ def build_power_report(raw: object) -> dict[str, Any]:
         "required_clips": required_units * raw["clips_per_identity"] if not blockers else None,
         "strata_quotas_digest": document_sha256(quotas),
     }
+    if design_schema == DESIGN_SCHEMA:
+        if candidate_surface is None:
+            raise DesignError("v2 design lost its candidate surface binding")
+        report.update(
+            {
+                "surface_digest": candidate_surface["surface_digest"],
+                "candidate_surface_binding_digest": candidate_surface["projection_digest"],
+                "candidate_surface_entry_count": candidate_surface["candidate_entry_count"],
+                "strata_quota_semantics_digest": document_sha256(raw["strata_quota_semantics"]),
+                "vbench_claim_count": vbench_claim_count,
+                "vbench_gate_count": len(vbench_catalog["gates"]),
+            }
+        )
     return report

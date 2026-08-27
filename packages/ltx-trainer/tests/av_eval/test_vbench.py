@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from ltx_trainer.av_eval import VBenchMeasurementError, build_vbench_measurements, document_sha256
+from ltx_trainer.av_eval import VBenchMeasurementError, build_power_report, build_vbench_measurements, document_sha256
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
+DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v2.json"
 
 
 def _design() -> dict[str, object]:
@@ -59,11 +59,14 @@ def _input(design: dict[str, object]) -> dict[str, object]:
                 }
             )
     observations.sort(key=lambda item: item["observation_id"])
+    design_report = build_power_report(design)
     return {
-        "schema_version": "ltx-av-eval-vbench-observations.v1",
+        "schema_version": "ltx-av-eval-vbench-observations.v2",
         "dataset_digest": "1" * 64,
         "preregistration_digest": "2" * 64,
         "release_digest": "3" * 64,
+        "surface_digest": design_report["surface_digest"],
+        "candidate_surface_binding_digest": design_report["candidate_surface_binding_digest"],
         "strata_plan_digest": "4" * 64,
         "design_digest": document_sha256(design),
         "vbench_gate_catalog_digest": document_sha256(design["vbench_gate_catalog"]),
@@ -85,8 +88,8 @@ def test_vbench_measurements_are_deterministic_and_holm_controlled() -> None:
     assert first == second
     assert first["verdict"] == "pass"
     assert first["multiplicity"] == "holm"
-    assert first["hypotheses"] == 180
-    assert len(first["metrics"]) == 90
+    assert first["hypotheses"] == 252
+    assert len(first["metrics"]) == 126
     assert all(metric["estimate"] <= 0.05 for metric in first["metrics"])
     assert all(metric["absolute"]["holm_ci_lower"] > 0 for metric in first["metrics"])
     assert all(metric["relative"]["holm_ci_lower"] > 0 for metric in first["metrics"])
@@ -179,5 +182,5 @@ def test_vbench_cli_emits_digest_bound_measurements(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     report = json.loads(result.stdout)
-    assert report["schema_version"] == "ltx-av-eval-vbench-measurements.v1"
+    assert report["schema_version"] == "ltx-av-eval-vbench-measurements.v2"
     assert report["verdict"] == "pass"

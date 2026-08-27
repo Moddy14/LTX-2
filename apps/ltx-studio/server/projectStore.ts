@@ -19,6 +19,11 @@ import { basename, join } from "node:path";
 
 import { canonicalJson } from "../shared/canonicalJson.js";
 import {
+  generationRequestSchema,
+  isLegacyDfrRequest,
+  migrateGenerationRequest,
+} from "../shared/pipelines.js";
+import {
   projectArchiveInputSchema,
   projectCreateInputSchema,
   projectOutputApprovalInputSchema,
@@ -84,6 +89,44 @@ function assertActive(project: StudioProject): void {
   if (project.status !== "active") {
     throw new ProjectConflictError("Ein archiviertes Projekt ist unveränderlich.");
   }
+  if (project.shots.some((shot) => shot.requestRevisions.some(({ request }) =>
+    isLegacyDfrRequest(request)))) {
+    throw new ProjectConflictError(
+      "Ein Projekt mit historischem DFR-Altbestand bleibt unveränderlich lesbar und darf nicht fortgesetzt werden.",
+    );
+  }
+}
+
+/**
+ * Preserve canonical persisted project bytes and their original request
+ * digests, but expose a deliberately non-executable archival view for the
+ * one known incompatible request family. Unknown corruption remains fatal.
+ */
+function legacyReadableProjectEnvelope(value: unknown): unknown | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const migrated = structuredClone(value) as Record<string, unknown>;
+  const project = migrated.project;
+  if (!project || typeof project !== "object" || Array.isArray(project)) return null;
+  const shots = (project as Record<string, unknown>).shots;
+  if (!Array.isArray(shots)) return null;
+  for (const shot of shots) {
+    if (!shot || typeof shot !== "object" || Array.isArray(shot)) return null;
+    const revisions = (shot as Record<string, unknown>).requestRevisions;
+    if (!Array.isArray(revisions)) return null;
+    for (const revision of revisions) {
+      if (!revision || typeof revision !== "object" || Array.isArray(revision)) return null;
+      const record = revision as Record<string, unknown>;
+      const current = generationRequestSchema.safeParse(record.request);
+      if (current.success) {
+        record.request = current.data;
+        continue;
+      }
+      const legacy = migrateGenerationRequest(record.request);
+      if (!legacy || !isLegacyDfrRequest(legacy)) return null;
+      record.request = legacy;
+    }
+  }
+  return migrated;
 }
 
 function assertRequestDigests(project: StudioProject): void {
@@ -348,6 +391,7 @@ export class ProjectStore {
       .sort((left, right) => left.name.localeCompare(right.name));
     if (revisionFiles.length === 0) throw new ProjectConflictError(`Projekt ${id} hat keine Revisionen.`);
     const history: ProjectRevisionEnvelope[] = [];
+    const persistedHistory: ProjectRevisionEnvelope[] = [];
     for (const [index, entry] of revisionFiles.entries()) {
       const match = REVISION_FILE_PATTERN.exec(entry.name);
       const expectedRevision = index + 1;
@@ -369,16 +413,21 @@ export class ProjectStore {
       } catch {
         throw new ProjectConflictError(`Projekt-Revision ${entry.name} enthält kein gültiges JSON.`);
       }
-      const parsed = projectRevisionEnvelopeSchema.safeParse(decoded);
-      const canonical = canonicalDocument(parsed.success ? parsed.data : decoded);
+      const readable = legacyReadableProjectEnvelope(decoded);
+      const parsed = projectRevisionEnvelopeSchema.safeParse(readable);
+      const canonical = canonicalDocument(decoded);
       if (!parsed.success || (payload !== canonical && payload !== `${canonical}\n`)) {
         throw new ProjectConflictError(`Projekt-Revision ${entry.name} ist nicht kanonisch oder schema-valid.`);
       }
       if (parsed.data.projectId !== id || parsed.data.revision !== expectedRevision) {
         throw new ProjectConflictError(`Projekt-Revision ${entry.name} ist an die falsche Identität gebunden.`);
       }
-      assertRequestDigests(parsed.data.project);
-      assertRevisionTransition(history.at(-1) ?? null, parsed.data);
+      // Digests and previous-revision hashes bind the exact historical bytes,
+      // not the additive archival presentation marker.
+      const persisted = decoded as ProjectRevisionEnvelope;
+      assertRequestDigests(persisted.project);
+      assertRevisionTransition(persistedHistory.at(-1) ?? null, persisted);
+      persistedHistory.push(persisted);
       history.push(parsed.data);
     }
     return history;

@@ -1,20 +1,22 @@
+import argparse
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from functools import partial
-from typing import Any
+from typing import Any, Literal, cast
 
 import torch
 
 from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
-from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep
+from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep, EulerDiffusionStep
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import Registry
 from ltx_core.model.transformer.compiling import CompilationConfig
 from ltx_core.model.video_vae import AUTO_TILING, AutoTiling, TilingConfig, get_video_chunks_number
+from ltx_core.model.video_vae.keyframes import DecodeKeyframes
 from ltx_core.model.video_vae.transformer import DiffVAEMode
 from ltx_core.quantization import QuantizationPolicy
-from ltx_core.types import Audio, VideoPixelShape
+from ltx_core.types import VideoPixelShape
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     add_generated_keyframes_arg,
@@ -34,6 +36,8 @@ from ltx_pipelines.utils.blocks import (
 )
 from ltx_pipelines.utils.constants import (
     DISTILLED_SIGMAS,
+    OFFICIAL_COMFY_STAGE_2_SEED,
+    OFFICIAL_COMFY_STAGE_2_SIGMAS,
     STAGE_2_DISTILLED_SIGMAS,
     detect_model_version,
 )
@@ -41,10 +45,12 @@ from ltx_pipelines.utils.denoisers import SimpleDenoiser
 from ltx_pipelines.utils.helpers import (
     assert_resolution,
     combined_image_conditionings,
+    decode_keyframes_from_slots,
     ensure_tiling_config,
     generated_keyframe_conditionings,
     get_device,
     has_generated_keyframes,
+    resolve_generated_keyframes,
     tiling_scale_factors_for_vae,
 )
 from ltx_pipelines.utils.media_io import (
@@ -54,8 +60,8 @@ from ltx_pipelines.utils.media_io import (
     vae_dtype_for_hdr,
 )
 from ltx_pipelines.utils.model_paths import ModelPaths
-from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop
-from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode
+from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop, euler_denoising_loop
+from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode, PipelineOutput
 
 # Generation from which stage 1 is sampled with the ancestral (SDE) Euler sampler instead of the
 # deterministic one.
@@ -71,6 +77,130 @@ ANCESTRAL_S_NOISE = 1.0
 # loop's ``_get_plain_noise`` both draw ``torch.randn`` at the same shape, dtype, and device from a
 # freshly seeded generator. Mirrors the substep-seed offset in ``res2s_audio_video_denoising_loop``.
 ANCESTRAL_NOISE_SEED_OFFSET = 10000
+
+DistilledSamplerProfile = Literal["native", "official-comfy"]
+DISTILLED_SAMPLER_PROFILES: tuple[DistilledSamplerProfile, ...] = ("native", "official-comfy")
+
+
+def _validate_sampler_profile(profile: str) -> DistilledSamplerProfile:
+    if profile not in DISTILLED_SAMPLER_PROFILES:
+        choices = ", ".join(DISTILLED_SAMPLER_PROFILES)
+        raise ValueError(f"Unsupported distilled sampler profile {profile!r}; expected one of: {choices}")
+    return cast(DistilledSamplerProfile, profile)
+
+
+def _distilled_stage_1_sampler_kwargs(
+    *,
+    profile: DistilledSamplerProfile,
+    use_native_ancestral_sampler: bool,
+    seed: int,
+    model_input_dtype: torch.dtype,
+) -> dict[str, Any]:
+    """Resolve stage-1 sampler overrides without loading model weights.
+
+    ``native`` preserves the checkpoint-generation behavior that predates the explicit profile:
+    old checkpoints use :class:`DiffusionStage` defaults, while LTX 2.5+ uses BF16 ancestral
+    sampling with the historical substep seed offset. ``official-comfy`` instead pins the
+    published plain RF Euler ancestral sampler to the user seed and keeps its trajectory in FP32,
+    casting only the transformer-bound latent to the BF16 model dtype.
+
+    The official profile is an effective-contract match, not a bit-identity claim: the native
+    pipeline and ComfyUI create their initial noise on different devices.
+    """
+    profile = _validate_sampler_profile(profile)
+    if profile == "official-comfy":
+        return {
+            "state_dtype": torch.float32,
+            "stepper": EulerAncestralDiffusionStep(eta=ANCESTRAL_ETA, s_noise=ANCESTRAL_S_NOISE),
+            "loop": partial(
+                euler_ancestral_denoising_loop,
+                noise_seed=seed,
+                model_dtype=torch.float32,
+                model_input_dtype=model_input_dtype,
+            ),
+        }
+    if not use_native_ancestral_sampler:
+        return {}
+    return {
+        "stepper": EulerAncestralDiffusionStep(eta=ANCESTRAL_ETA, s_noise=ANCESTRAL_S_NOISE),
+        "loop": partial(
+            euler_ancestral_denoising_loop,
+            noise_seed=seed + ANCESTRAL_NOISE_SEED_OFFSET,
+            model_dtype=model_input_dtype,
+        ),
+    }
+
+
+def _distilled_stage_1_schedule(
+    *,
+    profile: DistilledSamplerProfile,
+    requested: torch.Tensor,
+) -> torch.Tensor:
+    """Return the caller's native schedule or the fixed official Comfy 8-step schedule."""
+    profile = _validate_sampler_profile(profile)
+    return DISTILLED_SIGMAS if profile == "official-comfy" else requested
+
+
+def _distilled_stage_2_schedule(
+    *,
+    profile: DistilledSamplerProfile,
+    requested: torch.Tensor,
+    noiser: GaussianNoiser,
+    device: torch.device,
+) -> tuple[torch.Tensor, GaussianNoiser]:
+    """Resolve stage 2; its sampler remains deterministic Euler for both profiles."""
+    profile = _validate_sampler_profile(profile)
+    if profile == "native":
+        return requested, noiser
+    generator = torch.Generator(device=device).manual_seed(OFFICIAL_COMFY_STAGE_2_SEED)
+    return OFFICIAL_COMFY_STAGE_2_SIGMAS, GaussianNoiser(generator=generator)
+
+
+def _distilled_stage_2_sampler_kwargs(
+    *,
+    profile: DistilledSamplerProfile,
+    model_input_dtype: torch.dtype = torch.bfloat16,
+) -> dict[str, Any]:
+    """Pin deterministic Euler explicitly for Comfy while leaving native defaults untouched."""
+    profile = _validate_sampler_profile(profile)
+    if profile == "native":
+        return {}
+    return {
+        "state_dtype": torch.float32,
+        "stepper": EulerDiffusionStep(),
+        "loop": partial(
+            euler_denoising_loop,
+            model_dtype=torch.float32,
+            model_input_dtype=model_input_dtype,
+        ),
+    }
+
+
+def add_distilled_sampler_profile_arg(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """Add the explicit sampler-contract selector while retaining the native default."""
+    parser.add_argument(
+        "--sampler-profile",
+        choices=DISTILLED_SAMPLER_PROFILES,
+        default="native",
+        help=(
+            "Sampler contract: native preserves checkpoint-dependent behavior; official-comfy "
+            "pins the published LTX-2.5 8+3 schedules, stage seeds, and FP32 sampler trajectory."
+        ),
+    )
+    return parser
+
+
+def distilled_single_stage_keyframes(
+    generated_latents: torch.Tensor | None,
+    generated_keyframes: int | Sequence[int],
+    num_frames: int,
+) -> DecodeKeyframes | None:
+    """Expose generated slots when the distilled preview already uses the final canvas."""
+    return decode_keyframes_from_slots(
+        generated_latents,
+        resolve_generated_keyframes(generated_keyframes, num_frames),
+        num_frames,
+    )
 
 
 def should_use_ancestral_sampler(transformer_path: str) -> bool:
@@ -97,7 +227,7 @@ class DistilledPipeline:
     Single-stage generation samples and decodes directly at the requested resolution.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         model_paths: ModelPaths,
         spatial_upsampler_path: str | None,
@@ -110,7 +240,9 @@ class DistilledPipeline:
         alloc_trim_strategy: AllocatorTrimStrategy = AllocatorTrimStrategy.TRIM,
         prompt_enhancer_gemma_root: str | None = None,
         diffvae_optimization: DiffVAEMode = DiffVAEMode.CHUNKED_EAGER,
+        sampler_profile: DistilledSamplerProfile = "native",
     ):
+        self.sampler_profile = _validate_sampler_profile(sampler_profile)
         self.device = device or get_device()
         self.dtype = torch.bfloat16
 
@@ -182,19 +314,14 @@ class DistilledPipeline:
         Returns an empty dict for the deterministic sampler, letting ``DiffusionStage`` apply its
         own ``EulerDiffusionStep`` + ``euler_denoising_loop`` defaults rather than restating them.
         """
-        if not self.use_ancestral_sampler:
-            return {}
+        return _distilled_stage_1_sampler_kwargs(
+            profile=self.sampler_profile,
+            use_native_ancestral_sampler=self.use_ancestral_sampler,
+            seed=seed,
+            model_input_dtype=self.dtype,
+        )
 
-        return {
-            "stepper": EulerAncestralDiffusionStep(eta=ANCESTRAL_ETA, s_noise=ANCESTRAL_S_NOISE),
-            "loop": partial(
-                euler_ancestral_denoising_loop,
-                noise_seed=seed + ANCESTRAL_NOISE_SEED_OFFSET,
-                model_dtype=self.dtype,
-            ),
-        }
-
-    def __call__(  # noqa: PLR0913
+    def __call__(  # noqa: PLR0913, PLR0917
         self,
         prompt: str,
         seed: int,
@@ -212,13 +339,13 @@ class DistilledPipeline:
         color_space: HDRColorSpace | None = None,
         generated_keyframes: int | Sequence[int] = 0,
         skip_stage_2: bool = False,
-    ) -> tuple[Iterator[torch.Tensor], Audio, int, TilingConfig | None]:
+    ) -> PipelineOutput:
         """Generate a video.
-        Stage 1 samples with the ancestral (SDE) Euler sampler or the deterministic one according
-        to ``self.use_ancestral_sampler``, detected from the checkpoint generation. With
-        ``skip_stage_2=True`` it runs at output resolution and is decoded directly. Otherwise,
-        stage 2 is always deterministic -- its 3-step refinement schedule is too short to remove
-        freshly injected noise.
+        Under the native profile, stage 1 selects ancestral (SDE) Euler or deterministic Euler from
+        the detected checkpoint generation. The explicit official-Comfy profile pins ancestral
+        stage 1 independently of that detection. With ``skip_stage_2=True`` stage 1 runs at output
+        resolution and is decoded directly. Otherwise, stage 2 is always deterministic -- its
+        3-step refinement schedule is too short to remove freshly injected noise.
         """
         require_num_frames_source(num_frames, self.duration_predictor)
         if not skip_stage_2 and self.upsampler is None:
@@ -265,7 +392,10 @@ class DistilledPipeline:
         )
 
         # Stage 1: full resolution for the official preview graph, half resolution otherwise.
-        stage_1_sigmas = stage_1_sigmas.to(dtype=torch.float32, device=self.device)
+        stage_1_sigmas = _distilled_stage_1_schedule(
+            profile=self.sampler_profile,
+            requested=stage_1_sigmas,
+        ).to(dtype=torch.float32, device=self.device)
         stage_1_conditionings = self.image_conditioner(
             lambda enc: combined_image_conditionings(
                 images=images,
@@ -295,12 +425,25 @@ class DistilledPipeline:
         if skip_stage_2:
             decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
             decoded_audio = self.audio_decoder(audio_state.latent)
-            return decoded_video, decoded_audio, num_frames, tiling_config
+            keyframes = distilled_single_stage_keyframes(
+                video_state.generated_keyframes,
+                generated_keyframes,
+                num_frames,
+            )
+            return PipelineOutput(
+                decoded_video, decoded_audio, num_frames, tiling_config, keyframes, video_state.latent
+            )
 
         # Stage 2: Upsample and refine the video at higher resolution with distilled LORA.
         assert self.upsampler is not None
         upscaled_video_latent = self.upsampler(video_state.latent[:1])
 
+        stage_2_sigmas, stage_2_noiser = _distilled_stage_2_schedule(
+            profile=self.sampler_profile,
+            requested=stage_2_sigmas,
+            noiser=noiser,
+            device=self.device,
+        )
         stage_2_sigmas = stage_2_sigmas.to(dtype=torch.float32, device=self.device)
         stage_2_conditionings = self.image_conditioner(
             lambda enc: combined_image_conditionings(
@@ -317,7 +460,7 @@ class DistilledPipeline:
         video_state, audio_state = self.stage(
             denoiser=SimpleDenoiser(video_context, audio_context),
             sigmas=stage_2_sigmas,
-            noiser=noiser,
+            noiser=stage_2_noiser,
             width=width,
             height=height,
             frames=num_frames,
@@ -333,19 +476,23 @@ class DistilledPipeline:
                 noise_scale=stage_2_sigmas[0].item(),
                 initial_latent=audio_state.latent,
             ),
+            **_distilled_stage_2_sampler_kwargs(
+                profile=self.sampler_profile,
+                model_input_dtype=self.dtype,
+            ),
         )
 
         decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
         decoded_audio = self.audio_decoder(audio_state.latent)
-        return decoded_video, decoded_audio, num_frames, tiling_config
+        return PipelineOutput(decoded_video, decoded_audio, num_frames, tiling_config, None, video_state.latent)
 
 
 @torch.inference_mode()
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     params = resolve_cli_params(distilled=True)
-    parser = add_generated_keyframes_arg(
-        default_2_stage_distilled_arg_parser(params=params, supports_auto_duration=True)
+    parser = add_distilled_sampler_profile_arg(
+        add_generated_keyframes_arg(default_2_stage_distilled_arg_parser(params=params, supports_auto_duration=True))
     )
     for action in parser._actions:
         if "--spatial-upsampler-path" in action.option_strings:
@@ -368,10 +515,11 @@ def main() -> None:
         offload_mode=args.offload_mode,
         prompt_enhancer_gemma_root=args.prompt_enhancer_gemma_root,
         diffvae_optimization=args.diffvae_optimization,
+        sampler_profile=args.sampler_profile,
     )
     hdr = resolve_hdr_color_space(images=args.images, hdr=args.hdr)
     vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
-    video, audio, num_frames, tiling_config = pipeline(
+    result = pipeline(
         prompt=args.prompt,
         seed=args.seed,
         height=args.height,
@@ -389,11 +537,11 @@ def main() -> None:
     )
 
     encode_video(
-        video=video,
+        video=result.video,
         fps=args.frame_rate,
-        audio=audio,
+        audio=result.audio,
         output_path=args.output_path,
-        video_chunks_number=get_video_chunks_number(num_frames, tiling_config),
+        video_chunks_number=get_video_chunks_number(result.num_frames, result.tiling_config),
         color_space=hdr,
     )
 

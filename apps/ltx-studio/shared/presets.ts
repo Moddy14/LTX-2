@@ -15,6 +15,12 @@ export const RESOLUTION_PRESETS: readonly ResolutionPreset[] = [
   { id: "square", label: "Quadrat", width: 1024, height: 1024, tier: "production" },
 ] as const;
 
+// DFR v1.3.0 documents UHD on its required 128-pixel raster as 3840 x 2176.
+// Keep this mode-specific so the established non-DFR preset surface is stable.
+export const DFR_RESOLUTION_PRESETS: readonly ResolutionPreset[] = [
+  { id: "dfr-uhd-4k", label: "DFR UHD 4K", width: 3840, height: 2176, tier: "hq" },
+] as const;
+
 export const DURATION_PRESETS = [5, 10, 20] as const;
 
 export function framesForDuration(seconds: number, frameRate: number): number {
@@ -30,6 +36,11 @@ export function videoDurationSeconds(numFrames: number, frameRate: number): numb
 
 export function matchingResolutionPreset(width: number, height: number): ResolutionPreset | null {
   return RESOLUTION_PRESETS.find((preset) => preset.width === width && preset.height === height) ?? null;
+}
+
+export function matchingDfrResolutionPreset(width: number, height: number): ResolutionPreset | null {
+  return [...DFR_RESOLUTION_PRESETS, ...RESOLUTION_PRESETS]
+    .find((preset) => preset.width === width && preset.height === height) ?? null;
 }
 
 export function matchingDurationPreset(numFrames: number, frameRate: number): number | null {

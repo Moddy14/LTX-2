@@ -1,6 +1,5 @@
 import argparse
 import logging
-from collections.abc import Iterator
 from functools import partial
 from typing import Literal
 
@@ -31,8 +30,8 @@ from ltx_pipelines.utils.args import (
     default_2_stage_distilled_arg_parser,
 )
 from ltx_pipelines.utils.blocks import (
-    AudioDecoder,
     AudioConditioner,
+    AudioDecoder,
     DiffusionStage,
     ImageConditioner,
     PromptEncoder,
@@ -65,7 +64,7 @@ from ltx_pipelines.utils.media_io import (
 )
 from ltx_pipelines.utils.model_paths import ModelPaths
 from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop, euler_cfg_pp_denoising_loop
-from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
+from ltx_pipelines.utils.types import ModalitySpec, OffloadMode, PipelineOutput
 
 OfficialICLoraSampler = Literal[
     "euler-ancestral-rf",
@@ -76,6 +75,65 @@ OfficialICLoraSampler = Literal[
 
 def _audio_noise_scale(initial_audio_latent: torch.Tensor | None) -> float:
     return 0.0 if initial_audio_latent is not None else 1.0
+
+
+def _audio_stage_spec(
+    *,
+    context: torch.Tensor,
+    initial_latent: torch.Tensor | None,
+    freeze: bool,
+    generated_noise_scale: float,
+) -> ModalitySpec:
+    """Keep externally supplied control audio frozen across every diffusion stage."""
+    if freeze and initial_latent is None:
+        raise ValueError("Frozen IC-LoRA audio requires an initial latent.")
+    return ModalitySpec(
+        context=context,
+        frozen=freeze,
+        noise_scale=0.0 if freeze else generated_noise_scale,
+        initial_latent=initial_latent,
+    )
+
+
+def _pipeline_prompt_arguments(args: argparse.Namespace) -> dict[str, str]:
+    """Bind both CLI prompt channels so CFG++ cannot silently lose its negative prompt."""
+    return {"prompt": args.prompt, "negative_prompt": args.negative_prompt}
+
+
+def _official_comfy_ic_stage_kwargs(
+    *,
+    sampler: OfficialICLoraSampler,
+    seed: int,
+    model_input_dtype: torch.dtype,
+) -> dict[str, object]:
+    """Resolve the published IC-LoRA sampler while preserving an FP32 trajectory."""
+    if sampler == "euler-ancestral-rf":
+        return {
+            "state_dtype": torch.float32,
+            "stepper": EulerAncestralDiffusionStep(),
+            "loop": partial(
+                euler_ancestral_denoising_loop,
+                noise_seed=seed,
+                model_dtype=torch.float32,
+                model_input_dtype=model_input_dtype,
+            ),
+        }
+    if sampler in {"euler-ancestral-cfg-pp", "euler-cfg-pp"}:
+        ancestral = sampler == "euler-ancestral-cfg-pp"
+        return {
+            "state_dtype": torch.float32,
+            "stepper": EulerCfgPpDiffusionStep(
+                eta=1.0 if ancestral else 0.0,
+                s_noise=1.0 if ancestral else 0.0,
+            ),
+            "loop": partial(
+                euler_cfg_pp_denoising_loop,
+                noise_seed=seed,
+                model_dtype=torch.float32,
+                model_input_dtype=model_input_dtype,
+            ),
+        }
+    raise ValueError(f"Unsupported official IC-LoRA sampler: {sampler}")
 
 
 class ICLoraPipeline:
@@ -89,7 +147,7 @@ class ICLoraPipeline:
     Both stages use distilled models for efficiency.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         model_paths: ModelPaths,
         spatial_upsampler_path: str | None,
@@ -214,7 +272,7 @@ class ICLoraPipeline:
                     )
                 self.reference_temporal_scale_factor = temporal
 
-    def __call__(  # noqa: PLR0913
+    def __call__(  # noqa: PLR0913, PLR0915, PLR0917
         self,
         prompt: str,
         seed: int,
@@ -237,7 +295,7 @@ class ICLoraPipeline:
         stage_1_sigmas: torch.Tensor = DISTILLED_SIGMAS,
         stage_2_sigmas: torch.Tensor = STAGE_2_DISTILLED_SIGMAS,
         color_space: HDRColorSpace | None = None,
-    ) -> tuple[Iterator[torch.Tensor], Audio, TilingConfig | None]:
+    ) -> PipelineOutput:
         """
         Generate video with IC-LoRA conditioning.
         Args:
@@ -268,7 +326,7 @@ class ICLoraPipeline:
                 When None (default): scalar conditioning_attention_strength is used
                 directly.
         Returns:
-            Tuple of (video_iterator, audio_tensor).
+            PipelineOutput with decoded video and audio. ``keyframes`` is ``None``.
         """
         images = self.image_conditioner.resolve_crf(images)
         assert_resolution(height=height, width=width, is_two_stage=not self._official_comfy_workflow)
@@ -343,13 +401,14 @@ class ICLoraPipeline:
         stage_1_sigmas = stage_1_sigmas.to(dtype=torch.float32, device=self.device)
 
         denoiser = SimpleDenoiser(video_context, audio_context)
-        stepper = None
-        loop = None
+        stage_kwargs: dict[str, object] = {}
         if self._official_comfy_workflow:
-            if self._official_comfy_sampler == "euler-ancestral-rf":
-                stepper = EulerAncestralDiffusionStep()
-                loop = partial(euler_ancestral_denoising_loop, noise_seed=seed, model_dtype=self.dtype)
-            else:
+            stage_kwargs = _official_comfy_ic_stage_kwargs(
+                sampler=self._official_comfy_sampler,
+                seed=seed,
+                model_input_dtype=self.dtype,
+            )
+            if self._official_comfy_sampler != "euler-ancestral-rf":
                 if ctx_n is None:
                     raise RuntimeError("CFG++ sampling requires negative text conditioning")
                 guider_params = MultiModalGuiderParams(
@@ -373,12 +432,6 @@ class ICLoraPipeline:
                     ),
                     force_uncond_pass=True,
                 )
-                ancestral = self._official_comfy_sampler == "euler-ancestral-cfg-pp"
-                stepper = EulerCfgPpDiffusionStep(
-                    eta=1.0 if ancestral else 0.0,
-                    s_noise=1.0 if ancestral else 0.0,
-                )
-                loop = partial(euler_cfg_pp_denoising_loop, noise_seed=seed)
 
         initial_audio_latent = None
         preserved_audio = None
@@ -417,14 +470,13 @@ class ICLoraPipeline:
                 context=video_context,
                 conditionings=stage_1_conditionings,
             ),
-            audio=ModalitySpec(
+            audio=_audio_stage_spec(
                 context=audio_context,
-                frozen=initial_audio_latent is not None,
-                noise_scale=_audio_noise_scale(initial_audio_latent),
                 initial_latent=initial_audio_latent,
+                freeze=initial_audio_latent is not None,
+                generated_noise_scale=_audio_noise_scale(initial_audio_latent),
             ),
-            stepper=stepper,
-            loop=loop,
+            **stage_kwargs,
         )
 
         if self._official_comfy_workflow or skip_stage_2:
@@ -435,7 +487,7 @@ class ICLoraPipeline:
             )
             decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
             output_audio = preserved_audio or self.audio_decoder(audio_state.latent)
-            return decoded_video, output_audio, tiling_config
+            return PipelineOutput(decoded_video, output_audio, num_frames, tiling_config, None, video_state.latent)
 
         # Stage 2: Upsample and refine the video at higher resolution with distilled LORA.
         if self.upsampler is None or self.stage_2 is None:
@@ -470,16 +522,17 @@ class ICLoraPipeline:
                 noise_scale=stage_2_sigmas[0].item(),
                 initial_latent=upscaled_video_latent,
             ),
-            audio=ModalitySpec(
+            audio=_audio_stage_spec(
                 context=audio_context,
-                noise_scale=stage_2_sigmas[0].item(),
                 initial_latent=audio_state.latent,
+                freeze=preserved_audio is not None,
+                generated_noise_scale=stage_2_sigmas[0].item(),
             ),
         )
 
         decoded_video = self.video_decoder(video_state.latent, tiling_config, generator, dtype=vae_dtype)
         output_audio = preserved_audio or self.audio_decoder(audio_state.latent)
-        return decoded_video, output_audio, tiling_config
+        return PipelineOutput(decoded_video, output_audio, num_frames, tiling_config, None, video_state.latent)
 
     def _create_conditionings(
         self,
@@ -563,7 +616,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="euler-ancestral-rf",
         help=(
             "Sampler used by the selected official example. Native Union Control uses "
-            "euler-ancestral-rf; Ingredients, Motion Track and V2V use euler-ancestral-cfg-pp; "
+            "euler-ancestral-rf; LTX-2.5 Motion Track and V2V also use euler-ancestral-rf; "
+            "Ingredients uses euler-ancestral-cfg-pp; "
             "Pixel Spatial Upscaler uses euler-cfg-pp."
         ),
     )
@@ -698,8 +752,8 @@ def main() -> None:
         hdr=args.hdr,
     )
     vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
-    video, audio, tiling_config = pipeline(
-        prompt=args.prompt,
+    result = pipeline(
+        **_pipeline_prompt_arguments(args),
         seed=args.seed,
         height=args.height,
         width=args.width,
@@ -718,14 +772,12 @@ def main() -> None:
         repeat_static_video_conditioning=args.repeat_static_control,
         freeze_control_audio_path=args.freeze_control_audio,
     )
-    video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
-
     encode_video(
-        video=video,
+        video=result.video,
         fps=args.frame_rate,
-        audio=audio,
+        audio=result.audio,
         output_path=args.output_path,
-        video_chunks_number=video_chunks_number,
+        video_chunks_number=get_video_chunks_number(result.num_frames, result.tiling_config),
         color_space=hdr,
     )
 

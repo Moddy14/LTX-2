@@ -95,9 +95,12 @@ claim set from satisfying the SOTA gate vacuously.
 
 ## D0a design pilot
 
-`configs/av_eval/design-pilot.v1.json` is the machine-readable pre-acquisition
-contract for effect sizes, VBench gates, precision targets, power, and quoted
-strata. It intentionally remains `draft`: empirical design-effect,
+`configs/av_eval/design-pilot.v2.json` is the current machine-readable
+pre-acquisition contract for effect sizes, VBench gates, precision targets,
+power, and quoted strata. Its `candidate_surface` binding enumerates exactly
+the 24 unique claims selected by `targetStatus=candidate` plus the
+`vbench-i2v` gate, and the validator requires the complete 24-by-6 matrix of
+144 claim/dimension gates. It intentionally remains `draft`: empirical design-effect,
 repeatability, clinically/perceptually meaningful deltas, per-endpoint
 alternatives/CI widths, and quota counts are `null`. The official VBench-I2V
 Git revision and canonical source contract are already pinned;
@@ -110,10 +113,24 @@ installed-runtime or checkpoint fingerprint. Empirical gates must come
 from the leakage-disjoint design pilot; filling them from calibration or
 holdout results is forbidden.
 
+`design-pilot.v1.json` is retained byte-for-byte as the legacy frozen90
+contract: it still means 15 claims, 90 gates, a 193-hypothesis planning family,
+and a `ltx-sota-power-report.v1` output. It is not reinterpreted as 144 gates.
+Current D1, pilot, Q0, F0 and Q2 consumers require the v2 report and reject
+both a v1 report and a relabelled 15/90/193 payload. Existing frozen90 evidence
+therefore remains auditable under its original scope but cannot qualify the
+expanded Candidate-Surface.
+
 ```bash
 uv run python scripts/av_eval.py design-check \
-  --design configs/av_eval/design-pilot.v1.json
+  --design configs/av_eval/design-pilot.v2.json \
+  --surface ../../apps/ltx-studio/release/candidate-release-surface.v1.json
 ```
+
+The v2 design producer derives and compares both the full-surface digest and
+the complete candidate-plus-`vbench-i2v` projection from that supplied Studio
+document. A stored syntactically valid digest, a partial surface, or an
+unregistered claim projection is rejected before a D0a report is emitted.
 
 ```bash
 uv run python scripts/av_eval.py vbench-runtime-check \
@@ -146,7 +163,7 @@ invented from the shared trainer environment. Only the emitted
 `runtime_digest` may fill the calibration catalog's `vbench-runtime`
 fingerprint and the D1 observation binding. `complete-d1` additionally requires
 the complete verified runtime report, recomputes its fingerprint and binds the
-report digest in the final 127-gate D1 report. Matching arbitrary hash strings
+report digest in the final 188-gate D1 report. Matching arbitrary hash strings
 in the catalog and observation file are therefore insufficient.
 
 The checked-in draft exits with code 2 and a deterministic `hold` report that
@@ -161,37 +178,45 @@ the gates after results are visible.
 
 ## D1 calibration gates
 
-`configs/av_eval/calibration-gates.v1.json` is the complete machine-readable
-gate inventory for calibration. It includes 37 fixed AV, phoneme/viseme,
-identity, artifact, ASR, sharpness, calibration and abstention decisions plus
-90 claim-specific VBench measurements from D0a: six dimensions for every
-unique VBench-applicable visual claim in the current Candidate-Surface. Names, numbers and
-negations have separate 99%-accuracy gates and separate D0a power endpoints;
-they may never be hidden in one aggregate. Plan-fixed thresholds are
-immutable in the validator; only the still-unknown relative sharpness floor is
-nullable. Evaluator fingerprints, D0a/preregistration/VBench bindings and a
+`configs/av_eval/calibration-gates.v2.json` is the current complete
+machine-readable gate inventory for calibration. It includes 44 fixed AV,
+phoneme/viseme, identity, artifact, ASR, sharpness, calibration and abstention
+decisions plus 144 claim-specific VBench measurements from D0a: six dimensions
+for every one of the 24 unique VBench-applicable visual Candidate-Surface
+claims. The nine post-frozen90 LTX-2.5 claims are now structurally registered,
+but all 54 of their absolute minima, relative deltas and basis-evidence digests
+remain null. They therefore remain an explicit HOLD until a new disjoint pilot
+and review freeze real values; no legacy threshold or sample size is copied.
+Names,
+numbers and negations have separate 99%-accuracy gates and separate D0a power
+endpoints; they may never be hidden in one aggregate. Plan-fixed thresholds are
+immutable in the validator. The still-unknown relative sharpness floor and the
+new Worst-Stratum Brier/ECE floors remain nullable until independent basis
+evidence freezes them. Evaluator fingerprints, D0a/preregistration/VBench bindings and a
 basis-evidence hash for every gate remain null in the checked-in draft.
 
 ```bash
 uv run python scripts/av_eval.py calibration-check \
-  --catalog configs/av_eval/calibration-gates.v1.json
+  --catalog configs/av_eval/calibration-gates.v2.json
 ```
 
 The draft therefore exits 2 with `hold`. `frozen` rejects missing or extra
 metrics, changed plan thresholds, absent evaluator fingerprints, absent basis
-evidence, or an unbound upstream catalog. Its output is the exact 127-ID set
+evidence, or an unbound upstream catalog. Its output is the exact 188-ID set
 that the tune/holdout report validator must cover; a VBench or critical-token
 omission cannot be hidden behind the other D1 metrics.
 
-The D0a power report counts each of the 90 VBench gates as two planned
+The D0a v2 power report counts each of the 144 VBench gates as two planned
 hypotheses (absolute and anchor-relative) and every other registered power
-endpoint as one. With the current surface this is a 193-hypothesis planning
-family, so the conservative planning alpha is `0.05 / 193`, not `0.05 / 19`.
+endpoint as one. With 13 non-VBench endpoints this is a 301-hypothesis planning
+family, so the conservative planning alpha is `0.05 / 301`, not `0.05 / 19`.
 The six VBench power profiles must exactly cover the registered dimensions;
 their effect and variability inputs are the conservative worst case across
-all claim-specific gates in that dimension. The report exposes the hypothesis
-count so a downstream freeze cannot silently reuse a pre-expansion sample
-size.
+all claim-specific gates in that dimension. The report exposes the 24-claim,
+144-gate and 301-hypothesis counts plus the Candidate-Surface binding digest,
+so a downstream freeze cannot silently reuse a pre-expansion sample size.
+Because the expanded pilot has not happened, `required_independent_units` and
+`required_clips` remain null; no real N is claimed by the checked-in draft.
 
 Every executable D1 scorer binds the same dataset, preregistration, release
 candidate and strata-plan digests in both its input and output. This prevents
@@ -286,13 +311,75 @@ Fitzpatrick stratum must independently support both FAR and FRR decisions. TAR
 is the exact confidence-bound complement of FRR, not a separately tunable
 result.
 
-`offset-score` closes the nine AV-offset gates with one input contract. It
-requires non-abstained positive and negative subframe, one-frame and
-multiframe controls plus zero offset, each over at least two leakage
-components. Error median/p95, the cluster-bootstrap upper p95 bound,
-within-frame rate, fixed ten-bin ECE, Brier score, ID/OOD abstention and the
-generated-output offset p95 remain separately visible. Evaluator, calibration
-and abstention policies, release candidate and strata plan are digest-bound.
+The offset path is v2 and fail-closed. `offset-calibrate` accepts controls only
+when they are derived from a hash-verified dataset freeze and its frozen
+`tune` split. Each case ID binds the source sample, replicate, fps, grid point
+and explicit correspondence label. Every independent transitive component
+must contribute a balanced grid of seven signed offsets at 24, 25 and 30 fps
+for both correspondence labels, with exactly one preregistered replicate per
+cell. The D0a power report supplies a non-null
+`required_independent_units`; fewer tune, calibration or output components are
+rejected. Fit and calibration partitions must be disjoint across speaker,
+face identity, recording session, source asset, source collection and the
+transitive component.
+
+The fit is deterministic isotonic PAVA with equal total weight per transitive
+component. Its raw-score threshold, FAR/FRR targets and basis evidence are a
+separate frozen operating-point artifact and digest. `offset-observations-build`
+then applies that exact model only to the manifest-verified `calibration`
+split; generated outputs must come from the separately frozen `test` split.
+Fit, calibration and output are pairwise disjoint across voice speaker, face
+identity, recording session, source asset, source collection and the complete
+transitive leakage component. `offset-score` emits 16 decisions: offset error/within-frame accuracy,
+overall and Worst-Stratum correspondence FAR/FRR, Brier, ten-bin ECE,
+Worst-Stratum Brier/ECE/within-frame evidence, ID/OOD abstention and output
+offset p95. ECE and Brier are explicitly conditional on non-abstained cases;
+false in-domain abstention and OOD abstention recall remain separate gates, so
+an abstention can neither become probability zero nor disappear. FAR/FRR and
+abstention bounds use independent transitive components for Clopper-Pearson,
+not the much larger case count. Worst-stratum bounds use one simultaneous
+global-component resample for every registered stratum and its max/min
+bootstrap distribution, plus Bonferroni-adjusted component-exact
+intervals; even zero observed errors retain a positive upper bound. Freeze,
+manifest, tune/calibration/test split manifests, the deterministic D0a design
+report, evaluator, calibrator, operating point, abstention policy, release and
+the exact D0a strata quota plan are digest-bound.
+
+An observation JSON is not a scoring credential. Every scoring invocation
+must re-supply the frozen deck and calibrator plus the externally reviewed
+dataset-freeze and preregistration digests. The scorer reruns governance,
+recomputes the exact D0a report, deterministically refits PAVA, and derives
+every probability and the threshold before computing statistics. The offset
+CLI additionally refuses symlinks, non-regular files, non-finite JSON and any
+input above 256 MiB or 128 structural nesting levels; case, component, stratum
+and knot counts are bounded.
+
+The checked-in `preregistration.v2.json` still names the older v1 isotonic
+method and remains a draft. It is therefore intentionally unusable for this
+path: a reviewed preregistration must first freeze
+`speaker-disjoint-component-weighted-isotonic.v2`, then the dataset must be
+refrozen so the preregistration snapshot and split manifests receive new
+content hashes. Rehashing only the offset deck cannot bypass this HOLD.
+
+```bash
+uv run python scripts/av_eval.py offset-calibrate --deck /sealed/d1/offset-fit.v2.json \
+  --expected-dataset-digest <externally-reviewed-freeze-sha256> \
+  --trusted-preregistration-digest <externally-reviewed-preregistration-sha256> \
+  > /sealed/d1/offset-calibrator.v2.json
+uv run python scripts/av_eval.py offset-observations-build \
+  --deck /sealed/d1/offset-fit.v2.json \
+  --calibrator /sealed/d1/offset-calibrator.v2.json \
+  --observation-deck /sealed/d1/offset-evaluation.v2.json \
+  --expected-dataset-digest <externally-reviewed-freeze-sha256> \
+  --trusted-preregistration-digest <externally-reviewed-preregistration-sha256> \
+  > /sealed/d1/offset-observations.v2.json
+uv run python scripts/av_eval.py offset-score \
+  --observations /sealed/d1/offset-observations.v2.json \
+  --deck /sealed/d1/offset-fit.v2.json \
+  --calibrator /sealed/d1/offset-calibrator.v2.json \
+  --expected-dataset-digest <externally-reviewed-freeze-sha256> \
+  --trusted-preregistration-digest <externally-reviewed-preregistration-sha256>
+```
 
 `content-score` measures the P/B/M content controls without reducing them to
 raw frame accuracy. The fixed bilabial-closure/open/rounded/other labels use
@@ -313,23 +400,29 @@ remains a D1 calibration output with mandatory basis evidence.
 scorers. It requires one shared dataset, preregistration, release, strata plan
 and bootstrap contract; verifies every evaluator fingerprint against the
 ready calibration catalog; rejects missing or extra source metrics; and
-recomputes each of the 37 fixed decisions from its registered estimate or
-confidence bound. The remaining 90 gates are intentionally not synthesized:
+recomputes each of the 44 fixed decisions from its registered estimate or
+confidence bound. The remaining 144 gates are intentionally not synthesized:
 they require the pinned official VBench runtime and Holm-corrected evidence.
+The fixed report also propagates the complete offset-v2 design, split,
+calibrator, evaluator, abstention-policy, exact bootstrap, uncertainty and grid
+contract. `complete-d1` recomputes the supplied frozen D0a report, rebinds the
+offset evaluator to the calibration catalog and rejects any changed unit
+requirement, quota digest or offset semantics instead of trusting the fixed
+report.
 
-`vbench-score` supplies those 90 remaining measurements: six dimensions for
-each of the twelve visual candidate claims. It validates the
+`vbench-score` supplies those 144 remaining measurements: six dimensions for
+each of the 24 registered visual candidate claims. It validates the
 frozen D0a catalog, official repository commit and config, runtime,
 comparator-matrix and release bindings. Candidate and anchor scores are paired
 within leakage components. Every claim/dimension must clear both its absolute
-minimum and its registered noninferiority/superiority margin. The resulting 144
+minimum and its registered noninferiority/superiority margin. The resulting 288
 hypotheses share one Holm family; each effect retains its raw interval,
 adjusted p-value, rank-specific alpha and one-sided Holm lower bound. A metric
 passes only when both corrected lower bounds are positive.
 
 Finally, `complete-d1` revalidates both source reports against the same frozen
-D0a design and calibration catalog, verifies all 144 Holm ranks and the pinned
-VBench runtime, and emits one sorted 127-gate report. It recomputes every local
+D0a design and calibration catalog, verifies all 288 Holm ranks and the pinned
+VBench runtime, and emits one sorted 188-gate report. It recomputes every local
 estimate/bound decision and both corrected VBench subtests. Mixed releases,
 changed strata, duplicate ranks, missing metrics or copied pass labels reject
 the complete evidence instead of degrading to a warning.

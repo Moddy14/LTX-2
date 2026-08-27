@@ -9,6 +9,7 @@ import {
   UnixQualificationBrokerTransport,
   type QualificationBrokerRequest,
 } from "../server/qualificationBroker.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -16,7 +17,7 @@ const sha = (character: string) => character.repeat(64);
 
 function request(): QualificationBrokerRequest {
   return {
-    schemaVersion: "ltx-studio-qualification-broker-request.v1",
+    schemaVersion: "ltx-studio-qualification-broker-request.v3",
     requestId: "00000000-0000-4000-8000-000000000200",
     action: "accept",
     requestedAt: "2026-08-15T00:05:00Z",
@@ -24,6 +25,11 @@ function request(): QualificationBrokerRequest {
     expectedHeadSha256: sha("a"),
     expectedReleaseDigest: sha("b"),
     expectedSurfaceDigest: sha("c"),
+    expectedRuntimeInstallSealSha256: sha("2"),
+    expectedRuntimeTreeSha256: sha("3"),
+    expectedRuntimePolicySha256: sha("4"),
+    expectedNodeExecutableSha256: sha("5"),
+    expectedRuntimeTrust: runtimeTrustFixture,
     claim: {
       authorizationDigest: sha("d"),
       authorizationId: "qualification-r0l-001",

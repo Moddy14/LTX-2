@@ -535,7 +535,7 @@ export const mfaMediaPipeMeasurementSchema = z.object({
   medianBlurVariance: z.number().finite().min(0).nullable(),
   yawP95Degrees: z.number().finite().min(0).max(180).nullable(),
   pitchP95Degrees: z.number().finite().min(0).max(180).nullable(),
-  usableDurationSeconds: z.number().finite().min(0).max(5),
+  usableDurationSeconds: z.number().finite().min(0).max(10.5),
   sampledFrames: z.number().int().min(0).max(300),
 }).strict();
 

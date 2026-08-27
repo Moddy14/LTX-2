@@ -4,6 +4,11 @@ This image pins the official LipForcing code to
 `fc864771eb347ca3ccaaef9c0b583ff6ccc9f184` and runs it offline. The build
 changes only the production inference path:
 
+> **Apache-2.0 modification notice:** this is a modified build of LipForcing,
+> not an unmodified upstream image. Every changed upstream file carries a
+> prominent notice, and its source and patched SHA-256 values are recorded in
+> `runtime-patch-provenance.v1.json` for the exact pinned commit.
+
 - all reachable tensor checkpoints use `torch.load(..., weights_only=True)`;
 - the released 14B checkpoint is memory-mapped and assigned directly into the
   model structure created on PyTorch's `meta` device. Non-persistent RoPE and
@@ -19,6 +24,15 @@ changes only the production inference path:
   window is padded to the LTX duration and remains the refined video's audio.
   Without one, the original LTX audio is preserved. A selected final mix is
   applied only after refinement.
+
+The raw-output mux profile is a controlled, development-only experiment. The
+default `h264-crf13-mux-crf18-v1` preserves the pinned command contract: the
+upstream raw writer produces H.264 at CRF 13 and the upstream audio mux
+re-encodes video at CRF 18. Candidate `h264-crf13-mux-copy-v1` changes exactly
+that mux codec segment to `-c:v copy`; 25-fps input preparation, the CRF-13 raw
+write, timeline restoration, decoder, seed, models and masks remain unchanged.
+The candidate is outside the declared release surface and makes no quality or
+release claim.
 
 The quality mode uses the official Wan VAE decoder. The faster TAEHV decoder is
 available as an explicit alternative. Both remain experimental and disabled by

@@ -1,15 +1,53 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertAuthoritativeQueueAbsence,
+  assertAuthoritativeQueueList,
   buildAdmissionRequests,
   decisionMessage,
   normalizeSegmentBoundaryDecision,
   normalizeQueueJobs,
+  normalizeQueueJobsWithDiagnostics,
   retryAfterMs,
   shouldRetryQueueSubmit,
   supportsCooperativeCheckpoint,
 } from "../server/admission.js";
 import { validRequest } from "./fixtures.js";
+
+const queueAuthority = {
+  admission_state: "local_queue_v0",
+  readable: true,
+  lock_lane: { state: "free", waiters: 0 },
+} as const;
+
+function queueRead(queue: Record<string, unknown>): Record<string, unknown> {
+  return {
+    schema_version: "dgx-queue-read.v0",
+    queue: { ...queueAuthority, ...queue },
+  };
+}
+
+function queueJob(
+  jobId: string,
+  state: "accepted" | "queued" | "starting" | "running" | "pausing" | "paused" | "resuming",
+  requestedBy: string,
+): Record<string, unknown> {
+  const active = !["accepted", "queued"].includes(state);
+  return {
+    job_id: jobId,
+    state,
+    requested_by: requestedBy,
+    source_app: "ltx-studio",
+    job_type: "ltx2_native_distilled",
+    runtime: "ltx2_native",
+    priority: "normal",
+    exclusive_runtime: "ltx2_native",
+    created_at: "2026-08-27T08:00:00+00:00",
+    started_at: active ? "2026-08-27T08:00:01+00:00" : null,
+    reservation_active: state !== "queued",
+    idempotency_key: requestedBy,
+  };
+}
 
 describe("DGX admission contract", () => {
   it("normalizes all four canonical segment-boundary actions", () => {
@@ -20,6 +58,7 @@ describe("DGX admission contract", () => {
       "resume_current",
     ] as const) {
       expect(normalizeSegmentBoundaryDecision({
+        schema_version: "dgx-segment-schedule-decision.v1",
         action,
         current_job_id: "dgx-job-1",
         next_job_id: null,
@@ -32,12 +71,17 @@ describe("DGX admission contract", () => {
 
   it("rejects stale or malformed segment-boundary responses", () => {
     expect(() => normalizeSegmentBoundaryDecision({
+      schema_version: "dgx-segment-schedule-decision.v1",
       action: "continue_current",
       current_job_id: "dgx-job-stale",
     }, "dgx-job-current")).toThrow(/anderen DGX-Job/);
-    expect(() => normalizeSegmentBoundaryDecision({ action: "invented_action" }, "dgx-job-current"))
+    expect(() => normalizeSegmentBoundaryDecision({
+      schema_version: "dgx-segment-schedule-decision.v1",
+      action: "invented_action",
+    }, "dgx-job-current"))
       .toThrow(/keine bekannte Aktion/);
     expect(() => normalizeSegmentBoundaryDecision({
+      schema_version: "dgx-segment-schedule-decision.v1",
       action: "wait_for_successor",
       current_job_id: "dgx-job-current",
       retry_after_seconds: -1,
@@ -131,6 +175,13 @@ describe("DGX admission contract", () => {
 
     expect(admission.resumability).toBeUndefined();
     expect(admission.scheduling).toBeUndefined();
+  });
+
+  it("never constructs a DGX admission request while DFR v1.3 is in qualification HOLD", () => {
+    const request = validRequest("dfr");
+    expect(supportsCooperativeCheckpoint(request)).toBe(false);
+    expect(() => buildAdmissionRequests(request, undefined, "dfr-job"))
+      .toThrow(/Qualification-HOLD/u);
   });
 
   it("keeps the full LTX plus LatentSync allocation non-preemptible", () => {
@@ -262,30 +313,385 @@ describe("DGX admission contract", () => {
     })).toBe(false);
   });
 
-  it("normalizes the current Runtime API queue groups for crash reconciliation", () => {
+  it("separates resource-free cooling orders from queue jobs during crash reconciliation", () => {
+    const response = {
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        ...queueAuthority,
+        accepted_jobs: [queueJob(
+          "dgx-job-20260827-080000-000000000001",
+          "accepted",
+          "ltx-studio:one",
+        )],
+        active_jobs: [queueJob(
+          "dgx-job-20260827-080000-000000000002",
+          "running",
+          "ltx-studio:two",
+        )],
+        cooling_jobs: [{
+          order_id: "a".repeat(64),
+          state: "cooling",
+          source_app: "minimax-h3-dgx",
+          job_type: "comfyui_minimax_h3_workflow",
+          runtime: "comfyui_minimax_h3",
+          created_at: "2026-08-27T08:00:00+00:00",
+          updated_at: "2026-08-27T08:01:00+00:00",
+          current_step: "durable order waiting for stable cooling",
+          queue_position: null,
+        }],
+        queued_jobs: [queueJob(
+          "dgx-job-20260827-080000-000000000003",
+          "queued",
+          "ltx-studio:three",
+        )],
+      },
+    };
+
+    expect(normalizeQueueJobs(response)).toEqual([
+      expect.objectContaining({ job_id: "dgx-job-20260827-080000-000000000001", state: "accepted" }),
+      expect.objectContaining({ job_id: "dgx-job-20260827-080000-000000000002", state: "running" }),
+      expect.objectContaining({ job_id: "dgx-job-20260827-080000-000000000003", state: "queued" }),
+    ]);
+    expect(normalizeQueueJobsWithDiagnostics(response)).toMatchObject({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [
+        expect.objectContaining({ job_id: "dgx-job-20260827-080000-000000000001", state: "accepted" }),
+        expect.objectContaining({ job_id: "dgx-job-20260827-080000-000000000002", state: "running" }),
+        expect.objectContaining({ job_id: "dgx-job-20260827-080000-000000000003", state: "queued" }),
+      ],
+      coolingOrders: [{
+        order_id: "a".repeat(64),
+        state: "cooling",
+        source_app: "minimax-h3-dgx",
+        queue_position: null,
+      }],
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
+  });
+
+  it("rejects job-shaped, duplicate or malformed cooling orders instead of inventing leases", () => {
+    const order = {
+      order_id: "b".repeat(64),
+      state: "cooling",
+      source_app: "minimax-h3-dgx",
+      job_type: "comfyui_minimax_h3_workflow",
+      runtime: "comfyui_minimax_h3",
+      created_at: "2026-08-27T08:00:00+00:00",
+      updated_at: "2026-08-27T08:01:00+00:00",
+      current_step: "durable order waiting for stable cooling",
+      queue_position: null,
+    };
+    const result = normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        ...queueAuthority,
+        accepted_jobs: [],
+        active_jobs: [],
+        queued_jobs: [],
+        cooling_jobs: [
+          order,
+          { ...order },
+          {
+            job_id: "dgx-job-not-a-cooling-order",
+            state: "cooling",
+            requested_by: "ltx-studio:not-an-order",
+          },
+          { ...order, order_id: "not-a-digest" },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [],
+      coolingOrders: [order],
+      discardedCoolingEntries: 3,
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
     expect(normalizeQueueJobs({
       schema_version: "dgx-queue-read.v0",
       queue: {
-        accepted_jobs: [{
-          job_id: "dgx-job-accepted",
-          state: "accepted",
-          requested_by: "ltx-studio:one",
-        }],
-        active_jobs: [{
-          job_id: "dgx-job-running",
-          state: "running",
-          requested_by: "ltx-studio:two",
-        }],
-        queued_jobs: [{
-          job_id: "dgx-job-queued",
-          state: "queued",
-          requested_by: "ltx-studio:three",
+        ...queueAuthority,
+        accepted_jobs: [],
+        active_jobs: [],
+        queued_jobs: [],
+        cooling_jobs: [{
+          job_id: "dgx-job-not-a-cooling-order",
+          state: "cooling",
+          requested_by: "ltx-studio:not-an-order",
         }],
       },
-    })).toEqual([
-      expect.objectContaining({ job_id: "dgx-job-accepted", state: "accepted" }),
-      expect.objectContaining({ job_id: "dgx-job-running", state: "running" }),
-      expect.objectContaining({ job_id: "dgx-job-queued", state: "queued" }),
-    ]);
+    })).toEqual([]);
+    expect(() => assertAuthoritativeQueueList(result)).not.toThrow();
+  });
+
+  it("requires strict offset timestamps and chronological cooling updates", () => {
+    const order = {
+      order_id: "c".repeat(64),
+      state: "cooling",
+      source_app: "minimax-h3-dgx",
+      job_type: "comfyui_minimax_h3_workflow",
+      runtime: "comfyui_minimax_h3",
+      created_at: "2026-08-27T08:00:00+00:00",
+      updated_at: "2026-08-27T08:01:00+00:00",
+      current_step: "durable order waiting for stable cooling",
+      queue_position: null,
+    };
+    const result = normalizeQueueJobsWithDiagnostics(queueRead({
+      accepted_jobs: [],
+      active_jobs: [],
+      queued_jobs: [],
+      cooling_jobs: [
+        { ...order, order_id: "d".repeat(64), created_at: "2026-08-27T08:00:00" },
+        { ...order, order_id: "e".repeat(64), created_at: "2026-02-30T08:00:00+00:00" },
+        {
+          ...order,
+          order_id: "f".repeat(64),
+          created_at: "2026-08-27T08:02:00+00:00",
+          updated_at: "2026-08-27T08:01:00+00:00",
+        },
+      ],
+    }));
+
+    expect(result).toMatchObject({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [],
+      discardedCoolingEntries: 3,
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
+    expect(result).not.toHaveProperty("discardedJobLikeEntries");
+    expect(result).not.toHaveProperty("coolingOrders");
+  });
+
+  it("accepts a readable uninitialized queue without an accepted_jobs bucket", () => {
+    const result = normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        admission_state: "local_queue_uninitialized",
+        readable: true,
+        lock_lane: { state: "free", waiters: 0 },
+        active_jobs: [],
+        cooling_jobs: [],
+        queued_jobs: [],
+      },
+    });
+
+    expect(result).toEqual({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [],
+      queueReadable: true,
+      admissionState: "local_queue_uninitialized",
+      lockLane: { state: "free", waiters: 0 },
+    });
+    expect(() => assertAuthoritativeQueueList(result)).not.toThrow();
+    expect(() => assertAuthoritativeQueueAbsence(result)).not.toThrow();
+  });
+
+  it("rejects an unreadable queue even when its published buckets are empty", () => {
+    const result = normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        admission_state: "local_queue_unreadable",
+        readable: false,
+        lock_lane: { state: "free", waiters: 0 },
+        active_jobs: [],
+        cooling_jobs: [],
+        queued_jobs: [],
+      },
+    });
+
+    expect(result).toEqual({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [],
+      queueReadable: false,
+      admissionState: "local_queue_unreadable",
+      lockLane: { state: "free", waiters: 0 },
+    });
+    expect(() => assertAuthoritativeQueueList(result)).toThrow("nicht normalisierbare Jobzustände");
+    expect(() => assertAuthoritativeQueueAbsence(result)).toThrow("nicht normalisierbare Jobzustände");
+  });
+
+  it("uses a valid non-free lock view for listing but never for an absence proof", () => {
+    for (const lock_lane of [
+      { state: "held", seconds: 0.4, waiters: 0, holders: 1 },
+      { state: "stalled", seconds: 1203.4, waiters: 3, holders: 1 },
+      { state: "unmeasured", reason: "proc_locks_unreadable" },
+    ]) {
+      const result = normalizeQueueJobsWithDiagnostics(queueRead({
+        lock_lane,
+        accepted_jobs: [],
+        active_jobs: [],
+        cooling_jobs: [],
+        queued_jobs: [],
+      }));
+      expect(() => assertAuthoritativeQueueList(result)).not.toThrow();
+      expect(() => assertAuthoritativeQueueAbsence(result)).toThrow("nicht beweisbar");
+    }
+  });
+
+  it("fails closed on malformed or contradictory authority metadata", () => {
+    for (const authority of [
+      { readable: "yes", admission_state: "local_queue_v0", lock_lane: { state: "free", waiters: 0 } },
+      { readable: true, admission_state: "invented", lock_lane: { state: "free", waiters: 0 } },
+      { readable: true, admission_state: "local_queue_unreadable", lock_lane: { state: "free", waiters: 0 } },
+      { readable: true, admission_state: "local_queue_v0", lock_lane: { state: "held", seconds: 1, waiters: 0 } },
+    ]) {
+      const result = normalizeQueueJobsWithDiagnostics({
+        schema_version: "dgx-queue-read.v0",
+        queue: {
+          ...authority,
+          accepted_jobs: [],
+          active_jobs: [],
+          cooling_jobs: [],
+          queued_jobs: [],
+        },
+      });
+      expect(result.discardedJobLikeEntries).toBeGreaterThan(0);
+      expect(() => assertAuthoritativeQueueList(result)).toThrow("nicht normalisierbare Jobzustände");
+    }
+  });
+
+  it("reports unknown queue states instead of silently treating them as absence", () => {
+    expect(normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        ...queueAuthority,
+        accepted_jobs: [],
+        active_jobs: [{
+          job_id: "dgx-job-20260827-080000-000000000004",
+          state: "launching-vNext",
+          requested_by: "ltx-studio:one",
+        }],
+        cooling_jobs: [],
+        queued_jobs: [],
+      },
+    })).toEqual({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [],
+      discardedJobLikeEntries: 1,
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
+  });
+
+  it("reports structural queue-envelope drift instead of returning an authoritative empty list", () => {
+    expect(normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        ...queueAuthority,
+        accepted_jobs: [],
+        active_jobs: { job_id: "not-an-array" },
+        cooling_jobs: [],
+        queued_jobs: [],
+      },
+    })).toEqual({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [],
+      discardedJobLikeEntries: 1,
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
+    const missingContract = normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {},
+    });
+    expect(missingContract.jobs).toEqual([]);
+    expect(missingContract.discardedJobLikeEntries).toBeGreaterThan(0);
+    expect(missingContract.discardedCoolingEntries).toBe(1);
+  });
+
+  it("fails closed on schema drift and rejects the former root-jobs fallback", () => {
+    const emptyQueue = {
+      ...queueAuthority,
+      accepted_jobs: [],
+      active_jobs: [],
+      cooling_jobs: [],
+      queued_jobs: [],
+    };
+    expect(normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v1",
+      queue: emptyQueue,
+    })).toEqual({
+      jobs: [],
+      discardedJobLikeEntries: 1,
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
+    expect(normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      jobs: [],
+    })).toEqual({ jobs: [], discardedJobLikeEntries: 1 });
+    expect(() => normalizeQueueJobs({
+      schema_version: "dgx-queue-read.v1",
+      queue: emptyQueue,
+    })).toThrow("nicht normalisierbare Jobzustände");
+  });
+
+  it("diagnoses bucket/state contradictions, missing owners and duplicate job ids", () => {
+    const invalid = normalizeQueueJobsWithDiagnostics({
+      schema_version: "dgx-queue-read.v0",
+      queue: {
+        ...queueAuthority,
+        accepted_jobs: [{
+          ...queueJob(
+            "dgx-job-20260827-080000-000000000005",
+            "accepted",
+            "ltx-studio:wrong-bucket",
+          ),
+          state: "completed",
+        }],
+        active_jobs: [{
+          ...queueJob(
+            "dgx-job-20260827-080000-000000000006",
+            "running",
+            "ltx-studio:missing-owner",
+          ),
+          job_id: "dgx-job-20260827-080000-000000000006",
+          state: "running",
+          requested_by: undefined,
+        }, {
+          ...queueJob(
+            "dgx-job-20260827-080000-000000000007",
+            "running",
+            "ltx-studio:duplicate",
+          ),
+        }],
+        cooling_jobs: [{
+          job_id: "dgx-job-20260827-080000-000000000007",
+          state: "cooling",
+          requested_by: "ltx-studio:duplicate",
+        }],
+        queued_jobs: [{
+          ...queueJob(
+            "dgx-job-20260827-080000-000000000008",
+            "queued",
+            "ltx-studio:padded-owner",
+          ),
+          requested_by: " ltx-studio:padded-owner ",
+        }],
+      },
+    });
+
+    expect(invalid).toEqual({
+      schemaVersion: "dgx-queue-read.v0",
+      jobs: [expect.objectContaining({
+        job_id: "dgx-job-20260827-080000-000000000007",
+        state: "running",
+      })],
+      discardedJobLikeEntries: 3,
+      discardedCoolingEntries: 1,
+      queueReadable: true,
+      admissionState: "local_queue_v0",
+      lockLane: { state: "free", waiters: 0 },
+    });
   });
 });

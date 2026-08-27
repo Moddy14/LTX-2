@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildConfiguredJobStartEnforcer } from "../server/configuredStartEnforcer.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const context = {
   requestSha256: "a".repeat(64),
@@ -12,7 +13,16 @@ describe("configured job-start enforcer", () => {
   it("keeps development available without pretending it is a sealed activation", () => {
     expect(buildConfiguredJobStartEnforcer({
       sealed: false,
-      identity: { verified: false, releaseDigest: null, surfaceDigest: null },
+      identity: {
+        verified: false,
+        releaseDigest: null,
+        surfaceDigest: null,
+        runtimeInstallSealSha256: null,
+        runtimeTreeSha256: null,
+        runtimePolicySha256: null,
+        nodeExecutableSha256: null,
+        runtimeTrust: null,
+      },
       activationTrustPolicyDigest: "",
       rightsTrustPolicyDigest: "",
     }).decide(context)).toMatchObject({ allowed: true, mode: "development" });
@@ -23,27 +33,41 @@ describe("configured job-start enforcer", () => {
       verified: true,
       releaseDigest: "b".repeat(64),
       surfaceDigest: "c".repeat(64),
+      runtimeInstallSealSha256: "1".repeat(64),
+      runtimeTreeSha256: "2".repeat(64),
+      runtimePolicySha256: "3".repeat(64),
+      nodeExecutableSha256: "4".repeat(64),
+      runtimeTrust: runtimeTrustFixture,
     };
     expect(buildConfiguredJobStartEnforcer({
       sealed: true,
       identity: completeIdentity,
       activationTrustPolicyDigest: "",
-      rightsTrustPolicyDigest: "d".repeat(64),
+      rightsTrustPolicyDigest: runtimeTrustFixture.trustPolicyDigests.runtimeRights,
     }).decide(context)).toMatchObject({ allowed: false, mode: "blocked" });
     expect(buildConfiguredJobStartEnforcer({
       sealed: true,
       identity: completeIdentity,
-      activationTrustPolicyDigest: "e".repeat(64),
-      rightsTrustPolicyDigest: "d".repeat(64),
+      activationTrustPolicyDigest: runtimeTrustFixture.trustPolicyDigests.activationWriter,
+      rightsTrustPolicyDigest: runtimeTrustFixture.trustPolicyDigests.runtimeRights,
     }).decide(context)).toMatchObject({ allowed: false, mode: "blocked" });
   });
 
   it("uses the verified activation provider only with exact static trust pins", () => {
     const enforcer = buildConfiguredJobStartEnforcer({
       sealed: true,
-      identity: { verified: true, releaseDigest: "b".repeat(64), surfaceDigest: "c".repeat(64) },
-      activationTrustPolicyDigest: "e".repeat(64),
-      rightsTrustPolicyDigest: "d".repeat(64),
+      identity: {
+        verified: true,
+        releaseDigest: "b".repeat(64),
+        surfaceDigest: "c".repeat(64),
+        runtimeInstallSealSha256: "1".repeat(64),
+        runtimeTreeSha256: "2".repeat(64),
+        runtimePolicySha256: "3".repeat(64),
+        nodeExecutableSha256: "4".repeat(64),
+        runtimeTrust: runtimeTrustFixture,
+      },
+      activationTrustPolicyDigest: runtimeTrustFixture.trustPolicyDigests.activationWriter,
+      rightsTrustPolicyDigest: runtimeTrustFixture.trustPolicyDigests.runtimeRights,
       activation: {
         read: () => ({
           state: "production_stable",
@@ -51,6 +75,11 @@ describe("configured job-start enforcer", () => {
           activationHeadSha256: "f".repeat(64),
           releaseDigest: "b".repeat(64),
           surfaceDigest: "c".repeat(64),
+          runtimeInstallSealSha256: "1".repeat(64),
+          runtimeTreeSha256: "2".repeat(64),
+          runtimePolicySha256: "3".repeat(64),
+          nodeExecutableSha256: "4".repeat(64),
+          runtimeTrust: runtimeTrustFixture,
           rightsCurrent: true,
           releasedSurfaceEntryIds: [context.surfaceEntryId],
         }),

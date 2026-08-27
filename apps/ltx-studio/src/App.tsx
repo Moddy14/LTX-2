@@ -4,8 +4,9 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import packageJson from "../package.json";
 
 import {
-  createDefaultRequest,
+  createPreferredRequest,
   generationRequestSchema,
+  isLegacyDfrRequest,
   mergeGenerationRequest,
   PIPELINES,
   type GenerationRequest,
@@ -17,6 +18,7 @@ import {
 } from "../shared/models";
 import type { PlanSuggestion, PreparedLipDubReference } from "../shared/plan";
 import { estimateResources } from "../shared/estimates";
+import { qualificationHoldForRequest } from "../shared/qualificationHold";
 import { decodeDraftParameter } from "../shared/drafts";
 import { composePromptFromParts, composePromptRequestSchema } from "../shared/prompts";
 import {
@@ -36,32 +38,48 @@ import {
   setJobFavorite,
   setOutputQualityReview,
   startOutputAnalysis,
+  startT2aAudioAnalysis,
   takeOutputFrame,
   takeRecommendedOutputFrame,
   cancelOutputAnalysis,
+  cancelT2aAudioAnalysis,
   createExperiment as createExperimentApi,
   freezeExperiment as freezeExperimentApi,
   getExperiments,
   launchExperimentArm,
 } from "./api";
 import { protocolOrderedComparisonOutputs } from "./objectiveComparison";
-import { RefreshFence } from "./refreshFence";
+import { LatestRefreshFence, RefreshFence } from "./refreshFence";
 import type { QualityReviewInput } from "../shared/quality";
-import type { OutputAnalysisRecord } from "../shared/objectiveQuality";
+import type {
+  PublicControlledExperiment,
+  PublicOutputAnalysisRecord as OutputAnalysisRecord,
+} from "../shared/outputPublic";
+import type { T2aAudioPublicAnalysisRecord } from "../shared/t2aAudioPublic";
 import {
   MIN_SCENE_REFERENCE_FACE_SHARPNESS,
   sceneReferenceTooSoftMessage,
 } from "../shared/sceneReferenceQuality";
-import type {
-  ControlledExperiment,
-  ExperimentCreateInput,
-} from "../shared/experiments";
+import type { ExperimentCreateInput } from "../shared/experiments";
 import { ModeRail } from "./components/ModeRail";
 import { RunPanel } from "./components/RunPanel";
 import { LazyPanelBoundary, LazyPanelLoading } from "./components/LazyPanelBoundary";
+import { PersistenceHoldBanner } from "./components/PersistenceHoldBanner";
+import { settleStudioStartup } from "./startupLoad";
 import { importWithSingleReload } from "./lazyImport";
-import { mergeOutputAnalysis, mergeOutputRefresh } from "./outputState";
+import {
+  mergeOutputAnalysis,
+  mergeOutputRefresh,
+  mergeT2aAudioAnalysis,
+} from "./outputState";
 import { withSceneReference } from "./sceneReference";
+import { requestForModeChange } from "./modeTransition";
+import {
+  persistRequestDraft,
+  restorePersistedRequest,
+  type RequestDraftMigration,
+  type RestoredRequestDraft,
+} from "./requestDraftStorage";
 import {
   ApiError,
   type Health,
@@ -72,26 +90,31 @@ import {
   type StudioOutput,
 } from "./types";
 
-const STORAGE_KEY = "ltx-studio.request.v1";
-
 const Editor = lazy(async () => ({
   default: (await importWithSingleReload("editor", () => import("./components/Editor"))).Editor,
 }));
 
-function restoreRequest(): GenerationRequest {
+const LEGACY_OUTPUT_READ_ONLY_MESSAGE =
+  "Historischer Altbestand ist ungeprüft und nur lesbar; erlaubt sind ausschließlich Wiedergabe und Download.";
+
+function restoreRequest(): RestoredRequestDraft {
   try {
     const draft = decodeDraftParameter(window.location.search);
     if (draft !== null) {
       const currentUrl = new URL(window.location.href);
       currentUrl.searchParams.delete("draft");
       window.history.replaceState(null, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-      return withOfficialSpeechModelPaths(mergeGenerationRequest(draft));
+      return {
+        request: withOfficialSpeechModelPaths(mergeGenerationRequest(draft)),
+        migration: null,
+      };
     }
-    return withOfficialSpeechModelPaths(
-      mergeGenerationRequest(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")),
-    );
+    return restorePersistedRequest(localStorage);
   } catch {
-    return createDefaultRequest();
+    return {
+      request: withOfficialSpeechModelPaths(createPreferredRequest()),
+      migration: null,
+    };
   }
 }
 
@@ -115,7 +138,11 @@ function uniqueMessages(messages: readonly string[]): string[] {
 }
 
 export function App() {
-  const [request, setRequest] = useState<GenerationRequest>(restoreRequest);
+  const [restoredDraft] = useState<RestoredRequestDraft>(restoreRequest);
+  const [request, setRequest] = useState<GenerationRequest>(restoredDraft.request);
+  const [draftMigration, setDraftMigration] = useState<RequestDraftMigration | null>(
+    restoredDraft.migration,
+  );
   const requestRef = useRef(request);
   const [config, setConfig] = useState<StudioConfig | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -123,14 +150,17 @@ export function App() {
   const [historyEstimate, setHistoryEstimate] = useState<ResourceEstimate | null>(null);
   const [jobs, setJobs] = useState<StudioJob[]>([]);
   const [outputs, setOutputs] = useState<StudioOutput[]>([]);
-  const [experiments, setExperiments] = useState<ControlledExperiment[]>([]);
+  const [experiments, setExperiments] = useState<PublicControlledExperiment[]>([]);
   const experimentRefreshFence = useRef(new RefreshFence());
+  const outputRefreshFence = useRef(new LatestRefreshFence());
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedOutputName, setSelectedOutputName] = useState<string | null>(null);
   const [comparisonNames, setComparisonNames] = useState<string[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const cancellingJobs = useRef(new Set<string>());
+  const [cancellingJobIds, setCancellingJobIds] = useState<Set<string>>(() => new Set());
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [deletingOutputName, setDeletingOutputName] = useState<string | null>(null);
   const [extractingReferenceFrom, setExtractingReferenceFrom] = useState<string | null>(null);
@@ -145,11 +175,19 @@ export function App() {
   const [promptUndo, setPromptUndo] = useState<string | null>(null);
 
   const validation = useMemo(() => generationRequestSchema.safeParse(request), [request]);
+  const legacyExecutionBlocked = isLegacyDfrRequest(request);
+  const qualificationHold = qualificationHoldForRequest(request);
+  const requestExecutable = validation.success && !legacyExecutionBlocked && !qualificationHold;
   const fieldErrors = useMemo(() => {
     if (!attempted || validation.success) return {};
     return Object.fromEntries(validation.error.issues.map((issue) => [issue.path.join("."), issue.message]));
   }, [attempted, validation]);
-  const validationMessages = validation.success ? [] : validation.error.issues.map((issue) => issue.message);
+  const validationMessages = [
+    ...(validation.success ? [] : validation.error.issues.map((issue) => issue.message)),
+    ...(legacyExecutionBlocked
+      ? ["Historischer DFR-Altbestand ist nur lesbar und darf nicht neu ausgeführt werden."]
+      : []),
+  ];
   const resourceEstimate = historyEstimate ?? estimateResources(request);
   const requiredStartMemoryGiB = Math.max(
     config?.runtime.minAvailableGiB ?? 48,
@@ -160,7 +198,8 @@ export function App() {
   const comparisonOutputs = protocolOrderedComparisonOutputs(
     comparisonNames
       .map((name) => outputs.find((output) => output.name === name))
-      .filter((output): output is StudioOutput => Boolean(output)),
+      .filter((output): output is StudioOutput => output !== undefined
+        && output.trustStatus !== "legacy-unattested"),
   );
 
   useLayoutEffect(() => {
@@ -168,54 +207,67 @@ export function App() {
   }, [request]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(request));
-  }, [request]);
+    try {
+      persistRequestDraft(localStorage, request, draftMigration);
+    } catch {
+      // The editor remains usable when browser storage is unavailable. The
+      // next explicit server action still persists its own bound request.
+    }
+  }, [draftMigration, request]);
+
+  const refreshOutputs = async (): Promise<void> => {
+    const ticket = outputRefreshFence.current.issue();
+    const next = await getOutputs();
+    if (!outputRefreshFence.current.accepts(ticket)) return;
+    setOutputs((current) => mergeOutputRefresh(current, next));
+  };
 
   useEffect(() => {
     let mounted = true;
     const refresh = async () => {
       const experimentSnapshot = experimentRefreshFence.current.snapshot();
-      const [coreResult, experimentResult] = await Promise.allSettled([
-        Promise.all([
+      const outputTicket = outputRefreshFence.current.issue();
+      const { coreResult, healthResult, outputResult, experimentResult } = await settleStudioStartup({
+        core: Promise.all([
           getConfig(),
-          getHealth(),
           getJobs(),
           getModels(),
           getAssets(),
-          getOutputs(),
         ]),
-        getExperiments(),
-      ]);
+        health: getHealth(),
+        outputs: getOutputs(),
+        experiments: getExperiments(),
+        onHealthSettled: (result) => {
+          if (!mounted) return;
+          setHealth(result.status === "fulfilled" ? result.value : null);
+        },
+      });
       if (!mounted) return;
-      if (coreResult.status === "rejected") {
-        const error = coreResult.reason;
-        setStartupError(error instanceof Error ? error.message : "Studio API nicht erreichbar");
-        return;
+      // Health was applied independently by onHealthSettled. In particular,
+      // a persistence HOLD stays visible while another startup request hangs.
+      if (coreResult.status === "fulfilled") {
+        const [nextConfig, nextJobs, nextModels, nextAssets] = coreResult.value;
+        setConfig(nextConfig);
+        setJobs(nextJobs);
+        setModelInventory(nextModels);
+        setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
+        setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
       }
-      const [
-        nextConfig,
-        nextHealth,
-        nextJobs,
-        nextModels,
-        nextAssets,
-        nextOutputs,
-      ] = coreResult.value;
-      setConfig(nextConfig);
-      setHealth(nextHealth);
-      setJobs(nextJobs);
-      setOutputs((current) => mergeOutputRefresh(current, nextOutputs));
-      setModelInventory(nextModels);
-      setPreviews(Object.fromEntries(nextAssets.map((asset) => [asset.path, asset.url])));
-      setRequest((current) => withDiscoveredModelDefaults(current, nextModels));
+      if (outputResult.status === "fulfilled"
+        && outputRefreshFence.current.accepts(outputTicket)) {
+        setOutputs((current) => mergeOutputRefresh(current, outputResult.value));
+      }
       if (
         experimentResult.status === "fulfilled"
         && experimentRefreshFence.current.accepts(experimentSnapshot)
       ) {
         setExperiments(experimentResult.value.experiments);
       }
-      if (experimentResult.status === "rejected") {
-        const error = experimentResult.reason;
-        setStartupError(error instanceof Error ? error.message : "Experimentdaten sind nicht verfügbar");
+      const startupFailure = [coreResult, healthResult, outputResult, experimentResult]
+        .find((result) => result.status === "rejected");
+      if (startupFailure?.status === "rejected") {
+        const error = startupFailure.reason;
+        setStartupError(error instanceof Error ? error.message : "Studio API nicht erreichbar");
       } else {
         setStartupError(null);
       }
@@ -223,9 +275,7 @@ export function App() {
     void refresh();
     const healthTimer = window.setInterval(() => void getHealth().then(setHealth).catch(() => setHealth(null)), 10_000);
     const outputsTimer = window.setInterval(
-      () => void getOutputs()
-        .then((next) => setOutputs((current) => mergeOutputRefresh(current, next)))
-        .catch(() => undefined),
+      () => void refreshOutputs().catch(() => undefined),
       10_000,
     );
     const experimentsTimer = window.setInterval(
@@ -242,9 +292,12 @@ export function App() {
     const events = new EventSource("/api/events");
     events.addEventListener("jobs", (event) => {
       setJobs(JSON.parse((event as MessageEvent).data) as StudioJob[]);
-      void getOutputs()
-        .then((next) => setOutputs((current) => mergeOutputRefresh(current, next)))
-        .catch(() => undefined);
+      void refreshOutputs().catch(() => undefined);
+    });
+    events.addEventListener("blind-scope-lock", () => {
+      window.dispatchEvent(new CustomEvent("ltx-studio:hard-navigation", {
+        detail: { href: "/blind-evaluation-lock" },
+      }));
     });
     return () => {
       mounted = false;
@@ -256,18 +309,20 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!outputs.some((output) => output.analysis && ["queued", "running"].includes(output.analysis.status))) return;
+    if (!outputs.some((output) => (
+      output.analysis && ["queued", "running"].includes(output.analysis.status)
+    ) || (
+      output.audioAnalysis && ["queued", "running"].includes(output.audioAnalysis.status)
+    ))) return;
     const timer = window.setInterval(() => {
-      void getOutputs()
-        .then((next) => setOutputs((current) => mergeOutputRefresh(current, next)))
-        .catch(() => undefined);
+      void refreshOutputs().catch(() => undefined);
     }, 2_000);
     return () => window.clearInterval(timer);
   }, [outputs]);
 
   useEffect(() => {
     setHistoryEstimate(null);
-    if (!validation.success) return;
+    if (!requestExecutable || !validation.success) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void getEstimate(validation.data).then((estimate) => {
@@ -278,7 +333,7 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [request, validation]);
+  }, [request, requestExecutable, validation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,32 +363,7 @@ export function App() {
   }, [request, validation]);
 
   const changeMode = (mode: PipelineMode) => {
-    const modeDefaults = createDefaultRequest(mode);
-    setRequest((current) => withOfficialSpeechModelPaths({
-      ...modeDefaults,
-      prompt: current.prompt,
-      promptParts: current.promptParts,
-      negativePrompt: current.negativePrompt,
-      enhancePrompt: ["lipdub", "id-lora", "keyframes", "ic-lora", "text-to-audio"].includes(mode)
-        ? false
-        : current.enhancePrompt,
-      sourceMode: ["keyframes", "ic-lora", "id-lora", "image-audio-to-video"].includes(mode)
-        ? "image"
-        : current.sourceMode,
-      seed: current.seed,
-      models: mode === "lipdub" ? { ...current.models, loras: [] } : current.models,
-      images: ["lipdub", "text-to-audio"].includes(mode) ? [] : current.images,
-      quantization: current.quantization,
-      icLora: current.icLora,
-      idLora: current.idLora,
-      audio: current.audio,
-      lipDub: current.lipDub,
-      postprocess: mode === "text-to-audio"
-        ? modeDefaults.postprocess
-        : current.postprocess,
-      retake: current.retake,
-      continuity: current.continuity,
-    }));
+    setRequest((current) => requestForModeChange(current, mode, modelInventory));
     setAttempted(false);
     setServerErrors([]);
     setServerWarnings([]);
@@ -352,10 +382,13 @@ export function App() {
     setAttempted(true);
     setServerErrors([]);
     setServerWarnings([]);
-    if (!validation.success) return;
+    if (!validation.success || qualificationHold) return;
     const runtimeErrors: string[] = [];
     if (!health) runtimeErrors.push("DGX-Status ist noch nicht verfügbar.");
     else {
+      if (health.jobPersistence.status === "hold") {
+        runtimeErrors.push("Job-Persistenz ist im Sicherheits-HOLD; ein Neustart ist erforderlich.");
+      }
       if (health.engine !== "available") runtimeErrors.push("Python-Engine ist nicht verfügbar.");
       if (health.orchestrator === "missing") runtimeErrors.push("DGX-Orchestrator Runtime API ist nicht verfügbar.");
       const requiredDiskGiB = Math.max(1, Math.ceil(resourceEstimate.outputGiB * 3 * 100) / 100);
@@ -397,12 +430,22 @@ export function App() {
 
   const handleCancel = async (id: string) => {
     const job = jobs.find((candidate) => candidate.id === id);
-    if (!job || !window.confirm(`Job "${job.outputName}" wirklich abbrechen? Der aktuelle Prozess wird beendet.`)) return;
+    if (!job || !["queued", "running", "paused"].includes(job.status) || cancellingJobs.current.has(id)) return;
+    cancellingJobs.current.add(id);
+    setCancellingJobIds((current) => new Set(current).add(id));
+    setServerErrors([]);
     try {
       const cancelled = await cancelJob(id);
       setJobs((current) => current.map((job) => job.id === id ? cancelled : job));
     } catch (error) {
       setServerErrors([error instanceof Error ? error.message : "Job konnte nicht abgebrochen werden."]);
+    } finally {
+      cancellingJobs.current.delete(id);
+      setCancellingJobIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -503,13 +546,20 @@ export function App() {
   };
 
   const handleQualityReview = async (output: StudioOutput, input: QualityReviewInput) => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return;
+    }
     setServerErrors([]);
+    const finishMutation = outputRefreshFence.current.beginMutation();
     try {
       const updated = await setOutputQualityReview(output.name, input);
+      finishMutation();
       setOutputs((current) => current.map((item) =>
         item.name === updated.name ? mergeOutputRefresh([item], [updated])[0] : item,
       ));
     } catch (error) {
+      finishMutation();
       const message = error instanceof Error ? error.message : "Qualitätsbewertung konnte nicht gespeichert werden.";
       setServerErrors([message]);
       throw error;
@@ -522,53 +572,127 @@ export function App() {
     ));
   };
 
+  const updateT2aAnalysis = (
+    outputName: string,
+    analysis: T2aAudioPublicAnalysisRecord,
+  ) => {
+    setOutputs((current) => current.map((output) =>
+      output.name === outputName ? mergeT2aAudioAnalysis(output, analysis) : output,
+    ));
+  };
+
   const handleStartAnalysis = async (output: StudioOutput, force = false) => {
+    if (output.trustStatus === "legacy-unattested") {
+      const error = new Error(LEGACY_OUTPUT_READ_ONLY_MESSAGE);
+      setServerErrors([error.message]);
+      throw error;
+    }
     setServerErrors([]);
+    const finishMutation = outputRefreshFence.current.beginMutation();
     try {
-      updateOutputAnalysis(output.name, await startOutputAnalysis(output.name, force));
+      const analysis = await startOutputAnalysis(output.name, force);
+      finishMutation();
+      updateOutputAnalysis(output.name, analysis);
     } catch (error) {
+      finishMutation();
       setServerErrors([error instanceof Error ? error.message : "Objektive Analyse konnte nicht gestartet werden."]);
       throw error;
     }
   };
 
   const handleCancelAnalysis = async (output: StudioOutput) => {
+    if (output.trustStatus === "legacy-unattested") {
+      const error = new Error(LEGACY_OUTPUT_READ_ONLY_MESSAGE);
+      setServerErrors([error.message]);
+      throw error;
+    }
     setServerErrors([]);
+    const finishMutation = outputRefreshFence.current.beginMutation();
     try {
       if (!output.analysis) throw new Error("Kein aktiver Analyselauf vorhanden.");
-      updateOutputAnalysis(output.name, await cancelOutputAnalysis(output.name, output.analysis.analysisId));
+      const analysis = await cancelOutputAnalysis(output.name, output.analysis.analysisId);
+      finishMutation();
+      updateOutputAnalysis(output.name, analysis);
     } catch (error) {
+      finishMutation();
       setServerErrors([error instanceof Error ? error.message : "Objektive Analyse konnte nicht abgebrochen werden."]);
       throw error;
     }
   };
 
+  const handleStartT2aAnalysis = async (output: StudioOutput, force = false) => {
+    if (output.trustStatus === "legacy-unattested") {
+      const error = new Error(LEGACY_OUTPUT_READ_ONLY_MESSAGE);
+      setServerErrors([error.message]);
+      throw error;
+    }
+    setServerErrors([]);
+    const finishMutation = outputRefreshFence.current.beginMutation();
+    try {
+      const analysis = await startT2aAudioAnalysis(output.name, force);
+      finishMutation();
+      updateT2aAnalysis(output.name, analysis);
+    } catch (error) {
+      finishMutation();
+      setServerErrors([error instanceof Error ? error.message : "Audioanalyse konnte nicht gestartet werden."]);
+      throw error;
+    }
+  };
+
+  const handleCancelT2aAnalysis = async (output: StudioOutput, analysisId: string) => {
+    if (output.trustStatus === "legacy-unattested") {
+      const error = new Error(LEGACY_OUTPUT_READ_ONLY_MESSAGE);
+      setServerErrors([error.message]);
+      throw error;
+    }
+    setServerErrors([]);
+    const finishMutation = outputRefreshFence.current.beginMutation();
+    try {
+      const analysis = await cancelT2aAudioAnalysis(output.name, analysisId);
+      finishMutation();
+      updateT2aAnalysis(output.name, analysis);
+    } catch (error) {
+      finishMutation();
+      setServerErrors([error instanceof Error ? error.message : "Audioanalyse konnte nicht abgebrochen werden."]);
+      throw error;
+    }
+  };
+
   const handleDeleteOutput = async (output: StudioOutput) => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return;
+    }
     if (!window.confirm(
-      `Video "${output.name}" wirklich löschen?\n\n`
-      + "Die MP4 sowie gespeicherte Einstellungen, Analyse und Report werden dauerhaft entfernt. "
+      `Ausgabe "${output.name}" wirklich löschen?\n\n`
+      + "Die Mediendatei sowie gespeicherte Einstellungen, Analyse und Report werden dauerhaft entfernt. "
       + "Der Jobverlauf bleibt erhalten.",
     )) return;
     setServerErrors([]);
     setDeletingOutputName(output.name);
+    const finishMutation = outputRefreshFence.current.beginMutation();
     try {
       await deleteOutput(output.name);
-      const nextOutputs = await getOutputs();
-      setOutputs(nextOutputs);
+      finishMutation();
+      setOutputs((current) => current.filter((candidate) => candidate.name !== output.name));
       setComparisonNames((current) => current.filter((name) => name !== output.name));
       if (selectedOutputName === output.name) {
-        const next = nextOutputs[0] ?? null;
-        setSelectedOutputName(next?.name ?? null);
-        setSelectedJobId(next?.jobId ?? null);
+        setSelectedOutputName(null);
+        setSelectedJobId(null);
       }
     } catch (error) {
-      setServerErrors([error instanceof Error ? error.message : "Video konnte nicht gelöscht werden."]);
+      finishMutation();
+      setServerErrors([error instanceof Error ? error.message : "Ausgabe konnte nicht gelöscht werden."]);
     } finally {
       setDeletingOutputName(null);
     }
   };
 
   const handleUseFrameAsReference = async (output: StudioOutput, atSeconds: number) => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return;
+    }
     setServerErrors([]);
     setServerWarnings([]);
     setExtractingReferenceFrom(output.name);
@@ -598,6 +722,10 @@ export function App() {
   };
 
   const handleUseBestFrameAsReference = async (output: StudioOutput): Promise<number | null> => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return null;
+    }
     setServerErrors([]);
     setServerWarnings([]);
     setExtractingReferenceFrom(output.name);
@@ -637,6 +765,10 @@ export function App() {
   };
 
   const toggleComparison = (output: StudioOutput) => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return;
+    }
     setComparisonNames((current) => {
       if (current.includes(output.name)) return current.filter((name) => name !== output.name);
       return current.length < 2 ? [...current, output.name] : [current[1], output.name];
@@ -679,6 +811,10 @@ export function App() {
   };
 
   const loadOutputSettings = (output: StudioOutput) => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return;
+    }
     if (!output.request) {
       setServerErrors(["Für dieses Video ist keine verlässliche Studio-Einstellungshistorie gespeichert."]);
       setServerWarnings([]);
@@ -705,6 +841,10 @@ export function App() {
   };
 
   const prepareLipSyncRetry = (output: StudioOutput, referenceStrength: number) => {
+    if (output.trustStatus === "legacy-unattested") {
+      setServerErrors([LEGACY_OUTPUT_READ_ONLY_MESSAGE]);
+      return;
+    }
     if (!output.request || output.request.mode !== "lipdub") {
       setServerErrors(["Für dieses Video können keine LipDub-Einstellungen vorbereitet werden."]);
       return;
@@ -784,6 +924,7 @@ export function App() {
   const memoryPressure = health?.resources.availableMemoryGiB !== null
     && health?.resources.availableMemoryGiB !== undefined
     && health.resources.availableMemoryGiB < requiredStartMemoryGiB;
+  const authorityAttested = health?.release?.authorityIsolation?.status === "attested";
 
   return (
     <div className="studio-shell">
@@ -808,6 +949,14 @@ export function App() {
           <span className={`health-item health-item--${health?.orchestrator === "missing" ? "blocked" : "ok"}`} title="DGX-Orchestrator Admission">
             <ShieldCheck size={15} /> Admission
           </span>
+          <span
+            className={`health-item health-item--${authorityAttested ? "ok" : "warn"}`}
+            title={authorityAttested
+              ? "Execution-/Publication-Autorität ist separat attestiert"
+              : "Security-/Product-GO bleibt ohne separate Studio-Identität mit proc/fd-Isolation oder externen Signer-/Sealed-FD-Broker gesperrt"}
+          >
+            <ShieldCheck size={15} /> Authority {authorityAttested ? "PASS" : "HOLD"}
+          </span>
           <span className={`health-item health-item--${memoryPressure ? "warn" : "ok"}`} title="Verfügbarer Arbeitsspeicher; Startfreigabe erfolgt über die DGX-Queue">
             <MemoryStick size={15} /> {memoryLabel}
           </span>
@@ -822,12 +971,49 @@ export function App() {
         </div>
       ) : null}
 
+      {draftMigration?.noticePending ? (
+        <div className="draft-migration-notice" role="status">
+          <span>{draftMigration.kind === "auto-default-upgraded"
+            ? "Der automatisch gespeicherte LTX-2.3-Startentwurf wurde unverändert archiviert. Der Editor startet latest-first mit LTX-2.5; der Altentwurf wird nur nach ausdrücklicher Auswahl geladen."
+            : "Der individuelle v1-Altentwurf wurde unverändert archiviert. Der Editor startet latest-first mit LTX-2.5; der Altentwurf wird nur nach ausdrücklicher Auswahl geladen."}</span>
+          <div className="draft-migration-notice__actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                setRequest(draftMigration.legacyRequest);
+                setDraftMigration({
+                  ...draftMigration,
+                  kind: "legacy-draft-archived",
+                  noticePending: false,
+                });
+              }}
+            >
+              Altentwurf exakt laden
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => setDraftMigration({ ...draftMigration, noticePending: false })}
+            >
+              Hinweis schließen
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <PersistenceHoldBanner
+        health={health}
+        onReload={() => window.location.reload()}
+      />
+
       <div className="studio-grid">
         <ModeRail active={request.mode} onChange={changeMode} />
         <LazyPanelBoundary label="Editor">
           <Suspense fallback={<LazyPanelLoading label="Editor" />}>
             <Editor
               request={request}
+              resourceEstimate={resourceEstimate}
               onChange={updateRequest}
               errors={fieldErrors}
               previews={previews}
@@ -847,7 +1033,7 @@ export function App() {
         </LazyPanelBoundary>
         <RunPanel
           request={request}
-          requestValid={validation.success}
+          requestValid={requestExecutable}
           health={health}
           jobs={jobs}
           outputs={outputs}
@@ -864,6 +1050,7 @@ export function App() {
           }}
           onRun={() => void run()}
           onCancel={(id) => void handleCancel(id)}
+          cancellingJobIds={cancellingJobIds}
           onDeleteJob={handleDeleteJob}
           deletingJobId={deletingJobId}
           submitting={submitting}
@@ -889,6 +1076,8 @@ export function App() {
           onSaveQualityReview={handleQualityReview}
           onStartAnalysis={handleStartAnalysis}
           onCancelAnalysis={handleCancelAnalysis}
+          onStartT2aAnalysis={handleStartT2aAnalysis}
+          onCancelT2aAnalysis={handleCancelT2aAnalysis}
           onPrepareLipSyncRetry={prepareLipSyncRetry}
           onDeleteOutput={handleDeleteOutput}
           deletingOutputName={deletingOutputName}

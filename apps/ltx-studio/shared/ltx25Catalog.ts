@@ -35,6 +35,26 @@ export type Ltx25WorkflowCatalogEntry = {
   nativeStatus: "implemented-contract" | "implementation-required";
 };
 
+/**
+ * Semantic audit fence for the executable official V2V graph. The workflow
+ * digest is intentionally duplicated here: updating the pinned JSON without
+ * re-auditing its LoRA node must fail the offline catalog contract test.
+ */
+export const LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT = {
+  workflowId: "v2v-ic-lora",
+  auditedWorkflowSha256: "5880e5025bd0e2df391a8a64c642199b6a7d0924925a1c54a71f3ce06cbfd4ff",
+  profile: "v2v-deblur",
+  model: {
+    assetId: "ltx23-deblur-lora",
+    repoId: "Lightricks/LTX-2.3-22b-IC-LoRA-Deblur",
+    revision: "a71618270729530aa7968d232965bdbc99fb6577",
+    filename: "ltx-2.3-22b-ic-lora-deblur-0.9.safetensors",
+    sizeBytes: 906_071_437,
+    sha256: "dcdd73b57c2c4d5f5bc6535e825f4758b654a583bc991caa50c6809b6990b4ab",
+    strength: 1,
+  },
+} as const;
+
 export const LTX25_WORKFLOW_CATALOG = [
   {
     id: "t2v-i2v-two-stage",
@@ -80,11 +100,11 @@ export const LTX25_WORKFLOW_CATALOG = [
     id: "ic-lora-union-control",
     filename: "LTX-2.5_ICLoRA_Union_Control_Distilled.json",
     sha256: "c41586a1426fc68a136eb958004aaa9e529fe78f401262b475fad3180558cfd7",
-    stages: 1,
-    spatialUpscale: false,
+    stages: 2,
+    spatialUpscale: true,
     recommendation: "control",
     nativeBinding: { mode: "ic-lora", icLoraProfile: "union-control" },
-    nativeStatus: "implemented-contract",
+    nativeStatus: "implementation-required",
   },
   {
     id: "v2v-ic-lora",
@@ -93,7 +113,7 @@ export const LTX25_WORKFLOW_CATALOG = [
     stages: 1,
     spatialUpscale: false,
     recommendation: "control",
-    nativeBinding: { mode: "ic-lora", icLoraProfile: "v2v-instant-shave" },
+    nativeBinding: { mode: "ic-lora", icLoraProfile: "v2v-deblur" },
     nativeStatus: "implemented-contract",
   },
   {
@@ -153,6 +173,29 @@ export function ltx25WorkflowContract(id: Ltx25WorkflowId): ProvenanceUpstreamCo
 export const LTX25_MODEL_REPOSITORY = "https://huggingface.co/Lightricks/LTX-2.5";
 export const LTX25_MODEL_REVISION = "6c7e5e573ac1667efc83407806fe9b0b93730e60";
 
+/**
+ * The DFR implementation is part of the native Lightricks repository rather
+ * than the ComfyUI workflow catalog above. Keep the executable source pin next
+ * to the exact model artifacts so a future upstream refresh cannot silently
+ * change one half of the contract.
+ */
+export const LTX25_DFR_PIPELINE_CONTRACT = {
+  repository: "https://github.com/Lightricks/LTX-2",
+  tag: "v1.3.0",
+  commit: "598ab41247a77dbfe29b5186e915bcf4f9040ec7",
+  path: "packages/ltx-pipelines/src/ltx_pipelines/dfr_pipeline.py",
+  sha256: "227df4b2d0463bc543be87e8b7973ff76b0e2a423b2dd770ddd051f66e995e63",
+  module: "ltx_pipelines.dfr_pipeline",
+  scheduling: "single-call-non-cooperative",
+  detailingLoraStrength: 0.5,
+  temporalUpscalings: [0, 1, 2],
+  spatialUpscalings: [1, 2],
+} as const;
+
+export const LTX25_DFR_DETAILING_REPOSITORY =
+  "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler";
+export const LTX25_DFR_DETAILING_REVISION = "74c4e68ee7dd99f3997d5a1bb1a3784941822222";
+
 export const LTX25_TRANSFORMER_CANDIDATES = [
   {
     id: "bf16",
@@ -203,6 +246,16 @@ export const LTX25_MODEL_COMPONENTS = {
     path: "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
     sizeBytes: 995_778_752,
     sha256: "eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8",
+  },
+  temporalUpscaler: {
+    path: "latent_upscale_models/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors",
+    sizeBytes: 261_944_000,
+    sha256: "2bc3300f2b3c3c1834d72164fbf13a3b9fd73e5a741e8a2c3f4035f89a75c3fe",
+  },
+  dfrDetailingLora: {
+    path: "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+    sizeBytes: 327_322_640,
+    sha256: "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d",
   },
   durationHead: {
     path: "model_patches/ltx-2.5-duration-head-bf16.safetensors",

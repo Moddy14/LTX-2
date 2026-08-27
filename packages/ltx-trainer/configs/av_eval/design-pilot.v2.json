@@ -1,0 +1,1607 @@
+{
+  "schema_version": "ltx-sota-design-pilot.v2",
+  "status": "draft",
+  "design_id": "ltx-lipdub-de-en-design-02",
+  "independent_unit": "identity-speaker-and-transitive-leakage-component",
+  "familywise_alpha": 0.05,
+  "target_power": 0.9,
+  "multiplicity": "holm",
+  "minimum_identities": 30,
+  "clips_per_identity": 3,
+  "design_effect": null,
+  "delta_catalog": {
+    "schema_version": "ltx-sota-delta-catalog.v1",
+    "metrics": [
+      {
+        "metric_id": "asr-critical-name-accuracy",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "proportion",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "asr-critical-negation-accuracy",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "proportion",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "asr-critical-number-accuracy",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "proportion",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "asr-word-error-rate",
+        "test": "noninferiority",
+        "direction": "lower",
+        "delta": null,
+        "unit": "proportion",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "av-sync-offset-p95",
+        "test": "noninferiority",
+        "direction": "lower",
+        "delta": null,
+        "unit": "milliseconds",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "identity-similarity",
+        "test": "superiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "cosine",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "lip-sync-mos",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "mos",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "mouth-artifact-rate",
+        "test": "noninferiority",
+        "direction": "lower",
+        "delta": null,
+        "unit": "proportion",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "mouth-naturalness-mos",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "mos",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "phoneme-viseme-transition-f1",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "f1",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "sharpness-relative-face",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "normalized",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "skin-stability",
+        "test": "noninferiority",
+        "direction": "higher",
+        "delta": null,
+        "unit": "normalized",
+        "basis_evidence_sha256": null
+      },
+      {
+        "metric_id": "warp-residual-p95",
+        "test": "noninferiority",
+        "direction": "lower",
+        "delta": null,
+        "unit": "normalized",
+        "basis_evidence_sha256": null
+      }
+    ]
+  },
+  "vbench_gate_catalog": {
+    "schema_version": "vbench-gates.v2",
+    "repository": "Vchitect/VBench",
+    "commit": "45e79ec14e69a2187202c675d2dbce1a71843d53",
+    "config_sha256": "718b1fd43a2605569424de0bcf776ede9dcb7fc4e2835dfeeac4faee99181158",
+    "multiplicity": "holm",
+    "confidence_level": 0.95,
+    "gates": [
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.image-audio-to-video",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.first-last-frame",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.first-last-frame",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.first-last-frame",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.first-last-frame",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.first-last-frame",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.first-last-frame",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.hdr",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.hdr",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.hdr",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.hdr",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.hdr",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.hdr",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.ingredients",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.ingredients",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.ingredients",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.ingredients",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.ingredients",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.ingredients",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.inpainting",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.inpainting",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.inpainting",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.inpainting",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.inpainting",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.inpainting",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.motion-track",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.motion-track",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.motion-track",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.motion-track",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.motion-track",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.motion-track",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.outpainting",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.outpainting",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.outpainting",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.outpainting",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.outpainting",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.outpainting",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.pixel-upscaler",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.pixel-upscaler",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.pixel-upscaler",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.pixel-upscaler",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.pixel-upscaler",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.pixel-upscaler",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.union-control",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.union-control",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.union-control",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.union-control",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.union-control",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.union-control",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.v2v-instant-shave",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.v2v-instant-shave",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.v2v-instant-shave",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.v2v-instant-shave",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.v2v-instant-shave",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ic-lora.v2v-instant-shave",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.ingredients",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.ingredients",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.ingredients",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.ingredients",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.ingredients",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.ingredients",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.motion-track",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.motion-track",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.motion-track",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.motion-track",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.motion-track",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.motion-track",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.image-to-video",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.image-to-video",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.image-to-video",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.image-to-video",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.image-to-video",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.image-to-video",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.single-stage",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.single-stage",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.single-stage",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.single-stage",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.single-stage",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.single-stage",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.two-stage",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.two-stage",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.two-stage",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.two-stage",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.two-stage",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "native-generation.ltx25.image-to-video.two-stage",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.native-distilled",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.native-distilled",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.native-distilled",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.native-distilled",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.native-distilled",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.native-distilled",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.official-comfy-hq",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.official-comfy-hq",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.official-comfy-hq",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.official-comfy-hq",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.official-comfy-hq",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "reference-video-redubbing.official-comfy-hq",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "video-edit.retake",
+        "dimension": "aesthetic-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "video-edit.retake",
+        "dimension": "background-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "video-edit.retake",
+        "dimension": "dynamic-degree",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "video-edit.retake",
+        "dimension": "imaging-quality",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "video-edit.retake",
+        "dimension": "motion-smoothness",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      },
+      {
+        "claim_id": "video-edit.retake",
+        "dimension": "subject-consistency",
+        "direction": "higher",
+        "absolute_minimum": null,
+        "delta": null,
+        "test": "noninferiority",
+        "basis_evidence_sha256": null
+      }
+    ],
+    "candidate_surface": {
+      "schema_version": "ltx-av-eval-candidate-vbench-surface-binding.v2",
+      "surface_schema_version": "candidate-release-surface.v1",
+      "surface_digest": "01e2ed30f26aff8321496a7dcf689b99cd55b8479d65a7db8df924291ac10ff2",
+      "projection_digest": "67ef51581695b3919b16a869b1dcf8d0209cae544121359048ff7c43af48aef5",
+      "candidate_entry_count": 25,
+      "claim_ids": [
+        "audio-driven-video.image-audio-to-video",
+        "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
+        "audio-driven-video.ltx25.image-audio-to-video.two-stage",
+        "controlled-video.first-last-frame",
+        "controlled-video.ic-lora.hdr",
+        "controlled-video.ic-lora.ingredients",
+        "controlled-video.ic-lora.inpainting",
+        "controlled-video.ic-lora.motion-track",
+        "controlled-video.ic-lora.outpainting",
+        "controlled-video.ic-lora.pixel-upscaler",
+        "controlled-video.ic-lora.union-control",
+        "controlled-video.ic-lora.v2v-instant-shave",
+        "controlled-video.ltx25.ic-lora.ingredients",
+        "controlled-video.ltx25.ic-lora.motion-track",
+        "controlled-video.ltx25.ic-lora.v2v-deblur",
+        "native-generation.image-to-video",
+        "native-generation.ltx25.image-to-video.single-stage",
+        "native-generation.ltx25.image-to-video.two-stage",
+        "reference-video-redubbing.native-distilled",
+        "reference-video-redubbing.official-comfy-hq",
+        "video-edit.retake"
+      ]
+    }
+  },
+  "power_endpoints": [
+    {
+      "endpoint_id": "artifact-false-accept",
+      "model": "binomial-upper",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.01,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "artifact-true-positive",
+      "model": "binomial-lower",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.95,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "asr-critical-name",
+      "model": "binomial-lower",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.99,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "asr-critical-negation",
+      "model": "binomial-lower",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.99,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "asr-critical-number",
+      "model": "binomial-lower",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.99,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "asr-wer",
+      "model": "binomial-upper",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.05,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "identity-superiority",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "mos-audio-quality",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "mos-identity-mouth",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "mos-lip-sync",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "q0-sharpness-ni",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "sface-far",
+      "model": "binomial-upper",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.01,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "sface-tar",
+      "model": "binomial-lower",
+      "effect": null,
+      "variability": null,
+      "null_value": 0.95,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "vbench-aesthetic-quality",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "vbench-background-consistency",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "vbench-dynamic-degree",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "vbench-imaging-quality",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "vbench-motion-smoothness",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    },
+    {
+      "endpoint_id": "vbench-subject-consistency",
+      "model": "paired-mean",
+      "effect": null,
+      "variability": null,
+      "null_value": null,
+      "alternative": null,
+      "max_ci_width": null
+    }
+  ],
+  "strata_quotas": [
+    {
+      "stratum_id": "age.18-29",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "age.30-44",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "age.45-59",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "age.60-plus",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "fps.24",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "fps.25",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "fps.30",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "language.de",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "language.en",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "lighting.difficult",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "lighting.standard",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "motion.light",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "motion.static",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "skin.1",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "skin.2",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "skin.3",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "skin.4",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "skin.5",
+      "minimum_independent_units": null
+    },
+    {
+      "stratum_id": "skin.6",
+      "minimum_independent_units": null
+    }
+  ],
+  "strata_quota_semantics": {
+    "schema_version": "ltx-strata-quota-semantics.v1",
+    "maximum_independent_units": 50000,
+    "groups": [
+      {
+        "group_id": "age",
+        "relationship": "partition",
+        "stratum_ids": [
+          "age.18-29",
+          "age.30-44",
+          "age.45-59",
+          "age.60-plus"
+        ]
+      },
+      {
+        "group_id": "fps",
+        "relationship": "overlapping",
+        "stratum_ids": [
+          "fps.24",
+          "fps.25",
+          "fps.30"
+        ]
+      },
+      {
+        "group_id": "language",
+        "relationship": "overlapping",
+        "stratum_ids": [
+          "language.de",
+          "language.en"
+        ]
+      },
+      {
+        "group_id": "lighting",
+        "relationship": "overlapping",
+        "stratum_ids": [
+          "lighting.difficult",
+          "lighting.standard"
+        ]
+      },
+      {
+        "group_id": "motion",
+        "relationship": "overlapping",
+        "stratum_ids": [
+          "motion.light",
+          "motion.static"
+        ]
+      },
+      {
+        "group_id": "skin",
+        "relationship": "partition",
+        "stratum_ids": [
+          "skin.1",
+          "skin.2",
+          "skin.3",
+          "skin.4",
+          "skin.5",
+          "skin.6"
+        ]
+      }
+    ]
+  }
+}

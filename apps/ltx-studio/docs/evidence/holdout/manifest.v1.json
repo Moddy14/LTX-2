@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "ltx-studio-development-identity-assets.v1",
+  "status": "development-only-hold",
+  "purpose": "Local identity and cross-shot engineering probes only",
+  "authority": {
+    "sourceType": "synthetic-generated",
+    "generatorReceipt": "unavailable",
+    "rightsStatus": "unverified-development-only",
+    "independentCustody": false,
+    "developerVisible": true
+  },
+  "claimPolicy": {
+    "productEligible": false,
+    "sotaEligible": false,
+    "blindHoldoutEligible": false,
+    "reason": "No generator receipt, independent custodian, release-rights attestation, or sealed blind assignment exists."
+  },
+  "assets": [
+    {
+      "id": "identity-a-fictional-adult-dark-skinned-woman",
+      "path": "identity-a-fictional-adult-dark-skinned-woman.png",
+      "sha256": "5c70fe9b7a25118e370556c140991feaeef5dd496fb744a91d2aa0d98068ac83",
+      "sizeBytes": 2001474,
+      "width": 1254,
+      "height": 1254,
+      "fictionalAdult": true
+    },
+    {
+      "id": "identity-b-fictional-adult-east-asian-man",
+      "path": "identity-b-fictional-adult-east-asian-man.png",
+      "sha256": "a165e2383830e9490ea970828d4cd3c716d986bc5aba5a19f8985e2edc577fa6",
+      "sizeBytes": 2268412,
+      "width": 1254,
+      "height": 1254,
+      "fictionalAdult": true
+    },
+    {
+      "id": "identity-c-fictional-adult-red-haired-woman",
+      "path": "identity-c-fictional-adult-red-haired-woman.png",
+      "sha256": "57b1b22ccb2c4768ebbdf47497033f2006917bd5a2835f311cb7c52b536fd23b",
+      "sizeBytes": 2448330,
+      "width": 1254,
+      "height": 1254,
+      "fictionalAdult": true
+    },
+    {
+      "id": "identity-d-fictional-adult-south-asian-man",
+      "path": "identity-d-fictional-adult-south-asian-man.png",
+      "sha256": "0441e7c46660bce8f8a3bfc9edc4ce90e4649ec69a3ff89cbecbdf1ceb1a87ba",
+      "sizeBytes": 1974033,
+      "width": 1254,
+      "height": 1254,
+      "fictionalAdult": true
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "ltx-studio-lipforcing-runtime-patch.v1",
+  "patchSetId": "ltx-studio-lipforcing-runtime.v4",
+  "upstream": {
+    "repository": "https://github.com/cvlab-kaist/LipForcing",
+    "commit": "fc864771eb347ca3ccaaef9c0b583ff6ccc9f184",
+    "tree": "e89930c267ffe75d6d19a9d6a8fcad4afd6672c9",
+    "license": {
+      "path": "LICENSE",
+      "sha256": "e27d3412810eb8420110b2595aa86a013628e8f441d65cf75f00e14973f051b7",
+      "spdx": "Apache-2.0",
+      "noticeFilePresent": false
+    }
+  },
+  "patchedFiles": [
+    {
+      "path": "scripts/inference/_loader.py",
+      "sourceSha256": "36286f9fadb29a54ccbe94e4d492d6415ec5de14662e7502d096de0216fc055d",
+      "patchedSha256": "70e5b48b44b9b6dc217ee96ecae85724c2239f54b947abf6151d39fee6e2a2b5",
+      "changes": [
+        "restrict checkpoint deserialization to tensor/state-dict payloads",
+        "construct and assign the released model through the verified low-memory path"
+      ],
+      "modificationNotice": "# Modified by LTX Studio from pinned LipForcing commit fc864771eb347ca3ccaaef9c0b583ff6ccc9f184.\n# Exact changes are recorded in /opt/ltx-studio/runtime-patch-provenance.v1.json."
+    },
+    {
+      "path": "scripts/inference/_common.py",
+      "sourceSha256": "3abd62cdd426697a70ecbe557a6dd8ab86847009b9f63c4fdea29415afa6e8c2",
+      "patchedSha256": "26c04ca8874ea72f19b1679b6de8c48676b961b295df38ea370c6f68c7df524c",
+      "changes": [
+        "restrict reachable checkpoint loads to tensor payloads",
+        "bind InsightFace to the verified offline model root",
+        "delegate only the final upstream audio mux to the strict raw-output profile helper"
+      ],
+      "modificationNotice": "# Modified by LTX Studio from pinned LipForcing commit fc864771eb347ca3ccaaef9c0b583ff6ccc9f184.\n# Exact changes are recorded in /opt/ltx-studio/runtime-patch-provenance.v1.json."
+    },
+    {
+      "path": "OmniAvatar/utils/latentsync/face_detector.py",
+      "sourceSha256": "97499a4fc09160b6959e5daf157456d2e260e698a5e83a316d6ae823c7485e47",
+      "patchedSha256": "2441e2f0d880434dd7e4ea216e1b12c70a3e37ec8d7ced0d33105e31dacc40c1",
+      "changes": [
+        "bind the detector to the verified buffalo_l model set"
+      ],
+      "modificationNotice": "# Modified by LTX Studio from pinned LipForcing commit fc864771eb347ca3ccaaef9c0b583ff6ccc9f184.\n# Exact changes are recorded in /opt/ltx-studio/runtime-patch-provenance.v1.json."
+    }
+  ],
+  "localArtifacts": [
+    {
+      "path": "raw_output_mux.py",
+      "sha256": "9128e8c758d899f5931132049b7a45b1bb864c40adff4927e937d920214f4d17",
+      "role": "paired-premux-export-and-legacy-audio-mux"
+    },
+    {
+      "path": "lipforcing-runner.py",
+      "sha256": "c201fbf296c76e67110b065855e7707ef9260b291dc18ed4c734bf628f0cd106",
+      "role": "verified-offline-container-entrypoint"
+    }
+  ]
+}

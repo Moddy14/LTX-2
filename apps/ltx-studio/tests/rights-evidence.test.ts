@@ -36,11 +36,17 @@ describe("release rights evidence", () => {
     }
   });
 
-  it("never leaves blocked evidence on a candidate entry", () => {
+  it("never leaves blocked evidence on a candidate entry and explains independent target blocks", () => {
     const decisions = new Map(catalog.evidence.map(({ evidenceId, decision }) => [evidenceId, decision]));
     for (const entry of surface.entries) {
       const hasBlockedEvidence = entry.rights.evidenceIds.some((id) => decisions.get(id) === "blocked");
-      expect(entry.targetStatus === "blocked", entry.id).toBe(hasBlockedEvidence);
+      if (hasBlockedEvidence) expect(entry.targetStatus, entry.id).toBe("blocked");
+      if (entry.targetStatus === "candidate") {
+        expect(hasBlockedEvidence, entry.id).toBe(false);
+        expect(entry.targetReason, entry.id).toBeNull();
+      } else if (!hasBlockedEvidence) {
+        expect(entry.targetReason, entry.id).not.toBeNull();
+      }
     }
   });
 

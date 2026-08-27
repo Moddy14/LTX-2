@@ -1,4 +1,6 @@
-export type ProvenanceFileKind = "file" | "directory-manifest";
+import type { JobExecutionDecision } from "./jobExecution.js";
+
+export type ProvenanceFileKind = "file" | "directory-manifest" | "python-package-manifest";
 
 export type ProvenanceFileEntry = {
   relativePath: string;
@@ -55,7 +57,31 @@ export type ProvenanceReleaseIdentity = {
   verified: boolean;
   releaseDigest: string | null;
   manifestSha256: string | null;
+  surfaceDigest: string | null;
   sourceCommit: string | null;
+  runtimeInstallSealSha256: string | null;
+  runtimeTreeSha256: string | null;
+  runtimePolicySha256: string | null;
+  nodeExecutableSha256: string | null;
+  expectedHostTcbAttestationSha256: string | null;
+};
+
+export type ProvenanceContainerImageArtifact = {
+  path: string;
+  sizeBytes: number;
+  sha256: string;
+};
+
+export type ProvenanceContainerImageEvidence = {
+  role: "container:lipforcing-runtime";
+  requestedReference: string;
+  executionReference: string;
+  imageId: string;
+  repoDigest: string | null;
+  sourceRevision: string;
+  patchSetId: string;
+  artifacts: ProvenanceContainerImageArtifact[];
+  fingerprint: string;
 };
 
 export type RunProvenance = {
@@ -69,5 +95,9 @@ export type RunProvenance = {
   upstreamContracts?: ProvenanceUpstreamContract[];
   /** Required for v2; absent only on legacy v1 sidecars. */
   release?: ProvenanceReleaseIdentity;
+  /** Immutable runtime images; absent only on legacy evidence or runs without containers. */
+  containerImages?: ProvenanceContainerImageEvidence[];
+  /** Exact persisted execution decision; absent only on pre-v2-decision evidence. */
+  executionDecision?: JobExecutionDecision;
   fingerprint: string;
 };

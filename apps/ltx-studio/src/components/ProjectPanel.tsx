@@ -14,8 +14,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { GenerationRequest } from "../../shared/pipelines";
-import type { ProjectRevisionEnvelope, StudioProject } from "../../shared/projects";
+import { isLegacyDfrRequest, type GenerationRequest } from "../../shared/pipelines";
+import { qualificationHoldForRequest } from "../../shared/qualificationHold";
+import type {
+  PublicProjectRevisionEnvelope,
+  PublicStudioProject,
+} from "../../shared/outputPublic";
 import {
   addProjectShot,
   approveProjectShotOutput,
@@ -40,7 +44,7 @@ type ProjectPanelProps = {
   onLoadRequest: (request: GenerationRequest) => void;
 };
 
-type ProjectShot = StudioProject["shots"][number];
+type ProjectShot = PublicStudioProject["shots"][number];
 
 const shotStatusLabels: Record<ProjectShot["status"], string> = {
   draft: "Entwurf",
@@ -63,7 +67,7 @@ function latestRequest(shot: ProjectShot) {
     ?? shot.requestRevisions.at(-1)!;
 }
 
-function outputSourceOptions(project: StudioProject) {
+function outputSourceOptions(project: PublicStudioProject) {
   return project.shots.flatMap((shot) => shot.outputHistory.map((output) => ({
     value: output.id,
     label: `${shot.order + 1}. ${shot.title} · ${output.outputName}`,
@@ -89,7 +93,7 @@ export function ProjectPanel({
   onJobLaunched,
   onLoadRequest,
 }: ProjectPanelProps) {
-  const [projects, setProjects] = useState<ProjectRevisionEnvelope[]>([]);
+  const [projects, setProjects] = useState<PublicProjectRevisionEnvelope[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -164,8 +168,8 @@ export function ProjectPanel({
   };
 
   const mutate = async (
-    mutation: () => Promise<ProjectRevisionEnvelope>,
-  ): Promise<ProjectRevisionEnvelope> => {
+    mutation: () => Promise<PublicProjectRevisionEnvelope>,
+  ): Promise<PublicProjectRevisionEnvelope> => {
     const finishMutation = refreshFence.current.beginMutation();
     try {
       const project = await mutation();
@@ -273,7 +277,9 @@ export function ProjectPanel({
               <span>Revision {selected.revision} · {selected.project.status === "active" ? "aktiv" : "archiviert"}</span>
             </div>
             <span className="project-chain">
-              <ShieldCheck size={14} /> {selected.previousRevisionSha256?.slice(0, 12) ?? "Genesis"}
+              <ShieldCheck size={14} /> {selected.previousRevisionBound
+                ? "Vorgänger serverseitig gebunden"
+                : "Genesis"}
             </span>
           </div>
           {selected.project.description ? <p className="project-description">{selected.project.description}</p> : null}
@@ -287,7 +293,7 @@ export function ProjectPanel({
                 const revisions = await getProjectHistory(selected.projectId);
                 setHistoryStatus(
                   revisions.length === selected.revision
-                    ? `${revisions.length} Revisionen vollständig und hashverkettet gelesen.`
+                    ? `${revisions.length} Revisionen vollständig und serverseitig geprüft.`
                     : `Historie unvollständig: ${revisions.length} von ${selected.revision} Revisionen.`,
                 );
               })}
@@ -347,6 +353,8 @@ export function ProjectPanel({
           <div className="project-shot-list">
             {selected.project.shots.map((shot) => {
               const currentRequest = latestRequest(shot);
+              const legacyDfr = isLegacyDfrRequest(currentRequest.request);
+              const qualificationHold = qualificationHoldForRequest(currentRequest.request);
               const boundJob = latestBoundJob(shot, jobs);
               const selectedBinding = selectedOutput?.project;
               const capturable = Boolean(
@@ -377,7 +385,11 @@ export function ProjectPanel({
                   </div>
                   <div className="project-shot__facts">
                     <span>Request R{shot.requestRevisions.length}</span>
-                    <span>{currentRequest.requestSha256.slice(0, 12)}</span>
+                    <span>Request-Bindung serverseitig geprüft</span>
+                    {legacyDfr ? <span>DFR Legacy · nur lesbar · nicht ausführbar</span> : null}
+                    {qualificationHold && !legacyDfr
+                      ? <span>DFR Qualification-HOLD · Start und Rerun gesperrt</span>
+                      : null}
                     <span>{boundJob ? `Letzter Lauf ${jobStatusLabels[boundJob.status]}` : "Noch kein gebundener Lauf"}</span>
                   </div>
                   {shot.continuity ? (
@@ -396,7 +408,10 @@ export function ProjectPanel({
                       <button
                         type="button"
                         className="button button--secondary"
-                        disabled={busyAction !== null}
+                        disabled={legacyDfr || Boolean(qualificationHold) || busyAction !== null}
+                        title={legacyDfr
+                          ? "Historischer DFR-Altbestand darf nicht semantisch neu ausgeführt werden."
+                          : qualificationHold?.reason}
                         onClick={() => void action(
                           `launch-${shot.id}`,
                           async () => {
@@ -499,7 +514,7 @@ export function ProjectPanel({
                       {shot.outputHistory.map((output) => (
                         <div className="project-output" key={output.id}>
                           <span>{output.outputName}</span>
-                          <span>{output.exportSha256.slice(0, 12)}</span>
+                          <span>Export serverseitig gebunden</span>
                           {shot.approvedOutputId === output.id ? (
                             <strong><CircleCheck size={13} /> Freigegeben</strong>
                           ) : selected.project.status === "active" ? (

@@ -1,4 +1,4 @@
-import type { ControlledExperiment } from "../shared/experiments.js";
+import type { PublicControlledExperiment as ControlledExperiment } from "../shared/outputPublic.js";
 import type { StudioOutput } from "./types.js";
 
 export function outputForArm(
@@ -15,18 +15,17 @@ export function outputForArm(
     return outputs.find((output) =>
       output.name === adopted.outputName
       && output.jobId === adopted.jobId
-      && Boolean(output.provenance?.verifiedAt)
-      && output.provenance?.fingerprint === adopted.provenanceFingerprint,
+      && output.sizeBytes === adopted.sizeBytes
+      && output.changedAt === adopted.changedAt
+      && output.provenanceSummary?.status === "verified",
     );
   }
   return outputs.find((output) =>
     output.name === selected.request.outputName
     && output.jobId === selected.jobId
     && output.experiment?.experimentId === experiment.id
-    && output.experiment.protocolSha256 === experiment.protocolSha256
     && output.experiment.arm === selected.arm
-    && output.experiment.requestSha256 === selected.requestSha256
     && output.experimentRequestVerified === true
-    && Boolean(output.provenance?.verifiedAt),
+    && output.provenanceSummary?.status === "verified",
   );
 }

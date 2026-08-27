@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { effectiveA2vTimeline } from "./a2vDuration.js";
 import { framesForDuration, videoDurationSeconds } from "./presets.js";
 import { LTX25_MODEL_COMPONENTS } from "./ltx25Catalog.js";
 
@@ -8,6 +9,7 @@ export const pipelineModes = [
   "two-stage-hq",
   "one-stage",
   "distilled",
+  "dfr",
   "text-to-audio",
   "ic-lora",
   "id-lora",
@@ -83,6 +85,7 @@ export const icLoraProfiles = [
   "ingredients",
   "motion-track",
   "pixel-upscaler",
+  "v2v-deblur",
   "v2v-instant-shave",
   "inpainting",
   "outpainting",
@@ -92,6 +95,16 @@ export type ICLoraProfile = (typeof icLoraProfiles)[number];
 
 export const lipDubPipelineProfiles = ["official-comfy-hq", "native-distilled"] as const;
 export type LipDubPipelineProfile = (typeof lipDubPipelineProfiles)[number];
+
+export const lipForcingRawOutputProfiles = [
+  "h264-crf13-mux-crf18-v1",
+  "h264-crf13-mux-copy-v1",
+] as const;
+export type LipForcingRawOutputProfile = (typeof lipForcingRawOutputProfiles)[number];
+export const defaultLipForcingRawOutputProfile: LipForcingRawOutputProfile =
+  "h264-crf13-mux-crf18-v1";
+export const experimentalLipForcingRawOutputProfile: LipForcingRawOutputProfile =
+  "h264-crf13-mux-copy-v1";
 
 export function usesOfficialComfyLipDub(
   input: Pick<GenerationRequest, "mode" | "lipDub">,
@@ -133,7 +146,7 @@ export function hasDialogueIntent(
 export function isNativeDialogueRequest(
   input: Pick<GenerationRequest, "mode" | "prompt" | "promptParts">,
 ): boolean {
-  return ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(input.mode)
+  return ["two-stage", "two-stage-hq", "one-stage", "distilled", "dfr"].includes(input.mode)
     && hasDialogueIntent(input);
 }
 
@@ -155,11 +168,11 @@ export type PipelineDefinition = {
 export const PIPELINES: readonly PipelineDefinition[] = [
   {
     id: "two-stage",
-    label: "Offiziell Text / Bild zu Video",
-    shortLabel: "T2V / I2V",
+    label: "Legacy LTX-2.3 Text / Bild zu Video",
+    shortLabel: "LTX 2.3",
     description: "Offizieller LTX-2.3-ComfyUI-Ablauf mit festem 8+3-Schedule und Spatial Upscaling.",
     family: "generate",
-    quality: "Offiziell · 8 + 3",
+    quality: "Legacy · 8 + 3",
     // The Comfy template uses 1280x720. Native LTX requires dimensions
     // divisible by 32, so Studio keeps the aspect ratio at 1280x704.
     defaultHeight: 704,
@@ -171,11 +184,11 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "two-stage-hq",
-    label: "HQ Zwei-Stufen",
-    shortLabel: "HQ",
-    description: "1920 x 1088 Preset mit Res2S-Sampling und getrennten LoRA-Stärken.",
+    label: "Legacy LTX-2.3 HQ Zwei-Stufen",
+    shortLabel: "2.3 HQ",
+    description: "LTX-2.3-Kompatibilitätspreset mit 1920 x 1088, Res2S-Sampling und getrennten LoRA-Stärken.",
     family: "generate",
-    quality: "Maximale Qualität",
+    quality: "Legacy · HQ",
     defaultHeight: 1088,
     defaultWidth: 1920,
     defaultSteps: 15,
@@ -185,11 +198,11 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "one-stage",
-    label: "Schneller Entwurf",
-    shortLabel: "Eine Stufe",
-    description: "Direkte Generation für Entwurf und schnelle Iteration.",
+    label: "Legacy LTX-2.3 Entwurf",
+    shortLabel: "2.3 Entwurf",
+    description: "Direkte LTX-2.3-Generation für bestehende Entwürfe und Kompatibilität.",
     family: "generate",
-    quality: "Schnell",
+    quality: "Legacy · schnell",
     defaultHeight: 512,
     defaultWidth: 768,
     defaultSteps: 30,
@@ -199,11 +212,25 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "distilled",
-    label: "Distilled",
-    shortLabel: "Distilled",
-    description: "Feste schnelle Sigma-Schedules für hohe Durchsatzleistung.",
+    label: "Offiziell LTX-2.5 Text / Bild zu Video",
+    shortLabel: "LTX 2.5",
+    description: "Gepinnter offizieller LTX-2.5-BF16-Split-Pack-Ablauf: 8 Schritte, 2x Spatial Upscale und 3-Schritt-Refine.",
     family: "generate",
-    quality: "8 + 3 Schritte",
+    quality: "Offiziell · 8 + 3",
+    defaultHeight: 1024,
+    defaultWidth: 1536,
+    defaultSteps: 8,
+    needsNegativePrompt: false,
+    needsSpatialUpscaler: true,
+    needsDistilledLora: false,
+  },
+  {
+    id: "dfr",
+    label: "LTX-2.5 DFR Max-Detail · v1.3.0",
+    shortLabel: "DFR",
+    description: "Offizielle v1.3.0-DFR-Pipeline mit direktem Distilled-Transformer, verpflichtender Detailing IC-LoRA sowie konfigurierbarer räumlicher und zeitlicher Verfeinerung.",
+    family: "generate",
+    quality: "Offiziell · Max-Detail",
     defaultHeight: 1024,
     defaultWidth: 1536,
     defaultSteps: 8,
@@ -213,11 +240,11 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "text-to-audio",
-    label: "Offiziell Text zu Audio",
-    shortLabel: "T2A",
-    description: "Offizieller LTX-2.3-Audio-Only-Ablauf mit 8-Sigma-Schedule und Euler-Ancestral-CFG++.",
+    label: "Offiziell LTX-2.5 Text zu Audio",
+    shortLabel: "LTX 2.5 T2A",
+    description: "Gepinnter offizieller LTX-2.5-Audio-Only-Ablauf mit 8-Schritt-Schedule.",
     family: "generate",
-    quality: "Offiziell · Audio",
+    quality: "LTX 2.5 · Audio",
     defaultHeight: 512,
     defaultWidth: 512,
     defaultSteps: 8,
@@ -227,11 +254,11 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "ic-lora",
-    label: "Offiziell IC-LoRA Kontrolle",
+    label: "LTX-2.5 IC-LoRA Kontrolle",
     shortLabel: "IC-LoRA",
-    description: "Dokumentierte LTX-2.3-Abläufe für Union Control, Referenzkontrolle und Video-Edits.",
+    description: "Ausführbare auditierte LTX-2.5-Split-Pack-Profile für Ingredients, Motion Track und V2V Deblur; Union Control bleibt bis zur nativen Stage 2 im HOLD, ältere 2.3-Profile bleiben explizit Legacy.",
     family: "condition",
-    quality: "Offiziell · 8 Schritte",
+    quality: "LTX 2.5 empfohlen",
     defaultHeight: 704,
     defaultWidth: 1280,
     defaultSteps: 8,
@@ -271,11 +298,11 @@ export const PIPELINES: readonly PipelineDefinition[] = [
   },
   {
     id: "image-audio-to-video",
-    label: "Bild + Audio zu Video",
-    shortLabel: "IA2V",
-    description: "Offizieller Two-Stage-A2V-Pfad mit Referenzbild und unveränderter Audiospur.",
+    label: "Offiziell LTX-2.5 Bild + Audio zu Video",
+    shortLabel: "LTX 2.5 IA2V",
+    description: "Gepinnter offizieller LTX-2.5-Two-Stage-A2V-Pfad mit Referenzbild und unveränderter Audiospur.",
     family: "condition",
-    quality: "LipSync",
+    quality: "LTX 2.5 · LipSync",
     defaultHeight: 704,
     defaultWidth: 1280,
     defaultSteps: 30,
@@ -370,6 +397,22 @@ export const guidanceSchema = z.object({
   stgBlocks: z.array(z.number().int().min(0).max(255)).max(64),
 });
 
+export const legacyExecutionSchema = z.object({
+  schemaVersion: z.literal("ltx-studio-legacy-execution.v1"),
+  reason: z.literal("dfr-pre-v1.3.0"),
+  executable: z.literal(false),
+}).strict();
+
+export type LegacyExecution = z.infer<typeof legacyExecutionSchema>;
+
+function modelFilename(path: string): string {
+  return path.replaceAll("\\", "/").split("/").at(-1) ?? "";
+}
+
+function isDfrDetailingLoraPath(path: string): boolean {
+  return modelFilename(path) === LTX25_MODEL_COMPONENTS.dfrDetailingLora.path;
+}
+
 export const generationRequestSchema = z
   .object({
     mode: z.enum(pipelineModes),
@@ -387,6 +430,7 @@ export const generationRequestSchema = z
     outputName: outputNameSchema,
     tiling: z.boolean(),
     longClipAcknowledged: z.boolean(),
+    legacyExecution: legacyExecutionSchema.optional(),
     continuity: z.object({
       project: withoutNul(z.string().trim().max(120)),
       notes: withoutNul(z.string().max(2_000)),
@@ -415,6 +459,9 @@ export const generationRequestSchema = z
     }),
     videoGuidance: guidanceSchema,
     audioGuidance: guidanceSchema,
+    textToAudio: z.object({
+      peakCeilingDbfs: z.number().finite().min(-20).max(-1),
+    }),
     hq: z.object({
       distilledLoraStrengthStage1: z.number().finite().min(0).max(2),
       distilledLoraStrengthStage2: z.number().finite().min(0).max(2),
@@ -422,6 +469,12 @@ export const generationRequestSchema = z
     distilled: z.object({
       singleStage: z.boolean(),
     }),
+    dfr: z.object({
+      temporalUpscalings: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+      spatialUpscalings: z.union([z.literal(1), z.literal(2)]),
+      temporalUpscalerPath: pathValue,
+      detailingLoraPath: pathValue,
+    }).strict().optional(),
     icLora: z.object({
       profile: z.enum(icLoraProfiles).default("union-control"),
       controlType: z.enum(["prepared", "depth", "canny", "pose"]),
@@ -484,6 +537,7 @@ export const generationRequestSchema = z
       lipForcing: z.object({
         enabled: z.boolean(),
         decoder: z.enum(["wan-vae", "streaming-taehv"]),
+        rawOutputProfile: z.enum(lipForcingRawOutputProfiles),
         mouthDelayMs: z.number().int().min(-500).max(500),
         programAudioDelayMs: z.number().int().min(-500).max(500),
       }),
@@ -502,6 +556,20 @@ export const generationRequestSchema = z
   .superRefine((value, context) => {
     const definition = PIPELINES.find((pipeline) => pipeline.id === value.mode);
     if (!definition) return;
+
+    // Historical DFR requests are parsed only so jobs, outputs and projects
+    // remain inspectable. They are never reinterpreted as a runnable v1.3
+    // request; command planning and JobManager admission reject this marker.
+    if (value.legacyExecution) {
+      if (value.mode !== "dfr") {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyExecution"],
+          message: "Der nicht ausführbare Legacy-Marker ist ausschließlich für historischen DFR-Altbestand zulässig.",
+        });
+      }
+      return;
+    }
 
     const requirePath = (path: string, field: (string | number)[], label: string) => {
       if (!path) context.addIssue({ code: "custom", path: field, message: `${label} fehlt.` });
@@ -605,11 +673,69 @@ export const generationRequestSchema = z
           [LTX25_MODEL_COMPONENTS.spatialUpscaler.path.split("/").at(-1)!],
         );
       }
+      if (value.mode === "dfr") {
+        if (!value.dfr) {
+          context.addIssue({
+            code: "custom",
+            path: ["dfr"],
+            message: "DFR-Einstellungen fehlen.",
+          });
+          return;
+        }
+        if (value.dfr.temporalUpscalings > 0) {
+          requirePath(
+            value.dfr.temporalUpscalerPath,
+            ["dfr", "temporalUpscalerPath"],
+            "DFR Temporal Upscaler",
+          );
+          requireFilename(
+            value.dfr.temporalUpscalerPath,
+            ["dfr", "temporalUpscalerPath"],
+            "DFR Temporal Upscaler",
+            [LTX25_MODEL_COMPONENTS.temporalUpscaler.path.split("/").at(-1)!],
+          );
+        }
+        requirePath(
+          value.dfr.detailingLoraPath,
+          ["dfr", "detailingLoraPath"],
+          "DFR Detailing IC-LoRA",
+        );
+        requireFilename(
+          value.dfr.detailingLoraPath,
+          ["dfr", "detailingLoraPath"],
+          "DFR Detailing IC-LoRA",
+          [LTX25_MODEL_COMPONENTS.dfrDetailingLora.path],
+        );
+        if (!value.tiling) {
+          context.addIssue({
+            code: "custom",
+            path: ["tiling"],
+            message: "DFR v1.3 verwaltet VAE-Tiling pipeline-intern; der wirkungslose GUI-Regler muss fest aktiviert bleiben.",
+          });
+        }
+        value.models.loras.forEach((lora, index) => {
+          const filename = modelFilename(lora.path);
+          if (filename === "ltx-2.5-22b-distilled-lora-450-bf16.safetensors") {
+            context.addIssue({
+              code: "custom",
+              path: ["models", "loras", index, "path"],
+              message: "Die obsolete DFR Distilled-LoRA ist mit dem v1.3-Direkt-Transformer nicht zulässig.",
+            });
+          }
+          if (isDfrDetailingLoraPath(lora.path)) {
+            context.addIssue({
+              code: "custom",
+              path: ["models", "loras", index, "path"],
+              message: "Die verpflichtende DFR Detailing IC-LoRA darf nicht zusätzlich als normale LoRA angewendet werden.",
+            });
+          }
+        });
+      }
       const supportedOfficialProfile = value.mode === "ic-lora"
-        && ["union-control", "ingredients", "motion-track", "v2v-instant-shave"].includes(
+        && ["union-control", "ingredients", "motion-track", "v2v-deblur"].includes(
           value.icLora.profile,
         );
-      if (!["distilled", "text-to-audio", "image-audio-to-video"].includes(value.mode)
+      if (!["distilled", "dfr", "text-to-audio", "image-audio-to-video"].includes(value.mode)
         && !supportedOfficialProfile) {
         context.addIssue({
           code: "custom",
@@ -625,6 +751,20 @@ export const generationRequestSchema = z
           message: "LTX-2.5 muss als explizites Split-Pack geladen werden.",
         });
       }
+      if (value.mode === "dfr") {
+        context.addIssue({
+          code: "custom",
+          path: ["models", "layout"],
+          message: "DFR ist ausschließlich als gepinnter nativer LTX-2.5-Split-Pack-Vertrag verfügbar.",
+        });
+      }
+      if (value.mode === "ic-lora" && value.icLora.profile === "v2v-deblur") {
+        context.addIssue({
+          code: "custom",
+          path: ["icLora", "profile"],
+          message: "V2V Deblur ist an den auditierten offiziellen LTX-2.5-Split-Pack-Graph gebunden.",
+        });
+      }
       if (["distilled", "keyframes"].includes(value.mode)
         || (value.mode === "ic-lora" && value.icLora.profile === "hdr")
         || (value.mode === "lipdub" && value.lipDub.pipelineProfile === "native-distilled")
@@ -638,7 +778,7 @@ export const generationRequestSchema = z
         requirePath(value.models.checkpointPath, ["models", "checkpointPath"], "Checkpoint");
       }
     }
-    if (["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(value.mode)) {
+    if (["two-stage", "two-stage-hq", "one-stage", "distilled", "dfr"].includes(value.mode)) {
       if (value.sourceMode === "image" && value.images.length === 0) {
         context.addIssue({ code: "custom", path: ["images"], message: "Für Bild-zu-Video ist ein Referenzbild erforderlich." });
       }
@@ -647,6 +787,38 @@ export const generationRequestSchema = z
       }
     }
     if (value.mode === "text-to-audio") {
+      if (value.audioGuidance.modalityScale !== 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["audioGuidance", "modalityScale"],
+          message: "Text zu Audio besitzt keine Videomodalität; die Modalitätsführung muss fest auf 1,0 stehen.",
+        });
+      }
+      if (value.audioGuidance.stgScale > 0 && value.audioGuidance.stgBlocks.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["audioGuidance", "stgBlocks"],
+          message: "Aktives T2A-STG benötigt mindestens einen expliziten LTX-2.5-Block; für den Versuchsarm wird Block 29 empfohlen.",
+        });
+      }
+      if (value.audioGuidance.stgScale === 0 && value.audioGuidance.stgBlocks.length > 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["audioGuidance", "stgBlocks"],
+          message: "Bei deaktiviertem T2A-STG müssen die STG-Blöcke leer bleiben.",
+        });
+      }
+      if (
+        value.audioGuidance.cfgScale === 1
+        && value.audioGuidance.stgScale === 0
+        && value.audioGuidance.rescaleScale !== 0
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["audioGuidance", "rescaleScale"],
+          message: "T2A-Rescale wäre bei CFG 1,0 und STG 0 wirkungslos und muss 0 bleiben.",
+        });
+      }
       if (!value.outputName.toLowerCase().endsWith(".wav")) {
         context.addIssue({
           code: "custom",
@@ -765,7 +937,7 @@ export const generationRequestSchema = z
         });
       }
       if (
-        ["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(value.icLora.profile)
+        ["pixel-upscaler", "v2v-deblur", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(value.icLora.profile)
         && value.images.length > 0
       ) {
         context.addIssue({
@@ -778,7 +950,7 @@ export const generationRequestSchema = z
         context.addIssue({ code: "custom", path: ["icLora", "videoConditioning"], message: "Ein Kontrollvideo fehlt." });
       }
       if (
-        ["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(value.icLora.profile)
+        ["pixel-upscaler", "v2v-deblur", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(value.icLora.profile)
         && value.icLora.videoConditioning.length !== 1
       ) {
         context.addIssue({
@@ -816,6 +988,21 @@ export const generationRequestSchema = z
           "HDR-Szenen-Embeddings",
         );
       }
+      if (usesSplitModelPack(value)
+        && value.icLora.profile === "v2v-deblur"
+        && value.icLora.lora.strength !== 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["icLora", "lora", "strength"],
+          message: "Der offizielle LTX-2.5-V2V-Deblur-Graph verwendet die IC-LoRA mit Stärke 1,0.",
+        });
+      }
+    } else if (value.textToAudio.peakCeilingDbfs !== -3) {
+      context.addIssue({
+        code: "custom",
+        path: ["textToAudio", "peakCeilingDbfs"],
+        message: "Die T2A-Peak-Grenze ist außerhalb von Text zu Audio nicht aktiv und muss auf -3 dBFS bleiben.",
+      });
     }
     if (isAudioConditionedMode(value.mode)) {
       requirePath(value.audio.path, ["audio", "path"], "Audiodatei");
@@ -983,7 +1170,11 @@ export const generationRequestSchema = z
       // asserts the 64er grid; the remaining official IC profiles are single-stage.
       const inOutpaintICLora = value.mode === "ic-lora"
         && ["inpainting", "outpainting"].includes(value.icLora.profile);
-      const divisor = ["one-stage", "ic-lora"].includes(value.mode) && !inOutpaintICLora ? 32 : 64;
+      const divisor = value.mode === "dfr" && value.dfr?.spatialUpscalings === 2
+        ? 128
+        : ["one-stage", "ic-lora"].includes(value.mode) && !inOutpaintICLora
+          ? 32
+          : 64;
       if (value.height % divisor !== 0 || value.width % divisor !== 0) {
         context.addIssue({
           code: "custom",
@@ -995,7 +1186,9 @@ export const generationRequestSchema = z
         if ((value.numFrames - 1) % 8 !== 0) {
           context.addIssue({ code: "custom", path: ["numFrames"], message: "Frames müssen dem Muster 8k+1 folgen." });
         }
-        if (videoDurationSeconds(value.numFrames, value.frameRate) > 10 && !value.longClipAcknowledged) {
+        const effectiveDuration = effectiveA2vTimeline(value)?.upperBoundDurationSeconds
+          ?? videoDurationSeconds(value.numFrames, value.frameRate);
+        if (effectiveDuration > 10 && !value.longClipAcknowledged) {
           context.addIssue({
             code: "custom",
             path: ["longClipAcknowledged"],
@@ -1007,6 +1200,84 @@ export const generationRequestSchema = z
   });
 
 export type GenerationRequest = z.infer<typeof generationRequestSchema>;
+
+export function isLegacyDfrRequest(
+  request: Pick<GenerationRequest, "mode" | "legacyExecution">,
+): boolean {
+  return request.mode === "dfr"
+    && request.legacyExecution?.reason === "dfr-pre-v1.3.0"
+    && request.legacyExecution.executable === false;
+}
+
+export function hasDuplicateDfrDetailingLora(
+  request: Pick<GenerationRequest, "mode" | "models">,
+): boolean {
+  return request.mode === "dfr" && request.models.loras.some(({ path }) => isDfrDetailingLoraPath(path));
+}
+
+export type DfrSettings = NonNullable<GenerationRequest["dfr"]>;
+
+export const DEFAULT_DFR_SETTINGS: DfrSettings = {
+  temporalUpscalings: 0,
+  spatialUpscalings: 1,
+  temporalUpscalerPath: "",
+  detailingLoraPath: "",
+};
+
+/**
+ * Modes whose current, audited upstream workflow has a native LTX-2.5 split
+ * implementation in Studio. Legacy LTX-2.3 requests remain valid and are
+ * never silently rewritten; this set is used only for new editor defaults and
+ * explicit mode changes.
+ */
+export const preferredLtx25PipelineModes = [
+  "distilled",
+  "dfr",
+  "text-to-audio",
+  "ic-lora",
+  "image-audio-to-video",
+] as const satisfies readonly PipelineMode[];
+
+export function isPreferredLtx25PipelineMode(mode: PipelineMode): boolean {
+  return preferredLtx25PipelineModes.includes(
+    mode as (typeof preferredLtx25PipelineModes)[number],
+  );
+}
+
+export function dfrSettings(request: Pick<GenerationRequest, "dfr">): DfrSettings {
+  return request.dfr ?? DEFAULT_DFR_SETTINGS;
+}
+
+export type DfrOutputGeometry = {
+  width: number;
+  height: number;
+  numFrames: number;
+  frameRate: number;
+  durationSeconds: number;
+  temporalFactor: 1 | 2 | 4;
+};
+
+/**
+ * Official v1.3 output contract. Each temporal round applies
+ * N -> 2(N - 1) + 1 and doubles playback FPS, preserving the exact interval
+ * duration. Width/height are already the requested final canvas; spatial=2
+ * adds an internal full-resolution detailing epilogue, not another 2x export.
+ */
+export function dfrOutputGeometry(
+  request: Pick<GenerationRequest, "width" | "height" | "numFrames" | "frameRate" | "dfr">,
+): DfrOutputGeometry {
+  const temporalFactor = (2 ** dfrSettings(request).temporalUpscalings) as 1 | 2 | 4;
+  const numFrames = Math.max(1, (request.numFrames - 1) * temporalFactor + 1);
+  const frameRate = request.frameRate * temporalFactor;
+  return {
+    width: request.width,
+    height: request.height,
+    numFrames,
+    frameRate,
+    durationSeconds: videoDurationSeconds(numFrames, frameRate),
+    temporalFactor,
+  };
+}
 
 const defaultGuidance = {
   cfgScale: 3,
@@ -1050,8 +1321,8 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     longClipAcknowledged: false,
     continuity: { project: "", notes: "" },
     models: {
-      layout: "monolith",
-      generation: "2.3",
+      layout: mode === "dfr" ? "split" : "monolith",
+      generation: mode === "dfr" ? "2.5" : "2.3",
       checkpointPath: "",
       distilledCheckpointPath: "",
       gemmaRoot: "",
@@ -1072,8 +1343,10 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
     audioGuidance: mode === "text-to-audio"
       ? { cfgScale: 1, stgScale: 0, rescaleScale: 0, modalityScale: 1, skipStep: 0, stgBlocks: [] }
       : { ...defaultGuidance, cfgScale: 7 },
+    textToAudio: { peakCeilingDbfs: -3 },
     hq: { distilledLoraStrengthStage1: 0.25, distilledLoraStrengthStage2: 0.5 },
     distilled: { singleStage: false },
+    ...(mode === "dfr" ? { dfr: structuredClone(DEFAULT_DFR_SETTINGS) } : {}),
     icLora: {
       profile: "union-control",
       controlType: "depth",
@@ -1122,6 +1395,7 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
       lipForcing: {
         enabled: false,
         decoder: "wan-vae",
+        rawOutputProfile: defaultLipForcingRawOutputProfile,
         mouthDelayMs: 0,
         programAudioDelayMs: 0,
       },
@@ -1135,6 +1409,59 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
       regenerateAudio: true,
       distilled: false,
     },
+  };
+}
+
+/**
+ * Latest-first editor defaults. This is intentionally separate from
+ * createDefaultRequest()/mergeGenerationRequest(), whose LTX-2.3 defaults are
+ * a compatibility contract for persisted projects and tests.
+ */
+export function createPreferredRequest(mode: PipelineMode = "distilled"): GenerationRequest {
+  const request = createDefaultRequest(mode);
+  if (!isPreferredLtx25PipelineMode(mode)) return request;
+  if (mode === "dfr") return { ...request, enhancePrompt: false };
+  const preferredIcLora = mode === "ic-lora";
+  const preferredIcLoraFrameRate = 24;
+  return {
+    ...request,
+    ...(preferredIcLora ? {
+      width: 960,
+      height: 544,
+      numFrames: framesForDuration(
+        videoDurationSeconds(request.numFrames, request.frameRate),
+        preferredIcLoraFrameRate,
+      ),
+      frameRate: preferredIcLoraFrameRate,
+      icLora: {
+        ...request.icLora,
+        profile: "ingredients" as const,
+        controlType: "prepared" as const,
+        skipStage2: true,
+      },
+    } : {}),
+    // Exact dialogue and the official split-pack path should not depend on a
+    // second, separately configured prompt-enhancer model by default.
+    enhancePrompt: false,
+    models: {
+      ...request.models,
+      layout: "split",
+      generation: "2.5",
+      checkpointPath: "",
+      distilledCheckpointPath: "",
+      gemmaRoot: "",
+      transformerPath: "",
+      textEncoderPath: "",
+      videoVaePath: "",
+      audioVaePath: "",
+      durationHeadPath: "",
+      promptEnhancerGemmaRoot: "",
+      gemmaLora: { enabled: false, path: "", strength: 1 },
+      spatialUpscalerPath: "",
+      distilledLora: { path: "", strength: 1 },
+      loras: [],
+    },
+    quantization: { mode: "none", amaxPath: "" },
   };
 }
 
@@ -1154,7 +1481,7 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
   ) as Partial<GenerationRequest>;
   const mode = stored.mode && pipelineModes.includes(stored.mode) ? stored.mode : fallbackMode;
   const images = Array.isArray(stored.images) ? stored.images : defaults.images;
-  const inferredSourceMode = ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(mode) && images.length > 0
+  const inferredSourceMode = ["two-stage", "two-stage-hq", "one-stage", "distilled", "dfr"].includes(mode) && images.length > 0
     ? "image"
     : defaults.sourceMode;
   const frameRate = typeof stored.frameRate === "number" ? stored.frameRate : defaults.frameRate;
@@ -1165,6 +1492,15 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
   const storedModelsRecord = storedRecord.models && typeof storedRecord.models === "object"
     && !Array.isArray(storedRecord.models)
     ? storedRecord.models as Record<string, unknown>
+    : {};
+  const storedDfrRecord = storedRecord.dfr && typeof storedRecord.dfr === "object"
+    && !Array.isArray(storedRecord.dfr)
+    ? storedRecord.dfr as Record<string, unknown>
+    : {};
+  const legacyDetailingLoraRecord = storedDfrRecord.detailingLora
+    && typeof storedDfrRecord.detailingLora === "object"
+    && !Array.isArray(storedDfrRecord.detailingLora)
+    ? storedDfrRecord.detailingLora as Record<string, unknown>
     : {};
   const storedGemmaLoraRecord = storedModelsRecord.gemmaLora
     && typeof storedModelsRecord.gemmaLora === "object"
@@ -1191,31 +1527,124 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     && !Object.hasOwn(storedLipDub, "pipelineProfile")
     ? "native-distilled" as const
     : stored.lipDub?.pipelineProfile ?? defaults.lipDub.pipelineProfile;
+  const storedTemporalUpscalings = storedDfrRecord.temporalUpscalings
+    ?? storedDfrRecord.temporalUpsampleRounds;
+  const temporalUpscalings = storedTemporalUpscalings === 1 || storedTemporalUpscalings === 2
+    ? storedTemporalUpscalings
+    : 0;
+  const spatialUpscalings = storedDfrRecord.spatialUpscalings === 2 ? 2 : 1;
+  const detailingLoraPath = typeof storedDfrRecord.detailingLoraPath === "string"
+    ? storedDfrRecord.detailingLoraPath
+    : legacyDetailingLoraRecord.enabled === true
+      && typeof legacyDetailingLoraRecord.path === "string"
+      ? legacyDetailingLoraRecord.path
+      : "";
+  const storedTransformerPath = typeof storedModelsRecord.transformerPath === "string"
+    ? storedModelsRecord.transformerPath
+    : defaults.models.transformerPath;
+  const storedDistilledLoraRecord = storedModelsRecord.distilledLora
+    && typeof storedModelsRecord.distilledLora === "object"
+    && !Array.isArray(storedModelsRecord.distilledLora)
+    ? storedModelsRecord.distilledLora as Record<string, unknown>
+    : {};
+  const legacyDfrDistilledLoraRecord = storedDfrRecord.distilledLora
+    && typeof storedDfrRecord.distilledLora === "object"
+    && !Array.isArray(storedDfrRecord.distilledLora)
+    ? storedDfrRecord.distilledLora as Record<string, unknown>
+    : {};
+  const hasObsoleteDfrDistilledLora = [
+    storedDistilledLoraRecord.path,
+    legacyDfrDistilledLoraRecord.path,
+  ].some((path) => typeof path === "string"
+    && modelFilename(path) === "ltx-2.5-22b-distilled-lora-450-bf16.safetensors");
+  const knownLegacyDfr = mode === "dfr" && (
+    Object.hasOwn(storedDfrRecord, "temporalUpsampleRounds")
+    || Object.hasOwn(storedDfrRecord, "detailingLora")
+    || Object.hasOwn(storedDfrRecord, "distilledLora")
+    || modelFilename(storedTransformerPath) === "ltx-2.5-22b-dev-transformer-bf16.safetensors"
+    || hasObsoleteDfrDistilledLora
+  );
+  const storedLegacyExecution = legacyExecutionSchema.safeParse(storedRecord.legacyExecution);
+  const legacyExecution = storedLegacyExecution.success
+    ? storedLegacyExecution.data
+    : knownLegacyDfr
+      ? {
+          schemaVersion: "ltx-studio-legacy-execution.v1" as const,
+          reason: "dfr-pre-v1.3.0" as const,
+          executable: false as const,
+        }
+      : undefined;
+  // v1.2 DFR projects used the Dev transformer. v1.3 requires the direct
+  // distilled transformer, so that obsolete path must never be inherited as
+  // an apparently runnable choice. Leaving it blank makes model discovery or
+  // the validation gate select/prove the new asset explicitly.
+  const migratedTransformerPath = mode === "dfr"
+    && storedTransformerPath.replaceAll("\\", "/").split("/").at(-1)
+      === "ltx-2.5-22b-dev-transformer-bf16.safetensors"
+    ? ""
+    : storedTransformerPath;
+  const mergedAudio = {
+    ...defaults.audio,
+    ...stored.audio,
+    finalMix: { ...defaults.audio.finalMix, ...stored.audio?.finalMix },
+  };
+  const mergedA2vTimeline = effectiveA2vTimeline({
+    mode,
+    numFrames,
+    frameRate,
+    audio: mergedAudio,
+  });
+  const mergedDuration = mergedA2vTimeline?.upperBoundDurationSeconds
+    ?? videoDurationSeconds(numFrames, frameRate);
   return {
     ...defaults,
     ...stored,
+    ...(legacyExecution ? { legacyExecution } : {}),
     seed: typeof stored.seed === "number" && Number.isInteger(stored.seed) && stored.seed >= 0
       ? stored.seed
       : defaults.seed,
     sourceMode: stored.sourceMode ?? inferredSourceMode,
+    tiling: mode === "dfr" ? true : stored.tiling ?? defaults.tiling,
     promptParts: { ...defaults.promptParts, ...stored.promptParts },
     models: {
       ...defaults.models,
       ...stored.models,
+      transformerPath: migratedTransformerPath,
       gemmaLora: {
         ...defaults.models.gemmaLora,
         ...stored.models?.gemmaLora,
         enabled: storedGemmaLoraEnabled,
       },
-      distilledLora: { ...defaults.models.distilledLora, ...stored.models?.distilledLora },
-      loras: stored.models?.loras ?? defaults.models.loras,
+      distilledLora: mode === "dfr"
+        ? defaults.models.distilledLora
+        : { ...defaults.models.distilledLora, ...stored.models?.distilledLora },
+      loras: (Array.isArray(storedModelsRecord.loras)
+        ? storedModelsRecord.loras
+        : defaults.models.loras).filter((lora) => {
+          if (mode !== "dfr" || !lora || typeof lora !== "object") return true;
+          const path = (lora as Record<string, unknown>).path;
+          return typeof path !== "string"
+            || path.replaceAll("\\", "/").split("/").at(-1)
+              !== "ltx-2.5-22b-distilled-lora-450-bf16.safetensors";
+        }) as GenerationRequest["models"]["loras"],
     },
     images,
     quantization: { ...defaults.quantization, ...stored.quantization },
     videoGuidance: { ...defaults.videoGuidance, ...stored.videoGuidance },
     audioGuidance: { ...defaults.audioGuidance, ...stored.audioGuidance },
+    textToAudio: { ...defaults.textToAudio, ...stored.textToAudio },
     hq: { ...defaults.hq, ...stored.hq },
     distilled: { ...defaults.distilled, ...stored.distilled },
+    ...((stored.dfr || mode === "dfr") ? {
+      dfr: {
+        temporalUpscalings,
+        spatialUpscalings,
+        temporalUpscalerPath: typeof storedDfrRecord.temporalUpscalerPath === "string"
+          ? storedDfrRecord.temporalUpscalerPath
+          : "",
+        detailingLoraPath,
+      },
+    } : {}),
     icLora: {
       ...defaults.icLora,
       ...stored.icLora,
@@ -1232,11 +1661,7 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
       referenceAudio: { ...defaults.idLora.referenceAudio, ...storedIdLora.referenceAudio },
       lora: { ...defaults.idLora.lora, ...storedIdLora.lora },
     },
-    audio: {
-      ...defaults.audio,
-      ...stored.audio,
-      finalMix: { ...defaults.audio.finalMix, ...stored.audio?.finalMix },
-    },
+    audio: mergedAudio,
     lipDub: {
       ...defaults.lipDub,
       ...stored.lipDub,
@@ -1266,7 +1691,7 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     },
     retake: { ...defaults.retake, ...stored.retake },
     continuity: { ...defaults.continuity, ...stored.continuity },
-    longClipAcknowledged: stored.longClipAcknowledged ?? videoDurationSeconds(numFrames, frameRate) > 10,
+    longClipAcknowledged: stored.longClipAcknowledged ?? mergedDuration > 10,
   };
 }
 

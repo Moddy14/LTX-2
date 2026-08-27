@@ -8,7 +8,6 @@ import hashlib
 import os
 from pathlib import Path
 import re
-import signal
 import subprocess
 import sys
 import uuid
@@ -222,21 +221,6 @@ def main() -> int:
     ]
 
     child: subprocess.Popen[str] | None = None
-
-    def stop_owned_container(_signum: int, _frame: object) -> None:
-        if child is not None and child.poll() is None:
-            subprocess.run(
-                ["docker", "stop", "--time", "20", container_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=40,
-            )
-
-    old_handlers = {
-        signum: signal.signal(signum, stop_owned_container)
-        for signum in (signal.SIGTERM, signal.SIGINT)
-    }
     try:
         log(f"Container {container_name} startet innerhalb der bestehenden LTX-Zuteilung.")
         child = subprocess.Popen(
@@ -268,8 +252,6 @@ def main() -> int:
         log(f"verfeinertes Video fertig: {output}")
         return 0
     finally:
-        for signum, handler in old_handlers.items():
-            signal.signal(signum, handler)
         raw_output.unlink(missing_ok=True)
         final_output.unlink(missing_ok=True)
 

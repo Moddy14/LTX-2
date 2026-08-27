@@ -8,13 +8,34 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 import warnings
 from pathlib import Path
+
+EXPECTED_NATTEN_VERSION = "0.21.7+torch2130cu132"
+EXPECTED_NATTEN_URL = (
+    "https://github.com/SHI-Labs/NATTEN/releases/download/v0.21.7/"
+    "natten-0.21.7%2Btorch2130cu132-cp312-cp312-linux_aarch64.whl"
+)
+EXPECTED_NATTEN_SHA256 = "f2745ee3ad50f58b8aa3c4496b67461afcbdb088051eb929b090b88d241bcef1"
+EXPECTED_NATTEN_MARKER = "platform_machine == 'aarch64' and sys_platform == 'linux'"
+EXPECTED_NATTEN_REQUIREMENT = (
+    f"natten @ {EXPECTED_NATTEN_URL}#sha256={EXPECTED_NATTEN_SHA256} ; "
+    "sys_platform == 'linux' and platform_machine == 'aarch64'"
+)
+EXPECTED_TORCH_VERSION = "2.13.0+cu132"
+EXPECTED_TORCH_URL = (
+    "https://download-r2.pytorch.org/whl/cu132/"
+    "torch-2.13.0%2Bcu132-cp312-cp312-manylinux_2_28_aarch64.whl"
+)
+EXPECTED_TORCH_SHA256 = "184f88e91546a2087aee2e5e71012ea6182aaf9d6bc81c28375be2816c349a49"
+EXPECTED_TORCH_REQUIREMENT = f"torch @ {EXPECTED_TORCH_URL}#sha256={EXPECTED_TORCH_SHA256}"
 
 EXPECTED_DISTRIBUTIONS = (
     "kornia",
     "ltx-core",
     "ltx-pipelines",
+    "natten",
     "nvidia-cudnn-cu13",
     "openai-whisper",
     "requests",
@@ -26,13 +47,14 @@ EXPECTED_DISTRIBUTIONS = (
 )
 EXPECTED_VERSIONS = {
     "kornia": "0.8.2",
-    "ltx-core": "1.2.0",
-    "ltx-pipelines": "1.2.0",
-    "nvidia-cudnn-cu13": "9.21.1.3",
+    "ltx-core": "1.3.0",
+    "ltx-pipelines": "1.3.0",
+    "natten": EXPECTED_NATTEN_VERSION,
+    "nvidia-cudnn-cu13": "9.24.0.43",
     "openai-whisper": "20250625",
     "requests": "2.34.2",
     "setuptools": "84.0.0",
-    "torch": "2.13.0+cu132",
+    "torch": EXPECTED_TORCH_VERSION,
     "torchaudio": "2.11.0+cu132",
     "torchvision": "0.28.0+cu132",
     "transformers": "5.14.1",
@@ -40,8 +62,141 @@ EXPECTED_VERSIONS = {
 EXPECTED_CUSPARSELT_VERSION = "0.8.1"
 EXPECTED_CUSPARSELT_TAG = "Tag: py3-none-manylinux2014_aarch64\n"
 EXPECTED_TORCH_CUDNN_REQUIREMENT = (
-    'Requires-Dist: nvidia-cudnn-cu13==9.21.1.3; platform_system == "Linux"\n'
+    'Requires-Dist: nvidia-cudnn-cu13==9.24.0.43; platform_system == "Linux"\n'
 )
+
+
+def _load_toml(path: Path, label: str) -> dict[str, object]:
+    try:
+        payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise SystemExit(f"unable to read {label}: {error}") from error
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{label} must contain a TOML table")
+    return payload
+
+
+def _single_locked_package(lock: dict[str, object], name: str) -> dict[str, object]:
+    packages = lock.get("package")
+    if not isinstance(packages, list):
+        raise SystemExit("native runtime lock has no package inventory")
+    matches = [
+        package
+        for package in packages
+        if isinstance(package, dict) and package.get("name") == name
+    ]
+    if len(matches) != 1:
+        raise SystemExit(f"native runtime lock must contain exactly one {name} package")
+    return matches[0]
+
+
+def _project_requirements_named(dependencies: list[object], name: str) -> list[str]:
+    matches: list[str] = []
+    normalized_name = name.lower()
+    for dependency in dependencies:
+        if not isinstance(dependency, str):
+            continue
+        normalized = dependency.lstrip().lower()
+        if normalized == normalized_name or (
+            normalized.startswith(normalized_name)
+            and normalized[len(normalized_name)] in " [<>=!~@;"
+        ):
+            matches.append(dependency)
+    return matches
+
+
+def verify_diffvae_lock_contract(
+    pyproject_path: Path | None = None,
+    lock_path: Path | None = None,
+) -> None:
+    runtime_root = Path(__file__).resolve().parent
+    pyproject = _load_toml(pyproject_path or runtime_root / "pyproject.toml", "runtime pyproject")
+    lock = _load_toml(lock_path or runtime_root / "uv.lock", "runtime lock")
+
+    project = pyproject.get("project")
+    dependencies = project.get("dependencies") if isinstance(project, dict) else None
+    if not isinstance(dependencies, list) or dependencies.count(EXPECTED_NATTEN_REQUIREMENT) != 1:
+        raise SystemExit("NATTEN must be an active, exact AArch64 runtime dependency")
+    natten_requirements = _project_requirements_named(dependencies, "natten")
+    if natten_requirements != [EXPECTED_NATTEN_REQUIREMENT]:
+        raise SystemExit("runtime pyproject contains an unexpected NATTEN requirement")
+    if _project_requirements_named(dependencies, "torch") != [EXPECTED_TORCH_REQUIREMENT]:
+        raise SystemExit("NATTEN requires the exact direct Torch 2.13 CUDA 13.2 wheel pin")
+
+    tool = pyproject.get("tool")
+    uv = tool.get("uv") if isinstance(tool, dict) else None
+    no_sources = uv.get("no-sources-package") if isinstance(uv, dict) else None
+    if not isinstance(no_sources, list) or no_sources.count("natten") != 1:
+        raise SystemExit("NATTEN must ignore inherited uv source overrides")
+
+    root = _single_locked_package(lock, "ltx-studio-native-runtime")
+    root_dependencies = root.get("dependencies")
+    locked_root_natten = [
+        dependency
+        for dependency in root_dependencies
+        if isinstance(dependency, dict) and dependency.get("name") == "natten"
+    ] if isinstance(root_dependencies, list) else []
+    if locked_root_natten != [{"name": "natten"}]:
+        raise SystemExit("NATTEN is not an active root dependency in the runtime lock")
+    metadata = root.get("metadata")
+    requires_dist = metadata.get("requires-dist") if isinstance(metadata, dict) else None
+    locked_natten_requirements = [
+        requirement
+        for requirement in requires_dist
+        if isinstance(requirement, dict) and requirement.get("name") == "natten"
+    ] if isinstance(requires_dist, list) else []
+    if locked_natten_requirements != [{
+        "name": "natten",
+        "marker": EXPECTED_NATTEN_MARKER,
+        "url": EXPECTED_NATTEN_URL,
+    }]:
+        raise SystemExit("runtime lock does not bind the exact active NATTEN requirement")
+    locked_torch_requirements = [
+        requirement
+        for requirement in requires_dist
+        if isinstance(requirement, dict) and requirement.get("name") == "torch"
+    ] if isinstance(requires_dist, list) else []
+    if locked_torch_requirements != [{"name": "torch", "url": EXPECTED_TORCH_URL}]:
+        raise SystemExit("runtime lock does not bind the direct Torch wheel requirement")
+
+    natten = _single_locked_package(lock, "natten")
+    if natten.get("version") != EXPECTED_NATTEN_VERSION:
+        raise SystemExit("runtime lock contains an unexpected NATTEN version")
+    if natten.get("source") != {"url": EXPECTED_NATTEN_URL}:
+        raise SystemExit("runtime lock contains an unexpected NATTEN source")
+    if natten.get("wheels") != [{
+        "url": EXPECTED_NATTEN_URL,
+        "hash": f"sha256:{EXPECTED_NATTEN_SHA256}",
+    }]:
+        raise SystemExit("runtime lock does not bind the NATTEN AArch64 wheel SHA-256")
+
+    torch = _single_locked_package(lock, "torch")
+    if torch.get("version") != EXPECTED_TORCH_VERSION:
+        raise SystemExit("NATTEN runtime is not paired with the exact Torch 2.13 CUDA 13.2 version")
+    if torch.get("source") != {"url": EXPECTED_TORCH_URL} or torch.get("wheels") != [{
+        "url": EXPECTED_TORCH_URL,
+        "hash": f"sha256:{EXPECTED_TORCH_SHA256}",
+    }]:
+        raise SystemExit("NATTEN runtime is not paired with the hermetic Torch AArch64 wheel")
+
+
+def verify_installed_distribution_versions() -> dict[str, str]:
+    try:
+        actual_versions = {
+            name: importlib.metadata.version(name)
+            for name in EXPECTED_DISTRIBUTIONS
+        }
+    except importlib.metadata.PackageNotFoundError as error:
+        missing = error.name or "unknown"
+        raise SystemExit(
+            f"native release runtime is missing required distribution: {missing}"
+        ) from error
+    if actual_versions != EXPECTED_VERSIONS:
+        raise SystemExit(
+            "native release runtime version mismatch: "
+            + json.dumps({"actual": actual_versions, "expected": EXPECTED_VERSIONS}, sort_keys=True)
+        )
+    return actual_versions
 
 
 def verify_ltx25_cli_contract() -> None:
@@ -99,6 +254,7 @@ def verify_torch_cudnn_metadata() -> None:
 
 
 def main() -> None:
+    verify_diffvae_lock_contract()
     verify_cusparselt_metadata()
     verify_torch_cudnn_metadata()
     verify_ltx25_cli_contract()
@@ -108,15 +264,7 @@ def main() -> None:
     if sys.flags.no_user_site != 1 or sys.flags.isolated != 1:
         raise SystemExit("native release runtime must run with isolated Python and no user site")
 
-    actual_versions = {
-        name: importlib.metadata.version(name)
-        for name in EXPECTED_DISTRIBUTIONS
-    }
-    if actual_versions != EXPECTED_VERSIONS:
-        raise SystemExit(
-            "native release runtime version mismatch: "
-            + json.dumps({"actual": actual_versions, "expected": EXPECTED_VERSIONS}, sort_keys=True)
-        )
+    actual_versions = verify_installed_distribution_versions()
     try:
         importlib.metadata.version("chardet")
     except importlib.metadata.PackageNotFoundError:

@@ -2,6 +2,7 @@ import {
   ArchiveX,
   BarChart3,
   CircleCheck,
+  EyeOff,
   FlaskConical,
   LoaderCircle,
   LockKeyhole,
@@ -15,18 +16,23 @@ import type { AdmissionPreflightReport } from "../../shared/admissionPreflight";
 import {
   experimentVariableLabels,
   generationRequestDiffPaths,
-  type ControlledExperiment,
+  rawMuxPairV1BaselineError,
   type ExperimentCandidate,
   type ExperimentCreateInput,
   type ExperimentVariableId,
 } from "../../shared/experiments";
+import type { PublicControlledExperiment } from "../../shared/outputPublic";
+import { qualificationHoldForRequest } from "../../shared/qualificationHold";
 import {
+  defaultLipForcingRawOutputProfile,
+  experimentalLipForcingRawOutputProfile,
   hasDialogueIntent,
   isAudioConditionedMode,
   type GenerationRequest,
 } from "../../shared/pipelines";
-import { preflightAdmission } from "../api";
+import { blindEvaluationNavigation, createBlindEvaluation, preflightExperimentArm } from "../api";
 import { armRetryable } from "../experimentArms";
+import { buildExperimentCreateInput } from "../experimentCreate";
 import { outputForArm } from "../experimentOutputs";
 import { fieldHelp } from "../fieldHelp";
 import type { Health, StudioJob, StudioOutput } from "../types";
@@ -35,7 +41,7 @@ import { InfoTooltip, NumberField, SelectField, TextField } from "./Controls";
 type ExperimentPanelProps = {
   request: GenerationRequest;
   requestValid: boolean;
-  experiments: ControlledExperiment[];
+  experiments: PublicControlledExperiment[];
   jobs: StudioJob[];
   outputs: StudioOutput[];
   health: Health | null;
@@ -64,10 +70,39 @@ function availableVariables(request: GenerationRequest): ExperimentVariableId[] 
   ) {
     variables.push("lipforcing-enabled");
   }
+  if (request.postprocess.lipForcing.enabled) {
+    variables.push(
+      "lipforcing-decoder",
+      "lipforcing-mouth-delay-ms",
+      "lipforcing-program-audio-delay-ms",
+    );
+    if (
+      request.postprocess.lipForcing.rawOutputProfile === defaultLipForcingRawOutputProfile
+      && rawMuxPairV1BaselineError(request) === null
+    ) {
+      variables.push("lipforcing-raw-output-profile");
+    }
+  }
   return variables;
 }
 
-function initialValue(request: GenerationRequest, variable: ExperimentVariableId): number {
+function adjacentLipForcingDelay(current: number): number {
+  return current <= 475 ? current + 25 : current - 25;
+}
+
+type LipForcingDecoder = GenerationRequest["postprocess"]["lipForcing"]["decoder"];
+
+function alternateLipForcingDecoder(decoder: LipForcingDecoder): LipForcingDecoder {
+  return decoder === "wan-vae" ? "streaming-taehv" : "wan-vae";
+}
+
+function lipForcingDecoderLabel(decoder: LipForcingDecoder): string {
+  return decoder === "wan-vae"
+    ? "Wan-VAE (Qualitätsreferenz)"
+    : "Streaming-TAEHV (schneller, anderer Decoder)";
+}
+
+function initialValue(request: GenerationRequest, variable: ExperimentVariableId): number | null {
   switch (variable) {
     case "a2v-guidance":
       return request.videoGuidance.modalityScale === 3 ? 5 : 3;
@@ -78,7 +113,13 @@ function initialValue(request: GenerationRequest, variable: ExperimentVariableId
     case "lipdub-reference-strength":
       return request.lipDub.referenceVideo.strength === 0.9 ? 1 : 0.9;
     case "lipforcing-enabled":
-      return 1;
+    case "lipforcing-decoder":
+    case "lipforcing-raw-output-profile":
+      return null;
+    case "lipforcing-mouth-delay-ms":
+      return adjacentLipForcingDelay(request.postprocess.lipForcing.mouthDelayMs);
+    case "lipforcing-program-audio-delay-ms":
+      return adjacentLipForcingDelay(request.postprocess.lipForcing.programAudioDelayMs);
     case "replicate-seed":
       return request.seed === 23_072_026 ? 23_072_027 : 23_072_026;
     case "resolution":
@@ -88,19 +129,33 @@ function initialValue(request: GenerationRequest, variable: ExperimentVariableId
 
 function candidateFromState(
   variable: ExperimentVariableId,
-  value: number,
+  value: number | null,
   width: number,
   height: number,
+  request: GenerationRequest,
 ): ExperimentCandidate {
   switch (variable) {
     case "a2v-guidance":
     case "reference-image-strength":
-    case "lipdub-reference-strength":
+    case "lipdub-reference-strength": {
+      if (value === null) throw new Error("Der Kandidatenwert fehlt.");
       return { variable, value };
+    }
     case "reference-image-crf":
     case "replicate-seed":
+    case "lipforcing-mouth-delay-ms":
+    case "lipforcing-program-audio-delay-ms": {
+      if (value === null) throw new Error("Der Kandidatenwert fehlt.");
       return { variable, value: Math.round(value) };
+    }
     case "lipforcing-enabled":
+      return { variable };
+    case "lipforcing-decoder":
+      return {
+        variable,
+        value: alternateLipForcingDecoder(request.postprocess.lipForcing.decoder),
+      };
+    case "lipforcing-raw-output-profile":
       return { variable };
     case "resolution":
       return { variable, width: Math.round(width), height: Math.round(height) };
@@ -148,6 +203,16 @@ function experimentValue(
       return request.postprocess.lipForcing.enabled
         ? `an (${request.postprocess.lipForcing.decoder === "wan-vae" ? "Wan-VAE" : "TAEHV"})`
         : "aus";
+    case "lipforcing-decoder":
+      return lipForcingDecoderLabel(request.postprocess.lipForcing.decoder);
+    case "lipforcing-raw-output-profile":
+      return request.postprocess.lipForcing.rawOutputProfile === experimentalLipForcingRawOutputProfile
+        ? "CRF-13-Videostream unverändert muxen"
+        : "CRF-13-Video beim Audiomux erneut mit CRF 18 encodieren";
+    case "lipforcing-mouth-delay-ms":
+      return `${request.postprocess.lipForcing.mouthDelayMs} ms`;
+    case "lipforcing-program-audio-delay-ms":
+      return `${request.postprocess.lipForcing.programAudioDelayMs} ms`;
     case "replicate-seed":
       return String(request.seed);
     case "resolution":
@@ -156,7 +221,7 @@ function experimentValue(
 }
 
 function currentAnalysisCompleted(output: StudioOutput | undefined): boolean {
-  return output?.analysis?.schemaVersion === "ltx-studio-output-analysis.v7"
+  return output?.analysis?.sourceSchemaVersion === "ltx-studio-output-analysis.v7"
     && output.analysis.status === "completed"
     && output.analysis.result?.schemaVersion === "ltx-studio-objective-quality.v7";
 }
@@ -164,9 +229,9 @@ function currentAnalysisCompleted(output: StudioOutput | undefined): boolean {
 function evaluatorStatusLabel(health: Health | null): string {
   const evaluator = health?.evaluators.phonemeViseme;
   if (!evaluator) return "Status fehlt";
-  if (evaluator.status === "measured") return "Prüfung bestanden";
-  if (evaluator.status === "measurement-only") return "Prüfung abgeschlossen";
-  if (evaluator.measurementReady) return "Prüfung aktiv";
+  if (evaluator.status === "measured" && evaluator.productGo === "passed") return "Product-GO freigegeben";
+  if (evaluator.status === "measurement-only") return "Gemessen · keine Product-GO-Freigabe";
+  if (evaluator.measurementReady) return "Messung verfügbar · keine Product-GO-Freigabe";
   if (evaluator.status === "insufficient") return "Ergebnis nicht eindeutig";
   if (evaluator.status === "failed") return "Prüfung fehlgeschlagen";
   if (evaluator.status === "not-applicable") return "nicht nötig";
@@ -192,11 +257,17 @@ export function ExperimentPanel({
   onCompare,
 }: ExperimentPanelProps) {
   const variables = useMemo(() => availableVariables(request), [request]);
+  const rawMuxEligibilityError = useMemo(() => (
+    request.postprocess.lipForcing.enabled
+      && request.postprocess.lipForcing.rawOutputProfile === defaultLipForcingRawOutputProfile
+      ? rawMuxPairV1BaselineError(request)
+      : null
+  ), [request]);
   const reusableBaseline = useMemo(() => outputs.find((output) =>
     output.settingsAvailable
     && output.request
     && output.jobId
-    && output.provenance?.verifiedAt
+    && output.provenanceSummary?.status === "verified"
     && generationRequestDiffPaths(output.request, request).every((path) => path === "outputName")
   ), [outputs, request]);
   const [title, setTitle] = useState("");
@@ -238,12 +309,13 @@ export function ExperimentPanel({
   };
 
   const create = () => action("create", async () => {
-    await onCreate({
+    const candidate = candidateFromState(variable, value, width, height, request);
+    await onCreate(buildExperimentCreateInput({
       title,
       baselineRequest: request,
-      ...(reusableBaseline ? { baselineOutputName: reusableBaseline.name } : {}),
-      candidate: candidateFromState(variable, value, width, height),
-    });
+      reusableBaselineOutputName: reusableBaseline?.name ?? null,
+      candidate,
+    }));
     setTitle("");
   });
 
@@ -271,7 +343,25 @@ export function ExperimentPanel({
           options={variables.map((item) => ({ value: item, label: experimentVariableLabels[item] }))}
           onChange={selectVariable}
         />
-        {reusableBaseline ? (
+        {rawMuxEligibilityError ? (
+          <p className="experiment-fixed-value">
+            Rohvideo-Mux-Vergleich noch nicht zulässig: {rawMuxEligibilityError}
+          </p>
+        ) : null}
+        {variable === "lipforcing-raw-output-profile" ? (
+          <>
+            <p className="experiment-fixed-value">
+              Für diesen geplanten Einzelfaktor-Vergleich ist ein frisch gerenderter Baseline-Arm
+              verpflichtend; vorhandene Ausgaben werden nicht übernommen. Kausal vergleichbar wird
+              er erst nach dem gemeinsamen Pre-Mux-Artefaktnachweis.
+            </p>
+            <p className="experiment-fixed-value">
+              Kandidat: Der vorhandene CRF-13-Videostream wird beim Upstream-Audiomux unverändert
+              übernommen. Modelleingabe, Decoder und finale Timeline bleiben gleich; die GUI lässt
+              den Kandidaten erst nach unabhängig belegter Paket- und Decoder-Header-Gleichheit zu.
+            </p>
+          </>
+        ) : reusableBaseline ? (
           <p className="experiment-fixed-value">
             Verifizierte Baseline wird ohne neuen LTX-Render übernommen: {reusableBaseline.name}
           </p>
@@ -303,12 +393,29 @@ export function ExperimentPanel({
               ? "qualitativem Wan-VAE-Decoder"
               : "schnellem TAEHV-Decoder"}
           </p>
+        ) : variable === "lipforcing-decoder" ? (
+          <p className="experiment-fixed-value">
+            Kandidat: {lipForcingDecoderLabel(alternateLipForcingDecoder(
+              request.postprocess.lipForcing.decoder,
+            ))}. Wan-VAE ist die Qualitätsreferenz; Streaming-TAEHV ist der schnellere,
+            andere Decoder. Welcher am konkreten Clip besser abschneidet, bleibt offen.
+          </p>
         ) : (
           <NumberField
-            label="Kandidatenwert"
+            label={variable === "lipforcing-mouth-delay-ms"
+              ? "Modell-Steuerung des Kandidaten (ms)"
+              : variable === "lipforcing-program-audio-delay-ms"
+                ? "Hörbarer Tonversatz des Kandidaten (ms)"
+                : "Kandidatenwert"}
             hint={fieldHelp.experimentCandidate}
-            min={0}
-            max={variable === "reference-image-crf"
+            min={variable === "lipforcing-mouth-delay-ms"
+              || variable === "lipforcing-program-audio-delay-ms"
+              ? -500
+              : 0}
+            max={variable === "lipforcing-mouth-delay-ms"
+              || variable === "lipforcing-program-audio-delay-ms"
+              ? 500
+              : variable === "reference-image-crf"
               ? 51
               : variable === "reference-image-strength"
                 ? 1
@@ -317,7 +424,12 @@ export function ExperimentPanel({
                   : variable === "a2v-guidance"
                     ? 20
                     : Number.MAX_SAFE_INTEGER}
-            step={variable === "reference-image-crf" || variable === "replicate-seed" ? 1 : 0.05}
+            step={variable === "reference-image-crf"
+              || variable === "replicate-seed"
+              || variable === "lipforcing-mouth-delay-ms"
+              || variable === "lipforcing-program-audio-delay-ms"
+              ? 1
+              : 0.05}
             value={value}
             onChange={(next) => setValue(next ?? initialValue(request, variable))}
           />
@@ -344,9 +456,12 @@ export function ExperimentPanel({
             const candidateOutput = outputForArm(experiment, 1, outputs);
             const baselineRetryable = armRetryable(baseline, baselineJob, baselineOutput);
             const candidateRetryable = armRetryable(candidate, candidateJob, candidateOutput);
+            const baselineQualificationHold = qualificationHoldForRequest(baseline.request);
+            const candidateQualificationHold = qualificationHoldForRequest(candidate.request);
+            const experimentQualificationHold = baselineQualificationHold ?? candidateQualificationHold;
             const candidateEnabled = (
               baselineJob?.status === "completed"
-              && Boolean(baselineJob.runProvenance?.verifiedAt)
+              && baselineJob.runProvenanceSummary?.status === "verified"
             ) || Boolean(baselineOutput);
             const gateMessages = health === null
               ? ["Live-Systemstatus fehlt"]
@@ -357,14 +472,21 @@ export function ExperimentPanel({
             const analysesCompleted = currentAnalysisCompleted(baselineOutput)
               && currentAnalysisCompleted(candidateOutput);
             const outputsReady = Boolean(baselineOutput && candidateOutput);
-            const startableArmRequest = experiment.status !== "frozen"
+            const startableArm: "baseline" | "candidate" | null = experiment.status !== "frozen"
               ? null
               : (!baseline.jobId || baselineRetryable)
-                ? baseline.request
+                ? "baseline"
                 : (!candidate.jobId || candidateRetryable)
-                  ? candidate.request
+                  ? "candidate"
                   : null;
-            const preflight = preflights[experiment.id];
+            const preflightKey = startableArm ? `${experiment.id}:${startableArm}` : null;
+            const preflight = preflightKey ? preflights[preflightKey] : undefined;
+            const cpuOnlyPreflight = preflight?.executionClass === "cpu-only";
+            const cpuOnlyBound = baselineJob?.executionClass === "cpu-only"
+              || candidateJob?.executionClass === "cpu-only";
+            const cpuOnlyVisible = cpuOnlyPreflight || cpuOnlyBound;
+            const audioReusePreflight = preflight?.steps.some((step) =>
+              step.label === "Audio-only-Reuse-Nachweis" || step.decision === "cpu-only-provenance-reuse");
             return (
               <article className="experiment-item" key={experiment.id}>
                 <div className="experiment-item__heading">
@@ -384,16 +506,20 @@ export function ExperimentPanel({
                 </div>
                 <div className="experiment-item__facts">
                   <span>{experimentVariableLabels[experiment.candidate.variable]}</span>
-                  <span>{experiment.kind === "replicate" ? "Replikat" : "Einzelfaktor"}</span>
+                  <span>{experiment.kind === "replicate"
+                    ? "Replikat"
+                    : experiment.candidate.variable === "lipforcing-raw-output-profile"
+                      ? "Geplanter Einzelfaktor"
+                      : "Einzelfaktor"}</span>
                   <span>Seed {baseline.request.seed}</span>
                   <span>
                     LongCat {baseline.request.postprocess.longcatLipsync.enabled ? "an" : "aus"}
                   </span>
                   <span>{experiment.changedRequestPaths.join(", ")}</span>
                 </div>
-                {experiment.protocolSha256 ? (
+                {experiment.protocolEqualityToken ? (
                   <p className="experiment-hash">
-                    Protokoll {experiment.protocolSha256.slice(0, 12)}
+                    Protokoll {experiment.protocolEqualityToken.slice(0, 12)}
                     <InfoTooltip text={fieldHelp.experimentProtocolHash} />
                   </p>
                 ) : null}
@@ -416,15 +542,24 @@ export function ExperimentPanel({
                   </span>
                 </div>
                 <div className="experiment-gates">
-                  {gateMessages.length > 0 ? (
+                  {experimentQualificationHold ? (
+                    <span className="is-waiting">
+                      <TriangleAlert size={14} /> DFR Qualification-HOLD: Produktstarts und CPU-only-Reuse sind gesperrt
+                      <InfoTooltip text={experimentQualificationHold.reason} />
+                    </span>
+                  ) : cpuOnlyVisible ? (
+                    <span className="is-ready">
+                      <CircleCheck size={14} /> Gebundener CPU-only-Lauf; keine DGX-Queue erforderlich
+                    </span>
+                  ) : gateMessages.length > 0 ? (
                     <span className="is-waiting">
                       <TriangleAlert size={14} /> Queue nicht bereit: {gateMessages.join(" · ")}
                     </span>
                   ) : (
                     <span className="is-ready"><CircleCheck size={14} /> DGX-Queue entscheidet den Start automatisch</span>
                   )}
-                  <span className={phonemeViseme?.measurementReady ? "is-ready" : "is-waiting"}>
-                    {phonemeViseme?.measurementReady
+                  <span className={phonemeViseme?.productGo === "passed" ? "is-ready" : "is-waiting"}>
+                    {phonemeViseme?.productGo === "passed"
                       ? <CircleCheck size={14} />
                       : <TriangleAlert size={14} />}
                     Laut-/Lippenprüfung: {evaluatorStatusLabel(health)}
@@ -440,31 +575,42 @@ export function ExperimentPanel({
                       {preflight.verdict === "start-frei"
                         ? <CircleCheck size={14} />
                         : <TriangleAlert size={14} />}
-                      Startprüfung: {preflight.verdict === "start-frei"
-                        ? "Der Orchestrator würde den Lauf jetzt zulassen."
+                      Startprüfung: {cpuOnlyPreflight
+                        ? "Der gebundene Bildstrom wird CPU-only übernommen; kein DGX-Lauf ist erforderlich."
+                        : preflight.verdict === "hold"
+                          ? "DFR bleibt im Qualification-HOLD; es wurde keine Admission oder Wiederverwendung freigegeben."
+                        : preflight.verdict === "start-frei"
+                          ? "Der Orchestrator würde den Lauf jetzt zulassen."
                         : preflight.verdict === "wartet"
                           ? "Der Orchestrator würde den Lauf jetzt warten lassen."
+                          : audioReusePreflight
+                            ? "Die gebundene Audio-only-Wiederverwendung ist gerade nicht sicher prüfbar."
                           : "Die Orchestrator-Entscheidung ist gerade nicht prüfbar."}
                       <InfoTooltip text={preflight.notes.join(" ")} />
                     </span>
                     {preflight.steps.map((step) => (
                       <span key={step.label} className={step.accepted ? "is-ready" : "is-waiting"}>
                         {step.accepted ? <CircleCheck size={14} /> : <TriangleAlert size={14} />}
-                        {step.label} · {step.estimatedMemoryGiB} GiB: {step.message}
+                        {step.label} · {step.estimatedMemoryGiB === 0
+                          ? cpuOnlyPreflight ? "kein DGX-RAM" : "Ressourcen nicht ermittelt"
+                          : `${step.estimatedMemoryGiB} GiB`}: {step.message}
                       </span>
                     ))}
                   </div>
                 ) : null}
                 <div className="experiment-actions">
-                  {startableArmRequest ? (
+                  {startableArm ? (
                     <button
                       type="button"
                       className="button button--secondary"
                       disabled={busyAction !== null}
-                      title="Read-only beim DGX-Orchestrator prüfen, ob jeder Ressourcenschritt des Laufs jetzt zugelassen würde"
+                      title="Serverseitig prüfen, ob der Arm nach aktueller Evidenz CPU-only wiederverwendet wird oder welche DGX-Schritte zugelassen würden"
                       onClick={() => void action(`preflight-${experiment.id}`, async () => {
-                        const report = await preflightAdmission(startableArmRequest);
-                        setPreflights((current) => ({ ...current, [experiment.id]: report }));
+                        const report = await preflightExperimentArm(experiment.id, startableArm);
+                        setPreflights((current) => ({
+                          ...current,
+                          [`${experiment.id}:${startableArm}`]: report,
+                        }));
                       })}
                     >
                       {busyAction === `preflight-${experiment.id}`
@@ -490,10 +636,16 @@ export function ExperimentPanel({
                     <button
                       type="button"
                       className="button button--secondary"
-                      disabled={busyAction !== null}
+                      disabled={Boolean(baselineQualificationHold) || busyAction !== null}
+                      title={baselineQualificationHold?.reason}
                       onClick={() => void action(
                         `baseline-${experiment.id}`,
-                        () => onLaunch(experiment.id, "baseline"),
+                        async () => {
+                          await onLaunch(experiment.id, "baseline");
+                          setPreflights((current) => Object.fromEntries(
+                            Object.entries(current).filter(([key]) => !key.startsWith(`${experiment.id}:`)),
+                          ));
+                        },
                       )}
                     >
                       {busyAction === `baseline-${experiment.id}`
@@ -508,13 +660,18 @@ export function ExperimentPanel({
                     <button
                       type="button"
                       className="button button--secondary"
-                      disabled={busyAction !== null || !candidateEnabled}
-                      title={candidateEnabled
+                      disabled={Boolean(candidateQualificationHold) || busyAction !== null || !candidateEnabled}
+                      title={candidateQualificationHold?.reason ?? (candidateEnabled
                         ? "Kandidatenarm aus dem eingefrorenen Request starten"
-                        : "Erst nach fertiger, provenienzverifizierter Baseline verfügbar"}
+                        : "Erst nach fertiger, provenienzverifizierter Baseline verfügbar")}
                       onClick={() => void action(
                         `candidate-${experiment.id}`,
-                        () => onLaunch(experiment.id, "candidate"),
+                        async () => {
+                          await onLaunch(experiment.id, "candidate");
+                          setPreflights((current) => Object.fromEntries(
+                            Object.entries(current).filter(([key]) => !key.startsWith(`${experiment.id}:`)),
+                          ));
+                        },
                       )}
                     >
                       {busyAction === `candidate-${experiment.id}`
@@ -559,6 +716,26 @@ export function ExperimentPanel({
                       onClick={() => onCompare([baselineOutput!, candidateOutput!])}
                     >
                       <BarChart3 size={16} /> Protokollvergleich
+                    </button>
+                  ) : null}
+                  {outputsReady && analysesCompleted ? (
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={busyAction !== null}
+                      title="Neue oder bereits gebundene serverseitige X/Y-Blindbewertung öffnen"
+                      onClick={() => void action(`blind-${experiment.id}`, async () => {
+                        const evaluation = await createBlindEvaluation(experiment.id);
+                        const navigation = await blindEvaluationNavigation(evaluation);
+                        window.dispatchEvent(new CustomEvent("ltx-studio:hard-navigation", {
+                          detail: { href: navigation.href },
+                        }));
+                      })}
+                    >
+                      {busyAction === `blind-${experiment.id}`
+                        ? <LoaderCircle className="spin" size={16} />
+                        : <EyeOff size={16} />}
+                      Verblindet bewerten
                     </button>
                   ) : null}
                 </div>

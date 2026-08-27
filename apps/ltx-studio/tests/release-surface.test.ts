@@ -10,22 +10,34 @@ import {
   releaseSurfaceEntryForRequest,
   releaseGateIds,
 } from "../shared/releaseSurface.js";
+import { LTX25_WORKFLOW_CATALOG } from "../shared/ltx25Catalog.js";
 import { generationRequestSchema } from "../shared/pipelines.js";
 import { supportsCooperativeCheckpoint } from "../server/admission.js";
+import { buildCommand, validateRequestPlan } from "../server/command.js";
 import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 function requestFor(entry: ReturnType<typeof deriveReleaseSurfaceEntries>[number]) {
   const split = entry.request.modelProfile !== "ltx23-monolith";
-  if (split && !["distilled", "text-to-audio", "ic-lora", "image-audio-to-video"].includes(entry.request.mode)) {
+  if (split && !["distilled", "dfr", "text-to-audio", "ic-lora", "image-audio-to-video"].includes(entry.request.mode)) {
     throw new Error(`Unexpected LTX-2.5 release mode: ${entry.request.mode}`);
   }
   const request = split
     ? validLtx25SplitRequest(
-        entry.request.mode as "distilled" | "text-to-audio" | "ic-lora" | "image-audio-to-video",
+        entry.request.mode as "distilled" | "dfr" | "text-to-audio" | "ic-lora" | "image-audio-to-video",
       )
     : validRequest(entry.request.mode);
   if (entry.request.mode === "distilled" && split) {
     request.distilled.singleStage = entry.request.modelProfile === "ltx25-split-bf16-single-stage";
+  }
+  if (entry.request.mode === "dfr" && request.dfr) {
+    request.dfr.temporalUpscalings = entry.request.dfrTemporalUpscalings ?? 0;
+    request.dfr.spatialUpscalings = entry.request.dfrSpatialUpscalings ?? 1;
+    request.dfr.temporalUpscalerPath = request.dfr.temporalUpscalings > 0
+      ? "/models/ltx-2.5/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors"
+      : "";
+    request.dfr.detailingLoraPath =
+      "/models/ltx-2.5/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors";
+    if (request.dfr.spatialUpscalings === 2) request.height = 768;
   }
   if (entry.request.unionControlType) request.icLora.controlType = entry.request.unionControlType;
   request.models.gemmaLora.enabled = entry.request.promptEncoderProfile === "abliterated-lora";
@@ -38,7 +50,7 @@ function requestFor(entry: ReturnType<typeof deriveReleaseSurfaceEntries>[number
   if (entry.request.icLoraProfile) {
     request.icLora.profile = entry.request.icLoraProfile;
     if (entry.request.icLoraProfile === "ingredients") request.icLora.videoConditioning = [];
-    if (["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(entry.request.icLoraProfile)) {
+    if (["pixel-upscaler", "v2v-deblur", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(entry.request.icLoraProfile)) {
       request.images = [];
     }
     if (entry.request.icLoraProfile === "inpainting") request.icLora.attentionMaskPath = "/inputs/mask.mp4";
@@ -89,7 +101,8 @@ describe("candidate release surface", () => {
 
   it("never promotes a blocked-rights entry", () => {
     for (const entry of deriveReleaseSurfaceEntries()) {
-      expect(entry.targetStatus === "blocked").toBe(entry.rights.status === "blocked");
+      if (entry.rights.status === "blocked") expect(entry.targetStatus).toBe("blocked");
+      expect(entry.targetStatus === "blocked").toBe(entry.targetReason !== null);
     }
   });
 
@@ -121,6 +134,17 @@ describe("candidate release surface", () => {
       || request.postprocessor.startsWith("lipforcing"));
     expect(refiners.length).toBeGreaterThan(0);
     expect(refiners.every(({ targetStatus }) => targetStatus === "blocked")).toBe(true);
+  });
+
+  it("keeps the experimental LipForcing mux-copy profile outside every declared release entry", () => {
+    const request = validRequest("image-audio-to-video");
+    request.postprocess.lipForcing.enabled = true;
+    request.postprocess.lipForcing.rawOutputProfile = "h264-crf13-mux-copy-v1";
+
+    expect(() => releaseSurfaceEntryForRequest(request))
+      .toThrow("outside the declared release surface");
+    expect(deriveReleaseSurfaceEntries().some(({ request: entry }) =>
+      entry.postprocessor.includes("mux-copy"))).toBe(false);
   });
 
   it("separates release-safe Base-Gemma from the blocked optional abliterated LoRA", () => {
@@ -160,15 +184,32 @@ describe("candidate release surface", () => {
   it("declares each native LTX-2.5 BF16 core path as its own conditional surface", () => {
     const entries = deriveReleaseSurfaceEntries().filter(({ request }) =>
       request.modelProfile !== "ltx23-monolith");
-    expect(entries).toHaveLength(14);
+    expect(entries).toHaveLength(27);
     const nativeEntries = entries.filter(({ request }) => request.postprocessor === "none");
-    expect(nativeEntries).toHaveLength(12);
-    expect(nativeEntries.every(({ request, rights, targetStatus }) =>
+    expect(nativeEntries).toHaveLength(25);
+    const qualifiedNativeEntries = nativeEntries.filter(({ request }) => request.mode !== "dfr");
+    expect(qualifiedNativeEntries).toHaveLength(13);
+    expect(qualifiedNativeEntries.every(({ request, rights }) =>
       request.postprocessor === "none"
       && request.promptEncoderProfile === "not-applicable"
       && rights.status === "conditional"
-      && rights.evidenceIds.includes("ltx25-community-license-model-card-2026-08-21")
-      && targetStatus === "candidate")).toBe(true);
+      && rights.evidenceIds.includes("ltx25-community-license-model-card-2026-08-21"))).toBe(true);
+    expect(qualifiedNativeEntries.filter(({ targetStatus }) => targetStatus === "candidate"))
+      .toHaveLength(10);
+    expect(qualifiedNativeEntries.filter(({ targetStatus }) => targetStatus === "blocked"))
+      .toHaveLength(3);
+    const dfrEntries = nativeEntries.filter(({ request }) => request.mode === "dfr");
+    expect(dfrEntries).toHaveLength(12);
+    expect(dfrEntries.every(({ request, rights, targetStatus, targetReason, cooperativeCheckpoint }) =>
+      request.modelProfile === "ltx25-split-bf16-dfr"
+      && request.promptEncoderProfile === "not-applicable"
+      && request.dfrTemporalUpscalings !== null
+      && request.dfrSpatialUpscalings !== null
+      && rights.status === "conditional"
+      && rights.evidenceIds.includes("ltx25-dfr-detailing-lora-model-card-2026-08-25")
+      && targetStatus === "blocked"
+      && targetReason?.includes("mandatory Detailing IC-LoRA") === true
+      && cooperativeCheckpoint === false)).toBe(true);
     const lipForcingEntries = entries.filter(({ request }) =>
       request.postprocessor.startsWith("lipforcing-14b"));
     expect(lipForcingEntries).toHaveLength(2);
@@ -182,6 +223,85 @@ describe("candidate release surface", () => {
       .sort()).toEqual(["canny", "depth", "pose"]);
     expect(entries
       .filter(({ request }) => request.modelProfile === "ltx25-split-bf16-two-stage"))
-      .toHaveLength(5);
+      .toHaveLength(8);
+  });
+
+  it("keeps implementation-required LTX-2.5 Union Control two-stage and fail-closed end to end", () => {
+    const catalog = LTX25_WORKFLOW_CATALOG.find(({ id }) => id === "ic-lora-union-control");
+    expect(catalog).toMatchObject({
+      stages: 2,
+      spatialUpscale: true,
+      nativeStatus: "implementation-required",
+      nativeBinding: { mode: "ic-lora", icLoraProfile: "union-control" },
+    });
+    if (catalog?.nativeBinding?.mode !== "ic-lora") {
+      throw new Error("Union Control catalog binding must remain an IC-LoRA request");
+    }
+    const unionProfile = catalog.nativeBinding.icLoraProfile;
+
+    const entries = deriveReleaseSurfaceEntries().filter(({ request }) =>
+      request.modelProfile !== "ltx23-monolith"
+      && request.icLoraProfile === unionProfile);
+    expect(entries).toHaveLength(3);
+    for (const entry of entries) {
+      expect(entry).toMatchObject({
+        request: { modelProfile: "ltx25-split-bf16-two-stage" },
+        targetStatus: "blocked",
+      });
+      expect(entry.targetReason).toContain("Stage-2/spatial-upscaler implementation");
+
+      const request = requestFor(entry);
+      expect(validateRequestPlan(
+        request,
+        buildCommand(request),
+        undefined,
+        { enforceOfficialAssets: false },
+      )).toEqual(expect.arrayContaining([
+        expect.stringContaining("Stage-2-/Upscaler-Implementierung fehlt noch"),
+      ]));
+    }
+  });
+
+  it("separates generic LTX-2.5 T2A from verbatim dialogue and applies only audio-relevant speech gates", () => {
+    const generic = validLtx25SplitRequest("text-to-audio");
+    generic.promptParts.dialogue = "";
+    const exact = structuredClone(generic);
+    exact.promptParts.dialogue = "Dieser Wortlaut muss exakt gesprochen werden.";
+
+    const genericEntry = releaseSurfaceEntryForRequest(generic);
+    const exactEntry = releaseSurfaceEntryForRequest(exact);
+
+    expect(genericEntry.id).not.toBe(exactEntry.id);
+    expect(genericEntry).toMatchObject({
+      inputContract: ["prompt"],
+      request: { dialogueIntent: "optional" },
+    });
+    expect(genericEntry.applicableGates).not.toContain("asr-critical-token");
+    expect(exactEntry).toMatchObject({
+      claimId: "native-generation.ltx25.text-to-audio.single-stage.verbatim-dialogue",
+      inputContract: ["prompt", "verbatim-dialogue"],
+      request: { dialogueIntent: "required" },
+    });
+    expect(exactEntry.applicableGates).toContain("asr-critical-token");
+    expect(exactEntry.applicableGates).not.toContain("phoneme-viseme");
+    expect(exactEntry.applicableGates).not.toContain("mouth-artifact");
+    expect(exactEntry.notApplicable.map(({ gate }) => gate)).toEqual(expect.arrayContaining([
+      "phoneme-viseme",
+      "mouth-artifact",
+    ]));
+  });
+
+  it("separates official LTX-2.5 V2V Deblur from the LTX-2.3 Instant-Shave legacy arm", () => {
+    const nativeV2v = deriveReleaseSurfaceEntries().filter(({ request }) =>
+      request.postprocessor === "none"
+      && ["v2v-deblur", "v2v-instant-shave"].includes(request.icLoraProfile ?? ""));
+
+    expect(nativeV2v.map(({ request }) => ({
+      profile: request.icLoraProfile,
+      modelProfile: request.modelProfile,
+    }))).toEqual([
+      { profile: "v2v-instant-shave", modelProfile: "ltx23-monolith" },
+      { profile: "v2v-deblur", modelProfile: "ltx25-split-bf16-single-stage" },
+    ]);
   });
 });

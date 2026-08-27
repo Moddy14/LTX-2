@@ -15,11 +15,17 @@ import {
   type ActivationJournalRecord,
 } from "../shared/activation.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const release = (releaseDigest = sha("release")) => ({
   releaseDigest,
   surfaceDigest: sha("surface"),
+  runtimeInstallSealSha256: sha("runtime-seal"),
+  runtimeTreeSha256: sha("runtime-tree"),
+  runtimePolicySha256: sha("runtime-policy"),
+  nodeExecutableSha256: sha("node-executable"),
+  runtimeTrust: runtimeTrustFixture,
   rights: {
     policyEvidenceDigest: sha("rights"),
     attestationSeriesId: "rights-series-001",
@@ -43,7 +49,7 @@ function envelope(record: ActivationJournalRecord): ActivationJournalEnvelope {
 
 function bootstrap(): ActivationJournalEnvelope {
   return envelope({
-    schemaVersion: "ltx-studio-activation-journal-record.v1",
+    schemaVersion: "ltx-studio-activation-journal-record.v3",
     recordId: "00000000-0000-4000-8000-000000000001",
     sequence: 0,
     generation: 1,
@@ -67,7 +73,7 @@ function bootstrap(): ActivationJournalEnvelope {
 
 function validQualificationAuthorization() {
   return qualificationAuthorizationSchema.parse({
-    schemaVersion: "qualification-authorization.v1",
+    schemaVersion: "qualification-authorization.v3",
     authorizationId: "qualification-r0l-001",
     generation: 1,
     release: release(),
@@ -103,7 +109,7 @@ describe("activation contracts", () => {
 
   it("rejects inconsistent time windows and aggregate ticket budgets", () => {
     const invalid = {
-      schemaVersion: "qualification-authorization.v1",
+      schemaVersion: "qualification-authorization.v3",
       authorizationId: "qualification-r0l-001",
       generation: 1,
       release: release(),
@@ -274,6 +280,11 @@ describe("activation contracts", () => {
       activationHeadSha256: activationEnvelopeDigest(promotion),
       releaseDigest: release().releaseDigest,
       surfaceDigest: release().surfaceDigest,
+      runtimeInstallSealSha256: release().runtimeInstallSealSha256,
+      runtimeTreeSha256: release().runtimeTreeSha256,
+      runtimePolicySha256: release().runtimePolicySha256,
+      nodeExecutableSha256: release().nodeExecutableSha256,
+      runtimeTrust: runtimeTrustFixture,
       rightsCurrent: true,
       releasedSurfaceEntryIds: ["native-generation.text-to-video"],
     });

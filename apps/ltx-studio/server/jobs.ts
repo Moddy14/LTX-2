@@ -2,24 +2,35 @@ import { EventEmitter } from "node:events";
 import {
   chmodSync,
   closeSync,
+  constants,
   copyFileSync,
+  createReadStream,
   existsSync,
+  fstatSync,
   fsyncSync,
+  lstatSync,
+  linkSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
+  unlinkSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { dirname, extname, join } from "node:path";
+import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  rawMuxPairV1BaselineError,
+  rawMuxPairV1CandidateError,
   experimentRunBindingSchema,
   isAdoptedLipForcingCandidate,
   type ExperimentRunBinding,
@@ -29,34 +40,66 @@ import {
   type ProjectRunBinding,
 } from "../shared/projects.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import {
+  PUBLIC_JOB_PERSISTENCE_HOLD_CODE,
+  PUBLIC_JOB_PERSISTENCE_HOLD_REASON,
+  publicJobPersistenceHoldHealth,
+  type PublicJobPersistenceHealth,
+} from "../shared/healthPublic.js";
 import { refinerAdmissionMemoryGiB } from "../shared/admissionPreflight.js";
 import {
+  isJobExecutionClass,
+  jobExecutionDecisionIsMonotone,
+  normalizeJobExecutionDecision,
+  executionDescriptorThreatModel,
+  type CpuAudioRetimeReuseSourceBinding,
+  type CpuFfmpegOperation,
+  type CpuOperationState,
+  type CpuOperation,
+  type CpuPairedArtifactPromotionOperation,
+  type CpuPairedArtifactReuseSourceBinding,
+  type CpuReuseSourceBinding,
+  type ExecutionFileBinding,
+  type ExecutionFileRevision,
+  type JobExecutionDecision,
+  type JobExecutionClass,
+} from "../shared/jobExecution.js";
+import {
+  defaultLipForcingRawOutputProfile,
+  experimentalLipForcingRawOutputProfile,
   isAudioConditionedMode,
+  isLegacyDfrRequest,
   migrateGenerationRequest,
   type GenerationRequest,
 } from "../shared/pipelines.js";
+import { qualificationHoldForRequest } from "../shared/qualificationHold.js";
 import {
   requiredOfficialSpeechAssetIds,
   withOfficialSpeechModelPaths,
   type ModelInventory,
 } from "../shared/models.js";
 import {
+  assertAuthoritativeQueueList,
+  buildAdmissionRequests,
   decisionMessage,
   decideSegmentBoundary,
   cooperativeCheckpointPath,
   heartbeatQueueJob,
+  isDgxJobId,
   listQueueJobs,
   queueAdmissionMemoryGiB,
   readQueueJob,
   retryAfterMs,
-  shouldRetryQueueSubmit,
-  submitQueueAdmission,
+  submitPreparedQueueAdmission,
   supportsCooperativeCheckpoint,
   transitionQueueJob,
+  type AdmissionRequest,
   type QueueArtifact,
   type QueueHeartbeatPayload,
   type QueueJobSummary,
   type QueueJobState,
+  type QueueListResponse,
+  type QueueSubmitResponse,
   type QueueTransitionState,
   type SegmentBoundaryDecision,
 } from "./admission.js";
@@ -68,6 +111,7 @@ import {
   executableAvailable,
   hybridCacheRoot,
   hybridRoot,
+  hostTcbExecutables,
   isolatedPythonEnvironment,
   latentSyncCheckpointPath,
   latentSyncImage,
@@ -86,15 +130,19 @@ import {
   rendererPythonExecutable,
   pythonRuntimeAvailable,
   repoRoot,
+  SEALED_EXECUTABLE_PATH,
+  sealedRelease,
   statePath,
   thermalPauseC,
   thermalPausePolls,
   thermalPollIntervalMs,
+  thermalResumeC,
   thermalResumePolls,
   thermalStartSampleIntervalMs,
   thermalStartSamples,
   thermalUnreadablePolls,
 } from "./config.js";
+import { revalidateSealedRuntimeTrustIdentity } from "./releaseIdentity.js";
 import {
   readResourceSnapshot,
   validatePreAdmissionResources,
@@ -110,31 +158,86 @@ import {
 } from "./inputEvidence.js";
 import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } from "./thermal.js";
 import { buildFinalAudioRemuxArgs } from "./audioRemux.js";
-import type { RunProvenance } from "../shared/provenance.js";
+import type {
+  ProvenanceContainerImageEvidence,
+  RunProvenance,
+} from "../shared/provenance.js";
 import {
+  bindRunExecutionDecision,
   bindRunProvenanceFile,
   captureRunProvenance,
+  forkVerifiedRunProvenanceForArtifactPromotion,
   normalizeRunProvenance,
+  runProvenanceFingerprintMatches,
   verifyRunProvenance,
 } from "./runProvenance.js";
+import { lipForcingImageIdentity } from "./dockerImageIdentity.js";
+import {
+  verifyNativeRuntimeSource,
+  type NativeRuntimeSourceProbeOperations,
+} from "./nativeRuntimeSourceGate.js";
+import { outputAnalysisRecordSchema } from "../shared/objectiveQuality.js";
 import { RuntimeApiError } from "./runtimeApi.js";
 import { releaseSurfaceEntryForRequest } from "../shared/releaseSurface.js";
 import {
   jobStartSources,
+  type JobStartDecision,
   type JobStartEnforcer,
   type JobStartSource,
 } from "./startEnforcer.js";
 import { configuredJobStartEnforcer } from "./configuredStartEnforcer.js";
 import { DataRecoveryCoordinator } from "./dataRecoveryJournal.js";
+import { experimentRequestSha256V1 } from "./experimentDigest.js";
+import {
+  captureRawMuxPairFile,
+  copyRawMuxBoundFile,
+  createRawMuxBaselineAuthority,
+  pinRawMuxCandidateArtifact,
+  rawMuxPairPaths,
+  readVerifiedRawMuxBaselineAuthority,
+  type RawMuxBaselineAuthority,
+} from "./rawMuxBaselineAuthority.js";
+import {
+  OUTPUT_PUBLICATION_SUFFIX,
+  normalizeOutputPublicationAuthority,
+  outputPublicationPath,
+  persistOutputPublicationAuthority,
+  prepareOutputPublicationAuthority,
+  readValidOutputPublicationAuthority,
+  removeOutputPublicationAuthority,
+  terminalJobAuthoritySha256,
+  type OutputPublicationAuthority,
+} from "./outputPublication.js";
+import {
+  captureLegacyTerminalHistory,
+  legacyArtifactStatsStillMatch,
+  normalizeLegacyTerminalHistory,
+  type LegacyTerminalHistory,
+  type LegacyTerminalStatus,
+} from "./legacyOutput.js";
+
+const HOST_TCB_DOCKER_ENV: NodeJS.ProcessEnv = Object.freeze({
+  PATH: SEALED_EXECUTABLE_PATH,
+  LC_ALL: "C",
+});
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
+export type OutputAuthorityReconciliationOperations = {
+  removePublicationAuthority: (outputPath: string) => void;
+  quarantineUnreleased: (outputPath: string, quarantineRoot: string) => string | null;
+};
+
 export type JobManagerStorage = {
   path: string;
-  recovery: {
+  recovery?: {
     coordinator: DataRecoveryCoordinator;
     targetRelativePath: string;
   };
+  /** Test/recovery injection; production uses the pinned synchronous writer. */
+  fileOperations?: AtomicSnapshotFileOperations;
+  /** Fault-injection seam for startup reconciliation; production uses durable marker/quarantine operations. */
+  outputAuthorityReconciliationOperations?: Partial<OutputAuthorityReconciliationOperations>;
 };
 
 export type ThermalProfile = {
@@ -146,6 +249,64 @@ export type ThermalProfile = {
   resumeBelowC: number;
   updatedAt: string;
 };
+
+export const OWNED_DOCKER_THERMAL_WORKLOADS = Object.freeze({
+  latentSync: Object.freeze({
+    id: "latentsync",
+    label: "LatentSync",
+    containerPrefix: "ltx-latentsync-",
+    resumeHeartbeatPhase: "latentsync_refinement",
+  }),
+  museTalk: Object.freeze({
+    id: "musetalk",
+    label: "MuseTalk",
+    containerPrefix: "ltx-musetalk-",
+    resumeHeartbeatPhase: "musetalk_refinement",
+  }),
+  lipForcing: Object.freeze({
+    id: "lipforcing",
+    label: "LipForcing",
+    containerPrefix: "ltx-lipforcing-",
+    resumeHeartbeatPhase: "lipforcing_refinement",
+  }),
+} as const);
+
+type OwnedDockerThermalWorkload = typeof OWNED_DOCKER_THERMAL_WORKLOADS[keyof typeof OWNED_DOCKER_THERMAL_WORKLOADS];
+type OwnedDockerWorkloadId = OwnedDockerThermalWorkload["id"];
+type OwnedDockerContainerState = "bound" | "running" | "paused" | "cleanup";
+type OwnedDockerContainerAuthority = {
+  schemaVersion: "ltx-studio-owned-docker-container.v2";
+  name: string;
+  containerId: string | null;
+  dgxJobId: string;
+  workload: OwnedDockerWorkloadId;
+  state: OwnedDockerContainerState;
+  /** Durable ambiguity fence written before the FD3 start token is released. */
+  startGateReleasedAt: string | null;
+  /** Repeated name-absence evidence after a released start gate. */
+  absenceProofStartedAt: string | null;
+  absenceProofCount: number;
+};
+type OwnedDockerCommandResult = {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: Error | null;
+};
+type OwnedDockerOperations = {
+  run: (args: readonly string[]) => OwnedDockerCommandResult;
+};
+type OwnedDockerInspection =
+  | { kind: "absent" }
+  | { kind: "owned"; containerId: string; paused: boolean; running: boolean };
+
+type ThermalWatcherOperations = Partial<{
+  readTemperatureC: () => number | null;
+  processIsAlive: (child: ChildProcess) => boolean;
+  signalProcessGroup: (child: ChildProcess, signal: NodeJS.Signals) => boolean;
+  setHeartbeatPhase: (phase: string) => void;
+  dockerAction: (action: "pause" | "unpause", containerName: string) => boolean;
+}>;
 
 export type StudioJob = {
   id: string;
@@ -168,10 +329,30 @@ export type StudioJob = {
   project: ProjectRunBinding | null;
   runtimeMs: number | null;
   cancelledBy: "studio" | null;
+  /**
+   * Public, non-sensitive cancellation settlement state. A terminal-looking
+   * local status may still be waiting for process/container absence or the
+   * authoritative DGX terminal transition.
+   */
+  cancellationState?: "requested" | "settling" | "settled" | null;
   thermalProfile: ThermalProfile | null;
   dgxJobId: string | null;
   identityEvidence: IdentityInputEvidence | null;
   runProvenance: RunProvenance | null;
+  /**
+   * Missing only for history written before execution classes were persisted.
+   * Legacy jobs stay unclassified; neither server nor UI infers a class from
+   * logs, timing, or a missing DGX job id.
+   */
+  executionClass?: JobExecutionClass;
+  /** Missing only for persisted history predating versioned ExecutionDecision authority. */
+  executionDecision?: JobExecutionDecision;
+  /** Durable pre-publication binding; a marker is never its own authority. */
+  outputPublication?: OutputPublicationAuthority;
+  /** Explicitly non-authoritative history imported from Studio versions before v1.1. */
+  historyStatus?: "legacy-unattested";
+  /** Historical display value only; never a current queue lease or mutation authority. */
+  historicalDgxJobId?: string | null;
 };
 
 type DgxOwnerHeartbeatState = {
@@ -179,32 +360,94 @@ type DgxOwnerHeartbeatState = {
   phase: string;
   progressEpoch: number;
   acknowledgedProgressEpoch: number;
+  acknowledgedOnce: boolean;
+  lastAcknowledgedAt: number;
+  lastProgressAt: number;
+  failureStartedAt?: number;
+  consecutiveFailures: number;
   stopped: boolean;
   timer?: NodeJS.Timeout;
+  safetyTimer?: NodeJS.Timeout;
   inFlight?: Promise<void>;
   lastError?: string;
   activationBlockReason?: string;
 };
 
 type RuntimeJob = StudioJob & {
+  localProcessProtocol: "fd-gate.v1";
   startSource: JobStartSource;
+  /**
+   * Durable prepare/commit fence. A deferred job may be persisted before an
+   * external experiment/project CAS, but it must never execute until
+   * `startQueued()` has durably armed it after that CAS succeeds.
+   */
+  startDeferred: boolean;
   plan: CommandPlan;
+  /**
+   * Exact JSON value whose canonical digest is bound by the persisted ExecutionDecision.
+   * The parsed editor request may contain later schema defaults, but this value
+   * is never migrated or exposed through the public job API.
+   */
+  authorityBoundRequest: unknown;
+  authorityRequestSha256: string;
+  /** Old T2A requests had no peak-ceiling field and cannot be replayed exactly. */
+  legacyTextToAudioPeakCeilingUnset: boolean;
+  /** Read-only preservation receipt; cannot authorize execution, reuse, analysis, or quality GO. */
+  legacyHistory?: LegacyTerminalHistory;
+  /** Durable local preparation; never a remote completed intent by itself. */
+  outputPublicationCommitPending?: OutputPublicationCommitPending;
   process?: ChildProcess;
   processTermination?: Promise<void>;
+  localProcessSpawnPending?: boolean;
   localProcessGroupPending?: boolean;
   localProcessGroupIdentity?: LocalProcessGroupIdentity;
   localProcessGroupRetry?: NodeJS.Timeout;
+  /**
+   * Exact, private cleanup authority for one Studio-created Docker refiner.
+   * Presence means that the named container may still exist; it is cleared
+   * only after an identity-bound `docker container inspect` proves absence.
+   */
+  ownedDockerContainer?: OwnedDockerContainerAuthority;
+  /** Runtime receipt that the current immutable ID was successfully snapshotted. */
+  ownedDockerContainerIdDurablyCommitted?: boolean;
+  ownedDockerContainerRecoveryBlocked?: boolean;
+  ownedDockerContainerCleanup?: Promise<boolean>;
+  ownedDockerContainerRetry?: NodeJS.Timeout;
   dgxSubmitPending?: boolean;
   dgxSubmitStartedAt?: string;
+  /** Exact canonical POST body retained until an ambiguous submit is resolved. */
+  dgxPreparedAdmission?: AdmissionRequest;
+  dgxPreparedAdmissionSha256?: string;
+  dgxSubmitReconcileRetry?: NodeJS.Timeout;
+  dgxSubmitReconcileInFlight?: Promise<void>;
+  dgxSubmitReconcileDelayMs?: number;
   dgxAdmissionAbortController?: AbortController;
   dgxJobTerminal?: boolean;
+  /** Durable mutation authority acquired only from an exact submit response. */
+  dgxLeaseReceipt?: DgxLeaseReceipt;
   dgxStateTransitionInFlight?: Promise<boolean>;
   dgxTerminalDelivery?: DgxTerminalDelivery;
+  /** Durable proof that this exact remote lease was observed terminal. */
+  dgxTerminalReceipt?: DgxTerminalReceipt;
   dgxTerminalDeliveryInFlight?: Promise<boolean>;
   dgxTerminalRetry?: NodeJS.Timeout;
   dgxOwnerHeartbeat?: DgxOwnerHeartbeatState;
 };
+
+type RawOutputCandidateAuthorityJob = Pick<
+  RuntimeJob,
+  "request" | "experiment" | "runProvenance" | "identityEvidence"
+>;
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
+type BoundProcessOptions = {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  inheritedFds?: readonly number[];
+  boundExecutable?: BoundExecutableDescriptor;
+  recheckDescriptors?: readonly VerifiedExecutionDescriptor[];
+  startGate?: boolean;
+  genericGate?: boolean;
+};
 
 export function describeLipForcingFailure(
   logs: readonly string[],
@@ -232,7 +475,13 @@ type DgxTransitionMetadata = {
   last_error?: string;
   artifact?: QueueArtifact;
 };
+type OutputPublicationCommitPending = {
+  schemaVersion: "ltx-studio-output-publication-commit.v1";
+  completedAt: string;
+  completionMetadata: DgxTransitionMetadata;
+};
 type DgxTerminalState = Extract<QueueTransitionState, "completed" | "failed" | "cancelled">;
+type DgxObservedTerminalState = DgxTerminalState | "rejected";
 type DgxTerminalDelivery = {
   state: DgxTerminalState;
   metadata: DgxTransitionMetadata;
@@ -240,19 +489,128 @@ type DgxTerminalDelivery = {
   lastError: string | null;
   updatedAt: string;
 };
-type DgxStartOutcome = "started" | "queued" | "resubmit" | "stopped";
+type DgxTerminalReceipt = {
+  schemaVersion: "ltx-studio-dgx-terminal-receipt.v1";
+  studioJobId: string;
+  dgxJobId: string;
+  idempotencyKey: string;
+  localIntentState: DgxTerminalState;
+  remoteTerminalState: DgxObservedTerminalState;
+  confirmedAt: string;
+  evidence:
+    | {
+        kind: "job-read";
+        schemaVersion: "dgx-job-read.v0";
+        requestedBy: string;
+        sourceApp: "LTX Studio";
+        idempotencyKey: string;
+      }
+    | {
+        kind: "job-transition";
+        schemaVersion: "dgx-job-transition.v0";
+        requestedBy: string;
+        sourceApp: "LTX Studio";
+        idempotencyKey: string;
+      }
+    | {
+        kind: "queue-submit";
+        schemaVersion: "dgx-queue-submit.v0";
+        requestedBy: string;
+        sourceApp: "LTX Studio";
+        idempotencyKey: string;
+      }
+    | {
+        kind: "job-gone";
+        schemaVersion: "dgx-job-gone.v0";
+        idempotencyKey: string;
+        finishedAt: string;
+        reapedAt: string;
+        reason: string | null;
+      };
+};
+type DgxLeaseReceipt = {
+  schemaVersion: "ltx-studio-dgx-lease-receipt.v1";
+  studioJobId: string;
+  dgxJobId: string;
+  requestedBy: string;
+  sourceApp: "LTX Studio";
+  idempotencyKey: string;
+  preparedAdmission: AdmissionRequest;
+  preparedAdmissionSha256: string;
+  submitStartedAt: string;
+  observedState: "accepted" | "queued";
+  observedCreatedAt: string;
+  evidence:
+    | {
+        kind: "submit-response";
+        schemaVersion: "dgx-queue-submit.v0";
+      }
+    | {
+        kind: "queue-positive";
+        schemaVersion: "dgx-queue-read.v0";
+        observedAt: string;
+      };
+  confirmedAt: string;
+};
+type DgxStartOutcome = "started" | "queued" | "stopped";
 type LocalProcessGroupIdentity = {
   bootId: string;
   processGroupId: number;
   leaderStartTicks: string;
 };
-type PersistedStudioJob = StudioJob & {
+type PersistedStudioJob = Omit<StudioJob, "request"> & {
+  request: unknown;
+  legacyHistory?: LegacyTerminalHistory;
+  /** Durable pre-marker phase; remote completed is forbidden until this clears after marker commit. */
+  outputPublicationCommitPending?: OutputPublicationCommitPending;
+  localProcessProtocol?: "fd-gate.v1";
   startSource?: JobStartSource;
+  startDeferred?: boolean;
   dgxTerminalDelivery?: DgxTerminalDelivery;
+  dgxTerminalReceipt?: DgxTerminalReceipt;
+  dgxLeaseReceipt?: DgxLeaseReceipt;
+  localProcessSpawnPending?: boolean;
   localProcessGroupPending?: boolean;
   localProcessGroupIdentity?: LocalProcessGroupIdentity;
+  ownedDockerContainer?: OwnedDockerContainerAuthority;
+  ownedDockerContainerRecoveryBlocked?: boolean;
   dgxSubmitPending?: boolean;
   dgxSubmitStartedAt?: string;
+  dgxPreparedAdmission?: AdmissionRequest;
+  dgxPreparedAdmissionSha256?: string;
+};
+
+export type ArchivedOutputAuthority = {
+  schemaVersion: "ltx-studio-archived-output-authority.v1";
+  id: string;
+  status: "completed";
+  outputName: string;
+  finishedAt: string;
+  executionClass: "dgx" | "cpu-only";
+  executionDecisionSha256: string;
+  requestSha256: string;
+  protocolSha256: string | null;
+  cpuOutputSha256: string | null;
+  runProvenanceSha256: string;
+  identityEvidenceSha256: string | null;
+  experimentSha256: string | null;
+  projectSha256: string | null;
+  outputPublication: OutputPublicationAuthority;
+};
+
+export type CurrentOutputAuthorityJob = StudioJob & {
+  /** Internal-only raw request binding; output storage must not serialize it via an API. */
+  authorityBoundRequest?: unknown;
+  authorityRequestSha256?: string;
+  legacyHistory?: LegacyTerminalHistory;
+  outputPublicationCommitPending?: OutputPublicationCommitPending;
+};
+
+export type OutputAuthorityJob = CurrentOutputAuthorityJob | ArchivedOutputAuthority;
+
+type PersistedOutputAuthorityArchive = {
+  schemaVersion: "ltx-studio-output-authority-archive.v1";
+  entries: ArchivedOutputAuthority[];
 };
 type DgxQueueOperations = {
   read: typeof readQueueJob;
@@ -260,7 +618,7 @@ type DgxQueueOperations = {
   heartbeat?: typeof heartbeatQueueJob;
 };
 type DgxAdmissionOperations = {
-  submit: typeof submitQueueAdmission;
+  submit: typeof submitPreparedQueueAdmission;
   list?: typeof listQueueJobs;
 };
 type DgxSchedulerOperations = {
@@ -280,11 +638,11 @@ type JobCreateMetadata = {
   experiment?: ExperimentRunBinding | null;
   project?: ProjectRunBinding | null;
   deferStart?: boolean;
-  startSource?: Exclude<JobStartSource, "restored">;
 };
 
 const MAX_JOBS = 100;
 export const MAX_ACTIVE_JOBS = 8;
+const STUDIO_JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_LOG_LINES = 600;
 const MAX_LOG_LINE_LENGTH = 4000;
 const RESOURCE_RETRY_INTERVAL_MS = 10_000;
@@ -293,14 +651,35 @@ const MAX_RUNNING_PROCESS_PROGRESS = 95;
 const DEFAULT_DGX_TERMINAL_RETRY_BASE_MS = 5_000;
 const MAX_DGX_TERMINAL_RETRY_MS = 60_000;
 const DGX_START_FENCE_RETRY_MS = 30_000;
-const DGX_SUBMIT_AMBIGUITY_MAX_MS = 125_000;
 const DGX_SUBMIT_RECONCILE_POLL_MS = 2_000;
+const OWNED_DOCKER_CONTAINER_RECONCILE_MS = 2_000;
+const OWNED_DOCKER_CREATION_QUIESCENCE_MS = 4_000;
+const OWNED_DOCKER_CREATION_ABSENCE_PROOFS = 3;
+const OWNED_DOCKER_IDENTITY_DISCOVERY_MS = 10_000;
+const GENERIC_PROCESS_START_GATE_CODE = [
+  "import os,sys",
+  "token=os.read(3,2)",
+  "os.close(3)",
+  "token == b'1' or os._exit(125)",
+  "count=int(sys.argv[1])",
+  "[(os.dup2(fd+1,fd)) for fd in range(3,3+count)]",
+  "count == 0 or os.close(3+count)",
+  "os.execvpe(sys.argv[2],[sys.argv[2],*sys.argv[3:]],os.environ)",
+].join(";");
 export const DGX_OWNER_HEARTBEAT_INTERVAL_MS = Math.min(
   60_000,
   Math.max(
     1_000,
     Number.parseInt(process.env.LTX_STUDIO_DGX_HEARTBEAT_INTERVAL_MS ?? "45000", 10) || 45_000,
   ),
+);
+export const DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS = Math.min(
+  110_000,
+  Math.max(3_000, DGX_OWNER_HEARTBEAT_INTERVAL_MS * 2),
+);
+export const DGX_OWNER_NO_PROGRESS_TIMEOUT_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.LTX_STUDIO_DGX_NO_PROGRESS_TIMEOUT_MS ?? "600000", 10) || 600_000,
 );
 const LOCAL_PROCESS_GROUP_RECONCILE_MS = 2_000;
 const LTX_COOPERATIVE_YIELD_EXIT_CODE = 75;
@@ -320,11 +699,330 @@ const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
   "cancelled",
   "rejected",
 ]);
+const DGX_POSITIVE_DISCOVERY_STATES = new Set<QueueJobState>(["accepted", "queued"]);
+const DGX_QUEUE_JOB_STATES = new Set<QueueJobState>([
+  "submitted",
+  "accepted",
+  "queued",
+  "starting",
+  "running",
+  "pausing",
+  "paused",
+  "resuming",
+  "completed",
+  "failed",
+  "cancelled",
+  "rejected",
+]);
 
 function runtimePayloadError(error: RuntimeApiError): string | null {
   if (!error.payload || typeof error.payload !== "object") return null;
   const value = (error.payload as Record<string, unknown>).error;
   return typeof value === "string" ? value : null;
+}
+
+type DgxTerminalObservation = {
+  state: DgxObservedTerminalState;
+  evidence: DgxTerminalReceipt["evidence"];
+};
+
+function dgxResponseBoundJob(
+  value: unknown,
+  kind: "job-read" | "job-transition" | "job-heartbeat",
+  expectedDgxJobId: string,
+  expectedStudioJobId: string,
+): QueueJobSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const response = value as Record<string, unknown>;
+  const expectedSchema = kind === "job-read"
+    ? "dgx-job-read.v0"
+    : kind === "job-transition"
+      ? "dgx-job-transition.v0"
+      : "dgx-job-heartbeat.v0";
+  if (response.schema_version !== expectedSchema
+    || (kind === "job-transition" && response.transition_applied !== true)
+    || (kind === "job-heartbeat"
+      && response.heartbeat_applied !== undefined
+      && response.heartbeat_applied !== true)
+    || !response.job
+    || typeof response.job !== "object"
+    || Array.isArray(response.job)) return null;
+  const remoteJob = response.job as Record<string, unknown>;
+  const expectedCaller = `ltx-studio:${expectedStudioJobId}`;
+  if (!isDgxJobId(remoteJob.job_id)
+    || remoteJob.job_id !== expectedDgxJobId
+    || typeof remoteJob.state !== "string"
+    || !DGX_QUEUE_JOB_STATES.has(remoteJob.state as QueueJobState)
+    || remoteJob.requested_by !== expectedCaller
+    || remoteJob.source_app !== "LTX Studio"
+    || remoteJob.idempotency_key !== expectedCaller) return null;
+  return remoteJob as QueueJobSummary;
+}
+
+function dgxResponseJobState(
+  value: unknown,
+  kind: "job-read" | "job-transition",
+  expectedDgxJobId: string,
+  expectedStudioJobId: string,
+): QueueJobState | null {
+  return dgxResponseBoundJob(value, kind, expectedDgxJobId, expectedStudioJobId)?.state ?? null;
+}
+
+function dgxQueueJobCallerBound(
+  value: unknown,
+  expectedStudioJobId: string,
+): value is QueueJobSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const job = value as Record<string, unknown>;
+  const expectedCaller = `ltx-studio:${expectedStudioJobId}`;
+  return isDgxJobId(job.job_id)
+    && typeof job.state === "string"
+    && DGX_QUEUE_JOB_STATES.has(job.state as QueueJobState)
+    && job.requested_by === expectedCaller
+    && job.source_app === "LTX Studio"
+    && job.idempotency_key === expectedCaller;
+}
+
+function dgxSubmitResponseCallerBound(
+  value: unknown,
+  expectedStudioJobId: string,
+): value is QueueSubmitResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const response = value as Record<string, unknown>;
+  return response.schema_version === "dgx-queue-submit.v0"
+    && dgxQueueJobCallerBound(response.job, expectedStudioJobId)
+    && Boolean(response.admission)
+    && typeof response.admission === "object"
+    && !Array.isArray(response.admission)
+    && typeof (response.admission as Record<string, unknown>).decision === "string";
+}
+
+function dgxQueueJobIdentityMatchesPreparedAdmission(
+  remote: QueueJobSummary,
+  studioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+): boolean {
+  const remoteCreatedAt = canonicalIsoTimestamp(remote.created_at);
+  const localSubmitStartedAt = canonicalIsoTimestamp(submitStartedAt);
+  return isDgxJobId(remote.job_id)
+    && remote.requested_by === `ltx-studio:${studioJobId}`
+    && remote.requested_by === preparedAdmission.requested_by
+    && remote.source_app === preparedAdmission.source_app
+    && remote.job_type === preparedAdmission.job_type
+    && remote.runtime === preparedAdmission.runtime
+    && remote.priority === preparedAdmission.priority
+    && remote.exclusive_runtime === preparedAdmission.resource_profile.exclusive_runtime
+    && remote.idempotency_key === preparedAdmission.idempotency_key
+    && remoteCreatedAt !== null
+    && localSubmitStartedAt !== null
+    && Date.parse(remoteCreatedAt) >= Date.parse(localSubmitStartedAt);
+}
+
+function dgxQueueJobMatchesPreparedAdmission(
+  remote: QueueJobSummary,
+  studioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+): boolean {
+  return DGX_POSITIVE_DISCOVERY_STATES.has(remote.state)
+    && remote.started_at === null
+    && remote.reservation_active === (remote.state === "accepted")
+    && dgxQueueJobIdentityMatchesPreparedAdmission(
+      remote,
+      studioJobId,
+      preparedAdmission,
+      submitStartedAt,
+    );
+}
+
+function dgxLeaseReceiptFromBoundJob(
+  remote: QueueJobSummary,
+  studioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+  evidence: DgxLeaseReceipt["evidence"],
+): DgxLeaseReceipt {
+  const observedCreatedAt = canonicalIsoTimestamp(remote.created_at);
+  if (!dgxQueueJobMatchesPreparedAdmission(
+    remote,
+    studioJobId,
+    preparedAdmission,
+    submitStartedAt,
+  )
+    || !observedCreatedAt
+    || preparedAdmission.requested_by !== `ltx-studio:${studioJobId}`
+    || preparedAdmission.idempotency_key !== preparedAdmission.requested_by
+    || preparedAdmission.source_app !== "LTX Studio") {
+    throw new Error("DGX-Lease-Receipt kann nur aus einem exakt gebundenen Submit entstehen.");
+  }
+  return {
+    schemaVersion: "ltx-studio-dgx-lease-receipt.v1",
+    studioJobId,
+    dgxJobId: remote.job_id,
+    requestedBy: preparedAdmission.requested_by,
+    sourceApp: "LTX Studio",
+    idempotencyKey: preparedAdmission.idempotency_key,
+    preparedAdmission: structuredClone(preparedAdmission),
+    preparedAdmissionSha256: preparedAdmissionSha256(preparedAdmission),
+    submitStartedAt: canonicalIsoTimestamp(submitStartedAt)!,
+    observedState: remote.state as "accepted" | "queued",
+    observedCreatedAt,
+    evidence: structuredClone(evidence),
+    confirmedAt: now(),
+  };
+}
+
+function dgxLeaseReceiptFromSubmit(
+  response: QueueSubmitResponse,
+  studioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+): DgxLeaseReceipt {
+  if (!dgxSubmitResponseCallerBound(response, studioJobId)) {
+    throw new Error("DGX-Lease-Receipt kann nur aus einer exakt gebundenen Submit-Antwort entstehen.");
+  }
+  return dgxLeaseReceiptFromBoundJob(response.job, studioJobId, preparedAdmission, submitStartedAt, {
+    kind: "submit-response",
+    schemaVersion: "dgx-queue-submit.v0",
+  });
+}
+
+function dgxLeaseReceiptFromQueuePositive(
+  remote: QueueJobSummary,
+  studioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+): DgxLeaseReceipt {
+  return dgxLeaseReceiptFromBoundJob(remote, studioJobId, preparedAdmission, submitStartedAt, {
+    kind: "queue-positive",
+    schemaVersion: "dgx-queue-read.v0",
+    observedAt: now(),
+  });
+}
+
+function exactPositiveQueueCandidate(
+  response: QueueListResponse,
+  studioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+): QueueJobSummary | null {
+  assertAuthoritativeQueueList(response);
+  const expectedCaller = `ltx-studio:${studioJobId}`;
+  const collisions = response.jobs.filter((candidate) =>
+    candidate.requested_by === expectedCaller
+      || candidate.idempotency_key === preparedAdmission.idempotency_key);
+  const matches = collisions.filter((candidate) =>
+    dgxQueueJobMatchesPreparedAdmission(
+      candidate,
+      studioJobId,
+      preparedAdmission,
+      submitStartedAt,
+    ));
+  if (collisions.length !== matches.length || matches.length > 1) {
+    throw new DgxLeaseAuthorityError(
+      "DGX-Queue enthält eine mehrdeutige oder abweichend gebundene positive Submit-Identität.",
+    );
+  }
+  return matches[0] ?? null;
+}
+
+function canonicalIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return null;
+  return new Date(value).toISOString();
+}
+
+function dgxResponseTerminalObservation(
+  value: unknown,
+  kind: "job-read" | "job-transition",
+  expectedDgxJobId: string,
+  expectedStudioJobId: string,
+): DgxTerminalObservation | null {
+  const state = dgxResponseJobState(value, kind, expectedDgxJobId, expectedStudioJobId);
+  if (!state || !DGX_REMOTE_TERMINAL_STATES.has(state)) return null;
+  const expectedCaller = `ltx-studio:${expectedStudioJobId}`;
+  return {
+    state: state as DgxObservedTerminalState,
+    evidence: kind === "job-read"
+      ? {
+          kind,
+          schemaVersion: "dgx-job-read.v0",
+          requestedBy: expectedCaller,
+          sourceApp: "LTX Studio",
+          idempotencyKey: expectedCaller,
+        }
+      : {
+          kind,
+          schemaVersion: "dgx-job-transition.v0",
+          requestedBy: expectedCaller,
+          sourceApp: "LTX Studio",
+          idempotencyKey: expectedCaller,
+        },
+  };
+}
+
+function dgxSubmitTerminalObservation(
+  value: unknown,
+  expectedStudioJobId: string,
+  preparedAdmission: AdmissionRequest,
+  submitStartedAt: string,
+): DgxTerminalObservation | null {
+  if (!dgxSubmitResponseCallerBound(value, expectedStudioJobId)) return null;
+  const response = value as QueueSubmitResponse;
+  if (!DGX_REMOTE_TERMINAL_STATES.has(response.job.state)
+    || !dgxQueueJobIdentityMatchesPreparedAdmission(
+      response.job,
+      expectedStudioJobId,
+      preparedAdmission,
+      submitStartedAt,
+    )) return null;
+  return {
+    state: response.job.state as DgxObservedTerminalState,
+    evidence: {
+      kind: "queue-submit",
+      schemaVersion: "dgx-queue-submit.v0",
+      requestedBy: preparedAdmission.requested_by,
+      sourceApp: "LTX Studio",
+      idempotencyKey: preparedAdmission.idempotency_key,
+    },
+  };
+}
+
+function dgxGoneTerminalObservation(
+  error: unknown,
+  expectedDgxJobId: string,
+  expectedStudioJobId: string,
+): DgxTerminalObservation | null {
+  if (!(error instanceof RuntimeApiError)
+    || error.statusCode !== 410
+    || !error.payload
+    || typeof error.payload !== "object"
+    || Array.isArray(error.payload)) return null;
+  const payload = error.payload as Record<string, unknown>;
+  const state = payload.state;
+  const finishedAt = canonicalIsoTimestamp(payload.finished_at);
+  const reapedAt = canonicalIsoTimestamp(payload.reaped_at);
+  if (payload.error !== "job_gone"
+    || payload.schema_version !== "dgx-job-gone.v0"
+    || payload.terminal !== true
+    || payload.job_id !== expectedDgxJobId
+    || payload.idempotency_key !== `ltx-studio:${expectedStudioJobId}`
+    || typeof state !== "string"
+    || !DGX_REMOTE_TERMINAL_STATES.has(state as QueueJobState)
+    || !finishedAt
+    || !reapedAt
+    || Date.parse(reapedAt) < Date.parse(finishedAt)) return null;
+  return {
+    state: state as DgxObservedTerminalState,
+    evidence: {
+      kind: "job-gone",
+      schemaVersion: "dgx-job-gone.v0",
+      idempotencyKey: `ltx-studio:${expectedStudioJobId}`,
+      finishedAt,
+      reapedAt,
+      reason: typeof payload.reason === "string" ? payload.reason.slice(0, 1_000) : null,
+    },
+  };
 }
 
 function retryableStartFenceDelayMs(error: unknown): number | null {
@@ -350,12 +1048,83 @@ function retryableStartFenceDelayMs(error: unknown): number | null {
     : null;
 }
 
+function definitiveHeartbeatLeaseLoss(error: unknown): string | null {
+  if (!(error instanceof RuntimeApiError)) return null;
+  const code = runtimePayloadError(error);
+  if (!((error.statusCode === 404 && code === "job_not_found")
+    || (error.statusCode === 409 && code === "heartbeat_requires_active_job"))) return null;
+  return `DGX-Owner-Heartbeat verlor die Remote-Lease autoritativ `
+    + `(HTTP ${error.statusCode}${code ? `, ${code}` : ""}).`;
+}
+
 export type VariantMode = "exact" | "random-seed";
 
 export class JobConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "JobConflictError";
+  }
+}
+
+const LEGACY_JOB_READ_ONLY_MESSAGE =
+  "Historischer Altbestand ist ausdrücklich nur lesbar; Favoriten-, Abbruch- und andere Zustandsänderungen sind gesperrt.";
+const LEGACY_OUTPUT_READ_ONLY_MESSAGE =
+  "Historischer Altbestand ist ausschließlich für Wiedergabe und Download freigegeben; persistierende oder abgeleitete Änderungen sind gesperrt.";
+
+/**
+ * Sticky fail-stop raised when the manager cannot prove whether its complete
+ * job snapshot is durably committed.  Callers must not compensate or retry a
+ * mutation after this error: doing so could diverge from an already-renamed
+ * target.  A fresh manager process performs recovery before accepting work.
+ */
+export class JobPersistenceHoldError extends Error {
+  readonly publicCode = PUBLIC_JOB_PERSISTENCE_HOLD_CODE;
+  readonly publicReason = PUBLIC_JOB_PERSISTENCE_HOLD_REASON;
+  readonly restartRequired = true;
+
+  constructor(
+    _diagnosticMessage: string,
+    _persistenceCause: unknown,
+  ) {
+    super(PUBLIC_JOB_PERSISTENCE_HOLD_REASON);
+    void _diagnosticMessage;
+    void _persistenceCause;
+    this.name = "JobPersistenceHoldError";
+  }
+}
+
+function isJobPersistenceHoldError(error: unknown): error is JobPersistenceHoldError {
+  return error instanceof JobPersistenceHoldError;
+}
+
+/**
+ * A proven pre-rename failure while committing a DGX terminal receipt.  The
+ * remote transition may already be terminal, so the caller must not continue
+ * reconciliation in the same attempt; flush() rearms the durable GET-first
+ * retry after the in-flight promise has cleared.
+ */
+class DgxTerminalReceiptPersistenceError extends Error {
+  constructor(readonly persistenceCause: unknown) {
+    super(
+      `DGX-Terminalbeleg konnte nicht persistiert werden: ${
+        persistenceCause instanceof Error ? persistenceCause.message : String(persistenceCause)
+      }`,
+    );
+    this.name = "DgxTerminalReceiptPersistenceError";
+  }
+}
+
+class DgxLeaseAuthorityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DgxLeaseAuthorityError";
+  }
+}
+
+class DgxRemoteLeaseLostError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DgxRemoteLeaseLostError";
   }
 }
 
@@ -431,6 +1200,110 @@ export function publishedOutputIsReusableLipForcingVisual(
     && requestsShareLipForcingVisual(source, target);
 }
 
+export const DEVELOPMENT_LIPFORCING_RAW_OUTPUT_SURFACE_ID =
+  "development:lipforcing-raw-output-profile:h264-crf13-mux-copy-v1";
+
+const LIPFORCING_RAW_OUTPUT_EXPERIMENT_PATH = "postprocess.lipForcing.rawOutputProfile";
+
+export function validRequestBoundExperimentBinding(
+  request: GenerationRequest,
+  binding: ExperimentRunBinding | null | undefined,
+): ExperimentRunBinding | null {
+  const parsed = experimentRunBindingSchema.safeParse(binding);
+  if (!parsed.success) return null;
+  const requestSha256 = experimentRequestSha256V1(request);
+  return parsed.data.requestSha256 === requestSha256 ? parsed.data : null;
+}
+
+export function validRawOutputExperimentBinding(
+  request: GenerationRequest,
+  binding: ExperimentRunBinding | null | undefined,
+): ExperimentRunBinding | null {
+  const value = validRequestBoundExperimentBinding(request, binding);
+  if (!value || rawMuxPairV1CandidateError(request)) return null;
+  return value.arm === "candidate"
+    && value.kind === "ablation"
+    && value.variableId === "lipforcing-raw-output-profile"
+    && value.changedRequestPaths.length === 1
+    && value.changedRequestPaths[0] === LIPFORCING_RAW_OUTPUT_EXPERIMENT_PATH
+    && value.protocolSha256.length === 64
+    && value.baselineJobId !== null
+    && value.adoptedBaseline !== true
+    ? value
+    : null;
+}
+
+export function validRawOutputBaselineExperimentBinding(
+  request: GenerationRequest,
+  binding: ExperimentRunBinding | null | undefined,
+): ExperimentRunBinding | null {
+  const value = validRequestBoundExperimentBinding(request, binding);
+  if (!value || rawMuxPairV1BaselineError(request)) return null;
+  return value.arm === "baseline"
+    && value.kind === "ablation"
+    && value.variableId === "lipforcing-raw-output-profile"
+    && value.changedRequestPaths.length === 1
+    && value.changedRequestPaths[0] === LIPFORCING_RAW_OUTPUT_EXPERIMENT_PATH
+    && value.protocolSha256.length === 64
+    && value.baselineJobId === null
+    && value.baselineRequestSha256 === value.requestSha256
+    && value.adoptedBaseline !== true
+    ? value
+    : null;
+}
+
+export function rawMuxCandidateRequestFromBaseline(
+  request: GenerationRequest,
+  binding: ExperimentRunBinding,
+): GenerationRequest | null {
+  if (!validRawOutputBaselineExperimentBinding(request, binding)) return null;
+  const suffix = `-exp-${binding.experimentId.slice(0, 8)}-a.mp4`;
+  if (!request.outputName.endsWith(suffix)) return null;
+  const candidate = structuredClone(request);
+  candidate.outputName = `${request.outputName.slice(0, -suffix.length)}`
+    + `-exp-${binding.experimentId.slice(0, 8)}-b.mp4`;
+  candidate.postprocess.lipForcing.rawOutputProfile = experimentalLipForcingRawOutputProfile;
+  return candidate;
+}
+
+function isBoundRawOutputCandidate(job: Pick<StudioJob, "experiment" | "request">): boolean {
+  return validRawOutputExperimentBinding(job.request, job.experiment) !== null;
+}
+
+export function jobSurfaceEntryId(
+  request: GenerationRequest,
+  source: JobStartSource,
+  isSealedRelease = sealedRelease,
+  experiment: ExperimentRunBinding | null = null,
+): string {
+  const profile = request.postprocess.lipForcing.rawOutputProfile;
+  if (profile === defaultLipForcingRawOutputProfile) {
+    if (source === "experiment"
+      && experiment?.variableId === "lipforcing-raw-output-profile"
+      && validRawOutputBaselineExperimentBinding(request, experiment) === null) {
+      throw new JobConflictError(
+        "Der Rohvideo-Baseline-Arm erfüllt den strikt gepaarten Raw-Mux-v1-Vertrag nicht.",
+      );
+    }
+    return releaseSurfaceEntryForRequest(request).id;
+  }
+  if (profile !== experimentalLipForcingRawOutputProfile
+    || !request.postprocess.lipForcing.enabled) {
+    throw new JobConflictError("Unbekanntes oder inaktives experimentelles LipForcing-Rohvideo-Profil.");
+  }
+  if (
+    isSealedRelease
+    || source !== "experiment"
+    || validRawOutputExperimentBinding(request, experiment) === null
+  ) {
+    throw new JobConflictError(
+      "Der LipForcing-Mux-copy-Kandidat benötigt den exakt requestgebundenen Kandidatenarm "
+        + "des kontrollierten Development-Experiments.",
+    );
+  }
+  return DEVELOPMENT_LIPFORCING_RAW_OUTPUT_SURFACE_ID;
+}
+
 export function runProvenanceSharesLtxBase(
   source: RunProvenance | null,
   target: RunProvenance | null,
@@ -446,6 +1319,7 @@ export function runProvenanceSharesLtxBase(
       && !file.role.startsWith("model:musetalk-")
       && !file.role.startsWith("code:lipforcing-")
       && !file.role.startsWith("model:lipforcing-")
+      && file.role !== "private:lipforcing-raw-mux-pair-v1"
       // The shared refiner audio window helper is captured by every refiner
       // arm but never touches the LTX base. Leaving it in made the role lists
       // differ for good, so no refiner run could ever adopt an existing base.
@@ -458,6 +1332,14 @@ export function runProvenanceSharesLtxBase(
     && source.runtime.fingerprint === target.runtime.fingerprint;
 }
 
+export function runProvenanceUsesExactLipForcingImage(
+  provenance: RunProvenance | null,
+  expected: ProvenanceContainerImageEvidence,
+): boolean {
+  const actual = lipForcingImageIdentity(provenance?.containerImages);
+  return actual !== null && canonicalJson(actual) === canonicalJson(expected);
+}
+
 export type ReusableLtxBaseCandidate = {
   outputName: string;
   outputPath: string;
@@ -465,19 +1347,27 @@ export type ReusableLtxBaseCandidate = {
   request: GenerationRequest;
   identityEvidence: IdentityInputEvidence;
   runProvenance: RunProvenance;
+  settingsSidecarPath?: string;
+  analysisSidecarPath?: string;
+  analysisSidecarVerified?: boolean;
 };
 
 export type ReusableLtxBaseSource = {
   reusableLtxBaseCandidates: () => ReusableLtxBaseCandidate[];
 };
 
-type ReusableLtxBase = {
+export type ReusableLtxBase = {
   id: string;
   outputPath: string;
   description: string;
 };
 
-type ReusableLipForcingOutput = ReusableLtxBase & {
+export type ReusableLipForcingOutput = ReusableLtxBase & {
+  outputName: string;
+  baselineRequestSha256: string;
+  sourceProvenanceFingerprint: string;
+  settingsSidecarPath: string;
+  analysisSidecarPath: string;
   programAudioDelayMs: number;
 };
 
@@ -548,13 +1438,78 @@ export function reusableLipForcingOutputFromSidecars(
     && Boolean(candidate.runProvenance.verifiedAt)
     && publishedOutputIsReusableLipForcingVisual(candidate.request, target.request)
     && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
+    && (candidate.settingsSidecarPath === undefined || fileReady(candidate.settingsSidecarPath))
+    && (candidate.analysisSidecarPath === undefined
+      || (candidate.analysisSidecarVerified === true && fileReady(candidate.analysisSidecarPath)))
     && fileReady(candidate.outputPath));
   if (!match) return undefined;
   return {
     id: match.jobId,
     outputPath: match.outputPath,
     description: `LipForcing-Ausgabe „${match.outputName}" (Job ${match.jobId})`,
+    outputName: match.outputName,
+    baselineRequestSha256: experimentRequestSha256V1(match.request),
+    sourceProvenanceFingerprint: match.runProvenance.fingerprint,
+    settingsSidecarPath: match.settingsSidecarPath ?? `${match.outputPath}.ltx-settings.json`,
+    analysisSidecarPath: match.analysisSidecarPath ?? `${match.outputPath}.ltx-analysis.json`,
     programAudioDelayMs: match.request.postprocess.lipForcing.programAudioDelayMs,
+  };
+}
+
+function isBoundProgramAudioOnlyCandidate(job: Pick<StudioJob, "experiment" | "request">): boolean {
+  const binding = job.experiment;
+  return Boolean(
+    binding
+    && binding.arm === "candidate"
+    && binding.variableId === "lipforcing-program-audio-delay-ms"
+    && binding.changedRequestPaths.length === 1
+    && binding.changedRequestPaths[0] === "postprocess.lipForcing.programAudioDelayMs"
+    && binding.baselineJobId
+    && binding.baselineOutputName
+    && job.request.postprocess.lipForcing.enabled,
+  );
+}
+
+/**
+ * Runtime selection is deliberately narrower than the generic preflight
+ * predicate: an experiment may reuse only the exact frozen baseline named in
+ * its server-side binding. A compatible output from any other job is never a
+ * fallback.
+ */
+export function exactBoundLipForcingOutputFromSidecars(
+  candidates: readonly ReusableLtxBaseCandidate[],
+  target: Pick<StudioJob, "id" | "request" | "identityEvidence" | "experiment">,
+  fileReady: (path: string) => boolean,
+): ReusableLipForcingOutput | undefined {
+  const binding = target.experiment;
+  if (!binding || !isBoundProgramAudioOnlyCandidate(target) || !binding.baselineJobId) return undefined;
+  if (experimentRequestSha256V1(target.request) !== binding.requestSha256) {
+    return undefined;
+  }
+  const exact = candidates.filter((candidate) =>
+    candidate.jobId === binding.baselineJobId
+    && candidate.outputName === binding.baselineOutputName
+    && experimentRequestSha256V1(candidate.request) === binding.baselineRequestSha256
+    && candidate.runProvenance.verifiedAt
+    && /^[0-9a-f]{64}$/.test(candidate.runProvenance.fingerprint)
+    && publishedOutputIsReusableLipForcingVisual(candidate.request, target.request)
+    && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
+    && candidate.analysisSidecarVerified === true);
+  if (exact.length !== 1) return undefined;
+  const candidate = exact[0];
+  const settingsSidecarPath = candidate.settingsSidecarPath ?? `${candidate.outputPath}.ltx-settings.json`;
+  const analysisSidecarPath = candidate.analysisSidecarPath ?? `${candidate.outputPath}.ltx-analysis.json`;
+  if (![candidate.outputPath, settingsSidecarPath, analysisSidecarPath].every(fileReady)) return undefined;
+  return {
+    id: candidate.jobId,
+    outputName: candidate.outputName,
+    outputPath: candidate.outputPath,
+    description: `gebundene Baseline-Ausgabe „${candidate.outputName}" (Job ${candidate.jobId})`,
+    baselineRequestSha256: binding.baselineRequestSha256,
+    sourceProvenanceFingerprint: candidate.runProvenance.fingerprint,
+    settingsSidecarPath,
+    analysisSidecarPath,
+    programAudioDelayMs: candidate.request.postprocess.lipForcing.programAudioDelayMs,
   };
 }
 
@@ -621,13 +1576,85 @@ export function resolveRenderOutputPaths(
   };
 }
 
+function fsyncDirectory(path: string): void {
+  const descriptor = openSync(path, "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function quarantineUnreleasedArtifact(outputPath: string, quarantineRoot: string): string | null {
   if (!existsSync(outputPath)) return null;
   mkdirSync(quarantineRoot, { recursive: true, mode: 0o700 });
   const quarantinePath = join(quarantineRoot, `unreleased-output${extname(outputPath)}`);
-  rmSync(quarantinePath, { force: true });
+  if (existsSync(quarantinePath)) {
+    rmSync(quarantinePath, { force: true });
+    fsyncDirectory(quarantineRoot);
+  }
   renameSync(outputPath, quarantinePath);
+  fsyncDirectory(dirname(outputPath));
+  if (dirname(outputPath) !== quarantineRoot) fsyncDirectory(quarantineRoot);
   chmodSync(quarantinePath, 0o600);
+  const descriptor = openSync(quarantinePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  return quarantinePath;
+}
+
+const DEFAULT_OUTPUT_AUTHORITY_RECONCILIATION_OPERATIONS: OutputAuthorityReconciliationOperations =
+  Object.freeze({
+    removePublicationAuthority: removeOutputPublicationAuthority,
+    quarantineUnreleased: quarantineUnreleasedArtifact,
+  });
+
+/**
+ * Restore must revoke external authority even when private quarantine fails,
+ * but recovery never has authority to destroy the only remaining media bytes.
+ * A raw pathname that cannot be moved remains reserved and is made 404 by the
+ * caller's durable job/archive downgrade; a marker alone is never authority.
+ */
+export function quarantineRestoredUnpublishedArtifact(
+  outputPath: string,
+  quarantineRoot: string,
+  operations: OutputAuthorityReconciliationOperations =
+    DEFAULT_OUTPUT_AUTHORITY_RECONCILIATION_OPERATIONS,
+): string | null {
+  try {
+    operations.removePublicationAuthority(outputPath);
+  } catch {
+    // Moving the bound output below still makes a surviving marker inert.
+  }
+  let quarantinePath: string | null = null;
+  try {
+    const preferredPath = join(
+      quarantineRoot,
+      `unreleased-output${extname(outputPath)}`,
+    );
+    // Never let the legacy quarantine helper replace an earlier recovery
+    // artifact. A fresh private child directory retains both generations.
+    const nonReplacingRoot = existsSync(preferredPath)
+      ? join(quarantineRoot, `restore-${randomUUID()}`)
+      : quarantineRoot;
+    quarantinePath = operations.quarantineUnreleased(outputPath, nonReplacingRoot);
+  } catch {
+    // The caller terminalizes/downgrades the job if the raw pathname remains.
+  }
+  try {
+    operations.removePublicationAuthority(outputPath);
+  } catch {
+    // The caller removes every job/archive claim before exposing its restored state.
+  }
+  if (existsSync(outputPath)) {
+    throw new Error(
+      "Nicht publizierte Restore-Ausgabe konnte nicht privat quarantänisiert werden; "
+      + "Rohdaten bleiben unverändert und ohne Publikationsautorität am reservierten Pfad.",
+    );
+  }
   return quarantinePath;
 }
 
@@ -660,23 +1687,617 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function atomicJsonFile(path: string, value: object): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+export type AtomicSnapshotFileOperations = {
+  mkdir: (path: string) => void;
+  open: (path: string, flags: string, mode?: number) => number;
+  write: (descriptor: number, contents: string) => void;
+  fsync: (descriptor: number) => void;
+  close: (descriptor: number) => void;
+  rename: (source: string, target: string) => void;
+  remove: (path: string) => void;
+  read: (path: string) => Buffer;
+};
+
+type AtomicSnapshotWritePhase =
+  | "directory-create"
+  | "temporary-open"
+  | "temporary-write"
+  | "temporary-fsync"
+  | "temporary-close"
+  | "target-rename"
+  | "directory-open"
+  | "directory-fsync"
+  | "directory-close";
+
+class AtomicSnapshotWriteError extends Error {
+  constructor(
+    readonly phase: AtomicSnapshotWritePhase,
+    readonly originalError: unknown,
+  ) {
+    super(
+      `Atomare Snapshot-Persistenz scheiterte in Phase ${phase}: ${
+        originalError instanceof Error ? originalError.message : String(originalError)
+      }`,
+    );
+    this.name = "AtomicSnapshotWriteError";
+  }
+}
+
+const DEFAULT_ATOMIC_SNAPSHOT_FILE_OPERATIONS: AtomicSnapshotFileOperations = Object.freeze({
+  mkdir: (path: string) => mkdirSync(path, { recursive: true, mode: 0o700 }),
+  open: (path: string, flags: string, mode?: number) => openSync(path, flags, mode),
+  write: (descriptor: number, contents: string) => writeFileSync(descriptor, contents, "utf8"),
+  fsync: fsyncSync,
+  close: closeSync,
+  rename: renameSync,
+  remove: (path: string) => rmSync(path, { force: true }),
+  read: (path: string) => readFileSync(path),
+});
+
+function atomicTextFile(
+  path: string,
+  contents: string,
+  operations: AtomicSnapshotFileOperations = DEFAULT_ATOMIC_SNAPSHOT_FILE_OPERATIONS,
+): void {
+  let phase: AtomicSnapshotWritePhase = "directory-create";
+  let temporaryDescriptor: number | undefined;
+  let directoryDescriptor: number | undefined;
+  let renamed = false;
   const temporaryPath = join(dirname(path), `.${path.split("/").at(-1)}.${randomUUID()}.tmp`);
-  const descriptor = openSync(temporaryPath, "wx", 0o600);
   try {
-    writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    fsyncSync(descriptor);
+    operations.mkdir(dirname(path));
+    phase = "temporary-open";
+    temporaryDescriptor = operations.open(temporaryPath, "wx", 0o600);
+    phase = "temporary-write";
+    operations.write(temporaryDescriptor, contents);
+    phase = "temporary-fsync";
+    operations.fsync(temporaryDescriptor);
+    phase = "temporary-close";
+    operations.close(temporaryDescriptor);
+    temporaryDescriptor = undefined;
+    phase = "target-rename";
+    operations.rename(temporaryPath, path);
+    renamed = true;
+    phase = "directory-open";
+    directoryDescriptor = operations.open(dirname(path), "r");
+    phase = "directory-fsync";
+    operations.fsync(directoryDescriptor);
+    phase = "directory-close";
+    operations.close(directoryDescriptor);
+    directoryDescriptor = undefined;
+  } catch (error) {
+    if (temporaryDescriptor !== undefined) {
+      try { operations.close(temporaryDescriptor); } catch { /* best-effort descriptor cleanup */ }
+    }
+    if (directoryDescriptor !== undefined) {
+      try { operations.close(directoryDescriptor); } catch { /* best-effort descriptor cleanup */ }
+    }
+    if (!renamed) {
+      try { operations.remove(temporaryPath); } catch { /* target remains authoritative */ }
+    }
+    throw new AtomicSnapshotWriteError(phase, error);
+  }
+}
+
+function fsyncSnapshotDirectory(
+  path: string,
+  operations: AtomicSnapshotFileOperations,
+): void {
+  let lastError: unknown = new Error("Directory-fsync wurde nicht versucht.");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let descriptor: number | undefined;
+    try {
+      descriptor = operations.open(dirname(path), "r");
+      operations.fsync(descriptor);
+      operations.close(descriptor);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (descriptor !== undefined) {
+        try { operations.close(descriptor); } catch { /* retry uses a fresh directory FD */ }
+      }
+    }
+  }
+  throw lastError;
+}
+
+function atomicJsonFile(path: string, value: object): void {
+  atomicTextFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export type ProtectedJsonReadOperations = {
+  lstat?: typeof lstatSync;
+  open?: typeof openSync;
+  fstat?: typeof fstatSync;
+  read?: (fd: number, buffer: Buffer, offset: number, length: number, position: number) => number;
+  close?: typeof closeSync;
+};
+
+function archiveFileStatIsTrusted(stats: Stats, maxBytes: number): boolean {
+  return stats.isFile()
+    && stats.nlink === 1
+    && stats.uid === (process.getuid?.() ?? stats.uid)
+    && stats.gid === (process.getgid?.() ?? stats.gid)
+    && (stats.mode & 0o777) === 0o600
+    && stats.size > 0
+    && stats.size <= maxBytes;
+}
+
+function archiveFileStatsEqual(
+  left: Stats,
+  right: Stats,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+function readExactProtectedFile(
+  fd: number,
+  size: number,
+  read: (fd: number, buffer: Buffer, offset: number, length: number, position: number) => number,
+): Buffer {
+  const value = Buffer.allocUnsafe(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = read(fd, value, offset, size - offset, offset);
+    if (count <= 0) throw new Error("Output-Authority-Archiv endete während des Lesens vorzeitig.");
+    offset += count;
+  }
+  return value;
+}
+
+/**
+ * Reads an authority ledger exclusively through one held, no-follow descriptor.
+ * A second exact read plus pre/mid/post descriptor and pathname revisions makes
+ * path replacement, hard-linking and same-inode mutation fail closed.
+ */
+export function readProtectedJsonFile(
+  path: string,
+  maxBytes: number,
+  overrides: ProtectedJsonReadOperations = {},
+): unknown {
+  const operations = {
+    lstat: overrides.lstat ?? lstatSync,
+    open: overrides.open ?? openSync,
+    fstat: overrides.fstat ?? fstatSync,
+    read: overrides.read ?? readSync,
+    close: overrides.close ?? closeSync,
+  };
+  const pathBefore = operations.lstat(path);
+  if (pathBefore.isSymbolicLink() || !archiveFileStatIsTrusted(pathBefore, maxBytes)) {
+    throw new Error("Output-Authority-Archiv ist kein geschütztes reguläres Ledger.");
+  }
+  const descriptor = operations.open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const descriptorBefore = operations.fstat(descriptor);
+    if (!archiveFileStatIsTrusted(descriptorBefore, maxBytes)
+      || !archiveFileStatsEqual(pathBefore, descriptorBefore)) {
+      throw new Error("Output-Authority-Archiv wurde vor dem Lesen ersetzt.");
+    }
+    const first = readExactProtectedFile(descriptor, descriptorBefore.size, operations.read);
+    const descriptorMid = operations.fstat(descriptor);
+    const second = readExactProtectedFile(descriptor, descriptorBefore.size, operations.read);
+    const descriptorAfter = operations.fstat(descriptor);
+    const pathAfter = operations.lstat(path);
+    if (!archiveFileStatsEqual(descriptorBefore, descriptorMid)
+      || !archiveFileStatsEqual(descriptorBefore, descriptorAfter)
+      || !archiveFileStatsEqual(descriptorBefore, pathAfter)
+      || !first.equals(second)) {
+      throw new Error("Output-Authority-Archiv wurde während des Lesens verändert oder ersetzt.");
+    }
+    return JSON.parse(first.toString("utf8"));
+  } finally {
+    operations.close(descriptor);
+  }
+}
+
+type HashedExecutionFile = {
+  sha256: string;
+  revision: ExecutionFileRevision;
+};
+
+function executionRevision(stats: {
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  ino: number | bigint;
+  dev: number | bigint;
+  mode: number;
+  uid: number;
+  gid: number;
+  nlink: number;
+}): ExecutionFileRevision {
+  if (stats.nlink !== 1) {
+    throw new Error("Execution-Datei muss genau einen Hardlink besitzen.");
+  }
+  return {
+    sizeBytes: stats.size,
+    modifiedAtMs: stats.mtimeMs,
+    changedAtMs: stats.ctimeMs,
+    fileId: String(stats.ino),
+    deviceId: String(stats.dev),
+    mode: stats.mode,
+    uid: stats.uid,
+    gid: stats.gid,
+    nlink: 1,
+  };
+}
+
+function executionRevisionsEqual(left: ExecutionFileRevision, right: ExecutionFileRevision): boolean {
+  return left.sizeBytes === right.sizeBytes
+    && left.modifiedAtMs === right.modifiedAtMs
+    && left.changedAtMs === right.changedAtMs
+    && left.fileId === right.fileId
+    && left.deviceId === right.deviceId
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.nlink === right.nlink;
+}
+
+function hashExecutionDescriptor(descriptor: number, size: number, context: string): string {
+  const digest = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let position = 0;
+  while (position < size) {
+    const count = readSync(
+      descriptor,
+      buffer,
+      0,
+      Math.min(buffer.length, size - position),
+      position,
+    );
+    if (count <= 0) throw new Error(`${context} endete beim Prüfen vorzeitig.`);
+    digest.update(buffer.subarray(0, count));
+    position += count;
+  }
+  return digest.digest("hex");
+}
+
+export type BoundExecutableDescriptor = {
+  fd: number;
+  binding: ExecutionFileBinding;
+  version: string;
+};
+
+function verifyBoundExecutableDescriptor(executable: BoundExecutableDescriptor): void {
+  const before = fstatSync(executable.fd);
+  const beforeRevision = executionRevision(before);
+  if (!before.isFile()
+    || (before.mode & 0o111) === 0
+    || !executionRevisionsEqual(beforeRevision, executable.binding.revision)) {
+    throw new Error("Gebundener Executable-FD hat vor exec eine andere Revision oder keinen Ausführungsmodus.");
+  }
+  const sha256 = hashExecutionDescriptor(executable.fd, before.size, "Gebundener Executable-FD");
+  const afterRevision = executionRevision(fstatSync(executable.fd));
+  if (sha256 !== executable.binding.sha256
+    || !executionRevisionsEqual(beforeRevision, afterRevision)) {
+    throw new Error("Gebundener Executable-FD änderte sich vor exec.");
+  }
+}
+
+/**
+ * Opens with O_NOFOLLOW, binds bytes plus complete stat mode/revision, and asks
+ * that exact descriptor for its version. The descriptor deliberately stays
+ * open for exec through /proc/self/fd/N. This blocks pathname substitution;
+ * same-uid in-place mutation remains outside the guarantee without memfd or
+ * fs-verity and is stated in the persisted ExecutionDecision threat model.
+ */
+export function openBoundExecutable(
+  path: string,
+  versionArgs: readonly string[] = ["-version"],
+): BoundExecutableDescriptor {
+  if (!isAbsolute(path)) throw new Error("Executable-Pfad muss absolut sein.");
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    const openedRevision = executionRevision(opened);
+    if (!opened.isFile() || opened.size <= 0 || (opened.mode & 0o111) === 0) {
+      throw new Error(`Executable ist keine reguläre, nichtleere ausführbare Datei: ${path}`);
+    }
+    const sha256 = hashExecutionDescriptor(descriptor, opened.size, "Executable");
+    const afterHashRevision = executionRevision(fstatSync(descriptor));
+    const pathStats = lstatSync(path);
+    if (pathStats.isSymbolicLink()
+      || !pathStats.isFile()
+      || !executionRevisionsEqual(openedRevision, afterHashRevision)
+      || !executionRevisionsEqual(openedRevision, executionRevision(pathStats))) {
+      throw new Error(`Executable änderte sich während der Bindung: ${path}`);
+    }
+    const binding: ExecutionFileBinding = { path, sha256, revision: afterHashRevision };
+    const versionResult = spawnSync("/proc/self/fd/3", [...versionArgs], {
+      encoding: "utf8",
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe", descriptor],
+    });
+    const version = versionResult.status === 0
+      ? `${versionResult.stdout}\n${versionResult.stderr}`.split(/\r?\n/u).find((line) => line.trim())?.trim() ?? ""
+      : "";
+    if (!version) throw new Error(`Executable-Version konnte nicht vom gebundenen FD gelesen werden: ${path}`);
+    const executable = { fd: descriptor, binding, version };
+    verifyBoundExecutableDescriptor(executable);
+    return executable;
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+function openBoundExecutableFromPath(executable: string): BoundExecutableDescriptor {
+  const candidates = isAbsolute(executable)
+    ? [executable]
+    : (process.env.PATH ?? "").split(delimiter).filter(Boolean).map((directory) => join(directory, executable));
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      return openBoundExecutable(realpathSync(candidate));
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  throw new Error(`Kein bindbares ${executable} gefunden${errors.length > 0 ? `: ${errors.at(-1)}` : "."}`);
+}
+
+async function hashUnchangedExecutionFile(
+  path: string,
+  shouldStop: () => boolean = () => false,
+): Promise<HashedExecutionFile> {
+  if (shouldStop()) throw new Error("CPU-Reuse-Hashing wurde am Fail-Stop-Fence beendet.");
+  const before = lstatSync(path);
+  if (before.isSymbolicLink() || !before.isFile() || before.size <= 0) {
+    throw new Error(`CPU-Reuse-Quelle ist keine reguläre, nichtleere Datei: ${path}`);
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    const beforeRevision = executionRevision(before);
+    const openedRevision = executionRevision(opened);
+    if (!executionRevisionsEqual(beforeRevision, openedRevision)) {
+      throw new Error(`CPU-Reuse-Quelle änderte sich vor dem Öffnen: ${path}`);
+    }
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(path, { fd: descriptor, autoClose: false })) {
+      if (shouldStop()) throw new Error("CPU-Reuse-Hashing wurde am Fail-Stop-Fence beendet.");
+      digest.update(chunk);
+    }
+    if (shouldStop()) throw new Error("CPU-Reuse-Hashing wurde am Fail-Stop-Fence beendet.");
+    const afterDescriptor = executionRevision(fstatSync(descriptor));
+    const afterPathStats = lstatSync(path);
+    if (afterPathStats.isSymbolicLink()
+      || !afterPathStats.isFile()
+      || !executionRevisionsEqual(openedRevision, afterDescriptor)
+      || !executionRevisionsEqual(openedRevision, executionRevision(afterPathStats))) {
+      throw new Error(`CPU-Reuse-Quelle änderte sich während der Hash-Erfassung: ${path}`);
+    }
+    return { sha256: digest.digest("hex"), revision: afterDescriptor };
   } finally {
     closeSync(descriptor);
   }
-  renameSync(temporaryPath, path);
-  const directoryDescriptor = openSync(dirname(path), "r");
+}
+
+function durableSnapshotCopy(
+  sourcePath: string,
+  destinationPath: string,
+  expectedRevision: ExecutionFileRevision,
+): void {
+  rmSync(destinationPath, { force: true });
+  const sourceDescriptor = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    if (!executionRevisionsEqual(executionRevision(fstatSync(sourceDescriptor)), expectedRevision)) {
+      throw new Error(`CPU-Reuse-Quelle änderte sich vor dem privaten Snapshot: ${sourcePath}`);
+    }
+    copyFileSync(`/proc/self/fd/${sourceDescriptor}`, destinationPath, constants.COPYFILE_EXCL);
+    if (!executionRevisionsEqual(executionRevision(fstatSync(sourceDescriptor)), expectedRevision)) {
+      throw new Error(`CPU-Reuse-Quelle änderte sich während des privaten Snapshots: ${sourcePath}`);
+    }
+  } finally {
+    closeSync(sourceDescriptor);
+  }
+  chmodSync(destinationPath, 0o400);
+  const snapshotDescriptor = openSync(destinationPath, "r");
+  try {
+    fsyncSync(snapshotDescriptor);
+  } finally {
+    closeSync(snapshotDescriptor);
+  }
+}
+
+function sameHashedExecutionFile(left: HashedExecutionFile, right: HashedExecutionFile): boolean {
+  return left.sha256 === right.sha256 && executionRevisionsEqual(left.revision, right.revision);
+}
+
+type PinnedCpuReuse = {
+  inputPath: string;
+  source: CpuAudioRetimeReuseSourceBinding;
+};
+
+export type VerifiedExecutionDescriptor = {
+  fd: number;
+  revision: ExecutionFileRevision;
+  sha256: string;
+};
+
+export function openVerifiedExecutionDescriptor(
+  path: string,
+  expectedSha256: string,
+  expectedRevision: ExecutionFileRevision,
+): VerifiedExecutionDescriptor {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = fstatSync(descriptor);
+    const beforeRevision = executionRevision(before);
+    if (!before.isFile() || before.size <= 0
+      || !executionRevisionsEqual(beforeRevision, expectedRevision)) {
+      throw new Error(`Privater CPU-Reuse-Snapshot hat vor dem Prozessstart eine andere Revision: ${path}`);
+    }
+    const digest = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let position = 0;
+    while (position < before.size) {
+      const count = readSync(
+        descriptor,
+        buffer,
+        0,
+        Math.min(buffer.length, before.size - position),
+        position,
+      );
+      if (count <= 0) throw new Error(`Privater CPU-Reuse-Snapshot endete beim Prüfen vorzeitig: ${path}`);
+      digest.update(buffer.subarray(0, count));
+      position += count;
+    }
+    const afterRevision = executionRevision(fstatSync(descriptor));
+    const sha256 = digest.digest("hex");
+    if (!executionRevisionsEqual(beforeRevision, afterRevision) || sha256 !== expectedSha256) {
+      throw new Error(`Privater CPU-Reuse-Snapshot änderte sich unmittelbar vor dem Prozessstart: ${path}`);
+    }
+    return { fd: descriptor, revision: afterRevision, sha256 };
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+function recheckVerifiedExecutionDescriptor(descriptor: VerifiedExecutionDescriptor): void {
+  const before = fstatSync(descriptor.fd);
+  const beforeRevision = executionRevision(before);
+  if (!before.isFile()
+    || !executionRevisionsEqual(beforeRevision, descriptor.revision)
+    || hashExecutionDescriptor(descriptor.fd, before.size, "Gehaltenes Snapshot-FD") !== descriptor.sha256
+    || !executionRevisionsEqual(beforeRevision, executionRevision(fstatSync(descriptor.fd)))) {
+    throw new Error("Gehaltenes Snapshot-FD änderte sich unmittelbar vor exec.");
+  }
+}
+
+/** Captures, snapshots, and rechecks all evidence before a CPU process may be classified or spawned. */
+export async function pinExactLipForcingReuse(
+  reusable: ReusableLipForcingOutput,
+  stageRoot: string,
+  afterSnapshot?: () => void | Promise<void>,
+  shouldStop: () => boolean = () => false,
+): Promise<PinnedCpuReuse> {
+  const assertCanContinue = (): void => {
+    if (shouldStop()) throw new Error("CPU-Reuse-Snapshot wurde am Fail-Stop-Fence beendet.");
+  };
+  const sourceOutput = await hashUnchangedExecutionFile(reusable.outputPath, shouldStop);
+  const sourceSettings = await hashUnchangedExecutionFile(reusable.settingsSidecarPath, shouldStop);
+  const sourceAnalysis = await hashUnchangedExecutionFile(reusable.analysisSidecarPath, shouldStop);
+
+  assertCanContinue();
+  mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
+  const stageStats = lstatSync(stageRoot);
+  if (stageStats.isSymbolicLink() || !stageStats.isDirectory()) {
+    throw new Error("Privates CPU-Reuse-Verzeichnis ist kein echtes Verzeichnis.");
+  }
+  chmodSync(stageRoot, 0o700);
+  const snapshotOutputPath = join(stageRoot, "reused-lipforcing-output.mp4");
+  const snapshotSettingsSidecarPath = join(stageRoot, "reused-lipforcing-output.ltx-settings.json");
+  const snapshotAnalysisSidecarPath = join(stageRoot, "reused-lipforcing-output.ltx-analysis.json");
+  durableSnapshotCopy(reusable.outputPath, snapshotOutputPath, sourceOutput.revision);
+  durableSnapshotCopy(reusable.settingsSidecarPath, snapshotSettingsSidecarPath, sourceSettings.revision);
+  durableSnapshotCopy(reusable.analysisSidecarPath, snapshotAnalysisSidecarPath, sourceAnalysis.revision);
+  const directoryDescriptor = openSync(stageRoot, "r");
   try {
     fsyncSync(directoryDescriptor);
   } finally {
     closeSync(directoryDescriptor);
   }
+
+  const snapshotOutput = await hashUnchangedExecutionFile(snapshotOutputPath, shouldStop);
+  const snapshotSettings = await hashUnchangedExecutionFile(snapshotSettingsSidecarPath, shouldStop);
+  const snapshotAnalysis = await hashUnchangedExecutionFile(snapshotAnalysisSidecarPath, shouldStop);
+  if (snapshotOutput.sha256 !== sourceOutput.sha256
+    || snapshotSettings.sha256 !== sourceSettings.sha256
+    || snapshotAnalysis.sha256 !== sourceAnalysis.sha256) {
+    throw new Error("Privater CPU-Reuse-Snapshot stimmt nicht kryptografisch mit der Baseline überein.");
+  }
+
+  const parsedSettings = JSON.parse(readFileSync(snapshotSettingsSidecarPath, "utf8")) as Record<string, unknown>;
+  const rawSettingsRequestSha256 = experimentRequestSha256V1(parsedSettings.request);
+  const settingsRequest = migrateGenerationRequest(structuredClone(parsedSettings.request));
+  const settingsProvenance = normalizeRunProvenance(parsedSettings.runProvenance);
+  const settingsRequestSha256 = settingsRequest ? rawSettingsRequestSha256 : null;
+  const settingsMismatch = parsedSettings.outputName !== reusable.outputName
+    ? "Outputname"
+    : parsedSettings.jobId !== reusable.id
+      ? "Job-ID"
+      : settingsRequestSha256 !== reusable.baselineRequestSha256
+        ? "Request-SHA-256"
+        : settingsProvenance?.fingerprint !== reusable.sourceProvenanceFingerprint
+          ? "Provenienz-Fingerprint"
+          : !settingsProvenance.verifiedAt
+            ? "Provenienz-Verifikation"
+            : null;
+  if (settingsMismatch) {
+    throw new Error(
+      `Einstellungs-Sidecar bindet nicht die exakt ausgewählte Baseline und ihre Provenienz (${settingsMismatch}).`,
+    );
+  }
+  const analysis = outputAnalysisRecordSchema.parse(JSON.parse(readFileSync(snapshotAnalysisSidecarPath, "utf8")));
+  if (analysis.outputName !== reusable.outputName
+    || analysis.jobId !== reusable.id
+    || analysis.status !== "completed"
+    || analysis.sizeBytes !== sourceOutput.revision.sizeBytes
+    || Math.abs(analysis.modifiedAtMs - sourceOutput.revision.modifiedAtMs) >= 1
+    || Math.abs(analysis.changedAtMs - sourceOutput.revision.changedAtMs) >= 1
+    || analysis.fileId !== sourceOutput.revision.fileId) {
+    throw new Error("Analyse-Sidecar bindet nicht die unveränderte, abgeschlossene Baseline-Ausgabe.");
+  }
+
+  await afterSnapshot?.();
+  assertCanContinue();
+  const recheckedOutput = await hashUnchangedExecutionFile(reusable.outputPath, shouldStop);
+  const recheckedSettings = await hashUnchangedExecutionFile(reusable.settingsSidecarPath, shouldStop);
+  const recheckedAnalysis = await hashUnchangedExecutionFile(reusable.analysisSidecarPath, shouldStop);
+  if (!sameHashedExecutionFile(sourceOutput, recheckedOutput)
+    || !sameHashedExecutionFile(sourceSettings, recheckedSettings)
+    || !sameHashedExecutionFile(sourceAnalysis, recheckedAnalysis)) {
+    throw new Error("Baseline-Ausgabe oder Sidecars änderten sich während der privaten Snapshot-Erfassung.");
+  }
+  const finalSnapshotOutput = await hashUnchangedExecutionFile(snapshotOutputPath, shouldStop);
+  const finalSnapshotSettings = await hashUnchangedExecutionFile(snapshotSettingsSidecarPath, shouldStop);
+  const finalSnapshotAnalysis = await hashUnchangedExecutionFile(snapshotAnalysisSidecarPath, shouldStop);
+  if (!sameHashedExecutionFile(snapshotOutput, finalSnapshotOutput)
+    || !sameHashedExecutionFile(snapshotSettings, finalSnapshotSettings)
+    || !sameHashedExecutionFile(snapshotAnalysis, finalSnapshotAnalysis)) {
+    throw new Error("Privater CPU-Reuse-Snapshot oder seine Sidecars änderten sich vor der Freigabe.");
+  }
+
+  return {
+    inputPath: snapshotOutputPath,
+    source: {
+      baselineJobId: reusable.id,
+      baselineOutputName: reusable.outputName,
+      baselineRequestSha256: reusable.baselineRequestSha256,
+      sourceOutputPath: reusable.outputPath,
+      outputSha256: sourceOutput.sha256,
+      outputRevision: sourceOutput.revision,
+      settingsSidecarPath: reusable.settingsSidecarPath,
+      settingsSidecarSha256: sourceSettings.sha256,
+      settingsSidecarRevision: sourceSettings.revision,
+      analysisSidecarPath: reusable.analysisSidecarPath,
+      analysisSidecarSha256: sourceAnalysis.sha256,
+      analysisSidecarRevision: sourceAnalysis.revision,
+      sourceProvenanceFingerprint: reusable.sourceProvenanceFingerprint,
+      sourceProgramAudioDelayMs: reusable.programAudioDelayMs,
+      snapshotOutputPath,
+      snapshotOutputSha256: finalSnapshotOutput.sha256,
+      snapshotOutputRevision: finalSnapshotOutput.revision,
+      snapshotSettingsSidecarPath,
+      snapshotSettingsSidecarSha256: finalSnapshotSettings.sha256,
+      snapshotSettingsSidecarRevision: finalSnapshotSettings.revision,
+      snapshotAnalysisSidecarPath,
+      snapshotAnalysisSidecarSha256: finalSnapshotAnalysis.sha256,
+      snapshotAnalysisSidecarRevision: finalSnapshotAnalysis.revision,
+    },
+  };
 }
 
 function readJsonObject(path: string): Record<string, unknown> | null {
@@ -693,6 +2314,200 @@ function readJsonObject(path: string): Record<string, unknown> | null {
 
 function validTimestamp(value: unknown, fallback: string | null): string | null {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : fallback;
+}
+
+type RestoredExecutionAuthority = {
+  executionClass?: JobExecutionClass;
+  executionDecision?: JobExecutionDecision;
+  error: string | null;
+  cpuResumeAmbiguous: boolean;
+  operationInterruptedOnRestore?: boolean;
+};
+
+function restoreExecutionAuthority(
+  entry: PersistedStudioJob,
+  authorityBoundRequest: unknown,
+  request: GenerationRequest,
+  experiment: ExperimentRunBinding | null,
+  dgxJobId: string | null,
+  storedStatus: JobStatus,
+): RestoredExecutionAuthority {
+  const hasClass = Object.prototype.hasOwnProperty.call(entry, "executionClass");
+  const hasDecision = Object.prototype.hasOwnProperty.call(entry, "executionDecision");
+  if (!hasDecision) {
+    if (!hasClass) return { error: null, cpuResumeAmbiguous: false };
+    if (!isJobExecutionClass(entry.executionClass)) {
+      return {
+        error: "Persistierte Legacy-Ausführungsklasse ist vorhanden, aber ungültig.",
+        cpuResumeAmbiguous: false,
+      };
+    }
+    if ((entry.executionClass === "pending"
+      && (storedStatus !== "queued"
+        || dgxJobId !== null
+        || entry.dgxSubmitPending === true
+        || entry.localProcessSpawnPending === true
+        || entry.localProcessGroupPending === true))
+      || (entry.executionClass === "cpu-only"
+        && (dgxJobId !== null || entry.dgxSubmitPending === true))) {
+      return {
+        error: "Persistierte Legacy-Ausführungsklasse widerspricht Jobstatus oder DGX-Lease.",
+        cpuResumeAmbiguous: false,
+      };
+    }
+    return {
+      executionClass: entry.executionClass,
+      error: null,
+      cpuResumeAmbiguous: entry.executionClass === "cpu-only" && isActiveJobStatus(storedStatus),
+    };
+  }
+  const decision = normalizeJobExecutionDecision(entry.executionDecision);
+  if (!decision || !hasClass || !isJobExecutionClass(entry.executionClass)) {
+    return {
+        error: "Persistierte ExecutionDecision.v5/v6 fehlt oder ist ungültig; ältere Versionen werden nicht still migriert.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  const requestSha256 = createHash("sha256").update(canonicalJson(authorityBoundRequest)).digest("hex");
+  const protocolSha256 = experiment?.protocolSha256 ?? null;
+  if (entry.executionClass !== decision.executionClass
+    || decision.requestSha256 !== requestSha256
+    || decision.protocolSha256 !== protocolSha256) {
+    return {
+      error: "Persistierte Ausführungsklasse, Request- oder Protokollbindung widerspricht der ExecutionDecision.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  if ((decision.executionClass === "pending" || decision.executionClass === "cpu-only")
+    && (dgxJobId !== null || entry.dgxSubmitPending === true)) {
+    return {
+      error: "Persistierte Nicht-DGX-Entscheidung widerspricht einer vorhandenen DGX-Lease.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  const durablyUnarmedCrash = decision.executionClass === "pending"
+    && entry.startDeferred === true
+    && storedStatus === "interrupted"
+    && entry.startedAt === null
+    && dgxJobId === null
+    && entry.dgxSubmitPending !== true
+    && entry.localProcessSpawnPending !== true
+    && entry.localProcessGroupPending !== true;
+  const durablyNeverStartedTerminal = decision.executionClass === "pending"
+    && (["cancelled", "failed", "interrupted"] as const).includes(
+      storedStatus as "cancelled" | "failed" | "interrupted",
+    )
+    && entry.startedAt === null
+    && dgxJobId === null
+    && entry.dgxSubmitPending !== true
+    && entry.localProcessSpawnPending !== true
+    && entry.localProcessGroupPending !== true
+    && entry.localProcessGroupIdentity === undefined
+    && entry.ownedDockerContainer === undefined;
+  if (decision.executionClass === "pending"
+    && ((storedStatus !== "queued" && !durablyUnarmedCrash && !durablyNeverStartedTerminal)
+      || entry.localProcessSpawnPending === true
+      || entry.localProcessGroupPending === true)) {
+    return {
+      error: "Persistierte pending-Entscheidung widerspricht einem bereits gestarteten oder terminalen Job.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  if (decision.executionClass === "cpu-only") {
+    const operationState = decision.operation.state;
+    const operationMatchesJob = storedStatus === "completed"
+      ? operationState === "succeeded"
+      : storedStatus === "failed"
+        ? operationState === "failed" || operationState === "succeeded"
+        : storedStatus === "cancelled"
+          ? operationState === "cancelled"
+          : storedStatus === "interrupted"
+            ? operationState === "interrupted" || operationState === "succeeded"
+            : operationState === "prepared" || operationState === "running" || operationState === "succeeded";
+    const commonBindingMatches = Boolean(
+      experiment
+      && experiment.arm === "candidate"
+      && experiment.baselineJobId === decision.cpuReuse.baselineJobId
+      && experiment.baselineOutputName === decision.cpuReuse.baselineOutputName
+      && experiment.baselineRequestSha256 === decision.cpuReuse.baselineRequestSha256,
+    );
+    let operationBindingMatches = false;
+    if (decision.operation.kind === "ffmpeg-audio-retime"
+      && !("reuseKind" in decision.cpuReuse)) {
+      operationBindingMatches = experiment?.variableId === "lipforcing-program-audio-delay-ms"
+        && experiment.changedRequestPaths.length === 1
+        && experiment.changedRequestPaths[0] === "postprocess.lipForcing.programAudioDelayMs"
+        && decision.operation.deltaMs
+          === request.postprocess.lipForcing.programAudioDelayMs
+            - decision.cpuReuse.sourceProgramAudioDelayMs;
+    } else if (decision.operation.kind === "paired-artifact-promotion"
+      && "reuseKind" in decision.cpuReuse
+      && decision.cpuReuse.reuseKind === "lipforcing-raw-mux-pair") {
+      operationBindingMatches = experiment?.variableId === "lipforcing-raw-output-profile"
+        && experiment.changedRequestPaths.length === 1
+        && experiment.changedRequestPaths[0] === LIPFORCING_RAW_OUTPUT_EXPERIMENT_PATH
+        && validRawOutputExperimentBinding(request, experiment) !== null
+        && decision.operation.authoritySha256 === decision.cpuReuse.authority.sha256;
+    }
+    if (!commonBindingMatches || !operationBindingMatches || !operationMatchesJob) {
+      return {
+        error: "Persistierte CPU-Reuse-Entscheidung widerspricht Baseline, Operation oder Jobstatus.",
+        cpuResumeAmbiguous: false,
+      };
+    }
+  }
+  const runProvenance = normalizeRunProvenance(entry.runProvenance);
+  if (runProvenance?.executionDecision && !runProvenanceFingerprintMatches(runProvenance)) {
+    return {
+      error: "Persistierter ExecutionDecision-Provenienz-Fingerprint ist ungültig.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  if ((decision.executionClass !== "pending" || runProvenance?.executionDecision !== undefined)
+    && canonicalJson(runProvenance?.executionDecision) !== canonicalJson(decision)) {
+    return {
+      error: "Persistierte Laufprovenienz widerspricht der ExecutionDecision des Jobs.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  let restoredDecision = decision;
+  let operationInterruptedOnRestore = false;
+  if (decision.executionClass === "cpu-only"
+    && isActiveJobStatus(storedStatus)
+    && decision.operation.state === "prepared") {
+    return {
+      executionClass: decision.executionClass,
+      executionDecision: decision,
+      error: "Persistierte vorbereitete CPU-Operation besitzt nach dem Neustart keinen monoton belegbaren running-Zustand; sie bleibt unveraendert terminal fail-closed.",
+      cpuResumeAmbiguous: false,
+    };
+  }
+  if (decision.executionClass === "cpu-only"
+    && isActiveJobStatus(storedStatus)
+    && decision.operation.state === "running") {
+    restoredDecision = {
+      ...decision,
+      operation: {
+        ...decision.operation,
+        state: "interrupted",
+        completedAt: now(),
+        exitCode: null,
+        signal: null,
+        errorSha256: createHash("sha256")
+          .update("studio-restart-after-cpu-operation-running")
+          .digest("hex"),
+        output: null,
+      },
+    } as JobExecutionDecision;
+    operationInterruptedOnRestore = true;
+  }
+  return {
+    executionClass: decision.executionClass,
+    executionDecision: restoredDecision,
+    error: null,
+    cpuResumeAmbiguous: decision.executionClass === "cpu-only" && isActiveJobStatus(storedStatus),
+    operationInterruptedOnRestore,
+  };
 }
 
 function normalizeDgxTerminalDelivery(value: unknown): DgxTerminalDelivery | undefined {
@@ -735,6 +2550,288 @@ function normalizeDgxTerminalDelivery(value: unknown): DgxTerminalDelivery | und
       : 0,
     lastError: typeof candidate.lastError === "string" ? candidate.lastError.slice(0, 4000) : null,
     updatedAt: validTimestamp(candidate.updatedAt, now())!,
+  };
+}
+
+function hasExactKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(value).sort();
+  return keys.length === allowed.length
+    && [...allowed].sort().every((key, index) => key === keys[index]);
+}
+
+function normalizeOutputPublicationCommitPending(
+  value: unknown,
+): OutputPublicationCommitPending | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (!hasExactKeys(candidate, ["schemaVersion", "completedAt", "completionMetadata"])
+    || candidate.schemaVersion !== "ltx-studio-output-publication-commit.v1"
+    || typeof candidate.completedAt !== "string"
+    || !canonicalIsoTimestamp(candidate.completedAt)
+    || !candidate.completionMetadata
+    || typeof candidate.completionMetadata !== "object"
+    || Array.isArray(candidate.completionMetadata)) return undefined;
+  const normalizedDelivery = normalizeDgxTerminalDelivery({
+    state: "completed",
+    metadata: candidate.completionMetadata,
+    attempts: 0,
+    lastError: null,
+    updatedAt: candidate.completedAt,
+  });
+  if (!normalizedDelivery
+    || canonicalJson(normalizedDelivery.metadata) !== canonicalJson(candidate.completionMetadata)) {
+    return undefined;
+  }
+  return {
+    schemaVersion: "ltx-studio-output-publication-commit.v1",
+    completedAt: candidate.completedAt,
+    completionMetadata: normalizedDelivery.metadata,
+  };
+}
+
+function normalizePreparedAdmission(value: unknown): AdmissionRequest | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const cooperative = candidate.resumability !== undefined || candidate.scheduling !== undefined;
+  const topLevelKeys = [
+    "requested_by",
+    "source_app",
+    "job_type",
+    "runtime",
+    "priority",
+    "estimated_memory_gib",
+    "caller_network",
+    "queue_ttl_seconds",
+    "idempotency_key",
+    "resource_profile",
+    ...(cooperative ? ["resumability", "scheduling"] : []),
+  ];
+  if (!hasExactKeys(candidate, topLevelKeys)
+    || typeof candidate.requested_by !== "string"
+    || !candidate.requested_by.startsWith("ltx-studio:")
+    || !STUDIO_JOB_ID_PATTERN.test(candidate.requested_by.slice("ltx-studio:".length))
+    || candidate.source_app !== "LTX Studio"
+    || typeof candidate.job_type !== "string"
+    || !/^[a-z0-9_]{3,128}$/.test(candidate.job_type)
+    || typeof candidate.runtime !== "string"
+    || !/^[a-z0-9_]{3,128}$/.test(candidate.runtime)
+    || candidate.priority !== "normal"
+    || typeof candidate.estimated_memory_gib !== "number"
+    || !Number.isFinite(candidate.estimated_memory_gib)
+    || candidate.estimated_memory_gib <= 0
+    || candidate.estimated_memory_gib > 1_024
+    || candidate.caller_network !== "dgx_local"
+    || typeof candidate.queue_ttl_seconds !== "number"
+    || !Number.isInteger(candidate.queue_ttl_seconds)
+    || candidate.queue_ttl_seconds <= 0
+    || candidate.queue_ttl_seconds > 604_800
+    || candidate.idempotency_key !== candidate.requested_by
+    || !candidate.resource_profile
+    || typeof candidate.resource_profile !== "object"
+    || Array.isArray(candidate.resource_profile)) return undefined;
+  const profile = candidate.resource_profile as Record<string, unknown>;
+  if (!hasExactKeys(profile, ["gpu", "exclusive_runtime", "required_gib"])
+    || profile.gpu !== true
+    || profile.exclusive_runtime !== candidate.runtime
+    || profile.required_gib !== candidate.estimated_memory_gib) return undefined;
+  if (cooperative) {
+    if (candidate.resumability !== "required"
+      || !candidate.scheduling
+      || typeof candidate.scheduling !== "object"
+      || Array.isArray(candidate.scheduling)) return undefined;
+    const scheduling = candidate.scheduling as Record<string, unknown>;
+    if (!hasExactKeys(scheduling, [
+      "mode",
+      "preemptible",
+      "yield_after_each_segment",
+      "expected_segment_seconds",
+      "resume_checkpoint",
+    ])
+      || scheduling.mode !== "segmented"
+      || scheduling.preemptible !== true
+      || scheduling.yield_after_each_segment !== true
+      || typeof scheduling.expected_segment_seconds !== "number"
+      || !Number.isFinite(scheduling.expected_segment_seconds)
+      || scheduling.expected_segment_seconds <= 0
+      || scheduling.expected_segment_seconds > 3_600
+      || typeof scheduling.resume_checkpoint !== "string"
+      || !isAbsolute(scheduling.resume_checkpoint)) return undefined;
+  }
+  return structuredClone(candidate) as AdmissionRequest;
+}
+
+function preparedAdmissionSha256(value: AdmissionRequest): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function normalizeDgxLeaseReceipt(value: unknown): DgxLeaseReceipt | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<DgxLeaseReceipt>;
+  const preparedAdmission = normalizePreparedAdmission(candidate.preparedAdmission);
+  const confirmedAt = canonicalIsoTimestamp(candidate.confirmedAt);
+  const submitStartedAt = canonicalIsoTimestamp(candidate.submitStartedAt);
+  const observedCreatedAt = canonicalIsoTimestamp(candidate.observedCreatedAt);
+  const rawEvidence = candidate.evidence;
+  let evidence: DgxLeaseReceipt["evidence"] | undefined;
+  if (rawEvidence && typeof rawEvidence === "object" && !Array.isArray(rawEvidence)) {
+    if (rawEvidence.kind === "submit-response"
+      && rawEvidence.schemaVersion === "dgx-queue-submit.v0") {
+      evidence = {
+        kind: "submit-response",
+        schemaVersion: "dgx-queue-submit.v0",
+      };
+    } else if (rawEvidence.kind === "queue-positive"
+      && rawEvidence.schemaVersion === "dgx-queue-read.v0") {
+      const observedAt = canonicalIsoTimestamp(rawEvidence.observedAt);
+      if (observedAt) {
+        evidence = {
+          kind: "queue-positive",
+          schemaVersion: "dgx-queue-read.v0",
+          observedAt,
+        };
+      }
+    }
+  }
+  const futureLimit = Date.now() + 5 * 60_000;
+  if (candidate.schemaVersion !== "ltx-studio-dgx-lease-receipt.v1"
+    || typeof candidate.studioJobId !== "string"
+    || !STUDIO_JOB_ID_PATTERN.test(candidate.studioJobId)
+    || !isDgxJobId(candidate.dgxJobId)
+    || candidate.requestedBy !== `ltx-studio:${candidate.studioJobId}`
+    || candidate.sourceApp !== "LTX Studio"
+    || candidate.idempotencyKey !== candidate.requestedBy
+    || !preparedAdmission
+    || preparedAdmission.requested_by !== candidate.requestedBy
+    || candidate.preparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)
+    || !submitStartedAt
+    || (candidate.observedState !== "accepted" && candidate.observedState !== "queued")
+    || !observedCreatedAt
+    || !evidence
+    || !confirmedAt
+    || Date.parse(observedCreatedAt) < Date.parse(submitStartedAt)
+    || Date.parse(confirmedAt) < Date.parse(observedCreatedAt)
+    || Date.parse(submitStartedAt) > futureLimit
+    || Date.parse(observedCreatedAt) > futureLimit
+    || Date.parse(confirmedAt) > futureLimit
+    || (evidence.kind === "queue-positive"
+      && (Date.parse(evidence.observedAt) < Date.parse(observedCreatedAt)
+        || Date.parse(confirmedAt) < Date.parse(evidence.observedAt)
+        || Date.parse(evidence.observedAt) > futureLimit))) return undefined;
+  return {
+    schemaVersion: candidate.schemaVersion,
+    studioJobId: candidate.studioJobId,
+    dgxJobId: candidate.dgxJobId,
+    requestedBy: candidate.requestedBy,
+    sourceApp: "LTX Studio",
+    idempotencyKey: candidate.idempotencyKey,
+    preparedAdmission,
+    preparedAdmissionSha256: candidate.preparedAdmissionSha256,
+    submitStartedAt,
+    observedState: candidate.observedState,
+    observedCreatedAt,
+    evidence,
+    confirmedAt,
+  };
+}
+
+function requireDgxLeaseAuthority(job: RuntimeJob): DgxLeaseReceipt {
+  const receipt = normalizeDgxLeaseReceipt(job.dgxLeaseReceipt);
+  if (!receipt
+    || !job.dgxJobId
+    || receipt.studioJobId !== job.id
+    || receipt.dgxJobId !== job.dgxJobId
+    || canonicalJson(receipt) !== canonicalJson(job.dgxLeaseReceipt)) {
+    throw new DgxLeaseAuthorityError(
+      "DGX-Lease besitzt kein gültiges dauerhaftes Submit-Receipt; Remote-Zugriff bleibt gesperrt.",
+    );
+  }
+  return receipt;
+}
+
+function normalizeDgxTerminalReceipt(value: unknown): DgxTerminalReceipt | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<DgxTerminalReceipt>;
+  const confirmedAt = canonicalIsoTimestamp(candidate.confirmedAt);
+  if (candidate.schemaVersion !== "ltx-studio-dgx-terminal-receipt.v1"
+    || typeof candidate.studioJobId !== "string"
+    || !STUDIO_JOB_ID_PATTERN.test(candidate.studioJobId)
+    || !isDgxJobId(candidate.dgxJobId)
+    || candidate.idempotencyKey !== `ltx-studio:${candidate.studioJobId}`
+    || !candidate.localIntentState
+    || !DGX_TERMINAL_STATES.has(candidate.localIntentState)
+    || !candidate.remoteTerminalState
+    || !DGX_REMOTE_TERMINAL_STATES.has(candidate.remoteTerminalState)
+    || !confirmedAt) return undefined;
+
+  const rawEvidence = candidate.evidence;
+  if (!rawEvidence || typeof rawEvidence !== "object" || Array.isArray(rawEvidence)) return undefined;
+  const expectedCaller = `ltx-studio:${candidate.studioJobId}`;
+  let evidence: DgxTerminalReceipt["evidence"];
+  if (rawEvidence.kind === "job-read"
+    && rawEvidence.schemaVersion === "dgx-job-read.v0"
+    && rawEvidence.requestedBy === expectedCaller
+    && rawEvidence.sourceApp === "LTX Studio"
+    && rawEvidence.idempotencyKey === expectedCaller) {
+    evidence = {
+      kind: "job-read",
+      schemaVersion: "dgx-job-read.v0",
+      requestedBy: expectedCaller,
+      sourceApp: "LTX Studio",
+      idempotencyKey: expectedCaller,
+    };
+  } else if (rawEvidence.kind === "job-transition"
+    && rawEvidence.schemaVersion === "dgx-job-transition.v0"
+    && rawEvidence.requestedBy === expectedCaller
+    && rawEvidence.sourceApp === "LTX Studio"
+    && rawEvidence.idempotencyKey === expectedCaller) {
+    evidence = {
+      kind: "job-transition",
+      schemaVersion: "dgx-job-transition.v0",
+      requestedBy: expectedCaller,
+      sourceApp: "LTX Studio",
+      idempotencyKey: expectedCaller,
+    };
+  } else if (rawEvidence.kind === "queue-submit"
+    && rawEvidence.schemaVersion === "dgx-queue-submit.v0"
+    && rawEvidence.requestedBy === expectedCaller
+    && rawEvidence.sourceApp === "LTX Studio"
+    && rawEvidence.idempotencyKey === expectedCaller) {
+    evidence = {
+      kind: "queue-submit",
+      schemaVersion: "dgx-queue-submit.v0",
+      requestedBy: expectedCaller,
+      sourceApp: "LTX Studio",
+      idempotencyKey: expectedCaller,
+    };
+  } else if (rawEvidence.kind === "job-gone"
+    && rawEvidence.schemaVersion === "dgx-job-gone.v0"
+    && rawEvidence.idempotencyKey === expectedCaller) {
+    const finishedAt = canonicalIsoTimestamp(rawEvidence.finishedAt);
+    const reapedAt = canonicalIsoTimestamp(rawEvidence.reapedAt);
+    if (!finishedAt
+      || !reapedAt
+      || Date.parse(reapedAt) < Date.parse(finishedAt)
+      || (rawEvidence.reason !== null && typeof rawEvidence.reason !== "string")) return undefined;
+    evidence = {
+      kind: "job-gone",
+      schemaVersion: "dgx-job-gone.v0",
+      idempotencyKey: expectedCaller,
+      finishedAt,
+      reapedAt,
+      reason: rawEvidence.reason === null ? null : rawEvidence.reason.slice(0, 1_000),
+    };
+  } else {
+    return undefined;
+  }
+  return {
+    schemaVersion: candidate.schemaVersion,
+    studioJobId: candidate.studioJobId,
+    dgxJobId: candidate.dgxJobId,
+    idempotencyKey: candidate.idempotencyKey,
+    localIntentState: candidate.localIntentState,
+    remoteTerminalState: candidate.remoteTerminalState,
+    confirmedAt,
+    evidence,
   };
 }
 
@@ -820,6 +2917,24 @@ export class PipelineProgressTracker {
   isDenoising(): boolean {
     return this.phase === "denoising";
   }
+
+  snapshot(): {
+    denoisingStage: number;
+    phase: "preparing" | "denoising" | "decoding";
+    current: number;
+  } {
+    return {
+      denoisingStage: this.denoisingStage,
+      phase: this.phase,
+      current: this.current,
+    };
+  }
+
+  restore(snapshot: ReturnType<PipelineProgressTracker["snapshot"]>): void {
+    this.denoisingStage = snapshot.denoisingStage;
+    this.phase = snapshot.phase;
+    this.current = snapshot.current;
+  }
 }
 
 function processIsAlive(child: ChildProcess): boolean {
@@ -830,14 +2945,24 @@ function jobWasCancelled(job: RuntimeJob): boolean {
   return job.status === "cancelled" || job.status === "interrupted";
 }
 
+function signalExactProcessGroup(
+  processGroupId: number,
+  signal: NodeJS.Signals,
+  child?: ChildProcess,
+): boolean {
+  try {
+    process.kill(-processGroupId, signal);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if (child?.pid === processGroupId && processIsAlive(child)) return child.kill(signal);
+    throw error;
+  }
+}
+
 function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): boolean {
   if (!child.pid) return false;
-  try {
-    process.kill(-child.pid, signal);
-    return true;
-  } catch {
-    return child.kill(signal);
-  }
+  return signalExactProcessGroup(child.pid, signal, child);
 }
 
 function processGroupExists(processGroupId: number): boolean {
@@ -885,13 +3010,88 @@ function captureLocalProcessGroupIdentity(processGroupId: number): LocalProcessG
 function isLocalProcessGroupIdentity(value: unknown): value is LocalProcessGroupIdentity {
   if (!value || typeof value !== "object") return false;
   const identity = value as Record<string, unknown>;
-  return typeof identity.bootId === "string"
-    && /^[0-9a-f-]{36}$/i.test(identity.bootId)
+  return Object.keys(identity).sort().join(",") === "bootId,leaderStartTicks,processGroupId"
+    && typeof identity.bootId === "string"
+    && STUDIO_JOB_ID_PATTERN.test(identity.bootId)
     && typeof identity.processGroupId === "number"
     && Number.isSafeInteger(identity.processGroupId)
     && identity.processGroupId > 0
     && typeof identity.leaderStartTicks === "string"
     && /^[0-9]+$/u.test(identity.leaderStartTicks);
+}
+
+function ownedDockerWorkload(id: unknown): OwnedDockerThermalWorkload | null {
+  return Object.values(OWNED_DOCKER_THERMAL_WORKLOADS)
+    .find((candidate) => candidate.id === id) ?? null;
+}
+
+function normalizeOwnedDockerContainerAuthority(
+  value: unknown,
+  studioJobId: string,
+  dgxJobId: string | null,
+): OwnedDockerContainerAuthority | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !dgxJobId) return null;
+  const authority = value as Record<string, unknown>;
+  const workload = ownedDockerWorkload(authority.workload);
+  if (!workload
+    || authority.dgxJobId !== dgxJobId
+    || authority.name !== `${workload.containerPrefix}${studioJobId}`
+    || !(authority.containerId === null
+      || (typeof authority.containerId === "string" && /^[0-9a-f]{64}$/u.test(authority.containerId)))
+    || !["bound", "running", "paused", "cleanup"].includes(String(authority.state))) return null;
+
+  const v1Keys = "containerId,dgxJobId,name,schemaVersion,state,workload";
+  if (authority.schemaVersion === "ltx-studio-owned-docker-container.v1"
+    && Object.keys(authority).sort().join(",") === v1Keys) {
+    return {
+      schemaVersion: "ltx-studio-owned-docker-container.v2",
+      name: authority.name as string,
+      containerId: authority.containerId as string | null,
+      dgxJobId,
+      workload: workload.id,
+      state: authority.state as OwnedDockerContainerState,
+      // A legacy non-bound wrapper may already have sent docker create. Treat
+      // it conservatively as a freshly released gate on first v2 restore.
+      startGateReleasedAt: authority.state === "bound" ? null : now(),
+      absenceProofStartedAt: null,
+      absenceProofCount: 0,
+    };
+  }
+
+  const v2Keys = "absenceProofCount,absenceProofStartedAt,containerId,dgxJobId,name,schemaVersion,startGateReleasedAt,state,workload";
+  const validTimestamp = (timestamp: unknown): timestamp is string =>
+    typeof timestamp === "string" && Number.isFinite(Date.parse(timestamp));
+  const absenceProofValid = authority.absenceProofStartedAt === null
+    ? authority.absenceProofCount === 0
+    : validTimestamp(authority.absenceProofStartedAt)
+      && Number.isSafeInteger(authority.absenceProofCount)
+      && (authority.absenceProofCount as number) > 0
+      && (authority.absenceProofCount as number) <= OWNED_DOCKER_CREATION_ABSENCE_PROOFS;
+  const releaseStateValid = authority.state === "bound"
+    ? authority.startGateReleasedAt === null
+    : ["running", "paused"].includes(String(authority.state))
+      ? validTimestamp(authority.startGateReleasedAt)
+      : authority.startGateReleasedAt === null || validTimestamp(authority.startGateReleasedAt);
+  const proofTimelineValid = authority.absenceProofStartedAt === null
+    || (validTimestamp(authority.startGateReleasedAt)
+      && Date.parse(authority.absenceProofStartedAt as string)
+        >= Date.parse(authority.startGateReleasedAt));
+  if (authority.schemaVersion !== "ltx-studio-owned-docker-container.v2"
+    || Object.keys(authority).sort().join(",") !== v2Keys
+    || !releaseStateValid
+    || !absenceProofValid
+    || !proofTimelineValid) return null;
+  return {
+    schemaVersion: "ltx-studio-owned-docker-container.v2",
+    name: authority.name as string,
+    containerId: authority.containerId as string | null,
+    dgxJobId,
+    workload: workload.id,
+    state: authority.state as OwnedDockerContainerState,
+    startGateReleasedAt: authority.startGateReleasedAt as string | null,
+    absenceProofStartedAt: authority.absenceProofStartedAt as string | null,
+    absenceProofCount: authority.absenceProofCount as number,
+  };
 }
 
 function localProcessGroupIsGone(identity: LocalProcessGroupIdentity): boolean {
@@ -931,49 +3131,281 @@ async function terminateProcessGroup(
   deadlineMs = 15_000,
 ): Promise<void> {
   if (!child.pid) return;
-  const processGroupId = child.pid;
-  if (wasPaused) signalProcessGroup(child, "SIGCONT");
-  signalProcessGroup(child, "SIGTERM");
+  await terminateExactProcessGroup(child.pid, wasPaused, graceMs, deadlineMs, child);
+}
+
+async function terminateExactProcessGroup(
+  processGroupId: number,
+  wasPaused: boolean,
+  graceMs = 10_000,
+  deadlineMs = 15_000,
+  child?: ChildProcess,
+): Promise<void> {
+  if (wasPaused) signalExactProcessGroup(processGroupId, "SIGCONT", child);
+  signalExactProcessGroup(processGroupId, "SIGTERM", child);
   const startedAt = Date.now();
   if (await waitForProcessGroupExit(processGroupId, startedAt + graceMs)) return;
-  signalProcessGroup(child, "SIGKILL");
+  signalExactProcessGroup(processGroupId, "SIGKILL", child);
   if (!await waitForProcessGroupExit(processGroupId, startedAt + deadlineMs)) {
     throw new Error(`Prozessgruppe ${processGroupId} blieb nach SIGKILL aktiv.`);
   }
 }
 
-function publicJob(job: RuntimeJob): StudioJob {
+function runtimeSettlementPending(job: RuntimeJob): boolean {
+  return Boolean(
+    job.process
+    || job.processTermination
+    || job.localProcessSpawnPending
+    || job.localProcessGroupPending
+    || job.localProcessGroupIdentity
+    || job.localProcessGroupRetry
+    || job.ownedDockerContainer
+    || job.ownedDockerContainerRecoveryBlocked
+    || job.ownedDockerContainerCleanup
+    || job.ownedDockerContainerRetry
+    || job.dgxSubmitPending
+    || job.dgxSubmitReconcileRetry
+    || job.dgxSubmitReconcileInFlight
+    || job.dgxAdmissionAbortController
+    || job.dgxStateTransitionInFlight
+    || job.dgxTerminalDelivery
+    || job.dgxTerminalDeliveryInFlight
+    || job.dgxTerminalRetry
+    || (job.dgxOwnerHeartbeat && !job.dgxOwnerHeartbeat.stopped)
+  );
+}
+
+function publicJob(
+  job: RuntimeJob,
+  persistenceHeld = false,
+  settlementPending = runtimeSettlementPending(job),
+): StudioJob {
   const value = { ...job } as Partial<RuntimeJob>;
+  value.cancellationState = job.cancelledBy === "studio"
+    ? (persistenceHeld || settlementPending) ? "settling" : "settled"
+    : null;
+  value.historyStatus = job.legacyHistory ? "legacy-unattested" : undefined;
+  value.historicalDgxJobId = job.legacyHistory?.historicalDgxJobId ?? undefined;
   delete value.plan;
+  delete value.authorityBoundRequest;
+  delete value.authorityRequestSha256;
+  delete value.legacyTextToAudioPeakCeilingUnset;
+  delete value.legacyHistory;
+  delete value.outputPublicationCommitPending;
+  delete value.localProcessProtocol;
   delete value.process;
   delete value.processTermination;
+  delete value.localProcessSpawnPending;
   delete value.localProcessGroupPending;
   delete value.localProcessGroupIdentity;
   delete value.localProcessGroupRetry;
+  delete value.ownedDockerContainer;
+  delete value.ownedDockerContainerIdDurablyCommitted;
+  delete value.ownedDockerContainerRecoveryBlocked;
+  delete value.ownedDockerContainerCleanup;
+  delete value.ownedDockerContainerRetry;
   delete value.dgxSubmitPending;
   delete value.dgxSubmitStartedAt;
+  delete value.dgxPreparedAdmission;
+  delete value.dgxPreparedAdmissionSha256;
+  delete value.dgxSubmitReconcileRetry;
+  delete value.dgxSubmitReconcileInFlight;
+  delete value.dgxSubmitReconcileDelayMs;
   delete value.dgxAdmissionAbortController;
   delete value.dgxJobTerminal;
+  delete value.dgxLeaseReceipt;
   delete value.dgxStateTransitionInFlight;
   delete value.dgxTerminalDelivery;
+  delete value.dgxTerminalReceipt;
   delete value.dgxTerminalDeliveryInFlight;
   delete value.dgxTerminalRetry;
   delete value.dgxOwnerHeartbeat;
   delete value.startSource;
+  delete value.startDeferred;
+  delete value.outputPublication;
   return value as StudioJob;
 }
 
 function persistedJob(job: RuntimeJob): PersistedStudioJob {
   const value: PersistedStudioJob = publicJob(job);
+  delete value.cancellationState;
+  delete value.historyStatus;
+  delete value.historicalDgxJobId;
+  value.request = structuredClone(job.authorityBoundRequest);
+  if (job.legacyHistory) value.legacyHistory = structuredClone(job.legacyHistory);
+  if (job.outputPublicationCommitPending) {
+    value.outputPublicationCommitPending = structuredClone(job.outputPublicationCommitPending);
+  }
+  value.localProcessProtocol = job.localProcessProtocol;
+  if (job.outputPublication) value.outputPublication = structuredClone(job.outputPublication);
   value.startSource = job.startSource;
+  if (job.startDeferred) value.startDeferred = true;
   if (job.dgxTerminalDelivery) value.dgxTerminalDelivery = structuredClone(job.dgxTerminalDelivery);
+  if (job.dgxTerminalReceipt) value.dgxTerminalReceipt = structuredClone(job.dgxTerminalReceipt);
+  if (job.dgxLeaseReceipt) value.dgxLeaseReceipt = structuredClone(job.dgxLeaseReceipt);
+  if (job.localProcessSpawnPending) value.localProcessSpawnPending = true;
   if (job.localProcessGroupPending) value.localProcessGroupPending = true;
   if (job.localProcessGroupIdentity) {
     value.localProcessGroupIdentity = structuredClone(job.localProcessGroupIdentity);
   }
+  if (job.ownedDockerContainer) {
+    value.ownedDockerContainer = structuredClone(job.ownedDockerContainer);
+  }
+  if (job.ownedDockerContainerRecoveryBlocked) {
+    value.ownedDockerContainerRecoveryBlocked = true;
+  }
   if (job.dgxSubmitPending) value.dgxSubmitPending = true;
   if (job.dgxSubmitStartedAt) value.dgxSubmitStartedAt = job.dgxSubmitStartedAt;
+  if (job.dgxPreparedAdmission) {
+    value.dgxPreparedAdmission = structuredClone(job.dgxPreparedAdmission);
+  }
+  if (job.dgxPreparedAdmissionSha256) {
+    value.dgxPreparedAdmissionSha256 = job.dgxPreparedAdmissionSha256;
+  }
   return value;
+}
+
+function runtimeAuthorityRequestSha256(job: RuntimeJob): string | null {
+  const digest = createHash("sha256").update(canonicalJson(job.authorityBoundRequest)).digest("hex");
+  return digest === job.authorityRequestSha256 ? digest : null;
+}
+
+function archivedOutputAuthorityFromJob(job: RuntimeJob): ArchivedOutputAuthority | null {
+  const decision = normalizeJobExecutionDecision(job.executionDecision);
+  const requestSha256 = runtimeAuthorityRequestSha256(job);
+  const publication = job.outputPublication
+    ? normalizeOutputPublicationAuthority(job.outputPublication, join(outputRoot, job.outputName))
+    : null;
+  if (job.status !== "completed"
+    || !job.finishedAt
+    || !decision
+    || !requestSha256
+    || decision.executionClass === "pending"
+    || decision.executionClass !== job.executionClass
+    || decision.requestSha256 !== requestSha256
+    || decision.protocolSha256 !== (job.experiment?.protocolSha256 ?? null)
+    || !job.runProvenance
+    || !runProvenanceFingerprintMatches(job.runProvenance)
+    || canonicalJson(job.runProvenance.executionDecision) !== canonicalJson(decision)
+    || !publication) return null;
+  const executionDecisionSha256 = createHash("sha256").update(canonicalJson(decision)).digest("hex");
+  if (publication.jobId !== job.id
+    || publication.publishedAt !== job.finishedAt
+    || publication.executionDecisionSha256 !== executionDecisionSha256
+    || publication.jobAuthoritySha256 !== terminalJobAuthoritySha256({
+      jobId: job.id,
+      status: "completed",
+      outputName: job.outputName,
+      finishedAt: job.finishedAt,
+      executionClass: decision.executionClass,
+      executionDecisionSha256,
+      requestSha256: decision.requestSha256,
+      protocolSha256: decision.protocolSha256,
+      jobPersistenceRevision: publication.jobPersistenceRevision,
+    })) return null;
+  const cpuOutputSha256 = decision.executionClass === "cpu-only"
+    && decision.operation.state === "succeeded"
+    && decision.operation.output?.sha256 === publication.output.sha256
+    ? publication.output.sha256
+    : null;
+  if (decision.executionClass === "cpu-only" && cpuOutputSha256 === null) return null;
+  return {
+    schemaVersion: "ltx-studio-archived-output-authority.v1",
+    id: job.id,
+    status: "completed",
+    outputName: job.outputName,
+    finishedAt: job.finishedAt,
+    executionClass: decision.executionClass,
+    executionDecisionSha256,
+    requestSha256: decision.requestSha256,
+    protocolSha256: decision.protocolSha256,
+    cpuOutputSha256,
+    runProvenanceSha256: createHash("sha256").update(canonicalJson(job.runProvenance)).digest("hex"),
+    identityEvidenceSha256: job.identityEvidence == null
+      ? null
+      : createHash("sha256").update(canonicalJson(job.identityEvidence)).digest("hex"),
+    experimentSha256: job.experiment == null
+      ? null
+      : createHash("sha256").update(canonicalJson(job.experiment)).digest("hex"),
+    projectSha256: job.project == null
+      ? null
+      : createHash("sha256").update(canonicalJson(job.project)).digest("hex"),
+    outputPublication: publication,
+  };
+}
+
+function normalizeArchivedOutputAuthority(value: unknown): ArchivedOutputAuthority | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = value as Record<string, unknown>;
+  if (Object.keys(entry).sort().join(",") !== [
+    "cpuOutputSha256", "executionClass", "executionDecisionSha256", "finishedAt", "id",
+    "identityEvidenceSha256", "experimentSha256", "outputName", "outputPublication", "projectSha256",
+    "protocolSha256", "requestSha256", "runProvenanceSha256", "schemaVersion", "status",
+  ].sort().join(",")
+    || entry.schemaVersion !== "ltx-studio-archived-output-authority.v1"
+    || entry.status !== "completed"
+    || typeof entry.id !== "string"
+    || !/^[0-9a-f-]{36}$/i.test(entry.id)
+    || typeof entry.outputName !== "string"
+    || typeof entry.finishedAt !== "string"
+    || !Number.isFinite(Date.parse(entry.finishedAt))
+    || (entry.executionClass !== "dgx" && entry.executionClass !== "cpu-only")
+    || typeof entry.executionDecisionSha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(entry.executionDecisionSha256)
+    || typeof entry.requestSha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(entry.requestSha256)
+    || !(entry.protocolSha256 === null
+      || (typeof entry.protocolSha256 === "string" && /^[0-9a-f]{64}$/.test(entry.protocolSha256)))
+    || !(entry.cpuOutputSha256 === null
+      || (typeof entry.cpuOutputSha256 === "string" && /^[0-9a-f]{64}$/.test(entry.cpuOutputSha256)))
+    || typeof entry.runProvenanceSha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(entry.runProvenanceSha256)
+    || !(entry.identityEvidenceSha256 === null
+      || (typeof entry.identityEvidenceSha256 === "string" && /^[0-9a-f]{64}$/.test(entry.identityEvidenceSha256)))
+    || !(entry.experimentSha256 === null
+      || (typeof entry.experimentSha256 === "string" && /^[0-9a-f]{64}$/.test(entry.experimentSha256)))
+    || !(entry.projectSha256 === null
+      || (typeof entry.projectSha256 === "string" && /^[0-9a-f]{64}$/.test(entry.projectSha256)))
+    || (entry.executionClass === "dgx" && entry.cpuOutputSha256 !== null)
+    || (entry.executionClass === "cpu-only" && typeof entry.cpuOutputSha256 !== "string")) return null;
+  const outputPath = join(outputRoot, entry.outputName);
+  const publication = normalizeOutputPublicationAuthority(entry.outputPublication, outputPath);
+  if (!publication
+    || publication.jobId !== entry.id
+    || publication.publishedAt !== entry.finishedAt
+    || publication.executionDecisionSha256 !== entry.executionDecisionSha256
+    || publication.jobAuthoritySha256 !== terminalJobAuthoritySha256({
+      jobId: entry.id,
+      status: "completed",
+      outputName: entry.outputName,
+      finishedAt: entry.finishedAt,
+      executionClass: entry.executionClass,
+      executionDecisionSha256: entry.executionDecisionSha256,
+      requestSha256: entry.requestSha256,
+      protocolSha256: entry.protocolSha256,
+      jobPersistenceRevision: publication.jobPersistenceRevision,
+    })
+    || (entry.executionClass === "cpu-only" && entry.cpuOutputSha256 !== publication.output.sha256)) return null;
+  return { ...entry, outputPublication: publication } as ArchivedOutputAuthority;
+}
+
+function parseOutputAuthorityArchive(value: unknown): ArchivedOutputAuthority[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const archive = value as Partial<PersistedOutputAuthorityArchive>;
+  if (Object.keys(archive).sort().join(",") !== "entries,schemaVersion"
+    || archive.schemaVersion !== "ltx-studio-output-authority-archive.v1"
+    || !Array.isArray(archive.entries)) return null;
+  const entries = archive.entries.map(normalizeArchivedOutputAuthority);
+  if (entries.some((entry) => entry === null)) return null;
+  const normalized = entries as ArchivedOutputAuthority[];
+  const identities = new Set<string>();
+  const outputNames = new Set<string>();
+  for (const entry of normalized) {
+    if (identities.has(entry.id) || outputNames.has(entry.outputName)) return null;
+    identities.add(entry.id);
+    outputNames.add(entry.outputName);
+  }
+  return normalized;
 }
 
 const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
@@ -986,6 +3418,10 @@ function expectedDenoisingStages(request: GenerationRequest): number {
   if (request.mode === "one-stage" || request.mode === "retake" || request.mode === "text-to-audio") return 1;
   if (request.mode === "ic-lora" && request.icLora.skipStage2) return 1;
   return 2;
+}
+
+function historicalThermalResumeBelowC(baselineC: number, pauseAtC: number): number {
+  return Math.min(baselineC + 0.1, pauseAtC - 0.1);
 }
 
 function thermalProfileFromLogs(logs: unknown): ThermalProfile | null {
@@ -1005,7 +3441,7 @@ function thermalProfileFromLogs(logs: unknown): ThermalProfile | null {
       peakC,
       riseC,
       pauseAtC: thermalPauseC,
-      resumeBelowC: Math.min(baselineC + 0.1, thermalPauseC - 0.1),
+      resumeBelowC: historicalThermalResumeBelowC(baselineC, thermalPauseC),
       updatedAt: now(),
     };
   }
@@ -1014,12 +3450,23 @@ function thermalProfileFromLogs(logs: unknown): ThermalProfile | null {
 
 export class JobManager extends EventEmitter {
   private readonly storagePath: string;
-  private readonly recovery: JobManagerStorage["recovery"] | null;
+  private readonly outputAuthorityArchivePath: string;
+  private readonly recovery: NonNullable<JobManagerStorage["recovery"]> | null;
   private readonly jobs = new Map<string, RuntimeJob>();
+  private readonly outputAuthorityArchive = new Map<string, ArchivedOutputAuthority>();
+  private outputAuthorityArchiveNeedsRewrite = false;
   private readonly queue: string[] = [];
   private runningId: string | null = null;
   private activeRunPromise: Promise<void> | null = null;
   private shuttingDown = false;
+  private persistenceHold: JobPersistenceHoldError | null = null;
+  private readonly persistenceHoldAbortController = new AbortController();
+  private readonly persistenceHoldSafetyStops = new Map<string, Promise<void>>();
+  private readonly earlyProcessErrors = new WeakMap<ChildProcess, Error>();
+  private jobPersistenceFileOperations: AtomicSnapshotFileOperations =
+    DEFAULT_ATOMIC_SNAPSHOT_FILE_OPERATIONS;
+  private outputAuthorityReconciliationOperations: OutputAuthorityReconciliationOperations =
+    DEFAULT_OUTPUT_AUTHORITY_RECONCILIATION_OPERATIONS;
   private shutdownPromise: Promise<{
     queuedPreserved: number;
     localGroupsStopped: number;
@@ -1029,6 +3476,22 @@ export class JobManager extends EventEmitter {
   }> | null = null;
 
   private reusableBaseSource: ReusableLtxBaseSource | null = null;
+  private ownedDockerOperations: OwnedDockerOperations = {
+    run: (args) => {
+      const result = spawnSync(hostTcbExecutables.docker, [...args], {
+        encoding: "utf8",
+        env: HOST_TCB_DOCKER_ENV,
+        shell: false,
+        timeout: 30_000,
+      });
+      return {
+        status: result.status,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+        error: result.error ?? null,
+      };
+    },
+  };
 
   constructor(
     storage: string | JobManagerStorage = statePath,
@@ -1045,7 +3508,7 @@ export class JobManager extends EventEmitter {
     },
     private readonly dgxTerminalRetryBaseMs: number | null = DEFAULT_DGX_TERMINAL_RETRY_BASE_MS,
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
-      submit: submitQueueAdmission,
+      submit: submitPreparedQueueAdmission,
       list: listQueueJobs,
     },
     private readonly runProvenanceOperations: RunProvenanceOperations = {
@@ -1060,20 +3523,46 @@ export class JobManager extends EventEmitter {
       read: getModelInventory,
     },
     private readonly startEnforcer: JobStartEnforcer = configuredJobStartEnforcer(),
+    private readonly runtimeTrustRevalidation: () => void = () => {
+      if (sealedRelease) revalidateSealedRuntimeTrustIdentity();
+    },
+    private readonly nativeRuntimeSourceProbeOperations?: NativeRuntimeSourceProbeOperations,
   ) {
     super();
     this.storagePath = typeof storage === "string" ? storage : storage.path;
-    this.recovery = typeof storage === "string" ? null : storage.recovery;
-    if (this.recovery) {
-      this.recovery.coordinator.recover();
-      this.recovery.coordinator.verifyCommittedTargets();
+    this.outputAuthorityArchivePath = `${this.storagePath}.output-authority.v1.json`;
+    this.recovery = typeof storage === "string" ? null : storage.recovery ?? null;
+    if (typeof storage !== "string" && storage.fileOperations) {
+      this.jobPersistenceFileOperations = storage.fileOperations;
     }
-    this.restore();
+    if (typeof storage !== "string" && storage.outputAuthorityReconciliationOperations) {
+      this.outputAuthorityReconciliationOperations = {
+        ...DEFAULT_OUTPUT_AUTHORITY_RECONCILIATION_OPERATIONS,
+        ...storage.outputAuthorityReconciliationOperations,
+      };
+    }
+    try {
+      if (this.recovery) {
+        this.recovery.coordinator.recover();
+        this.recovery.coordinator.verifyCommittedTargets();
+      }
+      if (existsSync(this.storagePath)) this.sealExistingJobSnapshotForStartup();
+    } catch (error) {
+      this.enterPersistenceHold(
+        error,
+        `Startup-Durability des Job-Snapshots ${this.storagePath} konnte nicht bestätigt werden`,
+      );
+    }
+    if (!this.persistenceHold) this.restore();
     for (const job of this.jobs.values()) {
       this.scheduleLocalProcessGroupReconciliation(job, 0);
+      this.scheduleOwnedDockerContainerReconciliation(job, 0);
       this.scheduleDgxTerminalRetry(job, 0);
+      this.scheduleTerminalPendingDgxSubmitReconciliation(job, 0);
     }
-    if (this.autoStart && this.queue.length > 0) queueMicrotask(() => void this.pump());
+    if (this.autoStart && this.queue.length > 0) {
+      queueMicrotask(() => this.runDetached(this.pump(), "initialer Queue-Pump"));
+    }
   }
 
   // The output library lives beside the manager in index.ts; wiring it after
@@ -1085,38 +3574,484 @@ export class JobManager extends EventEmitter {
   list(): StudioJob[] {
     return [...this.jobs.values()]
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .map(publicJob);
+      .map((job) => this.publicJob(job));
+  }
+
+  /**
+   * Route-level preflight for operations that would persist state derived
+   * from an output. Legacy history grants byte playback only; it must never
+   * become an implicit authority for reviews, analyses or derived assets.
+   */
+  assertOutputMutationAllowed(outputName: string): void {
+    this.assertPersistenceAvailable("Änderung einer Ausgabe");
+    if ([...this.jobs.values()].some((job) =>
+      job.outputName === outputName && job.legacyHistory !== undefined)) {
+      throw new JobConflictError(LEGACY_OUTPUT_READ_ONLY_MESSAGE);
+    }
+  }
+
+  /** Reject missing or legacy jobs before a bound route can grant new authority. */
+  assertJobMutationAllowed(id: string): void {
+    const job = this.jobs.get(id);
+    if (!job) {
+      throw new JobConflictError(
+        "Der gebundene Job ist nicht mehr mit einer aktuellen modernen Jobautorität belegt.",
+      );
+    }
+    if (job.legacyHistory) throw new JobConflictError(LEGACY_JOB_READ_ONLY_MESSAGE);
+  }
+
+  /**
+   * Project outputHistory may outlive the bounded interactive job list. It may
+   * authorize a new continuity/retake operation only while either the current
+   * modern publication or its immutable modern archive entry still exists.
+   */
+  assertHistoricalOutputReferenceMutationAllowed(jobId: string, outputName: string): void {
+    this.assertPersistenceAvailable("Verwendung einer historischen Projektausgabe");
+    const job = this.jobs.get(jobId);
+    if (job?.legacyHistory) throw new JobConflictError(LEGACY_OUTPUT_READ_ONLY_MESSAGE);
+    const archived = this.outputAuthorityArchive.get(jobId);
+    const publication = readValidOutputPublicationAuthority(outputRoot, outputName);
+    if (archived?.outputName === outputName
+      && publication
+      && canonicalJson(publication) === canonicalJson(archived.outputPublication)) return;
+    throw new JobConflictError(
+      "Die gebundene Projektausgabe besitzt keine aktuell sichtbare, archivierte moderne Publikationsautorität.",
+    );
+  }
+
+  private publicJob(job: RuntimeJob): StudioJob {
+    return publicJob(job, this.persistenceHold !== null, this.jobSettlementPending(job));
+  }
+
+  /** Internal-only current job authorities; never serialize this through an API route. */
+  outputAuthorityList(): OutputAuthorityJob[] {
+    this.assertPersistenceAvailable("Lesen einer Output-Publikationsautorität");
+    const current = [...this.jobs.values()].map((job) => ({
+        ...publicJob(job),
+        authorityBoundRequest: structuredClone(job.authorityBoundRequest),
+        authorityRequestSha256: job.authorityRequestSha256,
+        legacyHistory: job.legacyHistory ? structuredClone(job.legacyHistory) : undefined,
+        outputPublicationCommitPending: job.outputPublicationCommitPending
+          ? structuredClone(job.outputPublicationCommitPending)
+          : undefined,
+        outputPublication: job.outputPublication
+          ? structuredClone(job.outputPublication)
+          : undefined,
+      }));
+    const currentIds = new Set(current.map(({ id }) => id));
+    const archived = [...this.outputAuthorityArchive.values()]
+      .filter(({ id }) => !currentIds.has(id))
+      .map((entry) => structuredClone(entry));
+    return [...current, ...archived]
+      .sort((left, right) => {
+        const leftAt = "createdAt" in left ? left.createdAt : left.finishedAt;
+        const rightAt = "createdAt" in right ? right.createdAt : right.finishedAt;
+        return rightAt.localeCompare(leftAt);
+      });
+  }
+
+  revokeOutputAuthority(outputName: string, expectedJobId: string): void {
+    this.assertPersistenceAvailable("Widerruf einer Output-Autorität");
+    const archived = this.outputAuthorityArchive.get(expectedJobId);
+    if (!archived || archived.outputName !== outputName) {
+      throw new Error("Dauerhafte Output-Autorität fehlt oder gehört zu einem anderen Job.");
+    }
+    const archiveSnapshot = new Map(this.outputAuthorityArchive);
+    this.outputAuthorityArchive.delete(expectedJobId);
+    try {
+      this.persistOutputAuthorityArchive();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        this.outputAuthorityArchive.clear();
+        for (const [jobId, entry] of archiveSnapshot) {
+          this.outputAuthorityArchive.set(jobId, entry);
+        }
+      }
+      throw error;
+    }
   }
 
   get(id: string): StudioJob | undefined {
     const job = this.jobs.get(id);
-    return job ? publicJob(job) : undefined;
+    return job ? this.publicJob(job) : undefined;
+  }
+
+  /**
+   * Internal-only settlement authority for experiment retries.
+   *
+   * A terminal public status is intentionally insufficient: cancellation is
+   * visible immediately while the local process group, an ambiguous queue
+   * submit, or the authoritative DGX terminal transition may still be in
+   * flight.  Never serialize these implementation details through an API.
+   */
+  experimentRetryAuthority(id: string): {
+    status: string;
+    dgxJobId: string | null;
+    settlementPending: boolean;
+  } | undefined {
+    const job = this.jobs.get(id);
+    if (!job) {
+      throw new JobConflictError(
+        "Der gebundene Experimentjob ist nicht mehr mit einer aktuellen modernen Jobautorität belegt.",
+      );
+    }
+    // Retry is a new execution, not a read-only inspection. Returning the
+    // terminal state here would let an imported v1 history entry bypass the
+    // explicit rerun lock through the controlled-experiment API.
+    if (job.legacyHistory) throw new JobConflictError(LEGACY_JOB_READ_ONLY_MESSAGE);
+    return {
+      status: job.status,
+      dgxJobId: job.dgxJobId,
+      settlementPending: this.jobSettlementPending(job),
+    };
+  }
+
+  private jobSettlementPending(job: RuntimeJob): boolean {
+    return this.runningId === job.id || runtimeSettlementPending(job);
+  }
+
+  private assertPersistenceAvailable(boundary: string): void {
+    if (!this.persistenceHold) return;
+    throw new JobPersistenceHoldError(
+      `LTX Studio bleibt wegen unbestätigter Snapshot-Durability im HOLD; ${boundary} ist gesperrt. `
+        + PUBLIC_JOB_PERSISTENCE_HOLD_REASON,
+      this.persistenceHold,
+    );
+  }
+
+  private enterPersistenceHold(
+    error: unknown,
+    details: string,
+  ): JobPersistenceHoldError {
+    if (!this.persistenceHold) {
+      const diagnostic = `Persistenz-HOLD: ${details}. Ursache: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.persistenceHold = new JobPersistenceHoldError(
+        diagnostic,
+        error,
+      );
+      this.persistenceHoldAbortController.abort();
+      process.stderr.write(`${diagnostic}\n`);
+      // A post-rename durability failure can happen after intended job bytes
+      // became visible but before changed() reached its normal SSE emission.
+      // Publish the manager-wide HOLD overlay exactly once, without another
+      // write, so an open GUI immediately renders `settling`/restart-required.
+      this.emitChangedSnapshot();
+      queueMicrotask(() => {
+        for (const job of this.jobs.values()) {
+          const admission = job.dgxAdmissionAbortController;
+          if (admission && !admission.signal.aborted) admission.abort();
+          this.runDetached(
+            this.safetyStopAfterPersistenceHold(job),
+            `Persistenz-HOLD-Sicherheitsstopp ${job.id}`,
+          );
+        }
+      });
+    }
+    return this.persistenceHold;
+  }
+
+  private safetyStopAfterPersistenceHold(job: RuntimeJob): Promise<void> {
+    const existing = this.persistenceHoldSafetyStops.get(job.id);
+    if (existing) return existing;
+    const safetyStop = (async () => {
+      const child = job.process;
+      const identity = job.localProcessGroupIdentity;
+      let processGroupId: number | null = null;
+      if (child?.pid && processIsAlive(child)) {
+        processGroupId = child.pid;
+      } else if (identity && !localProcessGroupIsGone(identity)) {
+        // The group leader can exit while descendants retain its PGID. The
+        // persisted boot/start-tick identity plus the /proc PGID scan proves
+        // that this is still our old isolated group; child.exitCode alone is
+        // therefore never an absence proof.
+        processGroupId = identity.processGroupId;
+      }
+      if (processGroupId !== null && processGroupExists(processGroupId)) {
+        try {
+          // Do not clear the process identity marker in HOLD.  We prove/force
+          // local quiescence, while restart recovery remains the only authority
+          // allowed to settle the persisted marker and remote lease.
+          await terminateExactProcessGroup(
+            processGroupId,
+            job.status === "paused",
+            10_000,
+            15_000,
+            child?.pid === processGroupId ? child : undefined,
+          );
+        } catch (error) {
+          this.recordCleanupDiagnostic(
+            job,
+            `Persistenz-HOLD: gebundene Prozessgruppe konnte nicht sicher gestoppt werden: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      if (job.ownedDockerContainer?.containerId
+        && job.ownedDockerContainerIdDurablyCommitted) {
+        await this.cleanupOwnedDockerContainer(job).catch(() => false);
+      }
+    })().finally(() => {
+      this.persistenceHoldSafetyStops.delete(job.id);
+    });
+    this.persistenceHoldSafetyStops.set(job.id, safetyStop);
+    return safetyStop;
+  }
+
+  /**
+   * Timer, EventEmitter and queueMicrotask callbacks have no awaiting caller.
+   * Observe every detached promise here so a persistence HOLD (or a secondary
+   * cleanup failure) can never surface as an unhandled rejection and crash the
+   * server before the fail-stop safety sequence has finished.
+   */
+  private runDetached(promise: Promise<unknown>, context: string): void {
+    void promise.catch((error) => {
+      try {
+        process.stderr.write(
+          `LTX Studio asynchroner Ablauf ${context} wurde fail-closed beendet: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`,
+        );
+      } catch {
+        // Diagnostics must never undermine the fail-stop boundary.
+      }
+    });
+  }
+
+  private persistenceTargetDigest(path = this.storagePath): string | null {
+    try {
+      return createHash("sha256")
+        .update(this.jobPersistenceFileOperations.read(path))
+        .digest("hex");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private sealExistingJobSnapshotForStartup(): void {
+    const before = this.jobPersistenceFileOperations.read(this.storagePath);
+    const descriptor = this.jobPersistenceFileOperations.open(this.storagePath, "r");
+    try {
+      this.jobPersistenceFileOperations.fsync(descriptor);
+    } finally {
+      this.jobPersistenceFileOperations.close(descriptor);
+    }
+    fsyncSnapshotDirectory(this.storagePath, this.jobPersistenceFileOperations);
+    const after = this.jobPersistenceFileOperations.read(this.storagePath);
+    if (!before.equals(after)) {
+      throw new Error("Job-Snapshot änderte sich während des Startup-Durability-Beweises.");
+    }
+  }
+
+  private commitManagedSnapshot(options: {
+    path: string;
+    value: unknown;
+    recoveryRelativePath: string | null;
+  }): void {
+    this.assertPersistenceAvailable("jede weitere Snapshot-Mutation");
+    const useRecovery = this.recovery && options.recoveryRelativePath !== null;
+    const intendedContents = useRecovery
+      ? canonicalJson(options.value)
+      : `${JSON.stringify(options.value, null, 2)}\n`;
+    const intendedDigest = createHash("sha256").update(intendedContents).digest("hex");
+    let beforeDigest: string | null;
+    try {
+      beforeDigest = this.persistenceTargetDigest(options.path);
+    } catch (error) {
+      throw this.enterPersistenceHold(error, "der vorherige Snapshot konnte nicht beweiskräftig gelesen werden");
+    }
+
+    try {
+      if (useRecovery) {
+        this.recovery.coordinator.commitJson({
+          targetKind: "job",
+          targetRelativePath: options.recoveryRelativePath!,
+          expectedAbsolutePath: options.path,
+          value: options.value,
+        });
+      } else {
+        atomicTextFile(
+          options.path,
+          intendedContents,
+          this.jobPersistenceFileOperations,
+        );
+      }
+      return;
+    } catch (commitError) {
+      // commitJson may have stopped after its prepared record or after writing
+      // the target.  Recovery is part of the same commit attempt and must make
+      // both journal and target authoritative before callers may continue.
+      if (useRecovery) {
+        try {
+          this.recovery.coordinator.recover();
+          this.recovery.coordinator.verifyCommittedTargets();
+          const recoveredDigest = this.persistenceTargetDigest(options.path);
+          if (recoveredDigest === intendedDigest) return;
+          if (recoveredDigest === beforeDigest) throw commitError;
+        } catch (recoveryError) {
+          if (recoveryError === commitError) throw commitError;
+          throw this.enterPersistenceHold(
+            recoveryError,
+            `Recovery des unklaren Job-Snapshot-Commits ist fehlgeschlagen (before=${beforeDigest ?? "missing"}, intended=${intendedDigest})`,
+          );
+        }
+        throw this.enterPersistenceHold(
+          commitError,
+          `Recovery bestätigte nicht den beabsichtigten Job-Snapshot (before=${beforeDigest ?? "missing"}, intended=${intendedDigest})`,
+        );
+      }
+
+      let observedDigest: string | null;
+      try {
+        observedDigest = this.persistenceTargetDigest(options.path);
+      } catch (readError) {
+        throw this.enterPersistenceHold(
+          readError,
+          `Read-back nach unklarem Snapshot-Commit scheiterte (before=${beforeDigest ?? "missing"}, intended=${intendedDigest})`,
+        );
+      }
+      if (observedDigest === intendedDigest) {
+        try {
+          // A rename followed by an open/fsync/close failure is recovered only
+          // through a newly opened directory FD.  Successful re-fsync turns
+          // the ambiguous attempt into a committed receipt for every caller.
+          fsyncSnapshotDirectory(options.path, this.jobPersistenceFileOperations);
+          return;
+        } catch (fsyncError) {
+          throw this.enterPersistenceHold(
+            fsyncError,
+            `der beabsichtigte Snapshot ist sichtbar, seine Directory-Durability bleibt aber unbestätigt (intended=${intendedDigest})`,
+          );
+        }
+      }
+      const failedBeforeTargetReplacement = commitError instanceof AtomicSnapshotWriteError
+        && [
+          "directory-create",
+          "temporary-open",
+          "temporary-write",
+          "temporary-fsync",
+          "temporary-close",
+          "target-rename",
+        ].includes(commitError.phase);
+      if (failedBeforeTargetReplacement && observedDigest === beforeDigest) {
+        // The target is byte-for-byte the snapshot observed before the attempt,
+        // and the writer did not pass rename.  This is the only outcome that
+        // authorizes caller compensation/retry rather than a sticky HOLD.
+        throw commitError;
+      }
+      throw this.enterPersistenceHold(
+        commitError,
+        `Snapshot-Ausgang ist nicht eindeutig committed (before=${beforeDigest ?? "missing"}, intended=${intendedDigest}, observed=${observedDigest ?? "missing"})`,
+      );
+    }
+  }
+
+  private commitJobSnapshot(values: PersistedStudioJob[]): void {
+    this.commitManagedSnapshot({
+      path: this.storagePath,
+      value: values,
+      recoveryRelativePath: this.recovery?.targetRelativePath ?? null,
+    });
+  }
+
+  private clearCancellationSettlementTransient(job: RuntimeJob, clear: () => void): void {
+    const wasPending = job.cancelledBy === "studio" && this.jobSettlementPending(job);
+    clear();
+    if (!wasPending || this.jobSettlementPending(job)) return;
+    // Runtime promises/timers are deliberately absent from persistedJob().
+    // This durable write + event exists only so an already-open GUI receives
+    // the final computed `settled` state without requiring a reload.
+    try {
+      this.changed();
+    } catch (error) {
+      process.stderr.write(
+        `LTX Studio konnte den finalen Cancellation-Settlement-Event nicht persistieren: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
+      // These cleared promises/timers are intentionally runtime-only and are
+      // never part of persistedJob().  Even when an unrelated durable write is
+      // unavailable, the live GUI must receive exactly one final computed
+      // `settled` snapshot instead of remaining permanently on `settling`.
+      this.emitChangedSnapshot();
+    }
+  }
+
+  private recordCleanupDiagnostic(job: RuntimeJob, message: string): void {
+    this.appendLog(job, message);
+    if (this.persistenceHold) {
+      // Cleanup is authorized only through a previously durable immutable ID.
+      // HOLD deliberately forbids another write, but a diagnostic must not
+      // interrupt the exact-ID stop/rm safety path.
+      this.emitChangedSnapshot();
+      return;
+    }
+    this.changed();
+  }
+
+  inspectRawMuxPairCandidateAuthority(
+    request: GenerationRequest,
+    binding: ExperimentRunBinding,
+  ): { description: string } | { error: string } {
+    const proof = this.rawOutputPairAuthority({
+      request,
+      experiment: binding,
+      runProvenance: null,
+      identityEvidence: null,
+    });
+    if (proof.error || !proof.authority || !proof.authorityBinding) {
+      return { error: proof.error ?? "Die private Raw-Mux-Paarautorität ist nicht vollständig verifizierbar." };
+    }
+    return {
+      description: `Baseline ${proof.authority.baselineOutputName} bindet den privaten Kandidatenarm, beide Receipts und die identische Host-Timeline.`,
+    };
   }
 
   activationStatus() {
     return this.startEnforcer.inspect();
   }
 
+  persistenceHealth(): PublicJobPersistenceHealth {
+    return this.persistenceHold
+      ? publicJobPersistenceHoldHealth()
+      : { status: "ok", restartRequired: false };
+  }
+
   create(
     request: GenerationRequest,
     metadata: JobCreateMetadata = {},
   ): StudioJob {
+    this.assertPersistenceAvailable("Annahme eines neuen Jobs");
     if (metadata.experiment && metadata.project) {
       throw new JobConflictError("Ein Job darf nicht gleichzeitig Experiment- und Projektlauf sein.");
     }
+    const experimentBinding = metadata.experiment
+      ? experimentRunBindingSchema.parse(metadata.experiment)
+      : null;
+    const startSource = this.startSource({ ...metadata, experiment: experimentBinding });
     // Frozen experiment and revision-bound project requests are authoritative.
     // Normal jobs are still canonicalized here; bound requests were canonicalized
     // before persistence and must retain their exact digest.
-    request = metadata.experiment || metadata.project
+    request = experimentBinding || metadata.project
       ? structuredClone(request)
       : withOfficialSpeechModelPaths(request);
+    const authorityBoundRequest = structuredClone(request);
+    const requestSha256 = createHash("sha256").update(canonicalJson(authorityBoundRequest)).digest("hex");
+    if (experimentBinding
+      && experimentBinding.requestSha256 !== experimentRequestSha256V1(authorityBoundRequest)) {
+      throw new JobConflictError("Experimentlauf stimmt nicht mit seiner gebundenen Request-Revision überein.");
+    }
     if (
       metadata.project
-      && createHash("sha256").update(canonicalJson(request)).digest("hex") !== metadata.project.requestSha256
+      && requestSha256 !== metadata.project.requestSha256
     ) {
       throw new JobConflictError("Projektlauf stimmt nicht mit seiner gebundenen Request-Revision überein.");
     }
-    this.assertStartAllowed(request, this.startSource(metadata));
+    this.assertStartAllowed(request, startSource, requestSha256, experimentBinding);
     if (this.shuttingDown) {
       throw new JobConflictError("LTX Studio wird beendet und nimmt keine neuen Aufträge mehr an.");
     }
@@ -1130,7 +4065,33 @@ export class JobManager extends EventEmitter {
       throw new JobConflictError(`Die Ausgabedatei ${request.outputName} ist bereits durch einen aktiven Job reserviert.`);
     }
     const plan = buildCommand(request);
+    const outputPath = join(outputRoot, request.outputName);
+    const completedJobOwnsName = [...this.jobs.values()].some(
+      (job) => job.status === "completed" && job.outputName === request.outputName,
+    );
+    const archivedJobOwnsName = [...this.outputAuthorityArchive.values()].some(
+      (entry) => entry.outputName === request.outputName,
+    );
+    if (completedJobOwnsName
+      || archivedJobOwnsName
+      || existsSync(outputPath)
+      || existsSync(outputPublicationPath(outputPath))) {
+      throw new JobConflictError(
+        `Die Ausgabedatei ${request.outputName} ist bereits publiziert oder durch eine dauerhafte Output-Autorität belegt.`,
+      );
+    }
     const id = randomUUID();
+    const createdAt = now();
+    const pendingDecision: JobExecutionDecision = {
+      schemaVersion: "ltx-studio-execution-decision.v6",
+      executionClass: "pending",
+      decidedAt: createdAt,
+      reason: "Auftrag dauerhaft angenommen; Ausführungsklasse wird vor dem ersten Prozess-/DGX-Start festgelegt.",
+      requestSha256,
+      protocolSha256: experimentBinding?.protocolSha256 ?? null,
+      cpuReuse: null,
+      operation: null,
+    };
     const job: RuntimeJob = {
       id,
       status: "queued",
@@ -1138,7 +4099,7 @@ export class JobManager extends EventEmitter {
       prompt: request.prompt,
       outputName: request.outputName,
       outputUrl: null,
-      createdAt: now(),
+      createdAt,
       startedAt: null,
       finishedAt: null,
       progress: null,
@@ -1148,7 +4109,7 @@ export class JobManager extends EventEmitter {
       request,
       favorite: false,
       variantOf: metadata.variantOf ?? null,
-      experiment: metadata.experiment ? experimentRunBindingSchema.parse(metadata.experiment) : null,
+      experiment: experimentBinding,
       project: metadata.project ? projectRunBindingSchema.parse(metadata.project) : null,
       runtimeMs: null,
       cancelledBy: null,
@@ -1156,64 +4117,129 @@ export class JobManager extends EventEmitter {
       dgxJobId: null,
       identityEvidence: null,
       runProvenance: null,
-      startSource: this.startSource(metadata),
+      executionClass: "pending",
+      executionDecision: pendingDecision,
+      localProcessProtocol: "fd-gate.v1",
+      startSource,
+      startDeferred: metadata.deferStart === true,
       plan,
+      authorityBoundRequest,
+      authorityRequestSha256: requestSha256,
+      legacyTextToAudioPeakCeilingUnset: false,
     };
+    const jobsSnapshot = new Map(this.jobs);
+    const queueSnapshot = [...this.queue];
     this.jobs.set(id, job);
     this.queue.push(id);
     this.trimHistory();
     try {
       this.changed();
     } catch (error) {
-      this.jobs.delete(id);
-      const queueIndex = this.queue.indexOf(id);
-      if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
+      if (!isJobPersistenceHoldError(error)) {
+        this.jobs.clear();
+        for (const [snapshotId, snapshotJob] of jobsSnapshot) {
+          this.jobs.set(snapshotId, snapshotJob);
+        }
+        this.queue.splice(0, this.queue.length, ...queueSnapshot);
+      }
       throw error;
     }
-    if (this.autoStart && !metadata.deferStart) void this.pump();
-    return publicJob(job);
+    if (this.autoStart && !metadata.deferStart) {
+      this.runDetached(this.pump(), `Queue-Pump nach Jobanlage ${job.id}`);
+    }
+    return this.publicJob(job);
   }
 
   startQueued(id: string): StudioJob | undefined {
+    this.assertPersistenceAvailable("Start eines vorbereiteten Jobs");
     if (this.shuttingDown) return undefined;
     const job = this.jobs.get(id);
     if (!job || job.status !== "queued" || !this.queue.includes(id)) return undefined;
-    if (this.autoStart) void this.pump();
-    return publicJob(job);
+    if (job.startDeferred) {
+      // Persist the arm only after the caller completed its external CAS. If
+      // this write fails, the in-memory fence is restored and no pump occurs.
+      job.startDeferred = false;
+      try {
+        this.changed();
+      } catch (error) {
+        if (!isJobPersistenceHoldError(error)) job.startDeferred = true;
+        throw error;
+      }
+    }
+    if (this.autoStart) this.runDetached(this.pump(), `Queue-Pump nach Freigabe ${job.id}`);
+    return this.publicJob(job);
+  }
+
+  /**
+   * Terminalizes a prepared-but-never-armed transaction without pretending it
+   * was a user cancellation. The private durable fence is deliberately kept:
+   * after any later restart it proves that the job never became executable.
+   */
+  interruptDeferredStart(id: string, reason: string): StudioJob | undefined {
+    this.assertPersistenceAvailable("Terminalisierung eines vorbereiteten Jobs");
+    const job = this.jobs.get(id);
+    if (!job
+      || job.status !== "queued"
+      || !job.startDeferred
+      || job.startedAt !== null
+      || job.dgxJobId !== null
+      || this.jobSettlementPending(job)) {
+      return undefined;
+    }
+    const queueIndex = this.queue.indexOf(id);
+    if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
+    job.status = "interrupted";
+    job.finishedAt = now();
+    job.error = reason;
+    this.appendLog(job, reason);
+    this.changed();
+    return this.publicJob(job);
   }
 
   rerun(id: string, mode: VariantMode): StudioJob | undefined {
     const source = this.jobs.get(id);
-    if (!source || isActiveJobStatus(source.status)) return undefined;
+    if (!source || isActiveJobStatus(source.status) || this.jobSettlementPending(source)) return undefined;
+    if (source.legacyHistory) {
+      throw new JobConflictError(
+        "Historischer Altbestand ist ausdrücklich nur lesbar und besitzt keine moderne "
+        + "Ausführungsautorität. Einstellungen bei Bedarf manuell als neuen Auftrag erfassen.",
+      );
+    }
+    if (source.legacyTextToAudioPeakCeilingUnset) {
+      throw new JobConflictError(
+        "Dieser historische Text-zu-Audio-Job hat keine gebundene Peak-Grenze und kann deshalb nicht "
+        + "semantisch exakt wiederholt werden. Bitte Einstellungen übernehmen und einen neuen, sichtbar "
+        + "auf -3 dBFS begrenzten Auftrag erstellen.",
+      );
+    }
     const unavailable = (name: string) =>
       [...this.jobs.values()].some((job) => job.outputName === name) || existsSync(join(outputRoot, name));
     const request = withOfficialSpeechModelPaths(structuredClone(source.request));
     request.outputName = nextVariantOutputName(source.outputName, unavailable);
     if (mode === "random-seed") request.seed = randomInt(0, 2_147_483_647);
-    return this.create(request, { variantOf: source.variantOf ?? source.id, startSource: "rerun" });
+    return this.create(request, { variantOf: source.variantOf ?? source.id });
   }
 
   setFavorite(id: string, favorite: boolean): StudioJob | undefined {
+    this.assertPersistenceAvailable("Änderung eines Jobs");
     const job = this.jobs.get(id);
     if (!job) return undefined;
+    if (job.legacyHistory) throw new JobConflictError(LEGACY_JOB_READ_ONLY_MESSAGE);
     job.favorite = favorite;
     this.changed();
-    return publicJob(job);
+    return this.publicJob(job);
   }
 
   remove(id: string): StudioJob | undefined {
+    this.assertPersistenceAvailable("Entfernen eines Jobs");
     const job = this.jobs.get(id);
     if (!job) return undefined;
-    if (
-      isActiveJobStatus(job.status)
-      || job.process
-      || job.processTermination
-      || job.localProcessGroupPending
-      || job.dgxSubmitPending
-      || job.dgxStateTransitionInFlight
-      || job.dgxTerminalDelivery
-      || job.dgxTerminalDeliveryInFlight
-    ) {
+    if (job.legacyHistory) {
+      throw new JobConflictError(
+        "Historischer Altbestand bleibt mit seinem schreibgeschützten Mediennachweis verbunden und kann hier nicht entfernt werden.",
+      );
+    }
+    if (isActiveJobStatus(job.status) || this.jobSettlementPending(job)) {
       throw new JobConflictError(
         "Der Job ist noch aktiv oder seine DGX-Abschlussmeldung ist noch nicht bestätigt.",
       );
@@ -1222,54 +4248,200 @@ export class JobManager extends EventEmitter {
     try {
       this.changed();
     } catch (error) {
-      this.jobs.set(id, job);
+      if (!isJobPersistenceHoldError(error)) this.jobs.set(id, job);
       throw error;
     }
-    return publicJob(job);
+    return this.publicJob(job);
+  }
+
+  private commitStudioCancellationIntent(job: RuntimeJob, beforeLocalStart: boolean): void {
+    const queueSnapshot = [...this.queue];
+    const snapshot = {
+      status: job.status,
+      cancelledBy: job.cancelledBy,
+      finishedAt: job.finishedAt,
+      runtimeMs: job.runtimeMs,
+      logs: [...job.logs],
+      dgxTerminalDelivery: job.dgxTerminalDelivery
+        ? structuredClone(job.dgxTerminalDelivery)
+        : undefined,
+      ownedDockerContainer: job.ownedDockerContainer
+        ? structuredClone(job.ownedDockerContainer)
+        : undefined,
+    };
+    try {
+      if (job.status === "queued") {
+        const index = this.queue.indexOf(job.id);
+        if (index >= 0) this.queue.splice(index, 1);
+      }
+      this.prepareDgxTerminalDelivery(job, "cancelled", {
+        current_step: beforeLocalStart
+          ? "cancelled by LTX Studio before local start"
+          : "cancelled by LTX Studio",
+        last_error: "manual Studio cancellation",
+      });
+      job.status = "cancelled";
+      job.cancelledBy = "studio";
+      job.finishedAt = now();
+      if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
+      if (job.ownedDockerContainer) job.ownedDockerContainer.state = "cleanup";
+      this.appendLog(
+        job,
+        beforeLocalStart
+          ? "Manueller Abbruch über die Studio-Abbruchfunktion vor dem Start angefordert."
+          : "Manueller Abbruch über die Studio-Abbruchfunktion angefordert.",
+      );
+      // No abort, signal, Docker action, or DGX transition may happen before
+      // this durable cancellation intent commits.
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        this.queue.splice(0, this.queue.length, ...queueSnapshot);
+        job.status = snapshot.status;
+        job.cancelledBy = snapshot.cancelledBy;
+        job.finishedAt = snapshot.finishedAt;
+        job.runtimeMs = snapshot.runtimeMs;
+        job.logs = snapshot.logs;
+        if (snapshot.dgxTerminalDelivery) {
+          job.dgxTerminalDelivery = snapshot.dgxTerminalDelivery;
+        } else {
+          delete job.dgxTerminalDelivery;
+        }
+        if (snapshot.ownedDockerContainer) {
+          job.ownedDockerContainer = snapshot.ownedDockerContainer;
+        } else {
+          delete job.ownedDockerContainer;
+        }
+      }
+      throw error;
+    }
   }
 
   cancel(id: string): StudioJob | undefined {
     const job = this.jobs.get(id);
     if (!job) return undefined;
+    if (job.legacyHistory) throw new JobConflictError(LEGACY_JOB_READ_ONLY_MESSAGE);
+    if (["queued", "running", "paused"].includes(job.status)) {
+      this.assertPersistenceAvailable("neuer Cancellation-Intent");
+    }
     if (job.status === "queued") {
-      const index = this.queue.indexOf(id);
-      if (index >= 0) this.queue.splice(index, 1);
       const process = job.process;
-      this.prepareDgxTerminalDelivery(job, "cancelled", {
-        current_step: "cancelled by LTX Studio before local start",
-        last_error: "manual Studio cancellation",
-      });
-      job.status = "cancelled";
-      job.cancelledBy = "studio";
-      job.finishedAt = now();
-      if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
-      this.appendLog(job, "Manueller Abbruch über die Studio-Abbruchfunktion vor dem Start angefordert.");
-      if (process?.pid) {
-        void this.stopProcessBeforeTerminalDelivery(job, process, false);
+      const admission = job.dgxAdmissionAbortController;
+      this.commitStudioCancellationIntent(job, true);
+      // The cancellation intent is durable now. Abort the one and only
+      // in-flight submit request so cancellation never waits on a hung HTTP
+      // response. Reconciliation remains read-only; this POST is not replayed.
+      admission?.abort();
+      if (job.dgxAdmissionAbortController === admission) {
+        delete job.dgxAdmissionAbortController;
       }
-      this.changed();
-      if (!process?.pid) void this.flushDgxTerminalDelivery(job);
-      return publicJob(job);
+      if (job.dgxSubmitPending) {
+        this.scheduleTerminalPendingDgxSubmitReconciliation(job, 0);
+      }
+      if (process?.pid) {
+        this.runDetached(
+          this.stopProcessBeforeTerminalDelivery(job, process, false),
+          `Cancellation-Prozessstopp ${job.id}`,
+        );
+      }
+      if (job.ownedDockerContainer) {
+        this.scheduleOwnedDockerContainerReconciliation(job, 0);
+      } else if (!process?.pid) {
+        this.runDetached(this.flushDgxTerminalDelivery(job), `Cancellation-DGX-Zustellung ${job.id}`);
+      }
+      return this.publicJob(job);
     }
     if (["running", "paused"].includes(job.status)) {
       const wasPaused = job.status === "paused";
       const process = job.process;
-      this.prepareDgxTerminalDelivery(job, "cancelled", {
-        current_step: "cancelled by LTX Studio",
-        last_error: "manual Studio cancellation",
-      });
-      job.status = "cancelled";
-      job.cancelledBy = "studio";
-      job.finishedAt = now();
-      if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
-      this.appendLog(job, "Manueller Abbruch über die Studio-Abbruchfunktion angefordert.");
-      if (process?.pid) {
-        void this.stopProcessBeforeTerminalDelivery(job, process, wasPaused);
+      const admission = job.dgxAdmissionAbortController;
+      this.commitStudioCancellationIntent(job, false);
+      admission?.abort();
+      if (job.dgxAdmissionAbortController === admission) {
+        delete job.dgxAdmissionAbortController;
       }
-      this.changed();
-      if (!process?.pid) void this.flushDgxTerminalDelivery(job);
+      if (job.dgxSubmitPending) {
+        this.scheduleTerminalPendingDgxSubmitReconciliation(job, 0);
+      }
+      if (process?.pid) {
+        this.runDetached(
+          this.stopProcessBeforeTerminalDelivery(job, process, wasPaused),
+          `Cancellation-Prozessstopp ${job.id}`,
+        );
+      }
+      if (job.ownedDockerContainer) {
+        this.scheduleOwnedDockerContainerReconciliation(job, 0);
+      } else if (!process?.pid) {
+        this.runDetached(this.flushDgxTerminalDelivery(job), `Cancellation-DGX-Zustellung ${job.id}`);
+      }
     }
-    return publicJob(job);
+    return this.publicJob(job);
+  }
+
+  async reconcileRestoredRemoteAuthority(timeoutMs = 140_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (const job of this.jobs.values()) {
+      while (
+        job.dgxSubmitPending
+        && !isActiveJobStatus(job.status)
+        && !this.shuttingDown
+        && Date.now() < deadline
+      ) {
+        if (job.dgxSubmitReconcileRetry) clearTimeout(job.dgxSubmitReconcileRetry);
+        delete job.dgxSubmitReconcileRetry;
+        if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
+        delete job.dgxTerminalRetry;
+        try {
+          if (job.dgxSubmitReconcileInFlight) {
+            await this.withDeadline(job.dgxSubmitReconcileInFlight, deadline);
+          } else if (job.dgxTerminalDelivery) {
+            await this.withDeadline(this.flushDgxTerminalDelivery(job).then(() => undefined), deadline);
+          } else {
+            const reconciliation = this.reconcileTerminalPendingDgxSubmit(job);
+            job.dgxSubmitReconcileInFlight = reconciliation;
+            try {
+              await this.withDeadline(reconciliation, deadline);
+            } finally {
+              if (job.dgxSubmitReconcileInFlight === reconciliation) {
+                this.clearCancellationSettlementTransient(
+                  job,
+                  () => delete job.dgxSubmitReconcileInFlight,
+                );
+              }
+            }
+          }
+        } catch {
+          // Durable pending/delivery state remains the authority. The loop
+          // retries until the caller's startup-cleanup deadline.
+        }
+        if (!job.dgxSubmitPending || Date.now() >= deadline) break;
+        const requestedDelayMs = job.dgxSubmitReconcileDelayMs;
+        delete job.dgxSubmitReconcileDelayMs;
+        const delayMs = Math.min(
+          requestedDelayMs ?? DGX_SUBMIT_RECONCILE_POLL_MS,
+          Math.max(0, deadline - Date.now()),
+        );
+        if (delayMs > 0) {
+          await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, delayMs));
+        }
+      }
+    }
+    for (const job of this.jobs.values()) {
+      while (job.dgxTerminalDelivery && !this.shuttingDown && Date.now() < deadline) {
+        if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
+        delete job.dgxTerminalRetry;
+        try {
+          await this.withDeadline(this.flushDgxTerminalDelivery(job).then(() => undefined), deadline);
+        } catch {
+          // The durable delivery remains pending and is retried below.
+        }
+        if (!job.dgxTerminalDelivery || Date.now() >= deadline) break;
+        await new Promise<void>((resolvePromise) => setTimeout(
+          resolvePromise,
+          Math.min(DGX_SUBMIT_RECONCILE_POLL_MS, Math.max(0, deadline - Date.now())),
+        ));
+      }
+    }
   }
 
   async shutdown(timeoutMs = 15_000): Promise<{
@@ -1286,8 +4458,12 @@ export class JobManager extends EventEmitter {
       delete job.dgxAdmissionAbortController;
       if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
       delete job.dgxTerminalRetry;
+      if (job.dgxSubmitReconcileRetry) clearTimeout(job.dgxSubmitReconcileRetry);
+      delete job.dgxSubmitReconcileRetry;
       if (job.localProcessGroupRetry) clearTimeout(job.localProcessGroupRetry);
       delete job.localProcessGroupRetry;
+      if (job.ownedDockerContainerRetry) clearTimeout(job.ownedDockerContainerRetry);
+      delete job.ownedDockerContainerRetry;
     }
     this.shutdownPromise = (async () => {
       const deadline = Date.now() + timeoutMs;
@@ -1295,6 +4471,8 @@ export class JobManager extends EventEmitter {
       let localGroupsStopped = 0;
       const preserveLocalQueue = activeJob?.status === "queued"
         && !activeJob.dgxJobId
+        && !activeJob.dgxSubmitPending
+        && !activeJob.dgxPreparedAdmission
         && !activeJob.process;
       if (activeJob && preserveLocalQueue) {
         if (!this.queue.includes(activeJob.id)) this.queue.unshift(activeJob.id);
@@ -1312,6 +4490,7 @@ export class JobManager extends EventEmitter {
         });
         activeJob.status = "interrupted";
         activeJob.finishedAt = now();
+        if (activeJob.ownedDockerContainer) activeJob.ownedDockerContainer.state = "cleanup";
         if (activeJob.startedAt) activeJob.runtimeMs = Date.now() - Date.parse(activeJob.startedAt);
         this.appendLog(
           activeJob,
@@ -1342,6 +4521,10 @@ export class JobManager extends EventEmitter {
           }
         } else {
           await this.withDeadline(
+            this.cleanupOwnedDockerContainer(activeJob).then(() => undefined),
+            deadline,
+          ).catch(() => undefined);
+          await this.withDeadline(
             this.flushDgxTerminalDelivery(activeJob).then(() => undefined),
             deadline,
           ).catch(() => undefined);
@@ -1349,6 +4532,14 @@ export class JobManager extends EventEmitter {
       }
       if (this.activeRunPromise) {
         await this.withDeadline(this.activeRunPromise, deadline).catch(() => undefined);
+      }
+      for (const job of this.jobs.values()) {
+        if (Date.now() >= deadline) break;
+        if (!job.ownedDockerContainer || job.ownedDockerContainerRecoveryBlocked) continue;
+        await this.withDeadline(
+          this.cleanupOwnedDockerContainer(job).then(() => undefined),
+          deadline,
+        ).catch(() => undefined);
       }
       const terminalJobs = [...this.jobs.values()].filter((job) => job.dgxTerminalDelivery);
       for (const job of terminalJobs) {
@@ -1368,7 +4559,12 @@ export class JobManager extends EventEmitter {
           (job) => job.status === "queued",
         ).length,
         localGroupsStopped,
-        localPending: [...this.jobs.values()].filter((job) => job.localProcessGroupPending).length,
+        localPending: [...this.jobs.values()].filter((job) => Boolean(
+          job.localProcessSpawnPending
+          || job.localProcessGroupPending
+          || job.ownedDockerContainer
+          || job.ownedDockerContainerRecoveryBlocked,
+        )).length,
         remoteConfirmed: shutdownRemoteJobs.filter((job) => job.dgxJobTerminal).length,
         remotePending: shutdownRemoteJobs.filter(
           (job) => Boolean(job.dgxSubmitPending || job.dgxTerminalDelivery),
@@ -1388,24 +4584,48 @@ export class JobManager extends EventEmitter {
     if (job.processTermination) return job.processTermination;
     const termination = (async () => {
       await terminateProcessGroup(process, wasPaused, graceMs, deadlineMs);
+      const snapshot = {
+        process: job.process,
+        localProcessGroupPending: job.localProcessGroupPending,
+        localProcessGroupIdentity: job.localProcessGroupIdentity
+          ? structuredClone(job.localProcessGroupIdentity)
+          : undefined,
+      };
       if (job.process === process) delete job.process;
       delete job.localProcessGroupPending;
       delete job.localProcessGroupIdentity;
-      this.changed();
+      try {
+        this.changed();
+      } catch (error) {
+        if (snapshot.process) job.process = snapshot.process;
+        if (snapshot.localProcessGroupPending) job.localProcessGroupPending = true;
+        if (snapshot.localProcessGroupIdentity) {
+          job.localProcessGroupIdentity = snapshot.localProcessGroupIdentity;
+        }
+        if (!isJobPersistenceHoldError(error)) {
+          this.scheduleLocalProcessGroupReconciliation(job, 0);
+        }
+        throw error;
+      }
+      if (!await this.cleanupOwnedDockerContainer(job)) {
+        throw new Error("Eigener Docker-Refiner ist noch nicht als abwesend bewiesen.");
+      }
       await this.flushDgxTerminalDelivery(job);
     })();
     job.processTermination = termination;
-    void termination.catch((error) => {
-      this.appendLog(
+    const observedTermination = termination.catch((error) => {
+      this.recordCleanupDiagnostic(
         job,
         `Lokale Prozessgruppe konnte nicht sicher beendet werden; Remote-Lease bleibt vorgemerkt: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      this.changed();
     }).finally(() => {
-      if (job.processTermination === termination) delete job.processTermination;
+      if (job.processTermination === termination) {
+        this.clearCancellationSettlementTransient(job, () => delete job.processTermination);
+      }
     });
+    this.runDetached(observedTermination, `Prozessgruppen-Terminisierung ${job.id}`);
     return termination;
   }
 
@@ -1425,32 +4645,588 @@ export class JobManager extends EventEmitter {
   }
 
   private jobShouldStop(job: RuntimeJob): boolean {
-    return this.shuttingDown || jobWasCancelled(job);
+    // Terminality is monotone. In particular, a heartbeat fail-stop can race
+    // with a successful child exit; no continuation may revive a failed or
+    // interrupted job and publish it as completed.
+    return this.shuttingDown
+      || this.persistenceHold !== null
+      || !isActiveJobStatus(job.status);
+  }
+
+  private hasOutputReleaseAuthority(job: RuntimeJob, boundary: string): boolean {
+    if (this.jobShouldStop(job)) return false;
+    if (!job.dgxJobId) return true;
+    try {
+      requireDgxLeaseAuthority(job);
+      if (job.dgxJobTerminal || job.dgxTerminalReceipt || job.dgxTerminalDelivery) {
+        throw new DgxLeaseAuthorityError(
+          `DGX-Lease ist vor ${boundary} bereits terminal oder zur Terminalisierung vorgemerkt.`,
+        );
+      }
+    } catch (error) {
+      this.enterPersistenceHold(error, `Ausgabeautorität vor ${boundary} ist nicht beweiskräftig`);
+      return false;
+    }
+    if (this.dgxQueueOperations.heartbeat) {
+      const heartbeat = job.dgxOwnerHeartbeat;
+      const heartbeatHealthy = heartbeat
+        && !heartbeat.stopped
+        && heartbeat.jobId === job.dgxJobId
+        && heartbeat.acknowledgedOnce
+        && heartbeat.failureStartedAt === undefined
+        && Date.now() - heartbeat.lastAcknowledgedAt < DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS;
+      if (!heartbeatHealthy) {
+        this.failJob(
+          job,
+          `Ausgabe bleibt unveröffentlicht: Der DGX-Owner-Heartbeat ist vor ${boundary} `
+            + "nicht frisch und fehlerfrei bestätigt.",
+        );
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private assertPublicationMarkerReleaseAuthority(job: RuntimeJob): void {
+    this.assertPersistenceAvailable("Publikationsmarker-Freigabe");
+    const pending = normalizeOutputPublicationCommitPending(job.outputPublicationCommitPending);
+    if (this.shuttingDown
+      || !isActiveJobStatus(job.status)
+      || !pending
+      || !job.finishedAt
+      || pending.completedAt !== job.finishedAt
+      || !job.outputPublication
+      || job.dgxTerminalDelivery
+      || job.dgxTerminalReceipt
+      || job.dgxJobTerminal) {
+      throw new Error("Publikationsmarker besitzt keine dauerhaft vorbereitete lokale Commit-Phase.");
+    }
+    // Preparing and hashing a large marker/output pair is synchronous and can
+    // take long enough for externally pinned runtime or Activation/Rights
+    // inputs to drift.  Re-read both at the last synchronous fence shared by
+    // CPU and DGX publication, directly before link(2) makes the marker public.
+    this.revalidateRuntimeTrustBoundary(job, "unmittelbarer Publikationsmarker-Freigabe");
+    const releaseDecision = this.jobStartDecision(job);
+    if (!releaseDecision.allowed) {
+      throw new Error(
+        `Publikationsmarker wurde vom aktuellen Activation-/Rights-Gate verweigert: ${releaseDecision.reason}`,
+      );
+    }
+    if (!job.dgxJobId) return;
+    requireDgxLeaseAuthority(job);
+    if (job.dgxJobTerminal
+      || job.dgxTerminalReceipt
+      || job.dgxTerminalDelivery) {
+      throw new DgxLeaseAuthorityError(
+        "Publikationsmarker besitzt keine aktive Lease ohne vorzeitigen Remote-Terminalintent.",
+      );
+    }
+    if (this.dgxQueueOperations.heartbeat) {
+      const heartbeat = job.dgxOwnerHeartbeat;
+      if (!heartbeat
+        || heartbeat.stopped
+        || heartbeat.jobId !== job.dgxJobId
+        || !heartbeat.acknowledgedOnce
+        || heartbeat.failureStartedAt !== undefined
+        || Date.now() - heartbeat.lastAcknowledgedAt >= DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS) {
+        throw new DgxRemoteLeaseLostError(
+          "Publikationsmarker wurde verweigert, weil der DGX-Owner-Heartbeat nicht frisch und fehlerfrei ist.",
+        );
+      }
+    }
+  }
+
+  private bindOwnedDockerContainer(
+    job: RuntimeJob,
+    name: string,
+    workload: OwnedDockerThermalWorkload,
+  ): void {
+    if (!job.dgxJobId
+      || name !== `${workload.containerPrefix}${job.id}`
+      || job.ownedDockerContainerRecoveryBlocked) {
+      throw new Error(`${workload.label}-Container konnte nicht exakt an den aktuellen DGX-Job gebunden werden.`);
+    }
+    const previous = job.ownedDockerContainer;
+    const authority: OwnedDockerContainerAuthority = {
+      schemaVersion: "ltx-studio-owned-docker-container.v2",
+      name,
+      containerId: null,
+      dgxJobId: job.dgxJobId,
+      workload: workload.id,
+      state: "bound",
+      startGateReleasedAt: null,
+      absenceProofStartedAt: null,
+      absenceProofCount: 0,
+    };
+    if (previous && canonicalJson(previous) !== canonicalJson(authority)) {
+      throw new Error("Ein anderer eigener Docker-Container ist noch nicht als abwesend bewiesen.");
+    }
+    job.ownedDockerContainer = authority;
+    delete job.ownedDockerContainerIdDurablyCommitted;
+    try {
+      // This is the durable pre-spawn fence. The wrapper may create the
+      // container only after its exact cleanup authority reached disk.
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        if (previous) job.ownedDockerContainer = previous;
+        else delete job.ownedDockerContainer;
+      }
+      throw error;
+    }
+  }
+
+  private setOwnedDockerContainerState(
+    job: RuntimeJob,
+    state: OwnedDockerContainerState,
+  ): void {
+    const authority = job.ownedDockerContainer;
+    if (!authority || authority.state === state) return;
+    const previous = authority.state;
+    authority.state = state;
+    try {
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) authority.state = previous;
+      throw error;
+    }
+  }
+
+  private markOwnedDockerStartGateReleased(job: RuntimeJob): void {
+    const authority = job.ownedDockerContainer;
+    if (!authority) throw new Error("Refiner-Startgate besitzt keine persistierte Containerautorität.");
+    const snapshot = {
+      state: authority.state,
+      startGateReleasedAt: authority.startGateReleasedAt,
+      absenceProofStartedAt: authority.absenceProofStartedAt,
+      absenceProofCount: authority.absenceProofCount,
+    };
+    authority.state = "running";
+    authority.startGateReleasedAt = now();
+    authority.absenceProofStartedAt = null;
+    authority.absenceProofCount = 0;
+    try {
+      // This durable ambiguity marker must precede the one-byte FD3 token.
+      // Restore therefore knows that a daemon-side Create/Start may still
+      // become visible even if the docker CLI process group has already died.
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) Object.assign(authority, snapshot);
+      throw error;
+    }
+  }
+
+  private async pinStartedOwnedDockerContainer(
+    job: RuntimeJob,
+    child: ChildProcess,
+  ): Promise<void> {
+    const deadline = Date.now() + OWNED_DOCKER_IDENTITY_DISCOVERY_MS;
+    while (Date.now() < deadline) {
+      const authority = job.ownedDockerContainer;
+      if (!authority) throw new Error("Containerautorität verschwand während der ID-Bindung.");
+      const inspection = this.inspectOwnedDockerContainer(job, authority);
+      if (inspection.kind === "owned" && job.ownedDockerContainerIdDurablyCommitted) return;
+      if (child.exitCode !== null || child.signalCode !== null || this.jobShouldStop(job)) {
+        throw new Error("Refiner endete, bevor seine unveränderliche Docker-ID dauerhaft gebunden war.");
+      }
+      await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 25));
+    }
+    throw new Error("Refiner-Container wurde nach Gate-Freigabe nicht rechtzeitig identitätsgebunden sichtbar.");
+  }
+
+  private ownedDockerCommand(
+    job: RuntimeJob,
+    boundary: string,
+    args: readonly string[],
+    allowPersistenceHold = false,
+  ): OwnedDockerCommandResult {
+    this.revalidateRuntimeTrustBoundary(job, boundary, allowPersistenceHold);
+    return this.ownedDockerOperations.run(args);
+  }
+
+  private inspectOwnedDockerContainer(
+    job: RuntimeJob,
+    authority: OwnedDockerContainerAuthority,
+    allowPersistenceHoldCleanup = false,
+  ): OwnedDockerInspection {
+    if (this.persistenceHold
+      && !(allowPersistenceHoldCleanup
+        && authority.containerId !== null
+        && job.ownedDockerContainerIdDurablyCommitted === true)) {
+      this.assertPersistenceAvailable("Docker-Containeridentitätsprüfung");
+    }
+    const current = normalizeOwnedDockerContainerAuthority(
+      authority,
+      job.id,
+      job.dgxJobId,
+    );
+    if (!current || canonicalJson(current) !== canonicalJson(authority)) {
+      throw new Error("Persistierte Docker-Containerautorität widerspricht dem aktuellen Studio-/DGX-Job.");
+    }
+    const inspectTarget = authority.containerId ?? authority.name;
+    const result = this.ownedDockerCommand(
+      job,
+      "Docker-Containeridentitätsprüfung",
+      ["container", "inspect", "--format", "{{json .}}", inspectTarget],
+      allowPersistenceHoldCleanup,
+    );
+    const stderr = result.stderr.trim();
+    if (result.status !== 0 || result.error) {
+      if (!result.error
+        && result.status === 1
+        && /No such (?:object|container):/iu.test(stderr)
+        && stderr.includes(inspectTarget)) return { kind: "absent" };
+      throw new Error(
+        `docker container inspect für ${authority.name} war nicht beweiskräftig: ${
+          result.error?.message || stderr || `Exit ${String(result.status)}`
+        }`,
+      );
+    }
+    let inspection: unknown;
+    try {
+      inspection = JSON.parse(result.stdout.trim());
+    } catch {
+      throw new Error(`docker container inspect für ${authority.name} lieferte kein gültiges JSON.`);
+    }
+    if (!inspection || typeof inspection !== "object" || Array.isArray(inspection)) {
+      throw new Error(`docker container inspect für ${authority.name} lieferte kein Objekt.`);
+    }
+    const record = inspection as Record<string, unknown>;
+    const inspectedContainerId = record.Id;
+    const config = record.Config;
+    const state = record.State;
+    const labels = config && typeof config === "object" && !Array.isArray(config)
+      ? (config as Record<string, unknown>).Labels
+      : null;
+    if (typeof inspectedContainerId !== "string"
+      || !/^[0-9a-f]{64}$/u.test(inspectedContainerId)
+      || (authority.containerId !== null && inspectedContainerId !== authority.containerId)
+      || record.Name !== `/${authority.name}`
+      || !labels
+      || typeof labels !== "object"
+      || Array.isArray(labels)
+      || (labels as Record<string, unknown>)["dgx.source_app"] !== "ltx-studio"
+      || (labels as Record<string, unknown>)["dgx.job"] !== authority.dgxJobId
+      || (labels as Record<string, unknown>)["dgx.runtime"] !== "ltx2_native"
+      || !state
+      || typeof state !== "object"
+      || Array.isArray(state)
+      || typeof (state as Record<string, unknown>).Paused !== "boolean"
+      || typeof (state as Record<string, unknown>).Running !== "boolean") {
+      throw new Error(
+        `Container ${authority.name} besitzt nicht die exakt erwartete Studio-/DGX-Identität; er wird nicht verändert.`,
+      );
+    }
+    if (authority.containerId === null) {
+      const previousAbsenceProofStartedAt = authority.absenceProofStartedAt;
+      const previousAbsenceProofCount = authority.absenceProofCount;
+      authority.containerId = inspectedContainerId;
+      authority.absenceProofStartedAt = null;
+      authority.absenceProofCount = 0;
+      try {
+        // The immutable Docker ID must be durable before the first mutation;
+        // all subsequent actions address the ID, never the reusable name.
+        this.changed();
+        job.ownedDockerContainerIdDurablyCommitted = true;
+      } catch (error) {
+        if (!isJobPersistenceHoldError(error)) {
+          authority.containerId = null;
+          authority.absenceProofStartedAt = previousAbsenceProofStartedAt;
+          authority.absenceProofCount = previousAbsenceProofCount;
+        }
+        delete job.ownedDockerContainerIdDurablyCommitted;
+        throw error;
+      }
+    }
+    return {
+      kind: "owned",
+      containerId: inspectedContainerId,
+      paused: (state as Record<string, unknown>).Paused as boolean,
+      running: (state as Record<string, unknown>).Running as boolean,
+    };
+  }
+
+  private mutateOwnedDockerContainer(
+    job: RuntimeJob,
+    authority: OwnedDockerContainerAuthority,
+    action: string,
+    argsBeforeTarget: readonly string[],
+    allowPersistenceHoldCleanup = false,
+  ): OwnedDockerInspection {
+    if (this.persistenceHold
+      && !(allowPersistenceHoldCleanup
+        && authority.containerId !== null
+        && job.ownedDockerContainerIdDurablyCommitted === true)) {
+      this.assertPersistenceAvailable(`Docker-${action}`);
+    }
+    const before = this.inspectOwnedDockerContainer(job, authority, allowPersistenceHoldCleanup);
+    if (before.kind === "absent") return before;
+    const result = this.ownedDockerCommand(
+      job,
+      `Docker-${action}`,
+      [...argsBeforeTarget, before.containerId],
+      allowPersistenceHoldCleanup,
+    );
+    if (result.status !== 0 || result.error) {
+      throw new Error(
+        `docker ${action} für ${authority.name} scheiterte: ${
+          result.error?.message || result.stderr.trim() || `Exit ${String(result.status)}`
+        }`,
+      );
+    }
+    return this.inspectOwnedDockerContainer(job, authority, allowPersistenceHoldCleanup);
+  }
+
+  private controlOwnedDockerThermalState(
+    job: RuntimeJob,
+    containerName: string,
+    workload: OwnedDockerThermalWorkload,
+    action: "pause" | "unpause",
+  ): boolean {
+    const authority = job.ownedDockerContainer;
+    if (!authority
+      || authority.name !== containerName
+      || authority.workload !== workload.id) {
+      throw new Error(`${workload.label}-Thermalaktion besitzt keine exakte persistierte Containerautorität.`);
+    }
+    const after = this.mutateOwnedDockerContainer(
+      job,
+      authority,
+      action,
+      [action],
+    );
+    const expectedPaused = action === "pause";
+    if (after.kind !== "owned" || after.paused !== expectedPaused) {
+      throw new Error(
+        `${workload.label}-Containerzustand nach docker ${action} ist nicht beweiskräftig.`,
+      );
+    }
+    this.setOwnedDockerContainerState(job, expectedPaused ? "paused" : "running");
+    return true;
+  }
+
+  private confirmOwnedDockerCreationQuiescence(
+    job: RuntimeJob,
+    authority: OwnedDockerContainerAuthority,
+  ): boolean {
+    if (authority.containerId !== null || authority.startGateReleasedAt === null) return true;
+    const timestamp = now();
+    const observedAt = Date.parse(timestamp);
+    const snapshot = {
+      absenceProofStartedAt: authority.absenceProofStartedAt,
+      absenceProofCount: authority.absenceProofCount,
+    };
+    if (authority.absenceProofStartedAt === null) {
+      authority.absenceProofStartedAt = timestamp;
+      authority.absenceProofCount = 1;
+    } else {
+      authority.absenceProofCount += 1;
+    }
+    try {
+      // Every proof is a fresh name inspect performed only after the wrapper
+      // process group is gone. Persisting the series keeps restore from
+      // accepting one early 404 while Docker daemon Create/Start is delayed.
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) Object.assign(authority, snapshot);
+      throw error;
+    }
+    return authority.absenceProofCount >= OWNED_DOCKER_CREATION_ABSENCE_PROOFS
+      && observedAt - Date.parse(authority.absenceProofStartedAt)
+        >= OWNED_DOCKER_CREATION_QUIESCENCE_MS;
+  }
+
+  private async cleanupOwnedDockerContainer(job: RuntimeJob): Promise<boolean> {
+    if (job.ownedDockerContainerRecoveryBlocked) return false;
+    if (!job.ownedDockerContainer) return true;
+    if (job.ownedDockerContainerCleanup) return job.ownedDockerContainerCleanup;
+    const cleanup = Promise.resolve().then(() => {
+      const authority = job.ownedDockerContainer;
+      if (!authority) return true;
+      if (this.persistenceHold) {
+        if (!authority.containerId || !job.ownedDockerContainerIdDurablyCommitted) return false;
+      } else {
+        this.setOwnedDockerContainerState(job, "cleanup");
+      }
+      let inspection = this.inspectOwnedDockerContainer(job, authority, true);
+      if (inspection.kind === "owned" && inspection.paused) {
+        try {
+          inspection = this.mutateOwnedDockerContainer(
+            job,
+            authority,
+            "unpause",
+            ["unpause"],
+            true,
+          );
+        } catch (error) {
+          this.recordCleanupDiagnostic(
+            job,
+            `Eigener pausierter Docker-Container konnte nicht regulär fortgesetzt werden; Cleanup bleibt exakt identitätsgebunden: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          inspection = this.inspectOwnedDockerContainer(job, authority, true);
+        }
+      }
+      if (inspection.kind === "owned") {
+        try {
+          inspection = this.mutateOwnedDockerContainer(
+            job,
+            authority,
+            "stop",
+            ["stop", "--time", "20"],
+            true,
+          );
+        } catch (error) {
+          this.recordCleanupDiagnostic(
+            job,
+            `Eigener Docker-Container konnte nicht regulär gestoppt werden; exakt gebundener rm-f-Fallback folgt: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          // A new inspect directly before rm -f is mandatory. It both
+          // detects an already completed --rm and revalidates ownership.
+          inspection = this.inspectOwnedDockerContainer(job, authority, true);
+        }
+      }
+      if (inspection.kind === "owned") {
+        inspection = this.mutateOwnedDockerContainer(
+          job,
+          authority,
+          "rm -f",
+          ["rm", "-f"],
+          true,
+        );
+      }
+      // Do not accept the mutation result alone. A final fresh inspect is the
+      // sole absence proof, including after docker stop/rm reported success.
+      inspection = this.inspectOwnedDockerContainer(job, authority, true);
+      if (inspection.kind !== "absent") {
+        throw new Error(`Container ${authority.name} ist nach Cleanup weiterhin vorhanden.`);
+      }
+      if (job.localProcessSpawnPending || job.localProcessGroupPending || job.localProcessGroupIdentity) {
+        // On restart a wrapper can still be between inspect and docker run.
+        // Keep the durable authority until its process group is also gone.
+        return false;
+      }
+      if (!this.confirmOwnedDockerCreationQuiescence(job, authority)) return false;
+      if (this.persistenceHold) return false;
+      const markerSnapshot = structuredClone(authority);
+      const idWasDurablyCommitted = job.ownedDockerContainerIdDurablyCommitted;
+      const logsSnapshot = [...job.logs];
+      if (job.ownedDockerContainerRetry) {
+        clearTimeout(job.ownedDockerContainerRetry);
+        delete job.ownedDockerContainerRetry;
+      }
+      if (job.ownedDockerContainer === authority) delete job.ownedDockerContainer;
+      delete job.ownedDockerContainerIdDurablyCommitted;
+      this.appendLog(
+        job,
+        `Eigener ${ownedDockerWorkload(authority.workload)?.label ?? "Docker-Refiner"}-Container ${authority.name} ist nachweislich abwesend.`,
+      );
+      try {
+        this.changed();
+      } catch (error) {
+        // Restoring an immutable, already-verified marker is conservative even
+        // in HOLD: it cannot authorize a reusable name, and it keeps local/DGX
+        // settlement fenced until restart recovery resolves disk durability.
+        job.ownedDockerContainer = markerSnapshot;
+        if (idWasDurablyCommitted) job.ownedDockerContainerIdDurablyCommitted = true;
+        job.logs = logsSnapshot;
+        throw error;
+      }
+      return true;
+    });
+    job.ownedDockerContainerCleanup = cleanup;
+    try {
+      return await cleanup;
+    } catch (error) {
+      this.recordCleanupDiagnostic(
+        job,
+        `Docker-Cleanup bleibt fail-closed; lokale/DGX-Freigabe ist weiter gesperrt: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
+    } finally {
+      if (job.ownedDockerContainerCleanup === cleanup) {
+        this.clearCancellationSettlementTransient(job, () => delete job.ownedDockerContainerCleanup);
+      }
+      if (job.ownedDockerContainer && !this.shuttingDown) {
+        this.scheduleOwnedDockerContainerReconciliation(job, OWNED_DOCKER_CONTAINER_RECONCILE_MS);
+      }
+    }
+  }
+
+  private scheduleOwnedDockerContainerReconciliation(job: RuntimeJob, delayMs: number): void {
+    if (this.shuttingDown
+      || !job.ownedDockerContainer
+      || job.ownedDockerContainerRecoveryBlocked
+      || job.ownedDockerContainerRetry
+      || job.ownedDockerContainerCleanup) return;
+    job.ownedDockerContainerRetry = setTimeout(() => {
+      this.clearCancellationSettlementTransient(
+        job,
+        () => delete job.ownedDockerContainerRetry,
+      );
+      this.runDetached(
+        this.reconcileOwnedDockerContainer(job),
+        `Docker-Container-Reconciliation ${job.id}`,
+      );
+    }, delayMs);
+    job.ownedDockerContainerRetry.unref();
+  }
+
+  private async reconcileOwnedDockerContainer(job: RuntimeJob): Promise<void> {
+    if (this.shuttingDown || !job.ownedDockerContainer) return;
+    const settled = await this.cleanupOwnedDockerContainer(job);
+    if (!settled) return;
+    await this.flushDgxTerminalDelivery(job);
+    this.scheduleDgxTerminalRetry(job, 0);
   }
 
   private async markProcessStarted(job: RuntimeJob, child: ChildProcess): Promise<void> {
+    const spawnPendingSnapshot = job.localProcessSpawnPending;
     job.process = child;
     job.localProcessGroupPending = true;
     try {
       if (!child.pid) throw new Error("Gestarteter Prozess besitzt keine PID.");
       job.localProcessGroupIdentity = captureLocalProcessGroupIdentity(child.pid);
+      delete job.localProcessSpawnPending;
       this.changed();
     } catch (error) {
-      this.appendLog(
-        job,
-        `Lokale Prozessgruppenidentität konnte nicht dauerhaft gebunden werden: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      this.changed();
+      try {
+        this.recordCleanupDiagnostic(
+          job,
+          `Lokale Prozessgruppenidentität konnte nicht dauerhaft gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      } catch {
+        // A diagnostic write must never stand between a spawned process and
+        // its unconditional safety stop.
+      }
+      let groupGone = false;
       try {
         await terminateProcessGroup(child, false, 250, 2_000);
+        groupGone = !child.pid || !processGroupExists(child.pid);
+      } catch (terminationError) {
+        try {
+          this.recordCleanupDiagnostic(
+            job,
+            `Prozessgruppen-Sicherheitsstopp nach Bindefehler blieb unbestätigt: ${
+              terminationError instanceof Error ? terminationError.message : String(terminationError)
+            }`,
+          );
+        } catch {
+          // The in-memory/persisted pending marker remains the fail-closed fence.
+        }
+      }
+      if (groupGone && !this.persistenceHold && !isJobPersistenceHoldError(error)) {
         if (job.process === child) delete job.process;
         delete job.localProcessGroupPending;
         delete job.localProcessGroupIdentity;
-        this.changed();
-      } catch {
-        // The persisted pending marker keeps every remote terminal transition fenced.
+        if (spawnPendingSnapshot) job.localProcessSpawnPending = true;
       }
       throw error;
     }
@@ -1460,15 +5236,41 @@ export class JobManager extends EventEmitter {
     if (child.pid && processGroupExists(child.pid)) {
       await terminateProcessGroup(child, false, 250, 2_000);
     }
+    if (this.persistenceHold) {
+      // HOLD may prove/force quiescence, but only restart recovery may clear
+      // the durable PG marker or release its remote lease.
+      await this.safetyStopAfterPersistenceHold(job);
+      return;
+    }
+    const processSnapshot = job.process;
+    const pendingSnapshot = job.localProcessGroupPending;
+    const identitySnapshot = job.localProcessGroupIdentity
+      ? structuredClone(job.localProcessGroupIdentity)
+      : undefined;
     if (job.process === child) delete job.process;
     delete job.localProcessGroupPending;
     delete job.localProcessGroupIdentity;
-    this.changed();
+    try {
+      this.changed();
+    } catch (error) {
+      if (processSnapshot) job.process = processSnapshot;
+      else delete job.process;
+      if (pendingSnapshot) job.localProcessGroupPending = true;
+      if (identitySnapshot) job.localProcessGroupIdentity = identitySnapshot;
+      if (!isJobPersistenceHoldError(error)) {
+        this.scheduleLocalProcessGroupReconciliation(job, 0);
+      }
+      throw error;
+    }
+    if (!await this.cleanupOwnedDockerContainer(job)) {
+      throw new Error("Eigener Docker-Refiner ist nach Prozessende noch nicht als abwesend bewiesen.");
+    }
   }
 
   private scheduleLocalProcessGroupReconciliation(job: RuntimeJob, delayMs: number): void {
     if (
       this.shuttingDown
+      || this.persistenceHold
       || !job.localProcessGroupPending
       || !job.localProcessGroupIdentity
       || job.localProcessGroupRetry
@@ -1477,7 +5279,10 @@ export class JobManager extends EventEmitter {
     }
     job.localProcessGroupRetry = setTimeout(() => {
       delete job.localProcessGroupRetry;
-      void this.reconcileLocalProcessGroup(job);
+      this.runDetached(
+        this.reconcileLocalProcessGroup(job),
+        `Prozessgruppen-Reconciliation ${job.id}`,
+      );
     }, delayMs);
     job.localProcessGroupRetry.unref();
   }
@@ -1501,23 +5306,59 @@ export class JobManager extends EventEmitter {
       this.scheduleLocalProcessGroupReconciliation(job, LOCAL_PROCESS_GROUP_RECONCILE_MS);
       return;
     }
+    if (this.persistenceHold) return;
+    const processSnapshot = job.process;
+    const pendingSnapshot = job.localProcessGroupPending;
+    const identitySnapshot = structuredClone(identity);
+    const logsSnapshot = [...job.logs];
+    if (job.process?.pid === identity.processGroupId) delete job.process;
     delete job.localProcessGroupPending;
     delete job.localProcessGroupIdentity;
     this.appendLog(
       job,
       "Studio-Recovery: frühere lokale Prozessgruppe ist nachweislich beendet; Remote-Terminalmeldung wird freigegeben.",
     );
-    this.changed();
+    try {
+      this.changed();
+    } catch (error) {
+      // A proven pre-rename failure means disk still contains the marker. Keep
+      // RAM identical and retry reconciliation live. In HOLD the early guard
+      // above prevents marker mutation entirely.
+      if (processSnapshot) job.process = processSnapshot;
+      else delete job.process;
+      if (pendingSnapshot) job.localProcessGroupPending = true;
+      job.localProcessGroupIdentity = identitySnapshot;
+      job.logs = logsSnapshot;
+      if (!isJobPersistenceHoldError(error)) {
+        this.scheduleLocalProcessGroupReconciliation(job, 0);
+      }
+      throw error;
+    }
+    if (job.ownedDockerContainer) {
+      this.scheduleOwnedDockerContainerReconciliation(job, 0);
+      return;
+    }
     await this.flushDgxTerminalDelivery(job);
     this.scheduleDgxTerminalRetry(job, 0);
   }
 
   private async pump(): Promise<void> {
-    if (this.shuttingDown || this.runningId !== null) return;
-    const id = this.queue.shift();
+    if (this.shuttingDown || this.persistenceHold || this.runningId !== null) return;
+    // A deferred entry is a prepared transaction, not runnable queue work.
+    // Another job may trigger the shared pump while its external experiment
+    // CAS is still pending, so the fence must be enforced here as well as at
+    // the create() call site.
+    for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+      const queued = this.jobs.get(this.queue[index]!);
+      if (!queued || queued.status !== "queued") this.queue.splice(index, 1);
+    }
+    const runnableIndex = this.queue.findIndex((queuedId) =>
+      this.jobs.get(queuedId)?.startDeferred === false);
+    if (runnableIndex < 0) return;
+    const [id] = this.queue.splice(runnableIndex, 1);
     if (!id) return;
     const job = this.jobs.get(id);
-    if (!job || job.status !== "queued") return void this.pump();
+    if (!job || job.status !== "queued") return this.pump();
     const decision = this.jobStartDecision(job);
     if (!decision.allowed) {
       job.status = "failed";
@@ -1525,7 +5366,7 @@ export class JobManager extends EventEmitter {
       job.error = decision.reason;
       this.appendLog(job, decision.reason);
       this.changed();
-      return void this.pump();
+      return this.pump();
     }
     this.runningId = id;
     const runPromise = this.run(job);
@@ -1533,7 +5374,16 @@ export class JobManager extends EventEmitter {
     try {
       await runPromise;
     } catch (error) {
-      if (!["cancelled", "interrupted"].includes(this.jobs.get(id)?.status ?? "")) {
+      if (isJobPersistenceHoldError(error)) {
+        process.stderr.write(
+          `LTX Studio Runner bleibt wegen Persistenz-HOLD fail-stop ohne Status-/DGX-Kompensation: ${error.message}\n`,
+        );
+        return;
+      }
+      // Publication is already locally terminal before its remote completion
+      // receipt is flushed. A delivery/receipt error must leave that completed
+      // authority monotone; only an actually active runner may still fail.
+      if (isActiveJobStatus(this.jobs.get(id)?.status ?? "failed")) {
         const message = `Interner Runner-Fehler: ${
           error instanceof Error ? error.message : "Unerwarteter Fehler im Job-Runner."
         }`;
@@ -1545,39 +5395,414 @@ export class JobManager extends EventEmitter {
       }
     } finally {
       if (this.activeRunPromise === runPromise) this.activeRunPromise = null;
-      this.runningId = null;
-      if (!this.shuttingDown) void this.pump();
+      this.clearCancellationSettlementTransient(job, () => {
+        this.runningId = null;
+      });
+      if (job.dgxSubmitPending && !isActiveJobStatus(job.status)) {
+        this.scheduleTerminalPendingDgxSubmitReconciliation(job, 0);
+      }
+      if (!this.shuttingDown) this.runDetached(this.pump(), "nachfolgender Queue-Pump");
     }
   }
 
   private startSource(metadata: JobCreateMetadata): Exclude<JobStartSource, "restored"> {
-    if (metadata.startSource) return metadata.startSource;
     if (metadata.project) return "project";
     if (metadata.experiment) return "experiment";
     if (metadata.variantOf) return "rerun";
     return "direct";
   }
 
-  private assertStartAllowed(request: GenerationRequest, source: Exclude<JobStartSource, "restored">): void {
+  private assertStartAllowed(
+    request: GenerationRequest,
+    source: Exclude<JobStartSource, "restored">,
+    requestSha256: string,
+    experiment: ExperimentRunBinding | null,
+  ): void {
+    if (isLegacyDfrRequest(request)) {
+      throw new JobConflictError(
+        "Historischer DFR-Altbestand vor v1.3.0 ist unveränderlich lesbar, aber nicht ausführbar. "
+        + "Für einen neuen Lauf muss DFR ausdrücklich mit dem aktuellen v1.3-Vertrag neu konfiguriert werden.",
+      );
+    }
+    const qualificationHold = qualificationHoldForRequest(request);
+    if (qualificationHold) throw new JobConflictError(qualificationHold.reason);
+    if ((source === "experiment") !== (experiment !== null)
+      || (experiment && validRequestBoundExperimentBinding(request, experiment) === null)) {
+      throw new JobConflictError(
+        "Experimentquelle und kanonische Request-Bindung stimmen nicht überein.",
+      );
+    }
     const decision = this.startEnforcer.decide({
-      requestSha256: createHash("sha256").update(canonicalJson(request)).digest("hex"),
-      surfaceEntryId: releaseSurfaceEntryForRequest(request).id,
+      requestSha256,
+      surfaceEntryId: jobSurfaceEntryId(request, source, sealedRelease, experiment),
       source,
     });
     if (!decision.allowed) throw new JobConflictError(decision.reason);
   }
 
-  private jobStartDecision(job: RuntimeJob) {
-    return this.startEnforcer.decide({
-      requestSha256: createHash("sha256").update(canonicalJson(job.request)).digest("hex"),
-      surfaceEntryId: releaseSurfaceEntryForRequest(job.request).id,
-      source: job.startSource,
+  private deniedStartDecision(reason: string): JobStartDecision {
+    const status = this.startEnforcer.inspect();
+    return {
+      allowed: false,
+      mode: status.mode,
+      reason,
+      schemaVersion: status.schemaVersion,
+      generation: status.generation,
+      activationHeadSha256: status.activationHeadSha256,
+    };
+  }
+
+  private rawOutputBaselineImageAuthority(job: Pick<RawOutputCandidateAuthorityJob, "request" | "experiment">): {
+    evidence: ProvenanceContainerImageEvidence | null;
+    error: string | null;
+  } {
+    if (job.request.postprocess.lipForcing.rawOutputProfile
+      !== experimentalLipForcingRawOutputProfile) {
+      return { evidence: null, error: null };
+    }
+    const candidateBinding = validRawOutputExperimentBinding(job.request, job.experiment);
+    if (!candidateBinding?.baselineJobId) {
+      return {
+        evidence: null,
+        error: "Mux-copy-Kandidat besitzt keine exakt requestgebundene frische Baseline.",
+      };
+    }
+    const baseline = this.jobs.get(candidateBinding.baselineJobId);
+    const baselineBinding = baseline
+      ? validRequestBoundExperimentBinding(baseline.request, baseline.experiment)
+      : null;
+    const currentPublication = baseline?.outputPublication
+      ? readValidOutputPublicationAuthority(outputRoot, baseline.outputName)
+      : null;
+    const baselineOutputPublished = Boolean(
+      baseline
+      && this.fileReady(baseline.plan.outputPath)
+      && currentPublication
+      && baseline.outputPublication
+      && canonicalJson(currentPublication) === canonicalJson(baseline.outputPublication)
+      && currentPublication.jobId === baseline.id
+      && currentPublication.publishedAt === baseline.finishedAt,
+    );
+    if (!baseline
+      || baseline.status !== "completed"
+      || baselineBinding?.arm !== "baseline"
+      || baselineBinding.experimentId !== candidateBinding.experimentId
+      || baselineBinding.protocolSha256 !== candidateBinding.protocolSha256
+      || baselineBinding.kind !== "ablation"
+      || baselineBinding.variableId !== "lipforcing-raw-output-profile"
+      || baselineBinding.changedRequestPaths.length !== 1
+      || baselineBinding.changedRequestPaths[0] !== LIPFORCING_RAW_OUTPUT_EXPERIMENT_PATH
+      || baselineBinding.requestSha256 !== candidateBinding.baselineRequestSha256
+      || baselineBinding.baselineJobId !== null
+      || baselineBinding.adoptedBaseline === true
+      || baseline.outputName !== candidateBinding.baselineOutputName
+      || !baselineOutputPublished
+      || runtimeAuthorityRequestSha256(baseline) === null
+      || baseline.runProvenance?.verifiedAt == null
+      || !runProvenanceFingerprintMatches(baseline.runProvenance)) {
+      return {
+        evidence: null,
+        error: "Mux-copy-Kandidat benötigt den abgeschlossenen, frisch gerenderten und exakt protokollgebundenen Baseline-Arm.",
+      };
+    }
+    const evidence = lipForcingImageIdentity(baseline.runProvenance.containerImages);
+    if (!evidence) {
+      return {
+        evidence: null,
+        error: "Der frische Baseline-Arm besitzt keine gültige unveränderliche LipForcing-Containeridentität.",
+      };
+    }
+    return { evidence, error: null };
+  }
+
+  private rawOutputPairAuthority(job: RawOutputCandidateAuthorityJob): {
+    authority: RawMuxBaselineAuthority | null;
+    authorityBinding: ExecutionFileBinding | null;
+    baselineRunProvenance: RunProvenance | null;
+    baselineProvenanceFingerprint: string | null;
+    error: string | null;
+  } {
+    if (!isBoundRawOutputCandidate(job)) {
+      return {
+        authority: null,
+        authorityBinding: null,
+        baselineRunProvenance: null,
+        baselineProvenanceFingerprint: null,
+        error: null,
+      };
+    }
+    const binding = validRawOutputExperimentBinding(job.request, job.experiment);
+    const baseline = binding?.baselineJobId ? this.jobs.get(binding.baselineJobId) : null;
+    const imageAuthority = this.rawOutputBaselineImageAuthority(job);
+    if (!binding?.baselineJobId || !baseline || imageAuthority.error || !imageAuthority.evidence) {
+      return {
+        authority: null,
+        authorityBinding: null,
+        baselineRunProvenance: null,
+        baselineProvenanceFingerprint: null,
+        error: imageAuthority.error
+          ?? "Mux-copy-Kandidat besitzt keine gültige gepaarte Baseline-Containerautorität.",
+      };
+    }
+    const baselineBinding = validRawOutputBaselineExperimentBinding(
+      baseline.request,
+      baseline.experiment,
+    );
+    const derivedCandidate = baselineBinding
+      ? rawMuxCandidateRequestFromBaseline(baseline.request, baselineBinding)
+      : null;
+    if (!baselineBinding
+      || baselineBinding.experimentId !== binding.experimentId
+      || baselineBinding.protocolSha256 !== binding.protocolSha256
+      || !derivedCandidate
+      || experimentRequestSha256V1(derivedCandidate) !== binding.requestSha256) {
+      return {
+        authority: null,
+        authorityBinding: null,
+        baselineRunProvenance: null,
+        baselineProvenanceFingerprint: null,
+        error: "Mux-copy-Kandidat stimmt nicht mit dem deterministisch abgeleiteten gepaarten Baseline-Request überein.",
+      };
+    }
+    const paths = rawMuxPairPaths(join(hybridRoot, baseline.id));
+    const verifiedAuthority = readVerifiedRawMuxBaselineAuthority(paths, {
+      experimentId: binding.experimentId,
+      protocolSha256: binding.protocolSha256,
+      baselineJobId: baseline.id,
+      baselineOutputName: binding.baselineOutputName,
+      baselineRequestSha256: binding.baselineRequestSha256,
+      candidateRequestSha256: binding.requestSha256,
+      containerImageFingerprint: imageAuthority.evidence.fingerprint,
+      baselineFinalPath: baseline.plan.outputPath,
+      mouthDelayMs: baseline.request.postprocess.lipForcing.mouthDelayMs,
+      programAudioDelayMs: baseline.request.postprocess.lipForcing.programAudioDelayMs,
     });
+    const manifestEvidence = baseline.runProvenance?.files.filter((file) =>
+      file.role === "private:lipforcing-raw-mux-pair-v1") ?? [];
+    const authority = verifiedAuthority?.authority ?? null;
+    const currentAuthority = verifiedAuthority?.authorityBinding ?? null;
+    if (!authority || !currentAuthority
+      || manifestEvidence.length !== 1
+      || manifestEvidence[0].path !== paths.authority
+      || manifestEvidence[0].sha256 !== currentAuthority.sha256
+      || manifestEvidence[0].sizeBytes !== currentAuthority.revision.sizeBytes
+      || manifestEvidence[0].fileId !== currentAuthority.revision.fileId
+      || !baseline.runProvenance?.verifiedAt
+      || !runProvenanceFingerprintMatches(baseline.runProvenance)) {
+      return {
+        authority: null,
+        authorityBinding: null,
+        baselineRunProvenance: null,
+        baselineProvenanceFingerprint: null,
+        error: "Gepaarte Raw-Mux-Baseline-Artefakte oder ihre verifizierte private Manifestbindung fehlen oder sind gedriftet.",
+      };
+    }
+    if (job.identityEvidence
+      && !identityEvidenceMatches(baseline.identityEvidence, job.identityEvidence)) {
+      return {
+        authority: null,
+        authorityBinding: null,
+        baselineRunProvenance: null,
+        baselineProvenanceFingerprint: null,
+        error: "Gepaarter Raw-Mux-Kandidat stimmt nicht exakt mit der aktuellen Eingabeidentität seiner Baseline überein.",
+      };
+    }
+    if (job.runProvenance
+      && (!runProvenanceSharesLtxBase(baseline.runProvenance, job.runProvenance)
+        || !runProvenanceUsesExactLipForcingImage(job.runProvenance, imageAuthority.evidence))) {
+      return {
+        authority: null,
+        authorityBinding: null,
+        baselineRunProvenance: null,
+        baselineProvenanceFingerprint: null,
+        error: "Gepaarter Raw-Mux-Kandidat stimmt nicht exakt mit Eingabe-, LTX- und Containerprovenienz seiner Baseline überein.",
+      };
+    }
+    return {
+      authority,
+      authorityBinding: currentAuthority,
+      baselineRunProvenance: baseline.runProvenance,
+      baselineProvenanceFingerprint: baseline.runProvenance.fingerprint,
+      error: null,
+    };
+  }
+
+  private jobStartDecision(job: RuntimeJob): JobStartDecision {
+    const canonicalRequestSha256 = createHash("sha256")
+      .update(canonicalJson(job.request))
+      .digest("hex");
+    if (job.authorityRequestSha256 !== canonicalRequestSha256) {
+      return this.deniedStartDecision(
+        "Kanonischer Request und persistierte Jobautorität stimmen nicht überein.",
+      );
+    }
+    if (isLegacyDfrRequest(job.request)) {
+      return this.deniedStartDecision(
+        "Historischer DFR-Altbestand vor v1.3.0 ist nur lesbar und darf nicht neu ausgeführt werden.",
+      );
+    }
+    const qualificationHold = qualificationHoldForRequest(job.request);
+    if (qualificationHold) return this.deniedStartDecision(qualificationHold.reason);
+    if ((job.startSource === "experiment") !== (job.experiment !== null)
+      || (job.experiment
+        && validRequestBoundExperimentBinding(job.request, job.experiment) === null)) {
+      return this.deniedStartDecision(
+        "Experimentquelle und kanonische Request-Bindung stimmen nicht überein.",
+      );
+    }
+    const rawBaseline = this.rawOutputBaselineImageAuthority(job);
+    if (rawBaseline.error) return this.deniedStartDecision(rawBaseline.error);
+    const executionDecision = normalizeJobExecutionDecision(job.executionDecision);
+    const pinnedPairedPromotion = isBoundRawOutputCandidate(job)
+      && executionDecision?.schemaVersion === "ltx-studio-execution-decision.v6"
+      && executionDecision.executionClass === "cpu-only"
+      && executionDecision.operation?.kind === "paired-artifact-promotion";
+    if (!pinnedPairedPromotion) {
+      const rawPair = this.rawOutputPairAuthority(job);
+      if (rawPair.error) return this.deniedStartDecision(rawPair.error);
+    }
+    if (rawBaseline.evidence
+      && job.runProvenance
+      && !runProvenanceUsesExactLipForcingImage(job.runProvenance, rawBaseline.evidence)) {
+      return this.deniedStartDecision(
+        "Mux-copy-Kandidat und frische Baseline besitzen nicht dieselbe unveränderliche Containeridentität.",
+      );
+    }
+    try {
+      return this.startEnforcer.decide({
+        requestSha256: job.authorityRequestSha256,
+        surfaceEntryId: jobSurfaceEntryId(job.request, job.startSource, sealedRelease, job.experiment),
+        source: job.startSource,
+      });
+    } catch (error) {
+      return this.deniedStartDecision(
+        error instanceof Error ? error.message : "Jobstart-Autorität ist ungültig.",
+      );
+    }
+  }
+
+  /**
+   * Re-read every externally pinned Runtime-Seal input immediately beside a
+   * state-changing boundary.  This is intentionally synchronous: no submit,
+   * fence, process, Docker action, resume, or publication may race ahead of a
+   * failed revalidation.
+   */
+  private revalidateRuntimeTrustBoundary(
+    job: RuntimeJob,
+    boundary: string,
+    allowPersistenceHold = false,
+  ): void {
+    if (!allowPersistenceHold) this.assertPersistenceAvailable(boundary);
+    try {
+      this.runtimeTrustRevalidation();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Runtime-Trust-Revalidierung vor ${boundary} verweigert: ${detail}`);
+    }
+  }
+
+  private verifyNativeRuntimeSourceBeforeAdmission(job: RuntimeJob): boolean {
+    try {
+      const evidence = verifyNativeRuntimeSource(
+        job.request,
+        job.plan.executable,
+        this.nativeRuntimeSourceProbeOperations,
+      );
+      if (evidence) {
+        this.appendLog(
+          job,
+          `Native Runtime-Source-Gate: ltx-pipelines ${evidence.distributionVersion}, `
+            + `${evidence.contractId.toUpperCase()} Runtime-SHA ${evidence.runtimeSourceSha256.slice(0, 12)}, `
+            + `Upstream-SHA ${evidence.upstreamSourceSha256.slice(0, 12)} und Patchbindung `
+            + `${evidence.patchBinding.bindingSha256.slice(0, 12)} verifiziert.`,
+        );
+        this.changed();
+      }
+      return true;
+    } catch (error) {
+      this.failJob(
+        job,
+        `Native Runtime-Source-Gate verweigert den Lauf vor Admission: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
+    }
+  }
+
+  private async captureInitialIdentityEvidence(job: RuntimeJob): Promise<boolean> {
+    const captured = await this.identityEvidenceOperations.capture(job.request, this.assets);
+    if (this.jobShouldStop(job)) return false;
+    job.identityEvidence = captured;
+    if (captured.status === "captured") {
+      this.appendLog(
+        job,
+        `${captured.references.length} Identitätsreferenz(en) kryptografisch für diesen Lauf gebunden.`,
+      );
+    } else if (captured.status === "unavailable") {
+      this.appendLog(
+        job,
+        `Identitätsmessung später nicht beweisbar: ${captured.reason ?? "Referenzprovenienz fehlt."}`,
+      );
+    }
+    this.changed();
+    return true;
+  }
+
+  private async captureInitialRunProvenance(
+    job: RuntimeJob,
+    options?: Parameters<typeof captureRunProvenance>[2],
+  ): Promise<boolean> {
+    let captured: RunProvenance;
+    try {
+      captured = await this.runProvenanceOperations.capture(job.request, job.plan, options);
+    } catch (error) {
+      if (this.jobShouldStop(job)) return false;
+      this.failJob(
+        job,
+        `Laufprovenienz konnte nicht vollständig gebunden werden: ${
+          error instanceof Error ? error.message : "unbekannter Fehler"
+        }`,
+      );
+      return false;
+    }
+    if (this.jobShouldStop(job)) return false;
+    if (options?.expectedLipForcingImage
+      && !runProvenanceUsesExactLipForcingImage(captured, options.expectedLipForcingImage)) {
+      this.failJob(
+        job,
+        "Mux-copy-Kandidat wurde nicht an exakt dieselbe unveränderliche Containeridentität wie seine frische Baseline gebunden.",
+      );
+      return false;
+    }
+    job.runProvenance = captured;
+    this.appendLog(
+      job,
+      `${captured.files.length} verwendete Datei-/Modellartefakte sowie Code und Runtime kryptografisch gebunden `
+        + `(Manifest ${captured.fingerprint.slice(0, 12)}).`,
+    );
+    this.changed();
+    return true;
+  }
+
+  private async bindJobRunProvenanceFile(
+    job: RuntimeJob,
+    path: string,
+    role: string,
+  ): Promise<boolean> {
+    if (!job.runProvenance) throw new Error("Laufprovenienz fehlt vor der Dateibindung.");
+    const bindFile = this.runProvenanceOperations.bindFile ?? bindRunProvenanceFile;
+    const bound = await bindFile(job.runProvenance, path, role);
+    if (this.jobShouldStop(job)) return false;
+    job.runProvenance = bound;
+    return true;
   }
 
   private async run(job: RuntimeJob): Promise<void> {
     const exactAdoptedRefinerRun = isAdoptedLipForcingCandidate(job.experiment);
-    const requiredAssetIds = exactAdoptedRefinerRun
+    const rawMuxPairedCandidate = isBoundRawOutputCandidate(job);
+    if (!this.verifyNativeRuntimeSourceBeforeAdmission(job)) return;
+    const requiredAssetIds = exactAdoptedRefinerRun || rawMuxPairedCandidate
       ? []
       : requiredOfficialSpeechAssetIds(job.request);
     let inventory: ModelInventory | undefined;
@@ -1586,16 +5811,20 @@ export class JobManager extends EventEmitter {
       try {
         inventory = await this.modelInventoryOperations.read(true, requiredAssetIds);
       } catch (error) {
+        if (this.jobShouldStop(job)) return;
         pathErrors.push(
           `Die offizielle Modellintegrität konnte nicht geprüft werden: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
+      if (this.jobShouldStop(job)) return;
     }
-    pathErrors.push(...validateRequestPlan(job.request, job.plan, inventory, {
-      enforceOfficialAssets: !exactAdoptedRefinerRun,
-    }));
+    if (!rawMuxPairedCandidate) {
+      pathErrors.push(...validateRequestPlan(job.request, job.plan, inventory, {
+        enforceOfficialAssets: !exactAdoptedRefinerRun,
+      }));
+    }
     const hybridEnabled = job.request.postprocess.longcatLipsync.enabled;
     const latentSyncEnabled = job.request.postprocess.latentSync.enabled;
     const museTalkEnabled = job.request.postprocess.museTalk.enabled;
@@ -1633,17 +5862,23 @@ export class JobManager extends EventEmitter {
       ] as const) {
         if (!existsSync(path)) pathErrors.push(`${label} fehlt (${path})`);
       }
-      if (!executableAvailable("docker")) {
+      if (!executableAvailable(hostTcbExecutables.docker)) {
         pathErrors.push("Docker für den LatentSync-Refiner ist nicht verfügbar.");
       } else {
-        const imageCheck = spawnSync("docker", ["image", "inspect", latentSyncImage], {
-          encoding: "utf8",
-          shell: false,
-          stdio: "ignore",
-          timeout: 20_000,
-        });
-        if (imageCheck.status !== 0 || imageCheck.error) {
-          pathErrors.push(`LatentSync-Containerimage fehlt (${latentSyncImage}).`);
+        try {
+          this.revalidateRuntimeTrustBoundary(job, "Docker-Image-Inspektion");
+          const imageCheck = spawnSync(hostTcbExecutables.docker, ["image", "inspect", latentSyncImage], {
+            encoding: "utf8",
+            env: HOST_TCB_DOCKER_ENV,
+            shell: false,
+            stdio: "ignore",
+            timeout: 20_000,
+          });
+          if (imageCheck.status !== 0 || imageCheck.error) {
+            pathErrors.push(`LatentSync-Containerimage fehlt (${latentSyncImage}).`);
+          }
+        } catch (error) {
+          pathErrors.push(error instanceof Error ? error.message : String(error));
         }
       }
     }
@@ -1670,21 +5905,31 @@ export class JobManager extends EventEmitter {
       ] as const) {
         if (!existsSync(path)) pathErrors.push(`${label} fehlt (${path})`);
       }
-      if (!executableAvailable("docker")) {
+      if (!executableAvailable(hostTcbExecutables.docker)) {
         pathErrors.push("Docker für den MuseTalk-Refiner ist nicht verfügbar.");
       } else {
-        const imageCheck = spawnSync("docker", ["image", "inspect", museTalkImage], {
-          encoding: "utf8",
-          shell: false,
-          stdio: "ignore",
-          timeout: 20_000,
-        });
-        if (imageCheck.status !== 0 || imageCheck.error) {
-          pathErrors.push(`MuseTalk-Containerimage fehlt (${museTalkImage}).`);
+        try {
+          this.revalidateRuntimeTrustBoundary(job, "Docker-Image-Inspektion");
+          const imageCheck = spawnSync(hostTcbExecutables.docker, ["image", "inspect", museTalkImage], {
+            encoding: "utf8",
+            env: HOST_TCB_DOCKER_ENV,
+            shell: false,
+            stdio: "ignore",
+            timeout: 20_000,
+          });
+          if (imageCheck.status !== 0 || imageCheck.error) {
+            pathErrors.push(`MuseTalk-Containerimage fehlt (${museTalkImage}).`);
+          }
+        } catch (error) {
+          pathErrors.push(error instanceof Error ? error.message : String(error));
         }
       }
     }
-    if (lipForcingEnabled) {
+    if (lipForcingEnabled && !rawMuxPairedCandidate) {
+      const rawOutputImageAuthority = this.rawOutputBaselineImageAuthority(job);
+      const lipForcingAvailabilityReference = rawOutputImageAuthority.evidence?.executionReference
+        ?? lipForcingImage;
+      if (rawOutputImageAuthority.error) pathErrors.push(rawOutputImageAuthority.error);
       for (const [label, path] of [
         ["LipForcing-Adapter", lipForcingScript],
         ["LipForcing-14B-Modell", join(lipForcingModelRoot, "lipforcing_14b.pth")],
@@ -1724,17 +5969,27 @@ export class JobManager extends EventEmitter {
       ) {
         pathErrors.push(`LipForcing-TAEHV fehlt (${join(lipForcingModelRoot, "taew2_1.pth")})`);
       }
-      if (!executableAvailable("docker")) {
+      if (!executableAvailable(hostTcbExecutables.docker)) {
         pathErrors.push("Docker für den LipForcing-Refiner ist nicht verfügbar.");
       } else {
-        const imageCheck = spawnSync("docker", ["image", "inspect", lipForcingImage], {
-          encoding: "utf8",
-          shell: false,
-          stdio: "ignore",
-          timeout: 20_000,
-        });
-        if (imageCheck.status !== 0 || imageCheck.error) {
-          pathErrors.push(`LipForcing-Containerimage fehlt (${lipForcingImage}).`);
+        try {
+          this.revalidateRuntimeTrustBoundary(job, "Docker-Image-Inspektion");
+          const imageCheck = spawnSync(
+            hostTcbExecutables.docker,
+            ["image", "inspect", lipForcingAvailabilityReference],
+            {
+              encoding: "utf8",
+              env: HOST_TCB_DOCKER_ENV,
+              shell: false,
+              stdio: "ignore",
+              timeout: 20_000,
+            },
+          );
+          if (imageCheck.status !== 0 || imageCheck.error) {
+            pathErrors.push(`LipForcing-Containerimage fehlt (${lipForcingAvailabilityReference}).`);
+          }
+        } catch (error) {
+          pathErrors.push(error instanceof Error ? error.message : String(error));
         }
       }
     }
@@ -1746,7 +6001,7 @@ export class JobManager extends EventEmitter {
       this.changed();
       return;
     }
-    if (!pythonRuntimeAvailable(pythonExecutable)) {
+    if (!rawMuxPairedCandidate && !pythonRuntimeAvailable(pythonExecutable)) {
       job.status = "failed";
       job.finishedAt = now();
       job.error = `Die konfigurierte Python-LTX-Laufzeit ist unvollständig: ${pythonExecutable}`;
@@ -1754,7 +6009,9 @@ export class JobManager extends EventEmitter {
       this.changed();
       return;
     }
-    if ((finalAudioMixEnabled || refinerEnabled) && !executableAvailable("ffmpeg")) {
+    if (!rawMuxPairedCandidate
+      && (finalAudioMixEnabled || refinerEnabled)
+      && !executableAvailable("ffmpeg")) {
       job.status = "failed";
       job.finishedAt = now();
       job.error = "FFmpeg für die finale Tonspur ist nicht verfügbar.";
@@ -1763,52 +6020,77 @@ export class JobManager extends EventEmitter {
       return;
     }
 
-    job.identityEvidence = await this.identityEvidenceOperations.capture(job.request, this.assets);
-    if (this.jobShouldStop(job)) {
-      this.changed();
-      return;
-    }
-    if (job.identityEvidence.status === "captured") {
-      this.appendLog(
-        job,
-        `${job.identityEvidence.references.length} Identitätsreferenz(en) kryptografisch für diesen Lauf gebunden.`,
-      );
-    } else if (job.identityEvidence.status === "unavailable") {
-      this.appendLog(
-        job,
-        `Identitätsmessung später nicht beweisbar: ${job.identityEvidence.reason ?? "Referenzprovenienz fehlt."}`,
-      );
-    }
-    this.changed();
+    if (!await this.captureInitialIdentityEvidence(job)) return;
 
-    try {
-      job.runProvenance = await this.runProvenanceOperations.capture(job.request, job.plan);
-    } catch (error) {
-      if (this.jobShouldStop(job)) return;
-      this.failJob(
+    if (rawMuxPairedCandidate) {
+      const paired = this.rawOutputPairAuthority(job);
+      if (paired.error
+        || !paired.authority
+        || !paired.authorityBinding
+        || !paired.baselineRunProvenance
+        || !paired.baselineProvenanceFingerprint) {
+        this.failJob(
+          job,
+          paired.error
+            ?? "Gepaarte Raw-Mux-Baseline ist nicht vollständig und unverändert verfügbar; ein DGX-Fallback ist verboten.",
+        );
+        return;
+      }
+      try {
+        job.runProvenance = forkVerifiedRunProvenanceForArtifactPromotion(
+          paired.baselineRunProvenance,
+        );
+      } catch (error) {
+        this.failJob(
+          job,
+          `Historische Baseline-Provenienz konnte nicht für die CPU-only-Promotion gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+      this.appendLog(
         job,
-        `Laufprovenienz konnte nicht vollständig gebunden werden: ${
-          error instanceof Error ? error.message : "unbekannter Fehler"
-        }`,
+        "CPU-only Paar-Promotion übernimmt die verifizierte historische Baseline-Provenienz; aktuelle DGX-Modelle, Python und Docker werden nicht benötigt.",
+      );
+      this.changed();
+      await this.runPairedRawOutputCandidate(
+        job,
+        paired.authority,
+        paired.authorityBinding,
+        paired.baselineProvenanceFingerprint,
       );
       return;
     }
-    if (this.jobShouldStop(job)) {
-      this.changed();
+
+    const rawOutputBaselineImage = this.rawOutputBaselineImageAuthority(job);
+    if (rawOutputBaselineImage.error) {
+      this.failJob(job, rawOutputBaselineImage.error);
       return;
     }
-    this.appendLog(
+    if (!await this.captureInitialRunProvenance(
       job,
-      `${job.runProvenance.files.length} verwendete Datei-/Modellartefakte sowie Code und Runtime kryptografisch gebunden `
-        + `(Manifest ${job.runProvenance.fingerprint.slice(0, 12)}).`,
-    );
-    this.changed();
+      rawOutputBaselineImage.evidence
+        ? { expectedLipForcingImage: rawOutputBaselineImage.evidence }
+        : undefined,
+    )) return;
 
     const reusableLipForcingOutput = this.findReusableLipForcingOutput(job);
     if (reusableLipForcingOutput) {
       await this.runReusedLipForcingAudioRetime(job, reusableLipForcingOutput);
       return;
     }
+    if (isBoundProgramAudioOnlyCandidate(job)) {
+      this.failJob(
+        job,
+        "Die exakt protokollgebundene Baseline samt Ausgabe-, Einstellungs- und Analyse-Sidecar ist nicht unverändert verfügbar; kein Fremdquellen- oder DGX-Fallback ist zulässig.",
+      );
+      return;
+    }
+
+    // Every remaining path can allocate DGX resources (including the LongCat
+    // supervisor). Persist the class before any admission or GPU start gate.
+    if (!this.classifyExecution(job, "dgx")) return;
 
     const stageRoot = join(hybridRoot, job.id);
     const longcatOutput = join(stageRoot, "longcat.mp4");
@@ -1912,12 +6194,11 @@ export class JobManager extends EventEmitter {
         return;
       }
       try {
-        const bindFile = this.runProvenanceOperations.bindFile ?? bindRunProvenanceFile;
-        job.runProvenance = await bindFile(
-          job.runProvenance,
+        if (!await this.bindJobRunProvenanceFile(
+          job,
           ltxOutput,
           `input:reused-ltx-base:${reusableBase.id}`,
-        );
+        )) return;
       } catch (error) {
         this.failJob(
           job,
@@ -2012,48 +6293,65 @@ export class JobManager extends EventEmitter {
 
         job.status = "running";
         job.startedAt ??= now();
-        const child = spawn(job.plan.executable, ltxArgs, {
-          cwd: repoRoot,
-          env: isolatedPythonEnvironment({
-            DGX_JOB_ID: job.dgxJobId ?? undefined,
-            LTX_COOPERATIVE_CHECKPOINT_DIR: cooperativeEnabled ? checkpointRoot : undefined,
-            LTX_COOPERATIVE_JOB_FINGERPRINT: cooperativeEnabled
-              ? job.runProvenance?.fingerprint
-              : undefined,
-            LTX_COOPERATIVE_GENERATION: cooperativeEnabled
-              ? String(cooperativeGeneration)
-              : undefined,
-            PYTHONUNBUFFERED: "1",
-          }),
-          detached: true,
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        await this.markProcessStarted(job, child);
-        if (!await this.transitionDgxJob(job, "running", {
-          current_step: cooperativeEnabled
-            ? "ltx native pipeline running with cooperative Euler checkpoints"
-            : "ltx native pipeline running",
-        })) {
+        let completion: Promise<ProcessResult> | null = null;
+        const boundaryWatcher: { value: {
+          stop: () => Promise<void>;
+          yieldDecisionId: () => string | null;
+        } | null } = { value: null };
+        let stopThermalWatcher: () => void = () => undefined;
+        let child: ChildProcess;
+        try {
+          child = await this.spawnProcessWithDurableGate(job, job.plan.executable, ltxArgs, {
+            cwd: repoRoot,
+            env: isolatedPythonEnvironment({
+              DGX_JOB_ID: job.dgxJobId ?? undefined,
+              LTX_COOPERATIVE_CHECKPOINT_DIR: cooperativeEnabled ? checkpointRoot : undefined,
+              LTX_COOPERATIVE_JOB_FINGERPRINT: cooperativeEnabled
+                ? job.runProvenance?.fingerprint
+                : undefined,
+              LTX_COOPERATIVE_GENERATION: cooperativeEnabled
+                ? String(cooperativeGeneration)
+                : undefined,
+              PYTHONUNBUFFERED: "1",
+            }),
+          }, async (gatedChild) => {
+            // Attach every observer before the token. A target that exits in
+            // its first instruction cannot outrun logs/completion/thermal QA.
+            this.consumeProcessLogs(job, gatedChild, progressTracker);
+            completion = this.waitForProcess(gatedChild);
+            if (!await this.transitionDgxJob(job, "running", {
+              current_step: cooperativeEnabled
+                ? "ltx native pipeline running with cooperative Euler checkpoints"
+                : "ltx native pipeline running",
+            })) {
+              throw new Error("DGX-Queue-Running-State wurde vor dem LTX-Exec nicht freigegeben.");
+            }
+            this.changed();
+            boundaryWatcher.value = cooperativeEnabled
+              ? this.watchSegmentBoundaries(
+                  job,
+                  checkpointRoot,
+                  job.runProvenance!.fingerprint,
+                  cooperativeGeneration,
+                )
+              : null;
+            stopThermalWatcher = this.watchThermals(job, gatedChild, thermalBaselineC);
+          });
+        } catch (error) {
+          stopThermalWatcher();
+          await boundaryWatcher.value?.stop();
           if (this.jobShouldStop(job)) return;
-          this.failJob(job, "DGX-Queue-Running-State wurde nicht freigegeben; LTX-Prozess wurde beendet.");
-          await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
+          this.failJob(
+            job,
+            `LTX-Prozess blieb vor dem autorisierten Startgate: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
           return;
         }
-        this.changed();
-        this.consumeProcessLogs(job, child, progressTracker);
-        const boundaryWatcher = cooperativeEnabled
-          ? this.watchSegmentBoundaries(
-              job,
-              checkpointRoot,
-              job.runProvenance!.fingerprint,
-              cooperativeGeneration,
-            )
-          : null;
-        const stopThermalWatcher = this.watchThermals(job, child, thermalBaselineC);
-        const ltxResult = await this.waitForProcess(child);
+        const ltxResult = await (completion ?? this.waitForProcess(child));
         stopThermalWatcher();
-        await boundaryWatcher?.stop();
+        await boundaryWatcher.value?.stop();
         await this.confirmProcessGroupGone(job, child);
         if (this.jobShouldStop(job)) {
           return;
@@ -2063,7 +6361,7 @@ export class JobManager extends EventEmitter {
           const artifact = this.validateCooperativeCheckpoint(
             job,
             checkpointManifest,
-            boundaryWatcher?.yieldDecisionId() ?? null,
+            boundaryWatcher.value?.yieldDecisionId() ?? null,
           );
           rmSync(join(checkpointRoot, "boundary-ready.json"), { force: true });
           rmSync(join(checkpointRoot, "boundary-decision.json"), { force: true });
@@ -2166,7 +6464,7 @@ export class JobManager extends EventEmitter {
     if (latentSyncEnabled) {
       const latentSyncInput = hybridEnabled ? compositeOutput : ltxOutput;
       const containerName = `ltx-latentsync-${job.id}`;
-      const thermalBaselineC = await this.readThermalBaseline(job);
+      const thermalBaselineC = await this.readThermalBaseline(job, "LatentSync");
       if (this.jobShouldStop(job)) return;
       if (thermalBaselineC === null) {
         await this.transitionDgxJob(job, "failed", {
@@ -2210,7 +6508,14 @@ export class JobManager extends EventEmitter {
           "LatentSync verwendet die unveränderte saubere Sprachkonditionierung als Mund- und Ausgabetonspur.",
         );
       }
-      const child = spawn(
+      job.status = "running";
+      job.startedAt ??= now();
+      let latentSyncCompletion: Promise<ProcessResult> | null = null;
+      let stopLatentSyncThermals: () => void = () => undefined;
+      const child = await this.spawnOwnedDockerRefiner(
+        job,
+        OWNED_DOCKER_THERMAL_WORKLOADS.latentSync,
+        containerName,
         pythonExecutable,
         latentSyncArgs,
         {
@@ -2220,32 +6525,29 @@ export class JobManager extends EventEmitter {
             DGX_JOB_ID: job.dgxJobId ?? undefined,
             PYTHONUNBUFFERED: "1",
           },
-          detached: true,
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
+        },
+        async (gatedChild) => {
+          this.consumeProcessLogs(job, gatedChild);
+          latentSyncCompletion = this.waitForProcess(gatedChild);
+          if (reusableBase && !await this.transitionDgxJob(job, "running", {
+            current_step: "LatentSync 1.6 face refinement running on reused LTX base",
+          })) {
+            throw new Error("DGX-Queue-Running-State wurde für LatentSync nicht freigegeben.");
+          }
+          this.setDgxOwnerHeartbeatPhase(job, "latentsync_refinement");
         },
       );
-      job.status = "running";
-      job.startedAt ??= now();
-      await this.markProcessStarted(job, child);
-      if (reusableBase && !await this.transitionDgxJob(job, "running", {
-        current_step: "LatentSync 1.6 face refinement running on reused LTX base",
-      })) {
-        if (this.jobShouldStop(job)) return;
-        await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
-        this.failJob(job, "DGX-Queue-Running-State wurde für LatentSync nicht freigegeben.");
-        return;
-      }
-      this.setDgxOwnerHeartbeatPhase(job, "latentsync_refinement");
-      this.consumeProcessLogs(job, child);
-      const stopThermalWatcher = this.watchOwnedDockerThermals(
+      // Docker thermal control requires the immutable container ID. The
+      // spawn helper returns only after that ID has been durably pinned.
+      stopLatentSyncThermals = this.watchOwnedDockerThermals(
         job,
         child,
         thermalBaselineC,
         containerName,
+        OWNED_DOCKER_THERMAL_WORKLOADS.latentSync,
       );
-      const latentSyncResult = await this.waitForProcess(child);
-      stopThermalWatcher();
+      const latentSyncResult = await (latentSyncCompletion ?? this.waitForProcess(child));
+      stopLatentSyncThermals();
       await this.confirmProcessGroupGone(job, child);
       if (this.jobShouldStop(job)) return;
       if (latentSyncResult.error || latentSyncResult.code !== 0 || !this.fileReady(refinedOutput)) {
@@ -2266,7 +6568,7 @@ export class JobManager extends EventEmitter {
     if (museTalkEnabled) {
       const museTalkInput = hybridEnabled ? compositeOutput : ltxOutput;
       const containerName = `ltx-musetalk-${job.id}`;
-      const thermalBaselineC = await this.readThermalBaseline(job);
+      const thermalBaselineC = await this.readThermalBaseline(job, "MuseTalk");
       if (this.jobShouldStop(job)) return;
       if (thermalBaselineC === null) {
         await this.transitionDgxJob(job, "failed", {
@@ -2310,7 +6612,14 @@ export class JobManager extends EventEmitter {
           "MuseTalk verwendet die unveränderte saubere Sprachkonditionierung als Mund- und Ausgabetonspur.",
         );
       }
-      const child = spawn(
+      job.status = "running";
+      job.startedAt ??= now();
+      let museTalkCompletion: Promise<ProcessResult> | null = null;
+      let stopMuseTalkThermals: () => void = () => undefined;
+      const child = await this.spawnOwnedDockerRefiner(
+        job,
+        OWNED_DOCKER_THERMAL_WORKLOADS.museTalk,
+        containerName,
         pythonExecutable,
         museTalkArgs,
         {
@@ -2320,32 +6629,27 @@ export class JobManager extends EventEmitter {
             DGX_JOB_ID: job.dgxJobId ?? undefined,
             PYTHONUNBUFFERED: "1",
           },
-          detached: true,
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
+        },
+        async (gatedChild) => {
+          this.consumeProcessLogs(job, gatedChild);
+          museTalkCompletion = this.waitForProcess(gatedChild);
+          if (reusableBase && !await this.transitionDgxJob(job, "running", {
+            current_step: "MuseTalk 1.5 frame inpainting running on reused LTX base",
+          })) {
+            throw new Error("DGX-Queue-Running-State wurde für MuseTalk nicht freigegeben.");
+          }
+          this.setDgxOwnerHeartbeatPhase(job, "musetalk_refinement");
         },
       );
-      job.status = "running";
-      job.startedAt ??= now();
-      await this.markProcessStarted(job, child);
-      if (reusableBase && !await this.transitionDgxJob(job, "running", {
-        current_step: "MuseTalk 1.5 frame inpainting running on reused LTX base",
-      })) {
-        if (this.jobShouldStop(job)) return;
-        await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
-        this.failJob(job, "DGX-Queue-Running-State wurde für MuseTalk nicht freigegeben.");
-        return;
-      }
-      this.setDgxOwnerHeartbeatPhase(job, "musetalk_refinement");
-      this.consumeProcessLogs(job, child);
-      const stopThermalWatcher = this.watchOwnedDockerThermals(
+      stopMuseTalkThermals = this.watchOwnedDockerThermals(
         job,
         child,
         thermalBaselineC,
         containerName,
+        OWNED_DOCKER_THERMAL_WORKLOADS.museTalk,
       );
-      const museTalkResult = await this.waitForProcess(child);
-      stopThermalWatcher();
+      const museTalkResult = await (museTalkCompletion ?? this.waitForProcess(child));
+      stopMuseTalkThermals();
       await this.confirmProcessGroupGone(job, child);
       if (this.jobShouldStop(job)) return;
       if (museTalkResult.error || museTalkResult.code !== 0 || !this.fileReady(refinedOutput)) {
@@ -2365,8 +6669,26 @@ export class JobManager extends EventEmitter {
 
     if (lipForcingEnabled) {
       const lipForcingInput = hybridEnabled ? compositeOutput : ltxOutput;
+      const pairedBaselineBinding = validRawOutputBaselineExperimentBinding(
+        job.request,
+        job.experiment,
+      );
+      const pairedCandidateRequest = pairedBaselineBinding
+        ? rawMuxCandidateRequestFromBaseline(job.request, pairedBaselineBinding)
+        : null;
+      const pairedPaths = pairedBaselineBinding ? rawMuxPairPaths(stageRoot) : null;
+      if (pairedBaselineBinding && (!pairedCandidateRequest || !pairedPaths || existsSync(pairedPaths.root))) {
+        await this.failDgxJob(
+          job,
+          pairedCandidateRequest
+            ? "Privates Raw-Mux-Paarverzeichnis existiert bereits; ein Teil- oder Wiederholungslauf wird nicht überschrieben."
+            : "Kandidatenrequest konnte nicht deterministisch aus der Raw-Mux-Baseline abgeleitet werden.",
+          "paired raw mux baseline precondition failed",
+        );
+        return;
+      }
       const containerName = `ltx-lipforcing-${job.id}`;
-      const thermalBaselineC = await this.readThermalBaseline(job);
+      const thermalBaselineC = await this.readThermalBaseline(job, "LipForcing");
       if (this.jobShouldStop(job)) return;
       if (thermalBaselineC === null) {
         await this.transitionDgxJob(job, "failed", {
@@ -2382,12 +6704,62 @@ export class JobManager extends EventEmitter {
         });
         return;
       }
+      const rawBaselineAtLipForcingStart = this.rawOutputBaselineImageAuthority(job);
+      if (rawBaselineAtLipForcingStart.error
+        || (rawBaselineAtLipForcingStart.evidence
+          && !runProvenanceUsesExactLipForcingImage(
+            job.runProvenance,
+            rawBaselineAtLipForcingStart.evidence,
+          ))) {
+        const detail = rawBaselineAtLipForcingStart.error
+          ?? "Containeridentität des frischen Baseline-Arms hat sich vor dem Kandidatenstart geändert.";
+        this.failJob(job, detail);
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "raw-output baseline authority changed before LipForcing start",
+          last_error: detail,
+        });
+        return;
+      }
+      const lipForcingContainerIdentity = lipForcingImageIdentity(
+        job.runProvenance?.containerImages,
+      );
+      if (!lipForcingContainerIdentity) {
+        this.failJob(job, "LipForcing-Containeridentität fehlt unmittelbar vor dem Prozessstart.");
+        await this.transitionDgxJob(job, "failed", {
+          current_step: "immutable LipForcing container identity missing before start",
+          last_error: "LipForcing-Containeridentität fehlt unmittelbar vor dem Prozessstart.",
+        });
+        return;
+      }
       this.appendLog(
         job,
         "LipForcing 14B startet mit offizieller 512x512-Gesichtsausrichtung und audiogeführter "
           + "Zwei-Schritt-Diffusion. Kopfbewegung, Körper, Hintergrund und die exakte LTX-Zeitachse bleiben erhalten.",
       );
-      rmSync(refinedOutput, { force: true });
+      if (pairedPaths) {
+        try {
+          lstatSync(refinedOutput);
+          await this.failDgxJob(
+            job,
+            "Gepaarte Raw-Mux-Baseline überschreibt keine bestehende oder verlinkte Zielausgabe.",
+            "paired raw mux baseline output already exists",
+          );
+          return;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            await this.failDgxJob(
+              job,
+              `Gepaarte Baseline-Zielausgabe konnte nicht sicher auf Abwesenheit geprüft werden: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              "paired raw mux baseline output absence check failed",
+            );
+            return;
+          }
+        }
+      } else {
+        rmSync(refinedOutput, { force: true });
+      }
       const lipForcingArgs = [
         lipForcingScript,
         "--video", lipForcingInput,
@@ -2395,9 +6767,10 @@ export class JobManager extends EventEmitter {
         "--stage-root", stageRoot,
         "--model-root", lipForcingModelRoot,
         "--insightface-root", latentSyncInsightFaceRoot,
-        "--image", lipForcingImage,
+        "--image", lipForcingContainerIdentity.executionReference,
         "--container-name", containerName,
         "--decoder", job.request.postprocess.lipForcing.decoder,
+        "--raw-output-profile", job.request.postprocess.lipForcing.rawOutputProfile,
         "--mouth-delay-ms", String(job.request.postprocess.lipForcing.mouthDelayMs),
         "--program-audio-delay-ms", String(job.request.postprocess.lipForcing.programAudioDelayMs),
         "--seed", String(job.request.seed),
@@ -2410,7 +6783,21 @@ export class JobManager extends EventEmitter {
           "LipForcing verwendet die unveränderte saubere Sprachkonditionierung; ein separater Musik-Endmix wird erst danach eingebunden.",
         );
       }
-      const child = spawn(
+      if (pairedPaths) {
+        lipForcingArgs.push("--paired-raw-experiment-dir", pairedPaths.root);
+        this.appendLog(
+          job,
+          "Gepaarter Raw-Mux-v1-Lauf aktiv: ein gemeinsamer CRF13-Pre-Mux erzeugt den privaten A/B-Arm; nur die Baseline wird jetzt publiziert.",
+        );
+      }
+      job.status = "running";
+      job.startedAt ??= now();
+      let lipForcingCompletion: Promise<ProcessResult> | null = null;
+      let stopLipForcingThermals: () => void = () => undefined;
+      const child = await this.spawnOwnedDockerRefiner(
+        job,
+        OWNED_DOCKER_THERMAL_WORKLOADS.lipForcing,
+        containerName,
         pythonExecutable,
         lipForcingArgs,
         {
@@ -2420,32 +6807,27 @@ export class JobManager extends EventEmitter {
             DGX_JOB_ID: job.dgxJobId ?? undefined,
             PYTHONUNBUFFERED: "1",
           },
-          detached: true,
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
+        },
+        async (gatedChild) => {
+          this.consumeProcessLogs(job, gatedChild);
+          lipForcingCompletion = this.waitForProcess(gatedChild);
+          if (reusableBase && !await this.transitionDgxJob(job, "running", {
+            current_step: "LipForcing 14B refinement running on reused LTX base",
+          })) {
+            throw new Error("DGX-Queue-Running-State wurde für LipForcing nicht freigegeben.");
+          }
+          this.setDgxOwnerHeartbeatPhase(job, "lipforcing_refinement");
         },
       );
-      job.status = "running";
-      job.startedAt ??= now();
-      await this.markProcessStarted(job, child);
-      if (reusableBase && !await this.transitionDgxJob(job, "running", {
-        current_step: "LipForcing 14B refinement running on reused LTX base",
-      })) {
-        if (this.jobShouldStop(job)) return;
-        await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
-        this.failJob(job, "DGX-Queue-Running-State wurde für LipForcing nicht freigegeben.");
-        return;
-      }
-      this.setDgxOwnerHeartbeatPhase(job, "lipforcing_refinement");
-      this.consumeProcessLogs(job, child);
-      const stopThermalWatcher = this.watchOwnedDockerThermals(
+      stopLipForcingThermals = this.watchOwnedDockerThermals(
         job,
         child,
         thermalBaselineC,
         containerName,
+        OWNED_DOCKER_THERMAL_WORKLOADS.lipForcing,
       );
-      const lipForcingResult = await this.waitForProcess(child);
-      stopThermalWatcher();
+      const lipForcingResult = await (lipForcingCompletion ?? this.waitForProcess(child));
+      stopLipForcingThermals();
       await this.confirmProcessGroupGone(job, child);
       if (this.jobShouldStop(job)) return;
       if (
@@ -2459,6 +6841,74 @@ export class JobManager extends EventEmitter {
           "LipForcing 14B refinement failed",
         );
         return;
+      }
+      if (pairedBaselineBinding && pairedCandidateRequest && pairedPaths) {
+        try {
+          const authority = createRawMuxBaselineAuthority({
+            paths: pairedPaths,
+            baselineFinalPath: refinedOutput,
+            experimentId: pairedBaselineBinding.experimentId,
+            protocolSha256: pairedBaselineBinding.protocolSha256,
+            baselineJobId: job.id,
+            baselineOutputName: job.outputName,
+            baselineRequestSha256: pairedBaselineBinding.baselineRequestSha256,
+            candidateRequestSha256: experimentRequestSha256V1(pairedCandidateRequest),
+            containerImageFingerprint: lipForcingContainerIdentity.fingerprint,
+            mouthDelayMs: job.request.postprocess.lipForcing.mouthDelayMs,
+            programAudioDelayMs: job.request.postprocess.lipForcing.programAudioDelayMs,
+          });
+          if (!await this.bindJobRunProvenanceFile(
+            job,
+            pairedPaths.authority,
+            "private:lipforcing-raw-mux-pair-v1",
+          )) return;
+          if (!await this.verifyJobRunProvenance(job, "nach dem privaten Raw-Mux-Paar-Seal")) {
+            throw new Error("Raw-Mux-Paar-Manifest konnte vor der Baseline-Publikation nicht verifiziert werden.");
+          }
+          const sealed = readVerifiedRawMuxBaselineAuthority(pairedPaths, {
+            experimentId: authority.experimentId,
+            protocolSha256: authority.protocolSha256,
+            baselineJobId: authority.baselineJobId,
+            baselineOutputName: authority.baselineOutputName,
+            baselineRequestSha256: authority.baselineRequestSha256,
+            candidateRequestSha256: authority.candidateRequestSha256,
+            containerImageFingerprint: authority.containerImageFingerprint,
+            baselineFinalPath: refinedOutput,
+            mouthDelayMs: authority.mouthDelayMs,
+            programAudioDelayMs: authority.programAudioDelayMs,
+          });
+          if (!sealed || sealed.authority.fingerprint !== authority.fingerprint) {
+            throw new Error("Raw-Mux-Paar-Authority driftete unmittelbar nach Provenienzbindung.");
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          try {
+            const quarantinePath = quarantineRestoredUnpublishedArtifact(
+              refinedOutput,
+              stageRoot,
+              this.outputAuthorityReconciliationOperations,
+            );
+            if (quarantinePath) {
+              this.appendLog(
+                job,
+                `Markerlose gepaarte Baseline wurde nach fehlgeschlagenem Authority-Seal nach ${quarantinePath} verschoben.`,
+              );
+            }
+          } catch (quarantineError) {
+            this.appendLog(
+              job,
+              `Markerlose gepaarte Baseline konnte nicht vollständig bereinigt werden: ${
+                quarantineError instanceof Error ? quarantineError.message : String(quarantineError)
+              }`,
+            );
+          }
+          await this.failDgxJob(
+            job,
+            `Gepaarte Raw-Mux-Baseline konnte nicht fail-closed versiegelt werden: ${detail}`,
+            "paired raw mux baseline sealing failed",
+          );
+          return;
+        }
       }
       job.progress = finalAudioMixEnabled ? 90 : MAX_RUNNING_PROCESS_PROGRESS;
       this.appendLog(job, "LipForcing-14B-Lippenrefiner erfolgreich abgeschlossen.");
@@ -2486,7 +6936,7 @@ export class JobManager extends EventEmitter {
         },
       );
       if (this.jobShouldStop(job)) {
-        rmSync(remuxPath, { force: true });
+        if (!this.persistenceHold) rmSync(remuxPath, { force: true });
         return;
       }
       if (remuxResult.error || remuxResult.code !== 0 || !this.fileReady(remuxPath)) {
@@ -2558,6 +7008,16 @@ export class JobManager extends EventEmitter {
       );
       return;
     }
+    if (!this.hasOutputReleaseAuthority(job, "der finalen Ausgabe-Publikation")) {
+      if (!this.persistenceHold) {
+        try {
+          quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+        } catch {
+          rmSync(job.plan.outputPath, { force: true });
+        }
+      }
+      return;
+    }
     const completionMetadata: DgxTransitionMetadata = {
       current_step: "all LTX Studio processing, identity and run provenance verification completed",
       artifact: {
@@ -2576,15 +7036,39 @@ export class JobManager extends EventEmitter {
             : hybridEnabled ? "final LTX Studio output after LongCat compositing" : "final LTX Studio output",
       },
     };
-    this.prepareDgxTerminalDelivery(job, "completed", completionMetadata);
-    job.status = "completed";
-    job.progress = 100;
-    job.outputUrl = `/api/jobs/${job.id}/output`;
-    job.finishedAt = now();
-    if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
-    this.appendLog(
-      job,
-      latentSyncEnabled
+    const completedAt = now();
+    let publicationAuthority: OutputPublicationAuthority;
+    try {
+      this.revalidateRuntimeTrustBoundary(job, "Ausgabe-Publikationsvorbereitung");
+      this.promotePrivateOutput(job.plan.outputPath, job.plan.outputPath);
+      // Hashing a large output is synchronous. Build the authority while the
+      // job is still active, then re-check heartbeat freshness afterwards.
+      publicationAuthority = this.buildPublicationAuthority(job, completedAt);
+    } catch (error) {
+      if (isJobPersistenceHoldError(error)) {
+        process.stderr.write(
+          "LTX Studio Publikationsvorbereitung bleibt im Persistenz-HOLD unverändert und nicht öffentlich; Restart-Recovery entscheidet.\n",
+        );
+        throw error;
+      }
+      removeOutputPublicationAuthority(job.plan.outputPath);
+      const publicationQuarantineRoot = join(hybridRoot, job.id);
+      quarantineUnreleasedArtifact(job.plan.outputPath, publicationQuarantineRoot);
+      this.failJob(
+        job,
+        `Ausgabe konnte nicht sicher für die atomare Publikation vorbereitet werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!this.hasOutputReleaseAuthority(job, "dem finalen Publikations-Commit")) {
+      if (!this.persistenceHold) {
+        quarantineUnreleasedArtifact(job.plan.outputPath, join(hybridRoot, job.id));
+      }
+      return;
+    }
+    const successLog = latentSyncEnabled
         ? "Video mit LatentSync-Gesichtsrefiner erfolgreich erzeugt."
         : museTalkEnabled
         ? "Video mit MuseTalk-1.5-Lippen-Inpainting erfolgreich erzeugt."
@@ -2594,9 +7078,16 @@ export class JobManager extends EventEmitter {
         ? "Hybridvideo erfolgreich erzeugt; LTX-Basis und LongCat-Mundspur bleiben als Zwischenstände erhalten."
         : job.request.mode === "text-to-audio"
           ? "Audio erfolgreich erzeugt."
-          : "Video erfolgreich erzeugt.",
-    );
-    this.changed();
+          : "Video erfolgreich erzeugt.";
+    if (!this.commitPreparedPublication(
+      job,
+      publicationAuthority,
+      completedAt,
+      completionMetadata,
+      successLog,
+      "Ausgabe konnte nicht atomar und dauerhaft publiziert werden",
+      join(hybridRoot, job.id),
+    )) return;
     await this.flushDgxTerminalDelivery(job);
   }
 
@@ -2607,6 +7098,311 @@ export class JobManager extends EventEmitter {
     } catch {
       return false;
     }
+  }
+
+  private terminalizeCpuOperation(
+    job: RuntimeJob,
+    state: Exclude<CpuOperationState, "prepared" | "running">,
+    result: ProcessResult,
+    output: ExecutionFileBinding | null,
+    errorDetail: string | null,
+  ): boolean {
+    const decision = normalizeJobExecutionDecision(job.executionDecision);
+    if (!decision || decision.executionClass !== "cpu-only") {
+      this.failJob(job, "Persistierte CPU-Ausführungsentscheidung fehlt beim terminalen Operationsresultat.");
+      return false;
+    }
+    if (["succeeded", "failed", "cancelled", "interrupted"].includes(decision.operation.state)) {
+      return decision.operation.state === state
+        && JSON.stringify(decision.operation.output) === JSON.stringify(output);
+    }
+    const errorText = errorDetail ?? result.error?.message ?? null;
+    const completedDecision = {
+      ...decision,
+      operation: {
+        ...decision.operation,
+        state,
+        completedAt: now(),
+        exitCode: result.code,
+        signal: result.signal,
+        errorSha256: errorText === null
+          ? null
+          : createHash("sha256").update(errorText).digest("hex"),
+        output,
+      },
+    } as JobExecutionDecision;
+    return this.commitExecutionDecision(job, completedDecision);
+  }
+
+  private promotePrivateOutput(sourcePath: string, outputPath: string): void {
+    removeOutputPublicationAuthority(outputPath);
+    if (sourcePath !== outputPath) renameSync(sourcePath, outputPath);
+    const outputDescriptor = openSync(outputPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      fsyncSync(outputDescriptor);
+    } finally {
+      closeSync(outputDescriptor);
+    }
+    const outputDirectoryDescriptor = openSync(dirname(outputPath), "r");
+    try {
+      fsyncSync(outputDirectoryDescriptor);
+    } finally {
+      closeSync(outputDirectoryDescriptor);
+    }
+    if (dirname(sourcePath) !== dirname(outputPath)) {
+      const sourceDirectoryDescriptor = openSync(dirname(sourcePath), "r");
+      try {
+        fsyncSync(sourceDirectoryDescriptor);
+      } finally {
+        closeSync(sourceDirectoryDescriptor);
+      }
+    }
+  }
+
+  private buildPublicationAuthority(
+    job: RuntimeJob,
+    publishedAt: string,
+  ): OutputPublicationAuthority {
+    const decision = normalizeJobExecutionDecision(job.executionDecision);
+    if (!canonicalIsoTimestamp(publishedAt)
+      || !decision
+      || decision.executionClass === "pending") {
+      throw new Error("Publikation ohne geplanten Terminalzeitpunkt und persistierte ExecutionDecision verweigert.");
+    }
+    const executionDecisionSha256 = createHash("sha256").update(canonicalJson(decision)).digest("hex");
+    const jobPersistenceRevision = randomUUID();
+    const jobAuthoritySha256 = terminalJobAuthoritySha256({
+      jobId: job.id,
+      status: "completed",
+      outputName: job.outputName,
+      finishedAt: publishedAt,
+      executionClass: decision.executionClass,
+      executionDecisionSha256,
+      requestSha256: decision.requestSha256,
+      protocolSha256: decision.protocolSha256,
+      jobPersistenceRevision,
+    });
+    return prepareOutputPublicationAuthority(job.plan.outputPath, {
+      jobId: job.id,
+      publishedAt,
+      executionDecisionSha256,
+      jobPersistenceRevision,
+      jobAuthoritySha256,
+    });
+  }
+
+  private persistPublicationAuthority(job: RuntimeJob): void {
+    const decision = normalizeJobExecutionDecision(job.executionDecision);
+    const pending = normalizeOutputPublicationCommitPending(job.outputPublicationCommitPending);
+    const expected = job.outputPublication
+      ? normalizeOutputPublicationAuthority(job.outputPublication, job.plan.outputPath)
+      : null;
+    if (!isActiveJobStatus(job.status)
+      || !job.finishedAt
+      || !pending
+      || pending.completedAt !== job.finishedAt
+      || !decision
+      || decision.executionClass === "pending"
+      || !expected
+      || expected.jobId !== job.id
+      || expected.publishedAt !== job.finishedAt) {
+      throw new Error("Publikation ohne dauerhaft vorbereitete lokale Commit- und ExecutionDecision-Autorität verweigert.");
+    }
+    const decisionSha256 = createHash("sha256").update(canonicalJson(decision)).digest("hex");
+    const jobAuthoritySha256 = terminalJobAuthoritySha256({
+      jobId: job.id,
+      status: "completed",
+      outputName: job.outputName,
+      finishedAt: job.finishedAt,
+      executionClass: decision.executionClass,
+      executionDecisionSha256: decisionSha256,
+      requestSha256: decision.requestSha256,
+      protocolSha256: decision.protocolSha256,
+      jobPersistenceRevision: expected.jobPersistenceRevision,
+    });
+    if (expected.executionDecisionSha256 !== decisionSha256
+      || expected.jobAuthoritySha256 !== jobAuthoritySha256) {
+      throw new Error("Persistierte Jobautorität driftete vor der Marker-Persistenz.");
+    }
+    const authority = persistOutputPublicationAuthority(job.plan.outputPath, {
+      jobId: job.id,
+      publishedAt: job.finishedAt,
+      executionDecisionSha256: decisionSha256,
+      jobPersistenceRevision: expected.jobPersistenceRevision,
+      jobAuthoritySha256,
+    }, {}, expected, () => this.assertPublicationMarkerReleaseAuthority(job));
+    if (decision.executionClass === "cpu-only"
+      && (decision.operation.state !== "succeeded"
+        || !decision.operation.output
+        || decision.operation.output.sha256 !== authority.output.sha256)) {
+      removeOutputPublicationAuthority(job.plan.outputPath);
+      throw new Error("Publizierte Bytes widersprechen dem terminalen CPU-Operationsresultat.");
+    }
+  }
+
+  private commitPreparedPublication(
+    job: RuntimeJob,
+    publicationAuthority: OutputPublicationAuthority,
+    completedAt: string,
+    completionMetadata: DgxTransitionMetadata,
+    successLog: string,
+    failureMessage: string,
+    quarantineRoot: string,
+  ): boolean {
+    if (!isActiveJobStatus(job.status)
+      || job.dgxTerminalDelivery
+      || job.dgxTerminalReceipt
+      || job.dgxJobTerminal
+      || job.outputPublicationCommitPending
+      || job.outputPublication) {
+      throw new Error("Publikationscommit startete ohne aktive, terminal-intent-freie Jobautorität.");
+    }
+    const normalized = normalizeOutputPublicationCommitPending({
+      schemaVersion: "ltx-studio-output-publication-commit.v1",
+      completedAt,
+      completionMetadata,
+    });
+    if (!normalized) throw new Error("Publikationscommit-Metadaten sind nicht kanonisch.");
+
+    const previousFinishedAt = job.finishedAt;
+    const previousLogs = [...job.logs];
+    job.finishedAt = completedAt;
+    job.outputPublication = publicationAuthority;
+    job.outputPublicationCommitPending = normalized;
+    this.appendLog(
+      job,
+      "Ausgabe lokal dauerhaft zum Marker-Commit vorbereitet; DGX completed ist bis nach dem Marker-Fsync gesperrt.",
+    );
+    // Crash before/inside this commit leaves the previous active snapshot and
+    // no remote completed intent. Crash after it is recovered from the exact
+    // prepared authority plus marker presence.
+    try {
+      this.changed();
+    } catch (error) {
+      if (isJobPersistenceHoldError(error)) {
+        // The prepared snapshot may already be the only durable authority.
+        // Preserve the exact in-memory claim for restart reconciliation and
+        // never remove bytes or a marker while durability is ambiguous.
+        throw error;
+      }
+
+      // commitManagedSnapshot returns a non-HOLD error only after proving that
+      // the target still contains the pre-attempt snapshot. Undo every RAM-only
+      // preparation mutation, including its diagnostic, before terminalizing.
+      delete job.outputPublicationCommitPending;
+      delete job.outputPublication;
+      job.finishedAt = previousFinishedAt;
+      job.logs = previousLogs;
+      const cleanupErrors: unknown[] = [];
+      try {
+        removeOutputPublicationAuthority(job.plan.outputPath);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      try {
+        quarantineUnreleasedArtifact(job.plan.outputPath, quarantineRoot);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      if (cleanupErrors.length > 0) {
+        const cleanupSummary = cleanupErrors
+          .map((cleanupError) => cleanupError instanceof Error ? cleanupError.message : String(cleanupError))
+          .join("; ");
+        throw this.enterPersistenceHold(
+          new AggregateError(
+            [error, ...cleanupErrors],
+            `Prepared-Publikationsrollback blieb mehrdeutig: ${cleanupSummary}`,
+          ),
+          "nicht dauerhaft vorbereitete Publikationsbytes konnten nicht beweiskräftig widerrufen werden",
+        );
+      }
+      this.failJob(
+        job,
+        `${failureMessage}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+
+    try {
+      this.persistPublicationAuthority(job);
+    } catch (error) {
+      if (isJobPersistenceHoldError(error)) {
+        process.stderr.write(
+          "LTX Studio Publikationsmarker bleibt im Persistenz-HOLD; kein Remote-completed wurde vorgemerkt.\n",
+        );
+        throw error;
+      }
+
+      // Revoke the in-memory prepared claim before any cleanup that can throw.
+      // Thus neither the outer pump nor failJob can inherit a stale completed intent.
+      delete job.outputPublicationCommitPending;
+      delete job.outputPublication;
+      job.finishedAt = previousFinishedAt;
+      const cleanupErrors: unknown[] = [];
+      try {
+        removeOutputPublicationAuthority(job.plan.outputPath);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      try {
+        quarantineUnreleasedArtifact(job.plan.outputPath, quarantineRoot);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      if (cleanupErrors.length > 0) {
+        throw this.enterPersistenceHold(
+          new AggregateError([error, ...cleanupErrors], "Publikationsrollback blieb mehrdeutig."),
+          "fehlgeschlagener Publikationsmarker konnte nicht beweiskräftig widerrufen werden",
+        );
+      }
+      this.failJob(
+        job,
+        `${failureMessage}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+
+    // Only a fully fsync-backed, final-fence-checked marker may unlock local
+    // completion and the first durable remote-completed intent.
+    delete job.outputPublicationCommitPending;
+    job.status = "completed";
+    job.progress = 100;
+    job.outputUrl = `/api/jobs/${job.id}/output`;
+    job.finishedAt = completedAt;
+    if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
+    this.prepareDgxTerminalDelivery(job, "completed", normalized.completionMetadata);
+    this.appendLog(job, successLog);
+    try {
+      this.changed();
+    } catch (firstError) {
+      if (isJobPersistenceHoldError(firstError)) throw firstError;
+      // A proven pre-rename failure leaves the durable prepared snapshot and
+      // marker intact. Retry the identical completed+delivery snapshot once;
+      // if that also cannot commit, enter HOLD before any public request or
+      // remote-completed mutation can interleave.
+      try {
+        this.changed();
+      } catch (retryError) {
+        if (isJobPersistenceHoldError(retryError)) throw retryError;
+        throw this.enterPersistenceHold(
+          new AggregateError(
+            [firstError, retryError],
+            "Finaler completed-Snapshot blieb nach beweisbaren Pre-Rename-Fehlern ungeschrieben.",
+          ),
+          "lokale Completion und Remote-completed-Intent konnten nach dem Marker nicht dauerhaft gemeinsam committed werden",
+        );
+      }
+    }
+    try {
+      this.archivePublishedJob(job);
+    } catch (error) {
+      if (isJobPersistenceHoldError(error)) throw error;
+      throw this.enterPersistenceHold(
+        error,
+        "publizierte Ausgabe konnte nicht in das dauerhafte Authority-Archiv übernommen werden",
+      );
+    }
+    return true;
   }
 
   private async verifyJobIdentityEvidence(job: RuntimeJob, context: string): Promise<boolean> {
@@ -2642,6 +7438,70 @@ export class JobManager extends EventEmitter {
     return true;
   }
 
+  private verifyPairedPromotionRunProvenance(
+    job: RuntimeJob,
+    source: CpuPairedArtifactReuseSourceBinding,
+    baselineProvenanceFingerprint: string,
+    context: string,
+  ): boolean {
+    if (!job.runProvenance || !runProvenanceFingerprintMatches(job.runProvenance)) {
+      this.failJob(job, `Historische Paar-Promotionsprovenienz ${context} fehlt oder ihr Fingerprint driftete.`);
+      return false;
+    }
+    if (source.sourceProvenanceFingerprint !== baselineProvenanceFingerprint) {
+      this.failJob(
+        job,
+        `Historische Baseline-Provenienz ${context} stimmt nicht mit der gepinnten Paarquelle überein.`,
+      );
+      return false;
+    }
+    const snapshotPairs = [
+      [source.authority, source.snapshotAuthority],
+      [source.receipt, source.snapshotReceipt],
+      [source.timelineReceipt, source.snapshotTimelineReceipt],
+      [source.preMux, source.snapshotPreMux],
+      [source.preMuxReceipt, source.snapshotPreMuxReceipt],
+      [source.candidateFinal, source.snapshotCandidateFinal],
+    ] as const;
+    for (const [original, snapshot] of snapshotPairs) {
+      if (original.sha256 !== snapshot.sha256
+        || original.revision.sizeBytes !== snapshot.revision.sizeBytes
+        || canonicalJson(captureRawMuxPairFile(snapshot.path)) !== canonicalJson(snapshot)) {
+        this.failJob(job, `Privater Paar-Snapshot ${context} ist nicht mehr exakt an seine verifizierte Baselinequelle gebunden.`);
+        return false;
+      }
+    }
+    const required = [
+      ["input:raw-mux-pair-authority", source.snapshotAuthority],
+      ["input:raw-mux-pair-receipt", source.snapshotReceipt],
+      ["input:raw-mux-timeline-receipt", source.snapshotTimelineReceipt],
+      ["input:raw-mux-pair-premux", source.snapshotPreMux],
+      ["input:raw-mux-premux-receipt", source.snapshotPreMuxReceipt],
+      ["input:raw-mux-paired-candidate-final", source.snapshotCandidateFinal],
+    ] as const;
+    for (const [role, binding] of required) {
+      const evidence = job.runProvenance.files.filter((file) => file.role === role);
+      if (evidence.length !== 1
+        || evidence[0].kind !== "file"
+        || evidence[0].path !== binding.path
+        || evidence[0].sha256 !== binding.sha256
+        || evidence[0].sizeBytes !== binding.revision.sizeBytes
+        || evidence[0].modifiedAtMs !== binding.revision.modifiedAtMs
+        || evidence[0].changedAtMs !== binding.revision.changedAtMs
+        || evidence[0].fileId !== binding.revision.fileId) {
+        this.failJob(job, `Privates Paar-Promotionsartefakt ${role} ${context} ist nicht exakt gebunden.`);
+        return false;
+      }
+    }
+    job.runProvenance = { ...job.runProvenance, verifiedAt: now() };
+    this.appendLog(
+      job,
+      `Historische Baseline- und private Snapshot-Provenienz ${context} ohne unbenutzte DGX-/Docker-Abhängigkeit verifiziert.`,
+    );
+    this.changed();
+    return true;
+  }
+
   private findReusableLtxBase(job: RuntimeJob): ReusableLtxBase | undefined {
     const fromHistory = [...this.jobs.values()].find((candidate) =>
       candidate.id !== job.id
@@ -2670,14 +7530,326 @@ export class JobManager extends EventEmitter {
   }
 
   private findReusableLipForcingOutput(job: RuntimeJob): ReusableLipForcingOutput | undefined {
-    if (!this.reusableBaseSource || !job.request.postprocess.lipForcing.enabled) return undefined;
+    if (!this.reusableBaseSource || !isBoundProgramAudioOnlyCandidate(job)) return undefined;
     let candidates: readonly ReusableLtxBaseCandidate[];
     try {
       candidates = this.reusableBaseSource.reusableLtxBaseCandidates();
     } catch {
       return undefined;
     }
-    return reusableLipForcingOutputFromSidecars(candidates, job, (path) => this.fileReady(path));
+    return exactBoundLipForcingOutputFromSidecars(candidates, job, (path) => this.fileReady(path));
+  }
+
+  private async runPairedRawOutputCandidate(
+    job: RuntimeJob,
+    authority: RawMuxBaselineAuthority,
+    authorityBinding: ExecutionFileBinding,
+    baselineProvenanceFingerprint: string,
+  ): Promise<void> {
+    const stageRoot = join(hybridRoot, job.id);
+    const temporaryOutput = join(stageRoot, "paired-raw-mux-candidate.tmp.mp4");
+    let pinned: ReturnType<typeof pinRawMuxCandidateArtifact>;
+    try {
+      pinned = pinRawMuxCandidateArtifact(
+        authority,
+        authorityBinding,
+        baselineProvenanceFingerprint,
+        stageRoot,
+      );
+    } catch (error) {
+      this.failJob(
+        job,
+        `Gepaarter Raw-Mux-Kandidat konnte nicht unverändert gesnapshottet werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!job.runProvenance) {
+      this.failJob(job, "Laufprovenienz fehlt vor der Bindung des gepaarten Kandidaten-Snapshots.");
+      return;
+    }
+    try {
+      for (const [path, role] of [
+        [pinned.source.snapshotAuthority.path, "input:raw-mux-pair-authority"],
+        [pinned.source.snapshotReceipt.path, "input:raw-mux-pair-receipt"],
+        [pinned.source.snapshotTimelineReceipt.path, "input:raw-mux-timeline-receipt"],
+        [pinned.source.snapshotPreMux.path, "input:raw-mux-pair-premux"],
+        [pinned.source.snapshotPreMuxReceipt.path, "input:raw-mux-premux-receipt"],
+        [pinned.source.snapshotCandidateFinal.path, "input:raw-mux-paired-candidate-final"],
+      ] as const) {
+        if (!await this.bindJobRunProvenanceFile(job, path, role)) return;
+      }
+    } catch (error) {
+      this.failJob(
+        job,
+        `Private Raw-Mux-Snapshots konnten nicht in die Kandidatenprovenienz gebunden werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!await this.verifyJobIdentityEvidence(job, "vor der gepaarten Kandidaten-Promotion")) return;
+    if (!this.verifyPairedPromotionRunProvenance(
+      job,
+      pinned.source,
+      baselineProvenanceFingerprint,
+      "vor der gepaarten Kandidaten-Promotion",
+    )) return;
+    const preparedAt = now();
+    const operation: CpuPairedArtifactPromotionOperation = {
+      kind: "paired-artifact-promotion",
+      state: "prepared",
+      descriptorThreatModel: executionDescriptorThreatModel,
+      authoritySha256: pinned.source.authority.sha256,
+      preparedAt,
+      startedAt: null,
+      completedAt: null,
+      exitCode: null,
+      signal: null,
+      errorSha256: null,
+      output: null,
+    };
+    if (!this.classifyExecution(job, "cpu-only", pinned.source, operation)) return;
+    const decision = normalizeJobExecutionDecision(job.executionDecision);
+    if (!decision
+      || decision.schemaVersion !== "ltx-studio-execution-decision.v6"
+      || decision.executionClass !== "cpu-only"
+      || decision.operation.kind !== "paired-artifact-promotion"
+      || !("reuseKind" in decision.cpuReuse)
+      || decision.cpuReuse.reuseKind !== "lipforcing-raw-mux-pair") {
+      this.failJob(job, "Persistierte v6-Promotion-Entscheidung fehlt unmittelbar vor der Operation.");
+      return;
+    }
+    const pairedDecision = decision as JobExecutionDecision & {
+      cpuReuse: CpuPairedArtifactReuseSourceBinding;
+      operation: CpuPairedArtifactPromotionOperation;
+    };
+    job.status = "running";
+    job.startedAt ??= now();
+    const runningDecision: JobExecutionDecision = {
+      ...pairedDecision,
+      operation: {
+        ...pairedDecision.operation,
+        state: "running",
+        startedAt: job.startedAt,
+      },
+    } as JobExecutionDecision;
+    if (!this.commitExecutionDecision(job, runningDecision)) return;
+
+    const descriptors: VerifiedExecutionDescriptor[] = [];
+    let promotedSource: ExecutionFileBinding | null = null;
+    let pairedPublishedFileId: string | null = null;
+    let pairedPublishedDeviceId: string | null = null;
+    let pairedPublicationTemporary: ExecutionFileBinding | null = null;
+    try {
+      for (const binding of [
+        pinned.source.snapshotAuthority,
+        pinned.source.snapshotReceipt,
+        pinned.source.snapshotTimelineReceipt,
+        pinned.source.snapshotPreMux,
+        pinned.source.snapshotPreMuxReceipt,
+        pinned.source.snapshotCandidateFinal,
+      ]) {
+        descriptors.push(openVerifiedExecutionDescriptor(
+          binding.path,
+          binding.sha256,
+          binding.revision,
+        ));
+      }
+      for (const descriptor of descriptors) recheckVerifiedExecutionDescriptor(descriptor);
+      this.revalidateRuntimeTrustBoundary(job, "gepaarte Raw-Mux-Kandidaten-Promotion");
+      const privateOutput = copyRawMuxBoundFile(
+        pinned.source.snapshotCandidateFinal,
+        temporaryOutput,
+      );
+      promotedSource = privateOutput;
+      for (const descriptor of descriptors) recheckVerifiedExecutionDescriptor(descriptor);
+      const success: ProcessResult = { code: 0, signal: null, error: null };
+      if (!this.terminalizeCpuOperation(job, "succeeded", success, privateOutput, null)) {
+        quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        return;
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const failed: ProcessResult = { code: 1, signal: null, error: error instanceof Error ? error : new Error(detail) };
+      this.terminalizeCpuOperation(job, "failed", failed, null, detail);
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      this.failJob(job, `Gepaarte Raw-Mux-Kandidaten-Promotion fehlgeschlagen: ${detail}`);
+      return;
+    } finally {
+      for (const descriptor of descriptors) closeSync(descriptor.fd);
+    }
+    if (!await this.verifyJobIdentityEvidence(job, "nach der gepaarten Kandidaten-Promotion")) {
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
+    if (!this.verifyPairedPromotionRunProvenance(
+      job,
+      pinned.source,
+      baselineProvenanceFingerprint,
+      "nach der gepaarten Kandidaten-Promotion",
+    )) {
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
+    const releaseDecision = this.jobStartDecision(job);
+    if (!releaseDecision.allowed) {
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      this.failJob(job, `Ausgabe bleibt wegen des aktuellen Activation-/Rights-Gates unveröffentlicht: ${releaseDecision.reason}`);
+      return;
+    }
+    if (!this.hasOutputReleaseAuthority(job, "der gepaarten Kandidaten-Publikation")) {
+      if (!this.persistenceHold) quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
+    try {
+      this.revalidateRuntimeTrustBoundary(job, "Ausgabe-Publikation");
+      if (!promotedSource
+        || existsSync(job.plan.outputPath)
+        || existsSync(outputPublicationPath(job.plan.outputPath))) {
+        throw new Error("Publikationsziel oder Marker existiert bereits; gepaarte Bytes werden nicht überschrieben.");
+      }
+      const publicationTemporary = `${job.plan.outputPath}.paired-${job.id}.tmp`;
+      const publicationBinding = copyRawMuxBoundFile(promotedSource, publicationTemporary);
+      pairedPublicationTemporary = publicationBinding;
+      linkSync(publicationBinding.path, job.plan.outputPath);
+      pairedPublishedFileId = publicationBinding.revision.fileId;
+      pairedPublishedDeviceId = publicationBinding.revision.deviceId;
+      unlinkSync(publicationBinding.path);
+      pairedPublicationTemporary = null;
+      const outputDescriptor = openSync(job.plan.outputPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const outputStats = fstatSync(outputDescriptor);
+        if (!outputStats.isFile()
+          || outputStats.nlink !== 1
+          || String(outputStats.ino) !== publicationBinding.revision.fileId
+          || String(outputStats.dev) !== publicationBinding.revision.deviceId
+          || outputStats.uid !== publicationBinding.revision.uid
+          || outputStats.gid !== publicationBinding.revision.gid
+          || outputStats.mode !== publicationBinding.revision.mode
+          || (outputStats.mode & 0o7777) !== 0o400
+          || (typeof process.getuid === "function" && outputStats.uid !== process.getuid())) {
+          throw new Error("No-replace-Publikation bindet nicht mehr das vorbereitete Kandidatenartefakt.");
+        }
+        const digest = createHash("sha256");
+        const buffer = Buffer.allocUnsafe(1024 * 1024);
+        let position = 0;
+        while (position < outputStats.size) {
+          const count = readSync(
+            outputDescriptor,
+            buffer,
+            0,
+            Math.min(buffer.length, outputStats.size - position),
+            position,
+          );
+          if (count <= 0) throw new Error("No-replace-Publikation endete während der Hashprüfung vorzeitig.");
+          digest.update(buffer.subarray(0, count));
+          position += count;
+        }
+        const outputAfter = fstatSync(outputDescriptor);
+        const outputPathAfter = lstatSync(job.plan.outputPath);
+        if (digest.digest("hex") !== publicationBinding.sha256
+          || outputAfter.size !== outputStats.size
+          || outputAfter.mtimeMs !== outputStats.mtimeMs
+          || outputAfter.ctimeMs !== outputStats.ctimeMs
+          || outputAfter.nlink !== 1
+          || String(outputAfter.ino) !== String(outputStats.ino)
+          || String(outputAfter.dev) !== String(outputStats.dev)
+          || outputPathAfter.isSymbolicLink()
+          || String(outputPathAfter.ino) !== String(outputStats.ino)
+          || String(outputPathAfter.dev) !== String(outputStats.dev)) {
+          throw new Error("No-replace-Publikationsbytes drifteten während der gehaltenen FD-Prüfung.");
+        }
+        fsyncSync(outputDescriptor);
+      } finally {
+        closeSync(outputDescriptor);
+      }
+      fsyncDirectory(dirname(job.plan.outputPath));
+      rmSync(temporaryOutput, { force: true });
+    } catch (error) {
+      let publishedPathIsOurs = false;
+      if (pairedPublishedFileId && pairedPublishedDeviceId) {
+        try {
+          const current = lstatSync(job.plan.outputPath);
+          publishedPathIsOurs = !current.isSymbolicLink()
+            && String(current.ino) === pairedPublishedFileId
+            && String(current.dev) === pairedPublishedDeviceId;
+        } catch {
+          publishedPathIsOurs = false;
+        }
+      }
+      if (publishedPathIsOurs) {
+        try {
+          unlinkSync(job.plan.outputPath);
+          fsyncDirectory(dirname(job.plan.outputPath));
+          publishedPathIsOurs = false;
+        } catch {
+          // Leave a still exact-owned path unserved: no publication marker is written.
+        }
+      }
+      if (pairedPublicationTemporary) {
+        try {
+          const current = lstatSync(pairedPublicationTemporary.path);
+          if (!current.isSymbolicLink()
+            && String(current.ino) === pairedPublicationTemporary.revision.fileId
+            && String(current.dev) === pairedPublicationTemporary.revision.deviceId) {
+            quarantineUnreleasedArtifact(pairedPublicationTemporary.path, stageRoot);
+          }
+        } catch {
+          // Never remove or move a pathname that no longer binds our private temp inode.
+        }
+      }
+      quarantineUnreleasedArtifact(
+        publishedPathIsOurs ? job.plan.outputPath : temporaryOutput,
+        stageRoot,
+      );
+      this.failJob(
+        job,
+        `Gepaarte CPU-Ausgabe konnte nicht atomar publiziert werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    const completedAt = now();
+    let publicationAuthority: OutputPublicationAuthority;
+    try {
+      this.revalidateRuntimeTrustBoundary(job, "gepaarte Publikationsautorität");
+      publicationAuthority = this.buildPublicationAuthority(job, completedAt);
+    } catch (error) {
+      if (isJobPersistenceHoldError(error)) throw error;
+      quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+      this.failJob(
+        job,
+        `Publikationsautorität des gepaarten Kandidaten konnte nicht vorbereitet werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!this.hasOutputReleaseAuthority(job, "dem gepaarten Publikations-Commit")) {
+      if (!this.persistenceHold) quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+      return;
+    }
+    const completionMetadata: DgxTransitionMetadata = {
+      current_step: "provenance-bound paired raw mux candidate promotion completed",
+      artifact: {
+        type: "video",
+        path: job.plan.outputPath,
+        note: "paired LipForcing raw mux candidate from exact baseline pre-mux",
+      },
+    };
+    if (!this.commitPreparedPublication(
+      job,
+      publicationAuthority,
+      completedAt,
+      completionMetadata,
+      "Privater gepaarter Mux-copy-Kandidatenarm ohne zweiten LTX-/LipForcing-/Docker-Lauf atomar publiziert.",
+      "Publikationsautorität des gepaarten Kandidaten konnte nicht persistiert werden",
+      stageRoot,
+    )) return;
+    await this.flushDgxTerminalDelivery(job);
   }
 
   private async runReusedLipForcingAudioRetime(
@@ -2685,21 +7857,35 @@ export class JobManager extends EventEmitter {
     reusable: ReusableLipForcingOutput,
   ): Promise<void> {
     const stageRoot = join(hybridRoot, job.id);
-    const pinnedInput = join(stageRoot, "reused-lipforcing-output.mp4");
     const temporaryOutput = join(stageRoot, "retimed-lipforcing-output.tmp.mp4");
-    mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
-    copyFileSync(reusable.outputPath, pinnedInput);
-    if (!this.fileReady(pinnedInput) || !job.runProvenance) {
-      this.failJob(job, "Die persistierte LipForcing-Ausgabe konnte nicht sicher übernommen werden.");
+    let pinned: PinnedCpuReuse;
+    try {
+      pinned = await pinExactLipForcingReuse(
+        reusable,
+        stageRoot,
+        undefined,
+        () => this.jobShouldStop(job),
+      );
+    } catch (error) {
+      if (this.jobShouldStop(job)) return;
+      this.failJob(
+        job,
+        `Die exakt gebundene LipForcing-Baseline konnte nicht fail-closed übernommen werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!this.fileReady(pinned.inputPath) || !job.runProvenance) {
+      this.failJob(job, "Der private Baseline-Snapshot oder die Laufprovenienz fehlt.");
       return;
     }
     try {
-      const bindFile = this.runProvenanceOperations.bindFile ?? bindRunProvenanceFile;
-      job.runProvenance = await bindFile(
-        job.runProvenance,
-        pinnedInput,
+      if (!await this.bindJobRunProvenanceFile(
+        job,
+        pinned.inputPath,
         `input:reused-lipforcing-output:${reusable.id}`,
-      );
+      )) return;
     } catch (error) {
       this.failJob(
         job,
@@ -2714,10 +7900,81 @@ export class JobManager extends EventEmitter {
 
     const targetDelayMs = job.request.postprocess.lipForcing.programAudioDelayMs;
     const deltaMs = targetDelayMs - reusable.programAudioDelayMs;
-    const args = buildLipForcingAudioRetimeArgs(pinnedInput, temporaryOutput, deltaMs);
+    let ffmpeg: BoundExecutableDescriptor;
+    try {
+      ffmpeg = openBoundExecutableFromPath("ffmpeg");
+    } catch (error) {
+      this.failJob(
+        job,
+        `FFmpeg konnte nicht per O_NOFOLLOW gebunden werden: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+    if (job.runProvenance.runtime.ffmpegVersion !== ffmpeg.version) {
+      closeSync(ffmpeg.fd);
+      this.failJob(job, "FFmpeg-Version des gebundenen Executable-FD widerspricht der Laufprovenienz.");
+      return;
+    }
+    let pinnedOutput: VerifiedExecutionDescriptor | null = null;
+    let pinnedSettings: VerifiedExecutionDescriptor | null = null;
+    let pinnedAnalysis: VerifiedExecutionDescriptor | null = null;
+    try {
+      pinnedOutput = openVerifiedExecutionDescriptor(
+        pinned.source.snapshotOutputPath,
+        pinned.source.snapshotOutputSha256,
+        pinned.source.snapshotOutputRevision,
+      );
+      pinnedSettings = openVerifiedExecutionDescriptor(
+        pinned.source.snapshotSettingsSidecarPath,
+        pinned.source.snapshotSettingsSidecarSha256,
+        pinned.source.snapshotSettingsSidecarRevision,
+      );
+      pinnedAnalysis = openVerifiedExecutionDescriptor(
+        pinned.source.snapshotAnalysisSidecarPath,
+        pinned.source.snapshotAnalysisSidecarSha256,
+        pinned.source.snapshotAnalysisSidecarRevision,
+      );
+    } catch (error) {
+      if (pinnedOutput) closeSync(pinnedOutput.fd);
+      if (pinnedSettings) closeSync(pinnedSettings.fd);
+      if (pinnedAnalysis) closeSync(pinnedAnalysis.fd);
+      closeSync(ffmpeg.fd);
+      this.failJob(
+        job,
+        `Der private Baseline-Snapshot änderte sich vor FFmpeg: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    // Child fd 3 is the executable; the held media snapshot is child fd 4.
+    const args = buildLipForcingAudioRetimeArgs("/proc/self/fd/4", temporaryOutput, deltaMs);
+    const preparedAt = now();
+    const operation: CpuFfmpegOperation = {
+      kind: "ffmpeg-audio-retime",
+      state: "prepared",
+      descriptorThreatModel: executionDescriptorThreatModel,
+      executable: ffmpeg.binding,
+      ffmpegVersion: ffmpeg.version,
+      argsSha256: createHash("sha256").update(canonicalJson(args)).digest("hex"),
+      deltaMs,
+      preparedAt,
+      startedAt: null,
+      completedAt: null,
+      exitCode: null,
+      signal: null,
+      errorSha256: null,
+      output: null,
+    };
+    if (!this.classifyExecution(job, "cpu-only", pinned.source, operation)) {
+      closeSync(pinnedOutput.fd);
+      closeSync(pinnedSettings.fd);
+      closeSync(pinnedAnalysis.fd);
+      closeSync(ffmpeg.fd);
+      return;
+    }
+
     rmSync(temporaryOutput, { force: true });
-    job.status = "running";
-    job.startedAt = now();
     job.progress = 90;
     this.appendLog(
       job,
@@ -2726,117 +7983,481 @@ export class JobManager extends EventEmitter {
         + "Kein LTX- oder LipForcing-GPU-Lauf erforderlich.",
     );
     this.changed();
-    const result = await this.runLoggedProcess(job, "ffmpeg", args, {
-      cwd: repoRoot,
-      env: { ...process.env },
-    });
+    let result: ProcessResult;
+    try {
+      result = await this.runLoggedProcess(job, "/proc/self/fd/3", args, {
+        cwd: repoRoot,
+        env: { ...process.env },
+        inheritedFds: [pinnedOutput.fd],
+        boundExecutable: ffmpeg,
+        recheckDescriptors: [pinnedOutput, pinnedSettings, pinnedAnalysis],
+      });
+    } finally {
+      closeSync(pinnedOutput.fd);
+      closeSync(pinnedSettings.fd);
+      closeSync(pinnedAnalysis.fd);
+      closeSync(ffmpeg.fd);
+    }
     if (this.jobShouldStop(job)) {
+      this.terminalizeCpuOperation(
+        job,
+        job.status === "cancelled" ? "cancelled" : "interrupted",
+        result,
+        null,
+        job.error,
+      );
       rmSync(temporaryOutput, { force: true });
       return;
     }
     if (result.error || result.code !== 0 || !this.fileReady(temporaryOutput)) {
+      const failure = result.error?.message
+        ?? `Audio-only-Zeitkorrektur endete mit Code ${String(result.code)}`
+          + `${result.signal ? ` (${result.signal})` : ""}`
+          + `${this.fileReady(temporaryOutput) ? "." : "; terminale Ausgabedatei fehlt."}`;
+      this.terminalizeCpuOperation(job, "failed", result, null, failure);
       rmSync(temporaryOutput, { force: true });
-      this.failJob(
-        job,
-        result.error?.message
-          ?? `Audio-only-Zeitkorrektur endete mit Code ${String(result.code)}`
-            + `${result.signal ? ` (${result.signal})` : ""}.`,
-      );
+      this.failJob(job, failure);
       return;
     }
-    renameSync(temporaryOutput, job.plan.outputPath);
-    if (!await this.verifyJobIdentityEvidence(job, "nach der Audio-only-Zeitkorrektur")) return;
-    if (!await this.verifyJobRunProvenance(job, "nach der Audio-only-Zeitkorrektur")) return;
+    let privateOutput: HashedExecutionFile;
+    try {
+      privateOutput = await hashUnchangedExecutionFile(
+        temporaryOutput,
+        () => this.jobShouldStop(job),
+      );
+    } catch (error) {
+      if (this.jobShouldStop(job)) return;
+      const failure = `FFmpeg-Ausgabe konnte nicht unverändert gebunden werden: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.terminalizeCpuOperation(job, "failed", result, null, failure);
+      rmSync(temporaryOutput, { force: true });
+      this.failJob(job, failure);
+      return;
+    }
+    const privateOutputBinding: ExecutionFileBinding = {
+      path: temporaryOutput,
+      sha256: privateOutput.sha256,
+      revision: privateOutput.revision,
+    };
+    if (!this.terminalizeCpuOperation(job, "succeeded", result, privateOutputBinding, null)) {
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
+    if (!await this.verifyJobIdentityEvidence(job, "nach der Audio-only-Zeitkorrektur")) {
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
+    if (!await this.verifyJobRunProvenance(job, "nach der Audio-only-Zeitkorrektur")) {
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
     const outputReleaseDecision = this.jobStartDecision(job);
     if (!outputReleaseDecision.allowed) {
-      quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+      quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
       this.failJob(
         job,
         `Ausgabe bleibt wegen des aktuellen Activation-/Rights-Gates unveröffentlicht: ${outputReleaseDecision.reason}`,
       );
       return;
     }
+    if (!this.hasOutputReleaseAuthority(job, "der Audio-only-Ausgabe-Publikation")) {
+      if (!this.persistenceHold) quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      return;
+    }
 
-    this.prepareDgxTerminalDelivery(job, "completed", {
+    try {
+      this.revalidateRuntimeTrustBoundary(job, "Ausgabe-Publikation");
+      this.promotePrivateOutput(temporaryOutput, job.plan.outputPath);
+    } catch (error) {
+      quarantineUnreleasedArtifact(
+        existsSync(job.plan.outputPath) ? job.plan.outputPath : temporaryOutput,
+        stageRoot,
+      );
+      this.failJob(
+        job,
+        `Terminale CPU-Ausgabe konnte nicht atomar/fsync-persistiert werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+
+    const completedAt = now();
+    let publicationAuthority: OutputPublicationAuthority;
+    try {
+      this.revalidateRuntimeTrustBoundary(job, "Audio-only-Publikationsautorität");
+      publicationAuthority = this.buildPublicationAuthority(job, completedAt);
+    } catch (error) {
+      if (isJobPersistenceHoldError(error)) throw error;
+      quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+      this.failJob(
+        job,
+        `Publikationsautorität der Audio-only-Ausgabe konnte nicht vorbereitet werden: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    if (!this.hasOutputReleaseAuthority(job, "dem Audio-only-Publikations-Commit")) {
+      if (!this.persistenceHold) quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+      return;
+    }
+    const completionMetadata: DgxTransitionMetadata = {
       current_step: "provenance-bound LipForcing audio-only retiming completed",
       artifact: {
         type: "video",
         path: job.plan.outputPath,
         note: "final LTX Studio LipForcing output with audio-only timing correction",
       },
-    });
-    job.status = "completed";
-    job.progress = 100;
-    job.outputUrl = `/api/jobs/${job.id}/output`;
-    job.finishedAt = now();
-    job.runtimeMs = Date.now() - Date.parse(job.startedAt);
-    this.appendLog(
+    };
+    if (!this.commitPreparedPublication(
       job,
+      publicationAuthority,
+      completedAt,
+      completionMetadata,
       "LipForcing-Bildstrom unverändert wiederverwendet und hörbare Sprachspur erfolgreich neu getimt.",
-    );
-    this.changed();
+      "Publikationsautorität konnte nicht dauerhaft persistiert werden",
+      stageRoot,
+    )) return;
     await this.flushDgxTerminalDelivery(job);
   }
 
   private async waitForDelay(job: RuntimeJob, delayMs: number): Promise<boolean> {
     const endAt = Date.now() + delayMs;
-    while (!this.shuttingDown && isActiveJobStatus(job.status)) {
+    while (!this.jobShouldStop(job) && isActiveJobStatus(job.status)) {
       const remaining = endAt - Date.now();
       if (remaining <= 0) return true;
-      await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, Math.min(1_000, remaining)));
+      await new Promise<void>((resolvePromise) => {
+        const signal = this.persistenceHoldAbortController.signal;
+        function finish(): void {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", finish);
+          resolvePromise();
+        }
+        const timer = setTimeout(finish, Math.min(1_000, remaining));
+        if (signal.aborted) return finish();
+        signal.addEventListener("abort", finish, { once: true });
+      });
     }
     return false;
+  }
+
+  /**
+   * Converts either the sole submit response or one authoritative positive
+   * queue observation into durable mutation authority.  The commit is the
+   * only point where an unknown submit may acquire a remote ID; callers may
+   * issue GET/PATCH only after this method has returned successfully.
+   */
+  private commitDgxLeaseReceipt(
+    job: RuntimeJob,
+    remote: QueueJobSummary,
+    receiptInput: DgxLeaseReceipt,
+    terminalIntent: boolean,
+  ): void {
+    const receipt = normalizeDgxLeaseReceipt(receiptInput);
+    if (!receipt
+      || canonicalJson(receipt) !== canonicalJson(receiptInput)
+      || receipt.studioJobId !== job.id
+      || receipt.dgxJobId !== remote.job_id) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Lease-Receipt widerspricht dem dauerhaft vorbereiteten Einmal-Submit-Vertrag.",
+      );
+    }
+    if (job.dgxTerminalReceipt) {
+      if (job.dgxTerminalReceipt.dgxJobId === remote.job_id) return;
+      throw new DgxLeaseAuthorityError(
+        "Eine verspätete Submit-Evidenz widerspricht dem bereits terminal bestätigten DGX-Job.",
+      );
+    }
+    if (job.dgxLeaseReceipt || job.dgxJobId) {
+      const existing = normalizeDgxLeaseReceipt(job.dgxLeaseReceipt);
+      if (existing
+        && job.dgxJobId === remote.job_id
+        && existing.dgxJobId === remote.job_id
+        && existing.preparedAdmissionSha256 === receipt.preparedAdmissionSha256) {
+        if (terminalIntent && !job.dgxTerminalDelivery) {
+          this.prepareDgxTerminalDelivery(job, "cancelled", {
+            current_step: "terminal Studio intent after ambiguous DGX submit",
+            last_error: job.error ?? "Studio job became terminal while the sole DGX submit was ambiguous",
+          });
+          this.changed();
+        }
+        return;
+      }
+      throw new DgxLeaseAuthorityError(
+        "Zwei verschiedene DGX-Leases beanspruchen denselben Studio-Einmal-Submit.",
+      );
+    }
+    const preparedAdmission = normalizePreparedAdmission(job.dgxPreparedAdmission);
+    if (!preparedAdmission
+      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)
+      || receipt.preparedAdmissionSha256 !== job.dgxPreparedAdmissionSha256
+      || canonicalJson(receipt.preparedAdmission) !== canonicalJson(preparedAdmission)) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Lease-Receipt widerspricht dem dauerhaft vorbereiteten Einmal-Submit-Vertrag.",
+      );
+    }
+    if (!job.dgxSubmitPending) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Lease-Evidenz traf ohne dauerhaften unbekannten Submit-Intent ein.",
+      );
+    }
+
+    const snapshot = {
+      dgxJobId: job.dgxJobId,
+      dgxJobTerminal: job.dgxJobTerminal,
+      dgxLeaseReceipt: job.dgxLeaseReceipt
+        ? structuredClone(job.dgxLeaseReceipt)
+        : undefined,
+      dgxSubmitPending: job.dgxSubmitPending,
+      dgxSubmitStartedAt: job.dgxSubmitStartedAt,
+      dgxPreparedAdmission: job.dgxPreparedAdmission
+        ? structuredClone(job.dgxPreparedAdmission)
+        : undefined,
+      dgxPreparedAdmissionSha256: job.dgxPreparedAdmissionSha256,
+      dgxTerminalDelivery: job.dgxTerminalDelivery
+        ? structuredClone(job.dgxTerminalDelivery)
+        : undefined,
+      logs: [...job.logs],
+    };
+    job.dgxJobId = remote.job_id;
+    job.dgxJobTerminal = false;
+    job.dgxLeaseReceipt = receipt;
+    delete job.dgxSubmitPending;
+    delete job.dgxSubmitStartedAt;
+    delete job.dgxPreparedAdmission;
+    delete job.dgxPreparedAdmissionSha256;
+    if (terminalIntent) {
+      this.prepareDgxTerminalDelivery(job, "cancelled", {
+        current_step: "terminal Studio intent after ambiguous DGX submit",
+        last_error: job.error ?? "Studio job became terminal while the sole DGX submit was ambiguous",
+      });
+    }
+    try {
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        job.dgxJobId = snapshot.dgxJobId;
+        job.dgxJobTerminal = snapshot.dgxJobTerminal;
+        if (snapshot.dgxLeaseReceipt) job.dgxLeaseReceipt = snapshot.dgxLeaseReceipt;
+        else delete job.dgxLeaseReceipt;
+        if (snapshot.dgxSubmitPending) job.dgxSubmitPending = true;
+        else delete job.dgxSubmitPending;
+        if (snapshot.dgxSubmitStartedAt) job.dgxSubmitStartedAt = snapshot.dgxSubmitStartedAt;
+        else delete job.dgxSubmitStartedAt;
+        if (snapshot.dgxPreparedAdmission) {
+          job.dgxPreparedAdmission = snapshot.dgxPreparedAdmission;
+        } else delete job.dgxPreparedAdmission;
+        if (snapshot.dgxPreparedAdmissionSha256) {
+          job.dgxPreparedAdmissionSha256 = snapshot.dgxPreparedAdmissionSha256;
+        } else delete job.dgxPreparedAdmissionSha256;
+        if (snapshot.dgxTerminalDelivery) job.dgxTerminalDelivery = snapshot.dgxTerminalDelivery;
+        else delete job.dgxTerminalDelivery;
+        job.logs.splice(0, job.logs.length, ...snapshot.logs);
+      }
+      throw error;
+    }
+  }
+
+  /** Finalizes an exact terminal response from the sole submit without GET. */
+  private commitTerminalDgxSubmitResponse(
+    job: RuntimeJob,
+    response: QueueSubmitResponse,
+    preparedAdmission: AdmissionRequest,
+    submitStartedAt: string,
+    message: string,
+  ): void {
+    const observation = dgxSubmitTerminalObservation(
+      response,
+      job.id,
+      preparedAdmission,
+      submitStartedAt,
+    );
+    if (!observation) {
+      throw new DgxLeaseAuthorityError(
+        "Terminale DGX-Submit-Antwort war nicht exakt an den dauerhaften Einmal-Submit gebunden.",
+      );
+    }
+    if (job.dgxTerminalReceipt) {
+      if (job.dgxTerminalReceipt.dgxJobId === response.job.job_id) return;
+      throw new DgxLeaseAuthorityError(
+        "Terminale Submit-Antwort widerspricht einem bereits bestätigten DGX-Terminalbeleg.",
+      );
+    }
+    if (!job.dgxSubmitPending
+      || job.dgxJobId
+      || job.dgxLeaseReceipt
+      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)
+      || canonicalJson(job.dgxPreparedAdmission) !== canonicalJson(preparedAdmission)) {
+      throw new DgxLeaseAuthorityError(
+        "Terminale Submit-Antwort traf nicht auf den exakt vorbereiteten unbekannten Submit-Intent.",
+      );
+    }
+
+    const queueSnapshot = [...this.queue];
+    const snapshot = {
+      status: job.status,
+      error: job.error,
+      finishedAt: job.finishedAt,
+      runtimeMs: job.runtimeMs,
+      logs: [...job.logs],
+      dgxJobId: job.dgxJobId,
+      dgxJobTerminal: job.dgxJobTerminal,
+      dgxSubmitPending: job.dgxSubmitPending,
+      dgxSubmitStartedAt: job.dgxSubmitStartedAt,
+      dgxPreparedAdmission: job.dgxPreparedAdmission
+        ? structuredClone(job.dgxPreparedAdmission)
+        : undefined,
+      dgxPreparedAdmissionSha256: job.dgxPreparedAdmissionSha256,
+      dgxLeaseReceipt: job.dgxLeaseReceipt
+        ? structuredClone(job.dgxLeaseReceipt)
+        : undefined,
+      dgxTerminalDelivery: job.dgxTerminalDelivery
+        ? structuredClone(job.dgxTerminalDelivery)
+        : undefined,
+      dgxTerminalReceipt: job.dgxTerminalReceipt
+        ? structuredClone(job.dgxTerminalReceipt)
+        : undefined,
+    };
+    const localIntentState: DgxTerminalState = jobWasCancelled(job) ? "cancelled" : "failed";
+    const queueIndex = this.queue.indexOf(job.id);
+    if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
+    if (!jobWasCancelled(job)) {
+      job.status = "failed";
+      job.error = message;
+      job.finishedAt = now();
+      if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
+    }
+    job.dgxJobId = response.job.job_id;
+    job.dgxJobTerminal = true;
+    delete job.dgxSubmitPending;
+    delete job.dgxSubmitStartedAt;
+    delete job.dgxPreparedAdmission;
+    delete job.dgxPreparedAdmissionSha256;
+    delete job.dgxLeaseReceipt;
+    delete job.dgxTerminalDelivery;
+    job.dgxTerminalReceipt = {
+      schemaVersion: "ltx-studio-dgx-terminal-receipt.v1",
+      studioJobId: job.id,
+      dgxJobId: response.job.job_id,
+      idempotencyKey: preparedAdmission.idempotency_key,
+      localIntentState,
+      remoteTerminalState: observation.state,
+      confirmedAt: now(),
+      evidence: structuredClone(observation.evidence),
+    };
+    this.appendLog(
+      job,
+      `${message} Exakte terminale Einmal-Submit-Antwort: ${response.job.job_id} ist ${observation.state}.`,
+    );
+    try {
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        this.queue.splice(0, this.queue.length, ...queueSnapshot);
+        job.status = snapshot.status;
+        job.error = snapshot.error;
+        job.finishedAt = snapshot.finishedAt;
+        job.runtimeMs = snapshot.runtimeMs;
+        job.logs.splice(0, job.logs.length, ...snapshot.logs);
+        job.dgxJobId = snapshot.dgxJobId;
+        job.dgxJobTerminal = snapshot.dgxJobTerminal;
+        if (snapshot.dgxSubmitPending) job.dgxSubmitPending = true;
+        else delete job.dgxSubmitPending;
+        if (snapshot.dgxSubmitStartedAt) job.dgxSubmitStartedAt = snapshot.dgxSubmitStartedAt;
+        else delete job.dgxSubmitStartedAt;
+        if (snapshot.dgxPreparedAdmission) job.dgxPreparedAdmission = snapshot.dgxPreparedAdmission;
+        else delete job.dgxPreparedAdmission;
+        if (snapshot.dgxPreparedAdmissionSha256) {
+          job.dgxPreparedAdmissionSha256 = snapshot.dgxPreparedAdmissionSha256;
+        } else delete job.dgxPreparedAdmissionSha256;
+        if (snapshot.dgxLeaseReceipt) job.dgxLeaseReceipt = snapshot.dgxLeaseReceipt;
+        else delete job.dgxLeaseReceipt;
+        if (snapshot.dgxTerminalDelivery) job.dgxTerminalDelivery = snapshot.dgxTerminalDelivery;
+        else delete job.dgxTerminalDelivery;
+        if (snapshot.dgxTerminalReceipt) job.dgxTerminalReceipt = snapshot.dgxTerminalReceipt;
+        else delete job.dgxTerminalReceipt;
+      }
+      throw error;
+    }
   }
 
   private async reconcilePendingDgxSubmit(
     job: RuntimeJob,
   ): Promise<QueueJobSummary | null | undefined> {
     if (!job.dgxSubmitPending) return null;
-    const list = this.dgxAdmissionOperations.list;
-    if (!list) {
+    const preparedAdmission = normalizePreparedAdmission(job.dgxPreparedAdmission);
+    const submitStartedAt = canonicalIsoTimestamp(job.dgxSubmitStartedAt);
+    if (!preparedAdmission
+      || !submitStartedAt
+      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)) {
       this.appendLog(
         job,
-        "DGX-Submit-Ausgang ist unklar und kann ohne Queue-List-Operation nicht sicher abgeglichen werden.",
+        "DGX-Submit-Ausgang bleibt fail-closed: Der vollständige persistierte Einmal-Submit-Vertrag ist ungültig.",
       );
       this.changed();
       return undefined;
     }
-    const requestedBy = `ltx-studio:${job.id}`;
-    const parsedStartedAt = Date.parse(job.dgxSubmitStartedAt ?? "");
-    const startedAt = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
-    const ambiguityDeadline = startedAt + DGX_SUBMIT_AMBIGUITY_MAX_MS;
     let lastError = "";
     while (!this.jobShouldStop(job) && job.dgxSubmitPending) {
       try {
-        const queue = await list();
+        if (!this.dgxAdmissionOperations.list) {
+          throw new Error("Die DGX-Queue unterstützt keine positive Submit-Discovery.");
+        }
+        const response = await this.dgxAdmissionOperations.list();
         if (this.jobShouldStop(job)) return undefined;
-        const matches = queue.jobs.filter((candidate) => candidate.requested_by === requestedBy);
-        const remote = matches.find((candidate) =>
-          ["submitted", "accepted", "queued", "starting", "running", "pausing", "paused", "resuming"]
-            .includes(candidate.state))
-          ?? matches[0];
-        if (remote) {
-          if (!DGX_REMOTE_TERMINAL_STATES.has(remote.state)) job.dgxJobId = remote.job_id;
-          delete job.dgxSubmitPending;
-          delete job.dgxSubmitStartedAt;
-          this.appendLog(
-            job,
-            `DGX-Submit nach unklarer Antwort autoritativ abgeglichen: ${remote.job_id} ist ${remote.state}.`,
-          );
-          this.changed();
-          return remote;
+        const remote = exactPositiveQueueCandidate(
+          response,
+          job.id,
+          preparedAdmission,
+          submitStartedAt,
+        );
+        if (!remote) {
+          const message = "noch kein exakt gebundener positiver Queue-Record sichtbar; Abwesenheit ist kein Gegenbeweis";
+          if (message !== lastError) {
+            lastError = message;
+            this.appendLog(job, `DGX-Submit-Discovery wartet: ${message}.`);
+            this.changed();
+          }
+          if (!await this.waitForDelay(job, DGX_SUBMIT_RECONCILE_POLL_MS)) return undefined;
+          continue;
         }
-        if (Date.now() >= ambiguityDeadline) {
-          delete job.dgxSubmitPending;
-          delete job.dgxSubmitStartedAt;
-          this.appendLog(
-            job,
-            "DGX-Queue bestätigt nach Ablauf des Submit-Zeitfensters, dass kein Auftrag für diesen Studio-Job existiert.",
-          );
+        const leaseReceipt = dgxLeaseReceiptFromQueuePositive(
+          remote,
+          job.id,
+          preparedAdmission,
+          submitStartedAt,
+        );
+        this.commitDgxLeaseReceipt(job, remote, leaseReceipt, false);
+        const logsBeforeDiscoveryMessage = [...job.logs];
+        this.appendLog(
+          job,
+          `DGX-Submit nach unklarer Antwort atomar per positiver Queue-Evidenz gebunden: `
+            + `${remote.job_id} ist ${remote.state}.`,
+        );
+        try {
           this.changed();
-          return null;
+        } catch (error) {
+          if (this.persistenceHold || isJobPersistenceHoldError(error)) return undefined;
+          // The lease adoption above is already durable authority. A proven
+          // pre-rename failure of this optional diagnostic must not turn that
+          // remote success back into an unknown submit, strand the lease, or
+          // make the caller leave a queue-less local job behind.
+          job.logs.splice(0, job.logs.length, ...logsBeforeDiscoveryMessage);
+          process.stderr.write(
+            `LTX Studio konnte das Diagnose-Log der bereits dauerhaft gebundenen DGX-Lease ${remote.job_id} nicht persistieren: ${
+              error instanceof Error ? error.message : String(error)
+            }\n`,
+          );
         }
+        return remote;
       } catch (error) {
+        if (this.persistenceHold || isJobPersistenceHoldError(error)) return undefined;
+        if (error instanceof DgxLeaseAuthorityError) {
+          this.enterPersistenceHold(error, "positive DGX-Submit-Discovery war mehrdeutig");
+          return undefined;
+        }
         const message = error instanceof Error ? error.message : String(error);
         if (message !== lastError) {
           lastError = message;
@@ -2844,18 +8465,131 @@ export class JobManager extends EventEmitter {
           this.changed();
         }
       }
-      const remaining = Math.max(1, ambiguityDeadline - Date.now());
-      if (!await this.waitForDelay(job, Math.min(DGX_SUBMIT_RECONCILE_POLL_MS, remaining))) {
+      if (!await this.waitForDelay(job, DGX_SUBMIT_RECONCILE_POLL_MS)) {
         return undefined;
       }
     }
     return undefined;
   }
 
+  private scheduleTerminalPendingDgxSubmitReconciliation(
+    job: RuntimeJob,
+    delayMs = DGX_SUBMIT_RECONCILE_POLL_MS,
+  ): void {
+    if (this.shuttingDown
+      || this.persistenceHold
+      || !job.dgxSubmitPending
+      || isActiveJobStatus(job.status)
+      || job.dgxSubmitReconcileRetry
+      || job.dgxSubmitReconcileInFlight
+      || job.dgxTerminalDelivery
+      || job.dgxTerminalDeliveryInFlight) return;
+    job.dgxSubmitReconcileRetry = setTimeout(() => {
+      delete job.dgxSubmitReconcileRetry;
+      const reconciliation = this.reconcileTerminalPendingDgxSubmit(job);
+      job.dgxSubmitReconcileInFlight = reconciliation;
+      const observedReconciliation = reconciliation.finally(() => {
+        if (job.dgxSubmitReconcileInFlight === reconciliation) {
+          this.clearCancellationSettlementTransient(
+            job,
+            () => delete job.dgxSubmitReconcileInFlight,
+          );
+        }
+        if (job.dgxSubmitPending && !isActiveJobStatus(job.status)) {
+          const retryDelayMs = job.dgxSubmitReconcileDelayMs;
+          delete job.dgxSubmitReconcileDelayMs;
+          this.scheduleTerminalPendingDgxSubmitReconciliation(job, retryDelayMs);
+        }
+      });
+      this.runDetached(
+        observedReconciliation,
+        `terminaler DGX-Submit-Abgleich ${job.id}`,
+      );
+    }, delayMs);
+    job.dgxSubmitReconcileRetry.unref();
+  }
+
+  private async reconcileTerminalPendingDgxSubmit(job: RuntimeJob): Promise<void> {
+    if (this.shuttingDown || this.persistenceHold || !job.dgxSubmitPending || isActiveJobStatus(job.status)) return;
+    const preparedAdmission = normalizePreparedAdmission(job.dgxPreparedAdmission);
+    const submitStartedAt = canonicalIsoTimestamp(job.dgxSubmitStartedAt);
+    if (!preparedAdmission
+      || !submitStartedAt
+      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)) {
+      this.appendLog(
+        job,
+        "Terminaler DGX-Submit-Ausgang bleibt ohne vollständigen Einmal-Submit-Vertrag fail-closed unaufgelöst.",
+      );
+      this.changed();
+      return;
+    }
+    try {
+      if (!this.dgxAdmissionOperations.list) {
+        throw new Error("Die DGX-Queue unterstützt keine positive Submit-Discovery.");
+      }
+      const response = await this.dgxAdmissionOperations.list();
+      if (this.shuttingDown
+        || this.persistenceHold
+        || !job.dgxSubmitPending
+        || isActiveJobStatus(job.status)) return;
+      const remote = exactPositiveQueueCandidate(
+        response,
+        job.id,
+        preparedAdmission,
+        submitStartedAt,
+      );
+      if (!remote) {
+        this.appendLog(
+          job,
+          "Terminaler DGX-Submit bleibt settling: Es ist noch kein exakt gebundener positiver Queue-Record sichtbar; Abwesenheit beendet den Intent nie.",
+        );
+        this.changed();
+        return;
+      }
+      const leaseReceipt = dgxLeaseReceiptFromQueuePositive(
+        remote,
+        job.id,
+        preparedAdmission,
+        submitStartedAt,
+      );
+      this.commitDgxLeaseReceipt(job, remote, leaseReceipt, true);
+      this.appendLog(
+        job,
+        `Terminaler DGX-Submit-Ausgang atomar per positiver Queue-Evidenz gebunden: ${remote.job_id} ist `
+          + `${remote.state} und wird ohne Compute-Start terminal bestätigt.`,
+      );
+      this.changed();
+      await this.flushDgxTerminalDelivery(job);
+      this.scheduleDgxTerminalRetry(job);
+    } catch (error) {
+      if (this.persistenceHold || isJobPersistenceHoldError(error)) return;
+      if (error instanceof DgxLeaseAuthorityError) {
+        this.enterPersistenceHold(error, "terminale positive DGX-Submit-Discovery war mehrdeutig");
+        return;
+      }
+      this.appendLog(
+        job,
+        `Terminaler DGX-Submit-Abgleich bleibt vorgemerkt: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.changed();
+      // The first durable write after adopting an ambiguous remote lease may
+      // have failed after the in-memory terminal delivery was prepared. Only
+      // arm its retry after this recovery write succeeded; otherwise a
+      // persisted lease could be left without either reconciliation timer.
+      if (job.dgxTerminalDelivery) this.scheduleDgxTerminalRetry(job, 0);
+    }
+  }
+
   private async waitForDgxQueueStart(
     job: RuntimeJob,
     estimatedMemoryGiBOverride?: number,
   ): Promise<boolean> {
+    if (this.persistenceHold) return false;
+    // Defense in depth: no queue admission may happen for an unclassified or
+    // explicitly CPU-only job.
+    if (!this.classifyExecution(job, "dgx")) return false;
     if (!await this.waitForLocalPreAdmissionResources(job)) return false;
     while (!this.shuttingDown && isActiveJobStatus(job.status)) {
       if (job.dgxSubmitPending) {
@@ -2882,14 +8616,26 @@ export class JobManager extends EventEmitter {
           continue;
         }
       }
-      let response;
+      let response: QueueSubmitResponse;
+      let responseLeaseReceipt: DgxLeaseReceipt | null = null;
       const submitAbortController = new AbortController();
+      try {
+        this.revalidateRuntimeTrustBoundary(job, "DGX-Submit");
+      } catch (error) {
+        this.failJob(job, error instanceof Error ? error.message : String(error));
+        return false;
+      }
       try {
         this.appendLog(job, "DGX-Queue: Renderbedarf wird beim Orchestrator eingereicht; laufende Anwendungen werden nicht direkt beendet.");
         const estimate = estimateRequest(job.request, this.list());
         const requestedMemoryGiB = queueAdmissionMemoryGiB(
           job.request,
           estimatedMemoryGiBOverride ?? estimate.memoryGiB,
+          job.id,
+        );
+        const [preparedAdmission] = buildAdmissionRequests(
+          job.request,
+          requestedMemoryGiB,
           job.id,
         );
         this.appendLog(
@@ -2899,52 +8645,80 @@ export class JobManager extends EventEmitter {
         );
         job.dgxSubmitPending = true;
         job.dgxSubmitStartedAt = now();
+        job.dgxPreparedAdmission = structuredClone(preparedAdmission);
+        job.dgxPreparedAdmissionSha256 = preparedAdmissionSha256(preparedAdmission);
         job.dgxAdmissionAbortController = submitAbortController;
         this.changed();
-        response = await this.dgxAdmissionOperations.submit(
-          job.request,
-          requestedMemoryGiB,
-          job.id,
+        const submitResponse = await this.dgxAdmissionOperations.submit(
+          preparedAdmission,
           submitAbortController.signal,
         );
-        delete job.dgxAdmissionAbortController;
-        delete job.dgxSubmitPending;
-        delete job.dgxSubmitStartedAt;
+        if (this.persistenceHold) return false;
+        if (!dgxSubmitResponseCallerBound(submitResponse, job.id)) {
+          throw new Error(
+            "DGX-Queue-Submit lieferte keine exakt caller- und idempotenzgebundene Antwort.",
+          );
+        }
+        if (DGX_POSITIVE_DISCOVERY_STATES.has(submitResponse.job.state)) {
+          responseLeaseReceipt = dgxLeaseReceiptFromSubmit(
+          submitResponse,
+          job.id,
+          preparedAdmission,
+          job.dgxSubmitStartedAt!,
+          );
+        }
+        response = submitResponse;
+        this.clearCancellationSettlementTransient(
+          job,
+          () => delete job.dgxAdmissionAbortController,
+        );
       } catch (error) {
-        delete job.dgxAdmissionAbortController;
+        if (this.persistenceHold || isJobPersistenceHoldError(error)) return false;
+        this.clearCancellationSettlementTransient(
+          job,
+          () => delete job.dgxAdmissionAbortController,
+        );
         const message = error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.";
         this.appendLog(
           job,
-          `DGX-Queue-Submit endete ohne autoritative Antwort; der Auftrag wird vor jedem weiteren Submit abgeglichen: ${message}`,
+          `DGX-Queue-Submit endete ohne autoritative Antwort; derselbe Studio-Job sendet nie erneut und wartet ausschließlich auf positive Queue-Evidenz: ${message}`,
         );
         this.changed();
-        if (this.jobShouldStop(job)) return false;
+        if (this.jobShouldStop(job)) {
+          if (job.dgxSubmitPending) {
+            this.scheduleTerminalPendingDgxSubmitReconciliation(job, 0);
+          }
+          return false;
+        }
         continue;
       }
 
       const { admission, job: queueJob } = response;
-      if (queueJob.state === "accepted" || queueJob.state === "queued") {
-        job.dgxJobId = queueJob.job_id;
-        this.changed();
-      }
       if (this.jobShouldStop(job)) {
-        if (this.shuttingDown && job.status === "queued" && job.dgxJobId) {
-          const queueIndex = this.queue.indexOf(job.id);
-          if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
-          job.status = "interrupted";
-          job.finishedAt = now();
+        if (!responseLeaseReceipt) {
+          this.commitTerminalDgxSubmitResponse(
+            job,
+            response,
+            job.dgxPreparedAdmission!,
+            job.dgxSubmitStartedAt!,
+            "Der einzige DGX-Submit wurde während des lokalen Abbruchs bereits remote terminal; es existiert keine aktive Lease.",
+          );
+          return false;
         }
-        this.prepareDgxTerminalDelivery(job, "cancelled", {
-          current_step: this.shuttingDown
-            ? "LTX Studio stopped while DGX queue submit was in flight"
-            : "cancelled while DGX queue submit was in flight",
-          last_error: this.shuttingDown
-            ? "Studio shutdown won the queue submit race"
-            : "manual Studio cancellation",
-        });
-        this.changed();
+        this.commitDgxLeaseReceipt(job, queueJob, responseLeaseReceipt, true);
+        if (job.dgxSubmitReconcileRetry) {
+          clearTimeout(job.dgxSubmitReconcileRetry);
+          delete job.dgxSubmitReconcileRetry;
+        }
         await this.flushDgxTerminalDelivery(job);
         return false;
+      }
+      if (job.dgxSubmitReconcileRetry) {
+        clearTimeout(job.dgxSubmitReconcileRetry);
+        delete job.dgxSubmitReconcileRetry;
+      }
+      if (responseLeaseReceipt) {
+        this.commitDgxLeaseReceipt(job, queueJob, responseLeaseReceipt, false);
       }
       this.appendLog(
         job,
@@ -2972,18 +8746,14 @@ export class JobManager extends EventEmitter {
         continue;
       }
 
-      if (shouldRetryQueueSubmit(admission)) {
-        const delayMs = retryAfterMs(admission);
-        this.appendLog(
-          job,
-          `DGX-Queue wartet: ${decisionMessage(admission)}. Neuer Submit in ${(delayMs / 1000).toFixed(0)} s.`,
-        );
-        this.changed();
-        if (!await this.waitForDelay(job, delayMs)) return false;
-        continue;
-      }
-
-      this.failJob(job, `DGX-Orchestrator lehnt den Start ab: ${decisionMessage(admission)}`);
+      this.commitTerminalDgxSubmitResponse(
+        job,
+        response,
+        job.dgxPreparedAdmission!,
+        job.dgxSubmitStartedAt!,
+        `DGX-Orchestrator beendete den einzigen sicheren Submit als ${queueJob.state}: `
+          + `${decisionMessage(admission)}. Ein Neuversuch benötigt einen neuen Studio-Job mit neuer UUID.`,
+      );
       return false;
     }
     return false;
@@ -2995,18 +8765,51 @@ export class JobManager extends EventEmitter {
       this.appendLog(job, `DGX-Queue-Job wartet beim Orchestrator; nächste Prüfung in ${(delayMs / 1000).toFixed(0)} s.`);
       this.changed();
       if (!await this.waitForDelay(job, delayMs)) return "stopped";
-      let response;
+      let queueJob: QueueJobSummary;
+      let terminalObservation: DgxTerminalObservation | null = null;
       try {
-        response = await this.dgxQueueOperations.read(job.dgxJobId);
+        const expectedDgxJobId = job.dgxJobId;
+        requireDgxLeaseAuthority(job);
+        const response = await this.dgxQueueOperations.read(expectedDgxJobId);
+        const boundJob = dgxResponseBoundJob(response, "job-read", expectedDgxJobId, job.id);
+        if (!boundJob) {
+          throw new DgxLeaseAuthorityError(
+            "DGX-Queue-Status ist nicht exakt an diesen Studio-Job gebunden.",
+          );
+        }
+        if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return "stopped";
+        queueJob = boundJob;
+        terminalObservation = dgxResponseTerminalObservation(
+          response,
+          "job-read",
+          expectedDgxJobId,
+          job.id,
+        );
       } catch (error) {
         if (this.jobShouldStop(job)) return "stopped";
+        const goneObservation = job.dgxJobId
+          ? dgxGoneTerminalObservation(error, job.dgxJobId, job.id)
+          : null;
+        if (goneObservation) {
+          const message = `DGX-Queue-Job ist per 410-Beleg terminal: ${goneObservation.state}. `
+            + "Derselbe Studio-Job wird niemals erneut submitten.";
+          this.failJob(job, message);
+          if (job.dgxTerminalDelivery) {
+            this.commitDgxTerminalReceipt(job, goneObservation, "Queue-Poll erhielt exakten HTTP-410-Beleg");
+          }
+          return "stopped";
+        }
+        if (error instanceof DgxLeaseAuthorityError) {
+          this.enterPersistenceHold(error, "DGX-Queue-Poll verlor seine Lease-Autorität");
+          return "stopped";
+        }
         const message = error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.";
         this.appendLog(job, `DGX-Queue-Status vorübergehend nicht lesbar: ${message}. Prüfung wird wiederholt.`);
         this.changed();
         delayMs = 30_000;
         continue;
       }
-      const queueJob = response.job;
+      if (this.jobShouldStop(job)) return "stopped";
       this.appendLog(job, `DGX-Queue-Status: ${queueJob.job_id} ${queueJob.state}${queueJob.reason ? ` - ${queueJob.reason}` : ""}.`);
       if (queueJob.state === "accepted") {
         const outcome = await this.startAcceptedDgxJob(job);
@@ -3021,13 +8824,29 @@ export class JobManager extends EventEmitter {
         continue;
       }
       if (queueJob.state === "cancelled") {
-        job.dgxJobTerminal = true;
-        this.resetDgxLeaseForResubmit(job, `Remote-Job ${queueJob.job_id} wurde vor dem Start abgebrochen.`);
-        return "resubmit";
+        this.failJob(
+          job,
+          `Remote-Job ${queueJob.job_id} wurde vor dem Start abgebrochen. `
+            + "Ein Neuversuch benötigt einen neuen Studio-Job mit neuer UUID.",
+        );
+        if (terminalObservation && job.dgxTerminalDelivery) {
+          this.commitDgxTerminalReceipt(
+            job,
+            terminalObservation,
+            "Queue-Poll bestätigte den Remote-Abbruch",
+          );
+        }
+        return "stopped";
       }
       if (["completed", "failed", "rejected"].includes(queueJob.state)) {
-        job.dgxJobTerminal = true;
         this.failJob(job, `DGX-Queue-Job ist terminal: ${queueJob.state}${queueJob.last_error ? ` - ${queueJob.last_error}` : ""}`);
+        if (terminalObservation && job.dgxTerminalDelivery) {
+          this.commitDgxTerminalReceipt(
+            job,
+            terminalObservation,
+            "Queue-Poll bestätigte einen terminalen Remote-Zustand",
+          );
+        }
         return "stopped";
       }
       delayMs = 30_000;
@@ -3058,16 +8877,6 @@ export class JobManager extends EventEmitter {
     this.failJob(job, message);
     await this.flushDgxTerminalDelivery(job);
     return "stopped";
-  }
-
-  private resetDgxLeaseForResubmit(job: RuntimeJob, detail: string): void {
-    if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
-    delete job.dgxTerminalRetry;
-    delete job.dgxTerminalDelivery;
-    job.dgxJobId = null;
-    job.dgxJobTerminal = false;
-    this.appendLog(job, `${detail} Der Renderbedarf wird erneut beim Orchestrator eingereicht.`);
-    this.changed();
   }
 
   private readStartResourceSnapshot(): ResourceSnapshot {
@@ -3111,7 +8920,15 @@ export class JobManager extends EventEmitter {
     state: QueueTransitionState,
     metadata: DgxTransitionMetadata = {},
   ): Promise<boolean> {
+    if (this.persistenceHold) return false;
     if (!job.dgxJobId || job.dgxJobTerminal) return true;
+    try {
+      requireDgxLeaseAuthority(job);
+    } catch (error) {
+      this.appendLog(job, error instanceof Error ? error.message : String(error));
+      this.changed();
+      return false;
+    }
     if (DGX_TERMINAL_STATES.has(state as DgxTerminalState)) {
       this.prepareDgxTerminalDelivery(job, state as DgxTerminalState, metadata);
       this.changed();
@@ -3122,15 +8939,120 @@ export class JobManager extends EventEmitter {
     if (job.dgxStateTransitionInFlight) return job.dgxStateTransitionInFlight;
     const transitionPromise = (async () => {
       while (!this.shuttingDown && isActiveJobStatus(job.status)) {
+        let transitionMayHaveApplied = false;
         try {
-          const response = await this.dgxQueueOperations.transition(job.dgxJobId!, state, metadata);
-          this.appendLog(job, `DGX-Queue-State: ${response.job.job_id} -> ${response.job.state}.`);
+          this.revalidateRuntimeTrustBoundary(job, `DGX-${state}-Fence`);
+          const expectedDgxJobId = job.dgxJobId!;
+          requireDgxLeaseAuthority(job);
+          const currentResponse = await this.dgxQueueOperations.read(expectedDgxJobId);
+          const current = dgxResponseBoundJob(
+            currentResponse,
+            "job-read",
+            expectedDgxJobId,
+            job.id,
+          );
+          if (!current) {
+            throw new DgxLeaseAuthorityError(
+              "DGX-State-Fence konnte die Lease nicht exakt an diesen Studio-Job binden.",
+            );
+          }
+          if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+          const alreadyApplied = current.state === state
+            || ((state === "starting" || state === "resuming") && current.state === "running");
+          if (alreadyApplied) {
+            this.appendLog(
+              job,
+              `DGX-Queue-State war vor PATCH bereits autoritativ ${current.state}: ${current.job_id}.`,
+            );
+            if (state === "starting" || state === "running" || state === "pausing" || state === "resuming") {
+              this.startDgxOwnerHeartbeat(job, current.state === "running" ? "ltx_rendering" : state);
+            }
+            this.changed();
+            return true;
+          }
+          if (DGX_REMOTE_TERMINAL_STATES.has(current.state)) {
+            throw new Error(`DGX-State-Fence ist bereits terminal: ${current.state}.`);
+          }
+          transitionMayHaveApplied = true;
+          if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+          requireDgxLeaseAuthority(job);
+          const response = await this.dgxQueueOperations.transition(expectedDgxJobId, state, metadata);
+          if (this.persistenceHold
+            || this.jobShouldStop(job)
+            || job.dgxJobId !== expectedDgxJobId) return false;
+          const applied = dgxResponseBoundJob(
+            response,
+            "job-transition",
+            expectedDgxJobId,
+            job.id,
+          );
+          if (!applied || applied.state !== state) {
+            throw new DgxLeaseAuthorityError(
+              `DGX-State-PATCH bestätigte ${state} nicht exakt callergebunden.`,
+            );
+          }
+          this.appendLog(job, `DGX-Queue-State: ${applied.job_id} -> ${applied.state}.`);
           if (state === "starting" || state === "running" || state === "pausing" || state === "resuming") {
             this.startDgxOwnerHeartbeat(job, state === "running" ? "ltx_rendering" : state);
           }
           this.changed();
           return true;
         } catch (error) {
+          if (this.persistenceHold || isJobPersistenceHoldError(error)) return false;
+          if (error instanceof DgxLeaseAuthorityError) {
+            this.enterPersistenceHold(error, `DGX-${state}-Fence verlor seine Lease-Autorität`);
+            return false;
+          }
+          if (transitionMayHaveApplied && job.dgxJobId) {
+            try {
+              const expectedDgxJobId = job.dgxJobId;
+              requireDgxLeaseAuthority(job);
+              const readBack = await this.dgxQueueOperations.read(expectedDgxJobId);
+              const remote = dgxResponseBoundJob(
+                readBack,
+                "job-read",
+                expectedDgxJobId,
+                job.id,
+              );
+              if (!remote) {
+                throw new DgxLeaseAuthorityError(
+                  "Statusabgleich nach PATCH war nicht exakt callergebunden.",
+                );
+              }
+              if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+              if (remote.state === state
+                || ((state === "starting" || state === "resuming") && remote.state === "running")) {
+                this.appendLog(
+                  job,
+                  `DGX-State-PATCH per exakt gebundenem GET bestätigt: ${remote.job_id} ist ${remote.state}.`,
+                );
+                if (state === "starting" || state === "running" || state === "pausing" || state === "resuming") {
+                  this.startDgxOwnerHeartbeat(
+                    job,
+                    remote.state === "running" ? "ltx_rendering" : state,
+                  );
+                }
+                this.changed();
+                return true;
+              }
+            } catch (readBackError) {
+              if (this.persistenceHold || isJobPersistenceHoldError(readBackError)) return false;
+              if (readBackError instanceof DgxLeaseAuthorityError) {
+                this.enterPersistenceHold(
+                  readBackError,
+                  `DGX-${state}-Statusabgleich verlor seine Lease-Autorität`,
+                );
+                return false;
+              }
+              this.appendLog(
+                job,
+                `DGX-State-PATCH-Ausgang bleibt nach GET unklar: ${
+                  readBackError instanceof Error ? readBackError.message : String(readBackError)
+                }`,
+              );
+              this.changed();
+            }
+          }
           const startFenceState = state === "starting" || state === "resuming" ? state : null;
           const retryDelayMs = startFenceState
             ? retryableStartFenceDelayMs(error)
@@ -3160,7 +9082,10 @@ export class JobManager extends EventEmitter {
       return await transitionPromise;
     } finally {
       if (job.dgxStateTransitionInFlight === transitionPromise) {
-        delete job.dgxStateTransitionInFlight;
+        this.clearCancellationSettlementTransient(
+          job,
+          () => delete job.dgxStateTransitionInFlight,
+        );
       }
     }
   }
@@ -3175,10 +9100,44 @@ export class JobManager extends EventEmitter {
       ? transitionError.message
       : String(transitionError);
     while (!this.shuttingDown && isActiveJobStatus(job.status) && job.dgxJobId) {
-      let remote;
+      let remote: QueueJobSummary;
       try {
-        remote = (await this.dgxQueueOperations.read(job.dgxJobId)).job;
+        const expectedDgxJobId = job.dgxJobId;
+        requireDgxLeaseAuthority(job);
+        const response = await this.dgxQueueOperations.read(expectedDgxJobId);
+        const boundJob = dgxResponseBoundJob(response, "job-read", expectedDgxJobId, job.id);
+        if (!boundJob) {
+          throw new DgxLeaseAuthorityError(
+            "DGX-Start-Fence-Status ist nicht exakt an diesen Studio-Job gebunden.",
+          );
+        }
+        if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return "failed";
+        remote = boundJob;
       } catch (error) {
+        if (this.persistenceHold || isJobPersistenceHoldError(error)) return "failed";
+        const expectedDgxJobId = job.dgxJobId;
+        const goneObservation = expectedDgxJobId
+          ? dgxGoneTerminalObservation(error, expectedDgxJobId, job.id)
+          : null;
+        if (goneObservation) {
+          this.failJob(
+            job,
+            `DGX-Start-Fence erhielt einen exakten HTTP-410-Terminalbeleg (${goneObservation.state}); `
+              + "derselbe Studio-Job wird nicht erneut submitten.",
+          );
+          if (job.dgxTerminalDelivery) {
+            this.commitDgxTerminalReceipt(
+              job,
+              goneObservation,
+              "Start-Fence erhielt exakten HTTP-410-Beleg",
+            );
+          }
+          return "failed";
+        }
+        if (error instanceof DgxLeaseAuthorityError) {
+          this.enterPersistenceHold(error, "DGX-Start-Fence verlor seine Lease-Autorität");
+          return "failed";
+        }
         this.appendLog(
           job,
           `DGX-Start-Fence antwortete nicht (${detail}); der Queue-State ist vorübergehend nicht lesbar: ${
@@ -3189,6 +9148,7 @@ export class JobManager extends EventEmitter {
         if (!await this.waitForDelay(job, retryDelayMs)) return "failed";
         continue;
       }
+      if (this.jobShouldStop(job)) return "failed";
       if (remote.state === targetState || remote.state === "running") {
         this.appendLog(
           job,
@@ -3264,23 +9224,65 @@ export class JobManager extends EventEmitter {
   }
 
   private async flushDgxTerminalDelivery(job: RuntimeJob): Promise<boolean> {
+    if (this.persistenceHold) return false;
     if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
-    if (job.localProcessGroupPending) return false;
+    if (job.localProcessSpawnPending
+      || job.localProcessGroupPending
+      || job.ownedDockerContainer
+      || job.ownedDockerContainerRecoveryBlocked) return false;
     if (job.dgxTerminalDeliveryInFlight) return job.dgxTerminalDeliveryInFlight;
-    if (job.dgxStateTransitionInFlight) await job.dgxStateTransitionInFlight;
-    await this.stopDgxOwnerHeartbeat(job);
-    if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
-    if (job.dgxTerminalRetry) {
-      clearTimeout(job.dgxTerminalRetry);
-      delete job.dgxTerminalRetry;
-    }
-    const deliveryPromise = this.attemptDgxTerminalDelivery(job);
+    // Claim single-flight synchronously, before waiting for a state transition
+    // or heartbeat.  No second caller may pass the same pre-await checks.
+    const deliveryPromise = (async (): Promise<boolean> => {
+      try {
+        requireDgxLeaseAuthority(job);
+        if (job.dgxStateTransitionInFlight) await job.dgxStateTransitionInFlight;
+        if (this.persistenceHold) return false;
+        requireDgxLeaseAuthority(job);
+        await this.stopDgxOwnerHeartbeat(job);
+        if (this.persistenceHold) return false;
+        if (!job.dgxJobId || job.dgxJobTerminal || !job.dgxTerminalDelivery) return true;
+        requireDgxLeaseAuthority(job);
+        if (job.dgxTerminalRetry) {
+          clearTimeout(job.dgxTerminalRetry);
+          delete job.dgxTerminalRetry;
+        }
+        return await this.attemptDgxTerminalDelivery(job);
+      } catch (error) {
+        if (error instanceof DgxLeaseAuthorityError) {
+          const message = error.message;
+          if (job.dgxTerminalDelivery && job.dgxTerminalDelivery.lastError !== message) {
+            job.dgxTerminalDelivery.lastError = message;
+            job.dgxTerminalDelivery.updatedAt = now();
+            this.appendLog(job, `${message} Automatische Remote-Retries bleiben gesperrt.`);
+            this.changed();
+          }
+          return false;
+        }
+        throw error;
+      }
+    })();
     job.dgxTerminalDeliveryInFlight = deliveryPromise;
+    let retryAfterPersistenceFailure = false;
     try {
       return await deliveryPromise;
+    } catch (error) {
+      retryAfterPersistenceFailure = !this.persistenceHold
+        && !isJobPersistenceHoldError(error)
+        && Boolean(job.dgxTerminalDelivery);
+      throw error;
     } finally {
       if (job.dgxTerminalDeliveryInFlight === deliveryPromise) {
-        delete job.dgxTerminalDeliveryInFlight;
+        this.clearCancellationSettlementTransient(
+          job,
+          () => delete job.dgxTerminalDeliveryInFlight,
+        );
+      }
+      if (retryAfterPersistenceFailure) this.scheduleDgxTerminalRetry(job);
+      if (job.dgxSubmitPending
+        && !isActiveJobStatus(job.status)
+        && !job.dgxTerminalDelivery) {
+        this.scheduleTerminalPendingDgxSubmitReconciliation(job, 0);
       }
     }
   }
@@ -3289,70 +9291,129 @@ export class JobManager extends EventEmitter {
     const delivery = job.dgxTerminalDelivery;
     const jobId = job.dgxJobId;
     if (!delivery || !jobId) return true;
+    const previousAttempts = delivery.attempts;
+    const previousUpdatedAt = delivery.updatedAt;
     delivery.attempts += 1;
     delivery.updatedAt = now();
-    this.changed();
+    try {
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        // A proven pre-rename failure left the durable delivery untouched. Keep
+        // memory aligned with that snapshot and restore the timer that flush()
+        // cleared before this attempt began.
+        delivery.attempts = previousAttempts;
+        delivery.updatedAt = previousUpdatedAt;
+      }
+      throw error;
+    }
     try {
       let transitionState: DgxTerminalState = delivery.state;
       let transitionMetadata = delivery.metadata;
-      if (delivery.state === "cancelled") {
-        const current = await this.dgxQueueOperations.read(jobId);
-        if (current.job.state === "cancelled") {
-          this.confirmDgxTerminalDelivery(job, "cancelled", "vor PATCH per GET bestätigt");
-          return true;
-        }
-        if (DGX_REMOTE_TERMINAL_STATES.has(current.job.state)) {
-          job.dgxJobTerminal = true;
-          delete job.dgxTerminalDelivery;
-          this.appendLog(
-            job,
-            `DGX-Terminalabweichung: lokal war cancelled vorgemerkt, der Orchestrator meldet ${current.job.state}.`,
-          );
-          this.changed();
-          return false;
-        }
-        if (["starting", "pausing", "resuming"].includes(current.job.state)) {
-          transitionState = "failed";
-          transitionMetadata = {
-            ...delivery.metadata,
-            current_step: "cancelled locally before compute launch completed",
-            last_error: delivery.metadata.last_error ?? "LTX Studio cancellation won a queue transition race",
-          };
-        }
+      // Every terminal mutation is GET-first. A persisted/adopted job ID alone
+      // is not mutation authority: the current public record must bind both
+      // caller fields to this exact Studio job before PATCH.
+      requireDgxLeaseAuthority(job);
+      if (job.dgxJobId !== jobId) throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Terminal-GET.");
+      const current = await this.dgxQueueOperations.read(jobId);
+      if (this.persistenceHold) return false;
+      const currentState = dgxResponseJobState(current, "job-read", jobId, job.id);
+      if (!currentState) {
+        throw new DgxLeaseAuthorityError(
+          "DGX Runtime API lieferte beim GET keinen exakt callergebundenen Jobzustand.",
+        );
       }
+      const currentTerminal = dgxResponseTerminalObservation(current, "job-read", jobId, job.id);
+      if (currentTerminal) {
+        this.commitDgxTerminalReceipt(
+          job,
+          currentTerminal,
+          currentState === delivery.state
+            ? "vor PATCH per GET bestätigt"
+            : "vor PATCH per GET abweichend terminal bestätigt",
+        );
+        return currentState === delivery.state;
+      }
+      if (delivery.state === "cancelled"
+        && ["starting", "pausing", "resuming"].includes(currentState)) {
+        transitionState = "failed";
+        transitionMetadata = {
+          ...delivery.metadata,
+          current_step: "cancelled locally before compute launch completed",
+          last_error: delivery.metadata.last_error ?? "LTX Studio cancellation won a queue transition race",
+        };
+      }
+      if (this.persistenceHold) return false;
+      requireDgxLeaseAuthority(job);
+      if (job.dgxJobId !== jobId) throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Terminal-PATCH.");
       const response = await this.dgxQueueOperations.transition(jobId, transitionState, transitionMetadata);
-      if (response.job.state !== transitionState) {
-        throw new Error(`DGX Runtime API bestätigte ${response.job.state} statt ${transitionState}.`);
+      if (this.persistenceHold) return false;
+      const responseState = dgxResponseJobState(response, "job-transition", jobId, job.id);
+      const responseTerminal = dgxResponseTerminalObservation(
+        response,
+        "job-transition",
+        jobId,
+        job.id,
+      );
+      if (!responseState || !responseTerminal) {
+        throw new DgxLeaseAuthorityError(
+          "DGX Runtime API lieferte beim PATCH keinen exakt gebundenen terminalen Jobzustand.",
+        );
+      }
+      if (responseState !== transitionState) {
+        throw new Error(`DGX Runtime API bestätigte ${responseState} statt ${transitionState}.`);
       }
       const detail = transitionState === delivery.state
         ? "PATCH bestätigt"
         : `lokaler Abbruch regelkonform als ${transitionState} abgeschlossen`;
-      this.confirmDgxTerminalDelivery(job, response.job.state as DgxTerminalState, detail);
+      this.commitDgxTerminalReceipt(job, responseTerminal, detail);
       return true;
     } catch (transitionError) {
+      if (this.persistenceHold || isJobPersistenceHoldError(transitionError)) return false;
+      if (transitionError instanceof DgxTerminalReceiptPersistenceError) throw transitionError;
+      if (transitionError instanceof DgxLeaseAuthorityError) throw transitionError;
+      const goneObservation = dgxGoneTerminalObservation(transitionError, jobId, job.id);
+      if (goneObservation) return this.settleDgxGoneEvidence(job, delivery, goneObservation);
       const transitionMessage = transitionError instanceof Error ? transitionError.message : String(transitionError);
       try {
+        requireDgxLeaseAuthority(job);
+        if (job.dgxJobId !== jobId) throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Terminal-Statusabgleich.");
         const response = await this.dgxQueueOperations.read(jobId);
-        if (response.job.state === delivery.state) {
-          this.confirmDgxTerminalDelivery(job, response.job.state, "nach verlorener PATCH-Antwort per GET abgeglichen");
+        if (this.persistenceHold) return false;
+        const responseState = dgxResponseJobState(response, "job-read", jobId, job.id);
+        if (!responseState) {
+          throw new DgxLeaseAuthorityError(
+            "DGX Runtime API lieferte beim Statusabgleich keinen exakt gebundenen Jobzustand.",
+          );
+        }
+        const responseTerminal = dgxResponseTerminalObservation(response, "job-read", jobId, job.id);
+        if (responseState === delivery.state && responseTerminal) {
+          this.commitDgxTerminalReceipt(
+            job,
+            responseTerminal,
+            "nach verlorener PATCH-Antwort per GET abgeglichen",
+          );
           return true;
         }
-        if (DGX_REMOTE_TERMINAL_STATES.has(response.job.state)) {
-          job.dgxJobTerminal = true;
-          delete job.dgxTerminalDelivery;
-          this.appendLog(
+        if (responseTerminal) {
+          this.commitDgxTerminalReceipt(
             job,
-            `DGX-Terminalabweichung: lokal war ${delivery.state} vorgemerkt, der Orchestrator meldet ${response.job.state}.`,
+            responseTerminal,
+            "nach verlorener PATCH-Antwort abweichend terminal abgeglichen",
           );
-          this.changed();
           return false;
         }
         this.deferDgxTerminalDelivery(
           job,
-          `${transitionMessage}; Remote-Zustand nach Abgleich: ${response.job.state}`,
+          `${transitionMessage}; Remote-Zustand nach Abgleich: ${responseState}`,
         );
         return false;
       } catch (readError) {
+        if (this.persistenceHold || isJobPersistenceHoldError(readError)) return false;
+        if (readError instanceof DgxTerminalReceiptPersistenceError) throw readError;
+        if (readError instanceof DgxLeaseAuthorityError) throw readError;
+        const readGoneObservation = dgxGoneTerminalObservation(readError, jobId, job.id);
+        if (readGoneObservation) return this.settleDgxGoneEvidence(job, delivery, readGoneObservation);
         const readMessage = readError instanceof Error ? readError.message : String(readError);
         this.deferDgxTerminalDelivery(job, `${transitionMessage}; Statusabgleich fehlgeschlagen: ${readMessage}`);
         return false;
@@ -3360,17 +9421,119 @@ export class JobManager extends EventEmitter {
     }
   }
 
-  private confirmDgxTerminalDelivery(
+  private settleDgxGoneEvidence(
     job: RuntimeJob,
-    state: DgxTerminalState,
+    delivery: DgxTerminalDelivery,
+    observation: DgxTerminalObservation,
+  ): boolean {
+    this.commitDgxTerminalReceipt(
+      job,
+      observation,
+      "gebundener HTTP-410-Gone-Terminalbeleg bestätigt",
+    );
+    return observation.state === delivery.state;
+  }
+
+  private commitDgxTerminalReceipt(
+    job: RuntimeJob,
+    observation: DgxTerminalObservation,
     detail: string,
   ): void {
-    if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
-    delete job.dgxTerminalRetry;
+    const delivery = job.dgxTerminalDelivery;
+    const dgxJobId = job.dgxJobId;
+    if (!delivery || !dgxJobId) {
+      throw new Error("DGX-Terminalbeleg besitzt keine aktive Zustellautorität.");
+    }
+    const snapshot = {
+      dgxJobId: job.dgxJobId,
+      dgxJobTerminal: job.dgxJobTerminal,
+      dgxTerminalDelivery: structuredClone(delivery),
+      dgxTerminalReceipt: job.dgxTerminalReceipt
+        ? structuredClone(job.dgxTerminalReceipt)
+        : undefined,
+      dgxLeaseReceipt: job.dgxLeaseReceipt
+        ? structuredClone(job.dgxLeaseReceipt)
+        : undefined,
+      dgxSubmitPending: job.dgxSubmitPending,
+      dgxSubmitStartedAt: job.dgxSubmitStartedAt,
+      dgxPreparedAdmission: job.dgxPreparedAdmission
+        ? structuredClone(job.dgxPreparedAdmission)
+        : undefined,
+      dgxPreparedAdmissionSha256: job.dgxPreparedAdmissionSha256,
+      dgxSubmitReconcileDelayMs: job.dgxSubmitReconcileDelayMs,
+      logs: [...job.logs],
+    };
     delete job.dgxTerminalDelivery;
     job.dgxJobTerminal = true;
-    this.appendLog(job, `DGX-Queue-State: ${job.dgxJobId} -> ${state} (${detail}).`);
-    this.changed();
+    job.dgxTerminalReceipt = {
+      schemaVersion: "ltx-studio-dgx-terminal-receipt.v1",
+      studioJobId: job.id,
+      dgxJobId,
+      idempotencyKey: `ltx-studio:${job.id}`,
+      localIntentState: delivery.state,
+      remoteTerminalState: observation.state,
+      confirmedAt: now(),
+      evidence: structuredClone(observation.evidence),
+    };
+    delete job.dgxLeaseReceipt;
+    // Exact terminal evidence also resolves any older submit-ambiguity marker
+    // for this same idempotency key. Replaying it again could only rediscover
+    // (or recreate after retention) the already-settled lease.
+    delete job.dgxSubmitPending;
+    delete job.dgxSubmitStartedAt;
+    delete job.dgxPreparedAdmission;
+    delete job.dgxPreparedAdmissionSha256;
+    this.appendLog(
+      job,
+      observation.state === delivery.state
+        ? `DGX-Queue-State: ${dgxJobId} -> ${observation.state} (${detail}).`
+        : `DGX-Terminalabweichung: lokal war ${delivery.state} vorgemerkt, ${dgxJobId} ist `
+          + `${observation.state} (${detail}).`,
+    );
+    try {
+      // Receipt, Delivery-Clear and an optional recovered-submit lease release
+      // are one fsync-backed snapshot. No restart may observe a half-settled
+      // cancellation.
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        job.dgxJobId = snapshot.dgxJobId;
+        job.dgxJobTerminal = snapshot.dgxJobTerminal;
+        job.dgxTerminalDelivery = snapshot.dgxTerminalDelivery;
+        if (snapshot.dgxTerminalReceipt) {
+          job.dgxTerminalReceipt = snapshot.dgxTerminalReceipt;
+        } else {
+          delete job.dgxTerminalReceipt;
+        }
+        if (snapshot.dgxLeaseReceipt) {
+          job.dgxLeaseReceipt = snapshot.dgxLeaseReceipt;
+        } else {
+          delete job.dgxLeaseReceipt;
+        }
+        if (snapshot.dgxSubmitPending) job.dgxSubmitPending = true;
+        else delete job.dgxSubmitPending;
+        if (snapshot.dgxSubmitStartedAt) job.dgxSubmitStartedAt = snapshot.dgxSubmitStartedAt;
+        else delete job.dgxSubmitStartedAt;
+        if (snapshot.dgxPreparedAdmission) {
+          job.dgxPreparedAdmission = snapshot.dgxPreparedAdmission;
+        } else {
+          delete job.dgxPreparedAdmission;
+        }
+        if (snapshot.dgxPreparedAdmissionSha256) {
+          job.dgxPreparedAdmissionSha256 = snapshot.dgxPreparedAdmissionSha256;
+        } else delete job.dgxPreparedAdmissionSha256;
+        if (snapshot.dgxSubmitReconcileDelayMs !== undefined) {
+          job.dgxSubmitReconcileDelayMs = snapshot.dgxSubmitReconcileDelayMs;
+        } else {
+          delete job.dgxSubmitReconcileDelayMs;
+        }
+        job.logs.splice(0, job.logs.length, ...snapshot.logs);
+        throw new DgxTerminalReceiptPersistenceError(error);
+      }
+      throw error;
+    }
+    if (job.dgxTerminalRetry) clearTimeout(job.dgxTerminalRetry);
+    delete job.dgxTerminalRetry;
   }
 
   private deferDgxTerminalDelivery(job: RuntimeJob, error: string): void {
@@ -3388,11 +9551,15 @@ export class JobManager extends EventEmitter {
   private scheduleDgxTerminalRetry(job: RuntimeJob, delayOverrideMs?: number): void {
     if (
       this.shuttingDown
+      || this.persistenceHold
       || this.dgxTerminalRetryBaseMs === null
       || !job.dgxTerminalDelivery
       || job.dgxJobTerminal
       || job.dgxTerminalRetry
+      || job.localProcessSpawnPending
       || job.localProcessGroupPending
+      || job.ownedDockerContainer
+      || job.ownedDockerContainerRecoveryBlocked
     ) {
       return;
     }
@@ -3403,12 +9570,19 @@ export class JobManager extends EventEmitter {
     const delayMs = delayOverrideMs ?? exponentialDelay;
     job.dgxTerminalRetry = setTimeout(() => {
       delete job.dgxTerminalRetry;
-      void this.flushDgxTerminalDelivery(job);
+      this.runDetached(
+        this.flushDgxTerminalDelivery(job),
+        `DGX-Terminal-Retry ${job.id}`,
+      );
     }, delayMs);
     job.dgxTerminalRetry.unref();
   }
 
   private failJob(job: RuntimeJob, message: string): void {
+    // Every terminal state is monotone. In particular, an error from the
+    // remote-completion receipt path must never downgrade already published
+    // local output from completed to failed.
+    if (!isActiveJobStatus(job.status)) return;
     this.prepareDgxTerminalDelivery(job, "failed", {
       current_step: "LTX Studio job failed",
       last_error: message,
@@ -3423,6 +9597,7 @@ export class JobManager extends EventEmitter {
   }
 
   private async failDgxJob(job: RuntimeJob, message: string, currentStep: string): Promise<void> {
+    if (!isActiveJobStatus(job.status)) return;
     this.prepareDgxTerminalDelivery(job, "failed", {
       current_step: currentStep,
       last_error: message,
@@ -3433,29 +9608,211 @@ export class JobManager extends EventEmitter {
 
   private startDgxOwnerHeartbeat(job: RuntimeJob, phase: string): void {
     if (!job.dgxJobId || job.dgxJobTerminal || !this.dgxQueueOperations.heartbeat) return;
+    try {
+      requireDgxLeaseAuthority(job);
+    } catch (error) {
+      this.enterPersistenceHold(error, "DGX-Owner-Heartbeat besitzt keine dauerhafte Lease-Autorität");
+      return;
+    }
     const existing = job.dgxOwnerHeartbeat;
     if (existing?.jobId === job.dgxJobId && !existing.stopped) {
+      // A descriptive phase transition is not compute progress. In
+      // particular, thermal pause/resume oscillation must never extend the
+      // independent no-progress deadline or emit `progressed: true`.
       existing.phase = phase;
       return;
     }
     if (existing) {
       existing.stopped = true;
       if (existing.timer) clearInterval(existing.timer);
+      if (existing.safetyTimer) clearTimeout(existing.safetyTimer);
     }
 
+    const startedAt = Date.now();
     const state: DgxOwnerHeartbeatState = {
       jobId: job.dgxJobId,
       phase,
       progressEpoch: 0,
       acknowledgedProgressEpoch: 0,
+      acknowledgedOnce: false,
+      lastAcknowledgedAt: startedAt,
+      lastProgressAt: startedAt,
+      consecutiveFailures: 0,
       stopped: false,
     };
     state.timer = setInterval(() => {
-      void this.sendDgxOwnerHeartbeat(job, state);
+      this.runDetached(
+        this.sendDgxOwnerHeartbeat(job, state),
+        `DGX-Owner-Heartbeat ${job.id}`,
+      );
     }, DGX_OWNER_HEARTBEAT_INTERVAL_MS);
     state.timer.unref();
     job.dgxOwnerHeartbeat = state;
-    void this.sendDgxOwnerHeartbeat(job, state);
+    this.armDgxOwnerHeartbeatSafetyDeadline(job, state);
+    this.runDetached(
+      this.sendDgxOwnerHeartbeat(job, state),
+      `initialer DGX-Owner-Heartbeat ${job.id}`,
+    );
+  }
+
+  private armDgxOwnerHeartbeatSafetyDeadline(
+    job: RuntimeJob,
+    state: DgxOwnerHeartbeatState,
+  ): void {
+    if (state.safetyTimer) clearTimeout(state.safetyTimer);
+    if (state.stopped || job.dgxOwnerHeartbeat !== state) {
+      delete state.safetyTimer;
+      return;
+    }
+    const deadline = Math.min(
+      state.lastAcknowledgedAt + DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS,
+      state.lastProgressAt + DGX_OWNER_NO_PROGRESS_TIMEOUT_MS,
+    );
+    state.safetyTimer = setTimeout(() => {
+      delete state.safetyTimer;
+      this.runDetached(
+        this.enforceDgxOwnerHeartbeatSafetyDeadline(job, state),
+        `DGX-Owner-Heartbeat-Sicherheitsfrist ${job.id}`,
+      );
+    }, Math.max(1, deadline - Date.now()));
+    state.safetyTimer.unref();
+  }
+
+  private async enforceDgxOwnerHeartbeatSafetyDeadline(
+    job: RuntimeJob,
+    state: DgxOwnerHeartbeatState,
+  ): Promise<void> {
+    if (state.stopped || job.dgxOwnerHeartbeat !== state) return;
+    const checkedAt = Date.now();
+    if (checkedAt - state.lastAcknowledgedAt >= DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS) {
+      await this.failStopDgxOwnerHeartbeat(
+        job,
+        state,
+        `DGX-Owner-Heartbeat blieb ${Math.round(DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS / 1_000)} s `
+          + "ohne Bestätigung; lokale Compute-Arbeit wurde durch die unabhängige Sicherheitsfrist beendet.",
+      );
+      return;
+    }
+    if (checkedAt - state.lastProgressAt >= DGX_OWNER_NO_PROGRESS_TIMEOUT_MS) {
+      await this.failStopDgxOwnerHeartbeat(
+        job,
+        state,
+        `DGX-Lauf überschritt die ${Math.round(DGX_OWNER_NO_PROGRESS_TIMEOUT_MS / 60_000)}`
+          + "-Minuten-No-Progress-Frist.",
+      );
+      return;
+    }
+    this.armDgxOwnerHeartbeatSafetyDeadline(job, state);
+  }
+
+  private async failStopDgxOwnerHeartbeat(
+    job: RuntimeJob,
+    state: DgxOwnerHeartbeatState,
+    message: string,
+    observation?: DgxTerminalObservation,
+  ): Promise<void> {
+    if (state.stopped || job.dgxOwnerHeartbeat !== state) return;
+    state.stopped = true;
+    if (state.timer) clearInterval(state.timer);
+    if (state.safetyTimer) clearTimeout(state.safetyTimer);
+    delete job.dgxOwnerHeartbeat;
+    if (jobWasCancelled(job) || this.persistenceHold) return;
+
+    const wasPaused = job.status === "paused";
+    const child = job.process;
+    try {
+      this.failJob(job, message);
+    } catch (error) {
+      // The local safety stop is unconditional. A failed snapshot commit may
+      // forbid remote mutation, but it must never leave GPU compute running
+      // after the owner heartbeat has stopped.
+      const emergencyStopErrors: string[] = [];
+      if (child?.pid) {
+        await terminateProcessGroup(child, wasPaused, 10_000, 15_000).catch((stopError) => {
+          emergencyStopErrors.push(stopError instanceof Error ? stopError.message : String(stopError));
+        });
+      }
+      if (job.ownedDockerContainer) {
+        const cleaned = await this.cleanupOwnedDockerContainer(job).catch((cleanupError) => {
+          emergencyStopErrors.push(
+            cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          );
+          return false;
+        });
+        if (!cleaned && job.ownedDockerContainer) {
+          try {
+            const remaining = this.inspectOwnedDockerContainer(job, job.ownedDockerContainer, true);
+            if (remaining.kind === "owned") {
+              emergencyStopErrors.push(`Container ${job.ownedDockerContainer.name} läuft möglicherweise weiter.`);
+            }
+          } catch (inspectionError) {
+            emergencyStopErrors.push(
+              inspectionError instanceof Error ? inspectionError.message : String(inspectionError),
+            );
+          }
+        }
+      }
+      if (emergencyStopErrors.length > 0) {
+        process.stderr.write(
+          `Heartbeat-Notstopp für ${job.id} konnte lokale Compute-Abwesenheit nicht vollständig beweisen: `
+            + `${emergencyStopErrors.join("; ")}\n`,
+        );
+      }
+      throw error;
+    }
+    let localStopFailure: unknown = null;
+    if (child?.pid) {
+      try {
+        await this.stopProcessBeforeTerminalDelivery(job, child, wasPaused);
+      } catch (error) {
+        localStopFailure = error;
+      }
+    } else if (job.localProcessSpawnPending
+      || job.localProcessGroupPending
+      || job.localProcessGroupIdentity) {
+      localStopFailure = new Error(
+        "Persistierte lokale Prozessgruppenautorität blieb ohne erreichbares Child-Handle aktiv.",
+      );
+    }
+    if (job.ownedDockerContainer) {
+      const cleaned = await this.cleanupOwnedDockerContainer(job);
+      if (!cleaned && job.ownedDockerContainer) {
+        try {
+          const remaining = this.inspectOwnedDockerContainer(job, job.ownedDockerContainer, true);
+          if (remaining.kind === "owned") {
+            localStopFailure ??= new Error(
+              `Container ${job.ownedDockerContainer.name} blieb nach Heartbeat-Notstopp aktiv.`,
+            );
+          }
+        } catch (error) {
+          localStopFailure ??= error;
+        }
+      }
+    }
+    if (job.ownedDockerContainerRecoveryBlocked) {
+      localStopFailure ??= new Error("Docker-Containerautorität ist recovery-blockiert.");
+    }
+    if (localStopFailure) {
+      this.enterPersistenceHold(
+        localStopFailure,
+        "Heartbeat-Notstopp konnte lokale Compute-Abwesenheit nicht beweisen",
+      );
+      return;
+    }
+    if (observation
+      && job.dgxTerminalDelivery
+      && !job.localProcessSpawnPending
+      && !job.localProcessGroupPending
+      && !job.ownedDockerContainer
+      && !job.ownedDockerContainerRecoveryBlocked) {
+      this.commitDgxTerminalReceipt(
+        job,
+        observation,
+        "Heartbeat-Fail-stop erhielt exakte Remote-Terminalevidenz",
+      );
+      return;
+    }
+    await this.flushDgxTerminalDelivery(job);
   }
 
   private async sendDgxOwnerHeartbeat(
@@ -3464,6 +9821,7 @@ export class JobManager extends EventEmitter {
   ): Promise<void> {
     if (
       state.stopped
+      || this.persistenceHold
       || job.dgxOwnerHeartbeat !== state
       || job.dgxJobId !== state.jobId
       || job.dgxJobTerminal
@@ -3485,11 +9843,13 @@ export class JobManager extends EventEmitter {
       } else {
         state.stopped = true;
         if (state.timer) clearInterval(state.timer);
+        if (state.safetyTimer) clearTimeout(state.safetyTimer);
         if (job.dgxOwnerHeartbeat === state) delete job.dgxOwnerHeartbeat;
         const child = job.process;
         if (child && processIsAlive(child)) {
           await this.stopProcessBeforeTerminalDelivery(job, child, false).catch(() => undefined);
         }
+        if (this.jobShouldStop(job)) return;
         if (isActiveJobStatus(job.status)) {
           await this.failDgxJob(
             job,
@@ -3512,24 +9872,164 @@ export class JobManager extends EventEmitter {
     };
     const request = (async () => {
       try {
-        await this.dgxQueueOperations.heartbeat!(state.jobId, payload);
-        if (state.stopped || job.dgxOwnerHeartbeat !== state) return;
+        requireDgxLeaseAuthority(job);
+        if (job.dgxJobId !== state.jobId) {
+          throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Owner-Heartbeat.");
+        }
+        const response = await this.dgxQueueOperations.heartbeat!(state.jobId, payload);
+        if (response && typeof response === "object"
+          && !Array.isArray(response)
+          && (response as Record<string, unknown>).heartbeat_applied === false) {
+          throw new DgxRemoteLeaseLostError(
+            "DGX-Owner-Heartbeat wurde explizit nicht auf die aktuelle Lease-Generation angewendet.",
+          );
+        }
+        const remote = dgxResponseBoundJob(
+          response,
+          "job-heartbeat",
+          state.jobId,
+          job.id,
+        );
+        if (!remote) {
+          throw new DgxLeaseAuthorityError(
+            "DGX-Owner-Heartbeat wurde nicht exakt caller- und idempotenzgebunden bestätigt.",
+          );
+        }
+        if (!["starting", "running", "pausing", "resuming"].includes(remote.state)) {
+          throw new DgxRemoteLeaseLostError(
+            `DGX-Owner-Heartbeat bestätigte keine aktive Lease mehr (${remote.state}).`,
+          );
+        }
+        if (this.jobShouldStop(job) || state.stopped || job.dgxOwnerHeartbeat !== state) return;
+        const acknowledgedAt = Date.now();
+        state.acknowledgedOnce = true;
+        state.lastAcknowledgedAt = acknowledgedAt;
         state.acknowledgedProgressEpoch = Math.max(
           state.acknowledgedProgressEpoch,
           sentProgressEpoch,
         );
+        state.consecutiveFailures = 0;
+        delete state.failureStartedAt;
+        this.armDgxOwnerHeartbeatSafetyDeadline(job, state);
         if (state.lastError) {
           this.appendLog(job, "DGX-Owner-Heartbeat ist wieder erreichbar.");
           delete state.lastError;
           this.changed();
         }
+        if (acknowledgedAt - state.lastProgressAt >= DGX_OWNER_NO_PROGRESS_TIMEOUT_MS) {
+          await this.failStopDgxOwnerHeartbeat(
+            job,
+            state,
+            `DGX-Lauf wurde nach ${Math.round(DGX_OWNER_NO_PROGRESS_TIMEOUT_MS / 60_000)} Minuten ohne `
+              + "dauerhaft beobachteten Pipeline-Fortschritt fail-closed beendet.",
+          );
+        }
       } catch (error) {
-        if (state.stopped || job.dgxOwnerHeartbeat !== state) return;
+        if (this.jobShouldStop(job)
+          || isJobPersistenceHoldError(error)
+          || state.stopped
+          || job.dgxOwnerHeartbeat !== state) return;
+        if (error instanceof DgxLeaseAuthorityError) {
+          this.enterPersistenceHold(error, "DGX-Owner-Heartbeat verlor seine Lease-Autorität");
+          return;
+        }
+        if (error instanceof DgxRemoteLeaseLostError) {
+          await this.failStopDgxOwnerHeartbeat(job, state, error.message);
+          return;
+        }
+        const definitiveLoss = definitiveHeartbeatLeaseLoss(error);
+        if (definitiveLoss) {
+          await this.failStopDgxOwnerHeartbeat(job, state, definitiveLoss);
+          return;
+        }
         const message = error instanceof Error ? error.message : String(error);
+        // Publication is forbidden from the first observed heartbeat failure
+        // until a later exact heartbeat response explicitly re-acknowledges us.
+        const failedAt = Date.now();
+        state.failureStartedAt ??= failedAt;
+        state.consecutiveFailures += 1;
+        let terminalObservation: DgxTerminalObservation | null = null;
+        try {
+          requireDgxLeaseAuthority(job);
+          if (job.dgxJobId !== state.jobId) {
+            throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Heartbeat-Statusabgleich.");
+          }
+          const readResponse = await this.dgxQueueOperations.read(state.jobId);
+          const remote = dgxResponseBoundJob(
+            readResponse,
+            "job-read",
+            state.jobId,
+            job.id,
+          );
+          if (!remote) {
+            throw new DgxLeaseAuthorityError(
+              "Heartbeat-Statusabgleich war nicht exakt caller- und idempotenzgebunden.",
+            );
+          }
+          terminalObservation = dgxResponseTerminalObservation(
+            readResponse,
+            "job-read",
+            state.jobId,
+            job.id,
+          );
+          if (terminalObservation
+            || !["starting", "running", "pausing", "resuming"].includes(remote.state)) {
+            await this.failStopDgxOwnerHeartbeat(
+              job,
+              state,
+              terminalObservation
+                ? `DGX-Remote-Lease wurde während des lokalen Laufs ${terminalObservation.state}.`
+                : `DGX-Remote-Lease ist nicht mehr aktiv (${remote.state}).`,
+              terminalObservation ?? undefined,
+            );
+            return;
+          }
+        } catch (readError) {
+          if (this.persistenceHold
+            || isJobPersistenceHoldError(readError)
+            || state.stopped
+            || job.dgxOwnerHeartbeat !== state) return;
+          const goneObservation = dgxGoneTerminalObservation(readError, state.jobId, job.id);
+          if (goneObservation) {
+            await this.failStopDgxOwnerHeartbeat(
+              job,
+              state,
+              `DGX-Remote-Lease ist laut exaktem HTTP-410-Beleg ${goneObservation.state}.`,
+              goneObservation,
+            );
+            return;
+          }
+          if (readError instanceof DgxLeaseAuthorityError) {
+            this.enterPersistenceHold(readError, "Heartbeat-Statusabgleich verlor seine Lease-Autorität");
+            return;
+          }
+          const definitiveReadLoss = definitiveHeartbeatLeaseLoss(readError);
+          if (definitiveReadLoss) {
+            await this.failStopDgxOwnerHeartbeat(job, state, definitiveReadLoss);
+            return;
+          }
+        }
         if (message !== state.lastError) {
           state.lastError = message;
           this.appendLog(job, `DGX-Owner-Heartbeat vorübergehend fehlgeschlagen: ${message}`);
           this.changed();
+        }
+        if (failedAt - state.failureStartedAt >= DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS
+          || failedAt - state.lastAcknowledgedAt >= DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS) {
+          await this.failStopDgxOwnerHeartbeat(
+            job,
+            state,
+            `DGX-Owner-Heartbeat blieb ${Math.round(DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS / 1_000)} s `
+              + `ohne Bestätigung (${state.consecutiveFailures} Fehler); lokale Compute-Arbeit wurde fail-closed beendet.`,
+          );
+          return;
+        }
+        if (failedAt - state.lastProgressAt >= DGX_OWNER_NO_PROGRESS_TIMEOUT_MS) {
+          await this.failStopDgxOwnerHeartbeat(
+            job,
+            state,
+            `DGX-Lauf überschritt die ${Math.round(DGX_OWNER_NO_PROGRESS_TIMEOUT_MS / 60_000)}-Minuten-No-Progress-Frist.`,
+          );
         }
       }
     })();
@@ -3544,11 +10044,16 @@ export class JobManager extends EventEmitter {
   private markDgxOwnerProgress(job: RuntimeJob): void {
     if (job.dgxOwnerHeartbeat && !job.dgxOwnerHeartbeat.stopped) {
       job.dgxOwnerHeartbeat.progressEpoch += 1;
+      job.dgxOwnerHeartbeat.lastProgressAt = Date.now();
+      this.armDgxOwnerHeartbeatSafetyDeadline(job, job.dgxOwnerHeartbeat);
     }
   }
 
   private setDgxOwnerHeartbeatPhase(job: RuntimeJob, phase: string): void {
     if (job.dgxOwnerHeartbeat && !job.dgxOwnerHeartbeat.stopped) {
+      // Phase is descriptive only. Only markDgxOwnerProgress(), called after
+      // a newly persisted Euler advance, may move the no-progress clock and
+      // advertise `progressed: true` to the orchestrator.
       job.dgxOwnerHeartbeat.phase = phase;
     }
   }
@@ -3558,6 +10063,7 @@ export class JobManager extends EventEmitter {
     if (!state) return;
     state.stopped = true;
     if (state.timer) clearInterval(state.timer);
+    if (state.safetyTimer) clearTimeout(state.safetyTimer);
     delete job.dgxOwnerHeartbeat;
     await state.inFlight;
   }
@@ -3569,6 +10075,11 @@ export class JobManager extends EventEmitter {
   ): void {
     const buffers = { stdout: "", stderr: "" };
     const consumeRecords = (records: string[]): boolean => {
+      // A persistence HOLD is a fail-stop boundary.  Child pipes can still
+      // deliver buffered data after the safety stop has begun, but those
+      // callbacks must neither mutate the durable model nor call changed()
+      // (which deliberately throws while the manager is held).
+      if (this.persistenceHold) return false;
       let changed = false;
       for (const rawLine of records) {
         const line = cleanLogLine(rawLine);
@@ -3586,10 +10097,45 @@ export class JobManager extends EventEmitter {
       }
       return changed;
     };
+    const commitRecords = (records: string[]): void => {
+      const logsSnapshot = [...job.logs];
+      const progressSnapshot = job.progress;
+      const heartbeatSnapshot = job.dgxOwnerHeartbeat;
+      const heartbeatProgressSnapshot = heartbeatSnapshot?.progressEpoch;
+      const heartbeatLastProgressAtSnapshot = heartbeatSnapshot?.lastProgressAt;
+      const trackerSnapshot = progressTracker?.snapshot();
+      if (!consumeRecords(records)) return;
+      try {
+        this.changed();
+      } catch (error) {
+        if (!isJobPersistenceHoldError(error)) {
+          job.logs = logsSnapshot;
+          job.progress = progressSnapshot;
+          if (heartbeatSnapshot !== undefined
+            && job.dgxOwnerHeartbeat === heartbeatSnapshot
+            && heartbeatProgressSnapshot !== undefined
+            && heartbeatLastProgressAtSnapshot !== undefined) {
+            heartbeatSnapshot.progressEpoch = heartbeatProgressSnapshot;
+            heartbeatSnapshot.lastProgressAt = heartbeatLastProgressAtSnapshot;
+            this.armDgxOwnerHeartbeatSafetyDeadline(job, heartbeatSnapshot);
+          }
+          if (progressTracker && trackerSnapshot) progressTracker.restore(trackerSnapshot);
+        }
+        // EventEmitter callbacks have no awaiting caller.  HOLD already
+        // scheduled the authoritative safety-stop; a proven pre-rename error
+        // was rolled back above.  Neither may escape and prevent later close
+        // listeners (including waitForProcess) from running.
+        process.stderr.write(
+          `LTX Studio Prozesslog konnte nicht dauerhaft übernommen werden: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`,
+        );
+      }
+    };
     const consume = (stream: keyof typeof buffers) => (chunk: Buffer) => {
       const framed = frameProcessLogChunk(buffers[stream], chunk.toString("utf8"));
       buffers[stream] = framed.rest;
-      if (consumeRecords(framed.records)) this.changed();
+      commitRecords(framed.records);
     };
     child.stdout?.on("data", consume("stdout"));
     child.stderr?.on("data", consume("stderr"));
@@ -3598,7 +10144,7 @@ export class JobManager extends EventEmitter {
       const stderr = frameProcessLogChunk(buffers.stderr, "", true);
       buffers.stdout = "";
       buffers.stderr = "";
-      if (consumeRecords([...stdout.records, ...stderr.records])) this.changed();
+      commitRecords([...stdout.records, ...stderr.records]);
     });
   }
 
@@ -3612,6 +10158,12 @@ export class JobManager extends EventEmitter {
       };
       child.once("error", (error) => finish({ code: null, signal: null, error }));
       child.once("close", (code, signal) => finish({ code, signal, error: null }));
+      const earlyError = this.earlyProcessErrors.get(child);
+      if (earlyError) {
+        finish({ code: null, signal: null, error: earlyError });
+      } else if (child.exitCode !== null || child.signalCode !== null) {
+        finish({ code: child.exitCode, signal: child.signalCode, error: null });
+      }
     });
   }
 
@@ -3621,6 +10173,12 @@ export class JobManager extends EventEmitter {
     fingerprint: string,
     generation: number,
   ): { stop: () => Promise<void>; yieldDecisionId: () => string | null } {
+    if (this.jobShouldStop(job)) {
+      return {
+        stop: async () => undefined,
+        yieldDecisionId: () => null,
+      };
+    }
     const readyPath = join(checkpointRoot, "boundary-ready.json");
     const decisionPath = join(checkpointRoot, "boundary-decision.json");
     rmSync(readyPath, { force: true });
@@ -3632,7 +10190,7 @@ export class JobManager extends EventEmitter {
 
     const poll = async (): Promise<void> => {
       const child = job.process;
-      if (stopped || !child || !processIsAlive(child)) return;
+      if (stopped || this.jobShouldStop(job) || !child || !processIsAlive(child)) return;
       const ready = readJsonObject(readyPath);
       if (!ready) return;
       if (
@@ -3658,6 +10216,7 @@ export class JobManager extends EventEmitter {
       const activationDecision = this.jobStartDecision(job);
       if (!activationDecision.allowed) {
         decision = {
+          schema_version: "dgx-segment-schedule-decision.v1",
           action: "yield_to_waiting_job",
           current_job_id: job.dgxJobId ?? "missing",
           next_job_id: null,
@@ -3667,13 +10226,19 @@ export class JobManager extends EventEmitter {
       } else {
         try {
           if (!job.dgxJobId) throw new Error("DGX-Job-ID fehlt an der Segmentgrenze");
-          decision = await this.dgxSchedulerOperations.decide(job.dgxJobId);
-          if (!job.dgxJobId || decision.current_job_id !== job.dgxJobId) {
+          const expectedDgxJobId = job.dgxJobId;
+          requireDgxLeaseAuthority(job);
+          this.revalidateRuntimeTrustBoundary(job, "DGX-Segment-Fence");
+          decision = await this.dgxSchedulerOperations.decide(expectedDgxJobId);
+          if (this.jobShouldStop(job)
+            || job.dgxJobId !== expectedDgxJobId
+            || decision.current_job_id !== expectedDgxJobId) {
             throw new Error("Segmententscheidung gehört nicht zum laufenden DGX-Job");
           }
         } catch (error) {
           process.stderr.write(`LTX Studio Segmentgrenzen-Wächter (fail-closed): ${String(error)}\n`);
           decision = {
+            schema_version: "dgx-segment-schedule-decision.v1",
             action: "yield_to_waiting_job",
             current_job_id: job.dgxJobId ?? "missing",
             next_job_id: null,
@@ -3682,7 +10247,7 @@ export class JobManager extends EventEmitter {
           };
         }
       }
-      if (stopped || !processIsAlive(child)) return;
+      if (stopped || this.jobShouldStop(job) || !processIsAlive(child)) return;
       const action = decision.action === "continue_current"
         ? "continue_current"
         : "yield_to_waiting_job";
@@ -3695,7 +10260,7 @@ export class JobManager extends EventEmitter {
         });
         if (!pausing) reason = `${reason}:pausing_transition_failed_fail_closed`;
       }
-      if (stopped || !processIsAlive(child)) return;
+      if (stopped || this.jobShouldStop(job) || !processIsAlive(child)) return;
       atomicJsonFile(decisionPath, {
         schema_version: "ltx-segment-boundary-decision.v1",
         job_fingerprint: fingerprint,
@@ -3718,10 +10283,13 @@ export class JobManager extends EventEmitter {
       }
     };
     const startPoll = (): void => {
-      if (pollInFlight || stopped) return;
-      pollInFlight = poll().finally(() => {
-        pollInFlight = null;
+      if (pollInFlight || stopped || this.jobShouldStop(job)) return;
+      const currentPoll = poll();
+      pollInFlight = currentPoll;
+      const observedPoll = currentPoll.finally(() => {
+        if (pollInFlight === currentPoll) pollInFlight = null;
       });
+      this.runDetached(observedPoll, `Segmentgrenzen-Wächter ${job.id}`);
     };
     startPoll();
     const timer = setInterval(startPoll, SEGMENT_BOUNDARY_FILE_POLL_MS);
@@ -3773,7 +10341,11 @@ export class JobManager extends EventEmitter {
       let disposition = "scheduler_unavailable";
       try {
         if (!job.dgxJobId) throw new Error("DGX-Job-ID fehlt während der Pause");
-        const decision = await this.dgxSchedulerOperations.decide(job.dgxJobId);
+        const expectedDgxJobId = job.dgxJobId;
+        requireDgxLeaseAuthority(job);
+        this.revalidateRuntimeTrustBoundary(job, "DGX-Resume-Auswahl");
+        const decision = await this.dgxSchedulerOperations.decide(expectedDgxJobId);
+        if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
         disposition = decision.action;
         delayMs = Math.max(SEGMENT_BOUNDARY_PAUSED_POLL_MS, decision.retry_after_seconds * 1_000);
         if (decision.action === "resume_current") return true;
@@ -3808,17 +10380,21 @@ export class JobManager extends EventEmitter {
       return false;
     }
     this.setDgxOwnerHeartbeatPhase(job, "checkpoint_committed");
-    if (!await this.transitionDgxJob(job, "pausing", {
+    const pausingApplied = await this.transitionDgxJob(job, "pausing", {
       current_step: "LTX Euler checkpoint committed; process exited before resource release",
       artifact,
-    })) {
+    });
+    if (this.jobShouldStop(job)) return false;
+    if (!pausingApplied) {
       this.failJob(job, "DGX-Queue konnte den LTX-Slice nicht auf pausing setzen.");
       return false;
     }
-    if (!await this.transitionDgxJob(job, "paused", {
+    const pausedApplied = await this.transitionDgxJob(job, "paused", {
       current_step: "LTX process exited and cooperative checkpoint is durable",
       artifact,
-    })) {
+    });
+    if (this.jobShouldStop(job)) return false;
+    if (!pausedApplied) {
       this.failJob(job, "DGX-Queue konnte die bestätigte ressourcenfreie LTX-Pause nicht speichern.");
       return false;
     }
@@ -3846,33 +10422,369 @@ export class JobManager extends EventEmitter {
     return true;
   }
 
+  private spawnBoundProcess(
+    job: RuntimeJob,
+    executable: string,
+    args: string[],
+    options: BoundProcessOptions,
+  ): ChildProcess {
+    let decision = normalizeJobExecutionDecision(job.executionDecision);
+    if (!decision
+      || decision.executionClass !== job.executionClass
+      || decision.executionClass === "pending"
+      || decision.requestSha256 !== runtimeAuthorityRequestSha256(job)
+      || decision.protocolSha256 !== (job.experiment?.protocolSha256 ?? null)
+      || canonicalJson(job.runProvenance?.executionDecision) !== canonicalJson(decision)) {
+      throw new Error("Prozessstart ohne gültige persistierte ExecutionDecision verweigert.");
+    }
+    const {
+      boundExecutable,
+      inheritedFds = [],
+      recheckDescriptors = [],
+      startGate = false,
+      genericGate = false,
+      ...spawnOptions
+    } = options;
+    if (genericGate && !startGate) {
+      throw new Error("Ein generisches Prozessgate benötigt seinen expliziten Parent-Pipe-FD.");
+    }
+    if (startGate && !genericGate && (boundExecutable || inheritedFds.length > 0)) {
+      throw new Error("Der Refiner-Startgate-FD darf nicht mit anderen geerbten Deskriptoren geteilt werden.");
+    }
+    if (decision.executionClass === "cpu-only") {
+      if (decision.operation.kind !== "ffmpeg-audio-retime"
+        || "reuseKind" in decision.cpuReuse
+        || !boundExecutable
+        || executable !== "/proc/self/fd/3"
+        || JSON.stringify(decision.operation.executable) !== JSON.stringify(boundExecutable.binding)
+        || decision.operation.ffmpegVersion !== boundExecutable.version
+        || decision.operation.argsSha256
+          !== createHash("sha256").update(canonicalJson(args)).digest("hex")) {
+        throw new Error("FFmpeg-FD oder Argumente stimmen nicht mit der persistierten CPU-Operation überein.");
+      }
+      verifyBoundExecutableDescriptor(boundExecutable);
+      for (const descriptor of recheckDescriptors) recheckVerifiedExecutionDescriptor(descriptor);
+      if (decision.operation.state === "prepared") {
+        const runningDecision = {
+          ...decision,
+          operation: {
+            ...decision.operation,
+            state: "running",
+            startedAt: job.startedAt ?? now(),
+          },
+        } as JobExecutionDecision;
+        if (!this.commitExecutionDecision(job, runningDecision)) {
+          throw new Error("CPU-Operation konnte vor exec nicht dauerhaft auf running gesetzt werden.");
+        }
+        decision = normalizeJobExecutionDecision(job.executionDecision);
+      }
+      if (!decision || decision.executionClass !== "cpu-only" || decision.operation.state !== "running") {
+        throw new Error("FFmpeg-Operation ist unmittelbar vor exec nicht dauerhaft running.");
+      }
+      // Recheck after the durable running fence. The held descriptor removes
+      // pathname replacement; the v4 threat model explicitly retains the
+      // same-uid in-place mutation residual without memfd/fs-verity.
+      verifyBoundExecutableDescriptor(boundExecutable);
+      for (const descriptor of recheckDescriptors) recheckVerifiedExecutionDescriptor(descriptor);
+    } else if (boundExecutable || inheritedFds.length > 0 || recheckDescriptors.length > 0) {
+      throw new Error("Nur eine CPU-Operation darf gebundene Executable-, Medien- oder Prüf-FDs übergeben.");
+    }
+    this.revalidateRuntimeTrustBoundary(job, "Prozess-Spawn");
+    // A final durable fence directly adjacent to spawn covers later state
+    // changes and makes persistence failure observably win the race.
+    this.persist();
+    const descriptorCount = (boundExecutable ? 1 : 0) + inheritedFds.length;
+    const spawnedExecutable = genericGate ? hostTcbExecutables.python3 : executable;
+    const spawnedArgs = genericGate
+      ? ["-I", "-S", "-c", GENERIC_PROCESS_START_GATE_CODE, String(descriptorCount), executable, ...args]
+      : args;
+    const child = spawn(spawnedExecutable, spawnedArgs, {
+      ...spawnOptions,
+      detached: true,
+      shell: false,
+      stdio: [
+        "ignore",
+        "pipe",
+        "pipe",
+        ...(startGate ? ["pipe" as const] : []),
+        ...(boundExecutable ? [boundExecutable.fd] : []),
+        ...inheritedFds,
+      ],
+    });
+    // Node can return a ChildProcess without a PID and emit ENOENT/EACCES on
+    // the next tick. Observe that error immediately; the durable gate helper
+    // may reject before waitForProcess() is installed.
+    child.once("error", (error) => this.earlyProcessErrors.set(child, error));
+    return child;
+  }
+
+  private assertProcessStartGateReleaseAuthority(
+    job: RuntimeJob,
+    executable: string,
+    args: readonly string[],
+    options: BoundProcessOptions,
+  ): void {
+    if (this.jobShouldStop(job)) {
+      throw new Error("Prozessstart wurde am unmittelbaren Startgate-Fence abgebrochen.");
+    }
+    const decision = normalizeJobExecutionDecision(job.executionDecision);
+    if (!decision
+      || decision.executionClass !== job.executionClass
+      || decision.executionClass === "pending"
+      || decision.requestSha256 !== runtimeAuthorityRequestSha256(job)
+      || decision.protocolSha256 !== (job.experiment?.protocolSha256 ?? null)
+      || canonicalJson(job.runProvenance?.executionDecision) !== canonicalJson(decision)) {
+      throw new Error("Prozess-Startgate besitzt keine aktuelle persistierte ExecutionDecision.");
+    }
+    const {
+      boundExecutable,
+      inheritedFds = [],
+      recheckDescriptors = [],
+    } = options;
+    if (decision.executionClass === "cpu-only") {
+      if (decision.operation.kind !== "ffmpeg-audio-retime"
+        || decision.operation.state !== "running"
+        || "reuseKind" in decision.cpuReuse
+        || !boundExecutable
+        || executable !== "/proc/self/fd/3"
+        || JSON.stringify(decision.operation.executable) !== JSON.stringify(boundExecutable.binding)
+        || decision.operation.ffmpegVersion !== boundExecutable.version
+        || decision.operation.argsSha256
+          !== createHash("sha256").update(canonicalJson(args)).digest("hex")) {
+        throw new Error("CPU-Prozessautorität driftete vor der Startgate-Freigabe.");
+      }
+      verifyBoundExecutableDescriptor(boundExecutable);
+      for (const descriptor of recheckDescriptors) recheckVerifiedExecutionDescriptor(descriptor);
+    } else if (boundExecutable || inheritedFds.length > 0 || recheckDescriptors.length > 0) {
+      throw new Error("Nicht-CPU-Prozess besitzt unerlaubte Deskriptoren am Startgate-Fence.");
+    }
+    const activationDecision = this.jobStartDecision(job);
+    if (!activationDecision.allowed) {
+      throw new Error(
+        `Prozess-Startgate wurde vom aktuellen Activation-/Rights-Gate verweigert: ${activationDecision.reason}`,
+      );
+    }
+    // Keep the Runtime-Seal check last: no await or user callback is allowed
+    // between this revalidation and writing the one-byte exec token.
+    this.revalidateRuntimeTrustBoundary(job, "unmittelbarer Prozess-Startgate-Freigabe");
+  }
+
+  private async releaseProcessStartGate(
+    job: RuntimeJob,
+    child: ChildProcess,
+    executable: string,
+    args: readonly string[],
+    options: BoundProcessOptions,
+  ): Promise<void> {
+    const gate = child.stdio[3] as null | {
+      once: (event: "error", listener: (error: Error) => void) => unknown;
+      off: (event: "error", listener: (error: Error) => void) => unknown;
+      end: (chunk: string, callback: () => void) => unknown;
+    };
+    if (!gate || typeof gate.end !== "function") {
+      throw new Error("Prozess-Startgate-Pipe fehlt nach dem Spawn.");
+    }
+    this.assertProcessStartGateReleaseAuthority(job, executable, args, options);
+    await new Promise<void>((resolvePromise, reject) => {
+      const onError = (error: Error) => reject(error);
+      gate.once("error", onError);
+      gate.end("1", () => {
+        gate.off("error", onError);
+        resolvePromise();
+      });
+    });
+  }
+
+  private prepareLocalProcessSpawn(job: RuntimeJob): void {
+    if (job.localProcessSpawnPending
+      || job.localProcessGroupPending
+      || job.localProcessGroupIdentity
+      || job.process) {
+      throw new Error("Ein zweiter Prozessstart ohne geklärte lokale Spawn-/PG-Autorität wurde verweigert.");
+    }
+    job.localProcessSpawnPending = true;
+    try {
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) delete job.localProcessSpawnPending;
+      throw error;
+    }
+  }
+
+  private clearLocalProcessSpawnPending(job: RuntimeJob): void {
+    if (!job.localProcessSpawnPending || this.persistenceHold) return;
+    delete job.localProcessSpawnPending;
+    try {
+      this.changed();
+    } catch (error) {
+      job.localProcessSpawnPending = true;
+      throw error;
+    }
+    if (!isActiveJobStatus(job.status)) {
+      this.runDetached(
+        this.flushDgxTerminalDelivery(job),
+        `DGX-Terminalzustellung nach Spawn-Gate-Abwesenheitsbeweis ${job.id}`,
+      );
+      this.scheduleDgxTerminalRetry(job, 0);
+    }
+  }
+
+  private async spawnProcessWithDurableGate(
+    job: RuntimeJob,
+    executable: string,
+    args: string[],
+    options: BoundProcessOptions,
+    beforeRelease?: (child: ChildProcess) => void | (() => void) | Promise<void | (() => void)>,
+  ): Promise<ChildProcess> {
+    this.prepareLocalProcessSpawn(job);
+    let child: ChildProcess | undefined;
+    try {
+      if (this.jobShouldStop(job)) {
+        this.clearLocalProcessSpawnPending(job);
+        throw new Error("Prozessstart wurde vor dem Spawn-Gate abgebrochen.");
+      }
+      child = this.spawnBoundProcess(job, executable, args, {
+        ...options,
+        startGate: true,
+        genericGate: true,
+      });
+      await this.markProcessStarted(job, child);
+      if (this.jobShouldStop(job)) {
+        throw new Error("Prozessstart wurde vor der Gate-Freigabe abgebrochen.");
+      }
+      await beforeRelease?.(child);
+      if (this.jobShouldStop(job)) {
+        throw new Error("Prozessstart wurde während der Gate-Freigabevorbereitung abgebrochen.");
+      }
+      await this.releaseProcessStartGate(job, child, executable, args, options);
+      return child;
+    } catch (error) {
+      const gate = child?.stdio[3] as { destroy?: () => void } | null | undefined;
+      gate?.destroy?.();
+      if (child?.pid && processGroupExists(child.pid)) {
+        await this.stopProcessBeforeTerminalDelivery(job, child, false, 250, 2_000)
+          .catch(() => undefined);
+      }
+      if (!child?.pid || !processGroupExists(child.pid)) {
+        try {
+          this.clearLocalProcessSpawnPending(job);
+        } catch {
+          // The durable spawn marker remains the restart fence.
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async spawnOwnedDockerRefiner(
+    job: RuntimeJob,
+    workload: OwnedDockerThermalWorkload,
+    containerName: string,
+    executable: string,
+    args: string[],
+    options: BoundProcessOptions,
+    beforeRelease?: (child: ChildProcess) => void | (() => void) | Promise<void | (() => void)>,
+  ): Promise<ChildProcess> {
+    const containerNamePositions = args
+      .map((argument, index) => argument === "--container-name" ? index : -1)
+      .filter((index) => index >= 0);
+    if (containerNamePositions.length !== 1
+      || args.some((argument) => argument.startsWith("--container-name="))
+      || args[containerNamePositions[0]! + 1] !== containerName
+      || options.env.DGX_JOB_ID !== job.dgxJobId) {
+      throw new Error(
+        `${workload.label}-Wrapper stimmt nicht exakt mit Containername und DGX_JOB_ID seiner persistierten Autorität überein.`,
+      );
+    }
+    this.bindOwnedDockerContainer(job, containerName, workload);
+    this.prepareLocalProcessSpawn(job);
+    let child: ChildProcess | undefined;
+    let abortPreparedObservers: (() => void) | undefined;
+    try {
+      child = this.spawnBoundProcess(
+        job,
+        executable,
+        args,
+        { ...options, startGate: true, genericGate: true },
+      );
+      await this.markProcessStarted(job, child);
+      if (this.jobShouldStop(job)) {
+        throw new Error("Refiner-Startgate wurde vor der Freigabe abgebrochen.");
+      }
+      const observerCleanup = await beforeRelease?.(child);
+      if (typeof observerCleanup === "function") abortPreparedObservers = observerCleanup;
+      if (this.jobShouldStop(job)) {
+        throw new Error("Refiner-Startgate wurde während der Freigabevorbereitung abgebrochen.");
+      }
+      this.markOwnedDockerStartGateReleased(job);
+      await this.releaseProcessStartGate(job, child, executable, args, options);
+      await this.pinStartedOwnedDockerContainer(job, child);
+      return child;
+    } catch (error) {
+      abortPreparedObservers?.();
+      const gate = child?.stdio[3] as { destroy?: () => void } | null | undefined;
+      gate?.destroy?.();
+      if (child?.pid) {
+        await this.stopProcessBeforeTerminalDelivery(job, child, false, 250, 2_000)
+          .catch(() => undefined);
+      }
+      if (!child?.pid || !processGroupExists(child.pid)) {
+        try {
+          this.clearLocalProcessSpawnPending(job);
+        } catch {
+          // The durable spawn marker remains the restart fence.
+        }
+      }
+      await this.cleanupOwnedDockerContainer(job).catch(() => false);
+      throw error;
+    }
+  }
+
   private async runLoggedProcess(
     job: RuntimeJob,
     executable: string,
     args: string[],
-    options: { cwd: string; env: NodeJS.ProcessEnv },
+    options: BoundProcessOptions,
   ): Promise<ProcessResult> {
-    const child = spawn(executable, args, {
-      ...options,
-      detached: true,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    await this.markProcessStarted(job, child);
-    this.consumeProcessLogs(job, child);
-    const result = await this.waitForProcess(child);
+    let child: ChildProcess;
+    let completion: Promise<ProcessResult> | null = null;
+    try {
+      job.status = "running";
+      job.startedAt ??= now();
+      child = await this.spawnProcessWithDurableGate(
+        job,
+        executable,
+        args,
+        options,
+        (gatedChild) => {
+          this.consumeProcessLogs(job, gatedChild);
+          completion = this.waitForProcess(gatedChild);
+        },
+      );
+    } catch (error) {
+      return {
+        code: null,
+        signal: null,
+        error: new Error(
+          `Prozessstart am dauerhaften Startgate verweigert: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      };
+    }
+    const result = await (completion ?? this.waitForProcess(child));
     await this.confirmProcessGroupGone(job, child);
     return result;
   }
 
-  private async readThermalBaseline(job: RuntimeJob): Promise<number | null> {
+  private async readThermalBaseline(job: RuntimeJob, workloadLabel = "LTX"): Promise<number | null> {
     const maxC = await readMedianMaxTemperatureC({
       samples: thermalStartSamples,
       intervalMs: thermalStartSampleIntervalMs,
     });
     if (this.jobShouldStop(job)) return null;
     if (maxC !== null && maxC < thermalPauseC) {
-      const resumeBelowC = Math.min(maxC + 0.1, thermalPauseC - 0.1);
+      const resumeBelowC = thermalResumeC;
       job.thermalProfile = {
         baselineC: maxC,
         currentC: maxC,
@@ -3884,19 +10796,29 @@ export class JobManager extends EventEmitter {
       };
       this.appendLog(
         job,
-        `Thermal-Basiswert: ${maxC.toFixed(1)} °C Host-Maximum. LTX-spezifischer Lastanstieg wird für diesen Lauf protokolliert.`,
+        `Thermal-Basiswert: ${maxC.toFixed(1)} °C Host-Maximum. Pause ab ${thermalPauseC.toFixed(1)} °C; Wiederanlauf erst nach ${thermalResumePolls} Messungen bei oder unter ${resumeBelowC.toFixed(1)} °C.`,
       );
       return maxC;
     }
     const error = maxC === null
-      ? "Temperatur ist nicht messbar; LTX-Start aus Sicherheitsgründen blockiert."
-      : `Host bereits bei ${maxC.toFixed(1)} °C; kein LTX-Start an oder über der Hardware-Pausenschwelle von ${thermalPauseC.toFixed(0)} °C.`;
+      ? `Temperatur ist nicht messbar; ${workloadLabel}-Start aus Sicherheitsgründen blockiert.`
+      : `Host bereits bei ${maxC.toFixed(1)} °C; kein ${workloadLabel}-Start an oder über der Hardware-Pausenschwelle von ${thermalPauseC.toFixed(0)} °C.`;
     this.failJob(job, error);
     return null;
   }
 
-  private watchThermals(job: RuntimeJob, child: ChildProcess, baselineC: number): () => void {
-    const resumeBelowC = Math.min(baselineC + 0.1, thermalPauseC - 0.1);
+  private watchThermals(
+    job: RuntimeJob,
+    child: ChildProcess,
+    baselineC: number,
+    operations: ThermalWatcherOperations = {},
+  ): () => void {
+    const resumeBelowC = thermalResumeC;
+    const readTemperatureC = operations.readTemperatureC ?? readMaxTemperatureC;
+    const childIsAlive = operations.processIsAlive ?? processIsAlive;
+    const signalChild = operations.signalProcessGroup ?? signalProcessGroup;
+    const setHeartbeatPhase = operations.setHeartbeatPhase
+      ?? ((phase: string) => this.setDgxOwnerHeartbeatPhase(job, phase));
     let peakC = baselineC;
     const guard = new ThermalPauseGuard({
       pauseAtC: thermalPauseC,
@@ -3906,9 +10828,11 @@ export class JobManager extends EventEmitter {
       unreadablePolls: thermalUnreadablePolls,
     });
     const timer = setInterval(() => {
-      if (!processIsAlive(child) || !["running", "paused"].includes(job.status)) return;
+      if (this.jobShouldStop(job)
+        || !childIsAlive(child)
+        || !["running", "paused"].includes(job.status)) return;
       try {
-        const temperatureC = readMaxTemperatureC();
+        const temperatureC = readTemperatureC();
         if (temperatureC !== null) peakC = Math.max(peakC, temperatureC);
         if (job.thermalProfile) {
           job.thermalProfile = {
@@ -3921,9 +10845,9 @@ export class JobManager extends EventEmitter {
         }
         const action = guard.observe(temperatureC, job.status === "paused");
         if (action === "pause_hot" || action === "pause_unreadable") {
-          if (!signalProcessGroup(child, "SIGSTOP")) return;
+          if (!signalChild(child, "SIGSTOP")) return;
           job.status = "paused";
-          this.setDgxOwnerHeartbeatPhase(job, "thermal_pause");
+          setHeartbeatPhase("thermal_pause");
           const reason = action === "pause_hot"
             ? `${temperatureC?.toFixed(1)} °C über ${thermalPausePolls} Messungen`
             : `${thermalUnreadablePolls} Temperaturmessungen ohne verwertbaren Sensorwert`;
@@ -3935,12 +10859,12 @@ export class JobManager extends EventEmitter {
           return;
         }
         if (action === "resume") {
-          if (!signalProcessGroup(child, "SIGCONT")) return;
+          if (!signalChild(child, "SIGCONT")) return;
           job.status = "running";
-          this.setDgxOwnerHeartbeatPhase(job, "ltx_rendering");
+          setHeartbeatPhase("ltx_rendering");
           this.appendLog(
             job,
-            `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen unter dem Lauf-Basiswert ${baselineC.toFixed(1)} °C. LTX läuft ohne Neustart weiter.`,
+            `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen bei oder unter der Wiederanlaufschwelle ${resumeBelowC.toFixed(1)} °C. LTX läuft ohne Neustart weiter.`,
           );
           this.changed();
           return;
@@ -3953,6 +10877,7 @@ export class JobManager extends EventEmitter {
     timer.unref();
     return () => {
       clearInterval(timer);
+      if (this.persistenceHold) return;
       if (job.thermalProfile) {
         job.thermalProfile = {
           ...job.thermalProfile,
@@ -3974,8 +10899,15 @@ export class JobManager extends EventEmitter {
     child: ChildProcess,
     baselineC: number,
     containerName: string,
+    workload: OwnedDockerThermalWorkload,
+    operations: ThermalWatcherOperations = {},
   ): () => void {
-    const resumeBelowC = Math.min(baselineC + 0.1, thermalPauseC - 0.1);
+    const resumeBelowC = thermalResumeC;
+    const readTemperatureC = operations.readTemperatureC ?? readMaxTemperatureC;
+    const childIsAlive = operations.processIsAlive ?? processIsAlive;
+    const signalChild = operations.signalProcessGroup ?? signalProcessGroup;
+    const setHeartbeatPhase = operations.setHeartbeatPhase
+      ?? ((phase: string) => this.setDgxOwnerHeartbeatPhase(job, phase));
     let peakC = baselineC;
     const guard = new ThermalPauseGuard({
       pauseAtC: thermalPauseC,
@@ -3984,26 +10916,42 @@ export class JobManager extends EventEmitter {
       resumePolls: thermalResumePolls,
       unreadablePolls: thermalUnreadablePolls,
     });
-    const dockerAction = (action: "pause" | "unpause"): boolean => {
-      const result = spawnSync("docker", [action, containerName], {
-        encoding: "utf8",
-        shell: false,
-        timeout: 20_000,
-      });
-      if (result.status === 0 && !result.error) return true;
-      const detail = result.error?.message || result.stderr.trim() || `Exit ${String(result.status)}`;
-      this.appendLog(
-        job,
-        `LatentSync-Thermalschutz konnte den eigenen Container nicht mit docker ${action} steuern: ${detail}`,
-      );
-      signalProcessGroup(child, "SIGTERM");
-      this.changed();
-      return false;
-    };
-    const timer = setInterval(() => {
-      if (!processIsAlive(child) || !["running", "paused"].includes(job.status)) return;
+    const productionDockerAction = (action: "pause" | "unpause"): boolean => {
       try {
-        const temperatureC = readMaxTemperatureC();
+        return this.controlOwnedDockerThermalState(
+          job,
+          containerName,
+          workload,
+          action,
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (this.persistenceHold || error instanceof JobPersistenceHoldError) {
+          // enterPersistenceHold() owns the only authorized SIGCONT/TERM/KILL
+          // and immutable-ID Docker cleanup sequence from this point onward.
+          process.stderr.write(
+            `LTX Studio ${workload.label}-Thermalwächter im Persistenz-HOLD beendet: ${detail}\n`,
+          );
+          return false;
+        }
+        this.appendLog(
+          job,
+          `${workload.label}-Thermalschutz konnte den eigenen Container nicht mit docker ${action} steuern: ${detail}`,
+        );
+        signalChild(child, "SIGTERM");
+        this.changed();
+        return false;
+      }
+    };
+    const dockerAction = (action: "pause" | "unpause") => operations.dockerAction
+      ? operations.dockerAction(action, containerName)
+      : productionDockerAction(action);
+    const timer = setInterval(() => {
+      if (this.jobShouldStop(job)
+        || !childIsAlive(child)
+        || !["running", "paused"].includes(job.status)) return;
+      try {
+        const temperatureC = readTemperatureC();
         if (temperatureC !== null) peakC = Math.max(peakC, temperatureC);
         if (job.thermalProfile) {
           job.thermalProfile = {
@@ -4018,13 +10966,13 @@ export class JobManager extends EventEmitter {
         if (action === "pause_hot" || action === "pause_unreadable") {
           if (!dockerAction("pause")) return;
           job.status = "paused";
-          this.setDgxOwnerHeartbeatPhase(job, "thermal_pause");
+          setHeartbeatPhase("thermal_pause");
           const reason = action === "pause_hot"
             ? `${temperatureC?.toFixed(1)} °C über ${thermalPausePolls} Messungen`
             : `${thermalUnreadablePolls} Temperaturmessungen ohne verwertbaren Sensorwert`;
           this.appendLog(
             job,
-            `Thermalpause: ${reason}. Der LatentSync-Container bleibt vollständig im Speicher und wird nach Abkühlung nahtlos fortgesetzt.`,
+            `Thermalpause: ${reason}. Der ${workload.label}-Container bleibt vollständig im Speicher und wird nach Abkühlung nahtlos fortgesetzt.`,
           );
           this.changed();
           return;
@@ -4032,22 +10980,23 @@ export class JobManager extends EventEmitter {
         if (action === "resume") {
           if (!dockerAction("unpause")) return;
           job.status = "running";
-          this.setDgxOwnerHeartbeatPhase(job, "lip_refinement");
+          setHeartbeatPhase(workload.resumeHeartbeatPhase);
           this.appendLog(
             job,
-            `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen unter dem Lauf-Basiswert ${baselineC.toFixed(1)} °C. LatentSync läuft ohne Neustart weiter.`,
+            `Thermalpause beendet: ${temperatureC?.toFixed(1)} °C über ${thermalResumePolls} Messungen bei oder unter der Wiederanlaufschwelle ${resumeBelowC.toFixed(1)} °C. ${workload.label} läuft ohne Neustart weiter.`,
           );
           this.changed();
           return;
         }
         this.changed();
       } catch (error) {
-        process.stderr.write(`LTX Studio LatentSync-Thermalwächter: ${String(error)}\n`);
+        process.stderr.write(`LTX Studio ${workload.label}-Thermalwächter: ${String(error)}\n`);
       }
     }, thermalPollIntervalMs);
     timer.unref();
     return () => {
       clearInterval(timer);
+      if (this.persistenceHold) return;
       if (job.thermalProfile) {
         job.thermalProfile = {
           ...job.thermalProfile,
@@ -4059,7 +11008,7 @@ export class JobManager extends EventEmitter {
       }
       this.appendLog(
         job,
-        `LatentSync-Thermalprofil (gesamter Host): Basis ${baselineC.toFixed(1)} °C, Peak ${peakC.toFixed(1)} °C, beobachteter Anstieg ${(peakC - baselineC).toFixed(1)} °C.`,
+        `${workload.label}-Thermalprofil (gesamter Host): Basis ${baselineC.toFixed(1)} °C, Peak ${peakC.toFixed(1)} °C, beobachteter Anstieg ${(peakC - baselineC).toFixed(1)} °C.`,
       );
     };
   }
@@ -4067,7 +11016,7 @@ export class JobManager extends EventEmitter {
   private async waitForLongcatResources(job: RuntimeJob): Promise<boolean> {
     let lastAvailable: number | null = null;
     let lastLogAt = 0;
-    while (!this.shuttingDown && job.status === "queued") {
+    while (!this.jobShouldStop(job) && job.status === "queued") {
       const resource = readResourceSnapshot();
       const available = resource.availableMemoryGiB;
       if (available !== null && available >= longcatMinAvailableGiB) {
@@ -4075,7 +11024,7 @@ export class JobManager extends EventEmitter {
           samples: thermalStartSamples,
           intervalMs: thermalStartSampleIntervalMs,
         });
-        if (this.shuttingDown || job.status !== "queued") return false;
+        if (this.jobShouldStop(job) || job.status !== "queued") return false;
         if (temperatureC !== null && temperatureC < longcatThermalStartMaxC) {
           this.appendLog(
             job,
@@ -4114,106 +11063,1003 @@ export class JobManager extends EventEmitter {
     return false;
   }
 
+  private classifyExecution(
+    job: RuntimeJob,
+    executionClass: Exclude<JobExecutionClass, "pending">,
+    cpuReuse?: CpuReuseSourceBinding,
+    operation?: CpuOperation,
+  ): boolean {
+    if (isBoundRawOutputCandidate(job)
+      && (executionClass !== "cpu-only"
+        || operation?.kind !== "paired-artifact-promotion"
+        || !cpuReuse
+        || !("reuseKind" in cpuReuse)
+        || cpuReuse.reuseKind !== "lipforcing-raw-mux-pair")) {
+      this.failJob(
+        job,
+        "Mux-copy-Kandidaten dürfen ausschließlich als gebundene paired-artifact-promotion laufen; DGX- oder Audio-Retime-Fallback ist verboten.",
+      );
+      return false;
+    }
+    const current = job.executionClass;
+    if (current !== undefined && current !== "pending" && current !== executionClass) {
+      this.failJob(
+        job,
+        `Ausführungsklasse bleibt fail-closed: ${current} kann nicht als ${executionClass} umklassifiziert werden.`,
+      );
+      return false;
+    }
+    if (executionClass === "cpu-only" && (!cpuReuse || !operation)) {
+      this.failJob(job, "CPU-only darf nur mit vollständig gebundener Baseline und registrierter Operation klassifiziert werden.");
+      return false;
+    }
+    if (executionClass === "dgx" && (cpuReuse || operation)) {
+      this.failJob(job, "DGX-Klassifizierung darf keine CPU-Reuse-Quelle tragen.");
+      return false;
+    }
+    if (job.executionDecision?.executionClass === executionClass) {
+      const currentDecision = normalizeJobExecutionDecision(job.executionDecision);
+      const requestSha256 = runtimeAuthorityRequestSha256(job);
+      if (!currentDecision
+        || !requestSha256
+        || currentDecision.requestSha256 !== requestSha256
+        || currentDecision.protocolSha256 !== (job.experiment?.protocolSha256 ?? null)
+        || canonicalJson(job.runProvenance?.executionDecision) !== canonicalJson(currentDecision)) {
+        this.failJob(job, "Persistierte Ausführungsentscheidung driftete vor dem Startgate; Lauf bleibt fail-closed.");
+        return false;
+      }
+      return true;
+    }
+    const decision = {
+      schemaVersion: job.executionDecision?.schemaVersion
+        ?? "ltx-studio-execution-decision.v6",
+      executionClass,
+      decidedAt: now(),
+      reason: executionClass === "dgx"
+        ? "Der verbleibende Renderplan kann DGX-Ressourcen belegen; Entscheidung vor Queue-Admission persistiert."
+        : operation?.kind === "paired-artifact-promotion"
+          ? "Gepaarter privater Kandidatenarm wurde aus exakt einem Baseline-Pre-Mux abgeleitet, protokollgebunden gesnapshottet und wird nur atomar publiziert."
+          : "Exakt protokollgebundene Baseline wurde vor und nach privatem Snapshot verifiziert; nur FFmpeg-Audio-Retime.",
+      requestSha256: job.authorityRequestSha256,
+      protocolSha256: job.experiment?.protocolSha256 ?? null,
+      cpuReuse: executionClass === "cpu-only" ? cpuReuse! : null,
+      operation: executionClass === "cpu-only" ? operation! : null,
+    } as JobExecutionDecision;
+    return this.commitExecutionDecision(job, decision);
+  }
+
+  private commitExecutionDecision(job: RuntimeJob, decision: JobExecutionDecision): boolean {
+    const normalized = normalizeJobExecutionDecision(decision);
+    const requestSha256 = runtimeAuthorityRequestSha256(job);
+    const protocolSha256 = job.experiment?.protocolSha256 ?? null;
+    if (!normalized
+      || normalized.executionClass !== decision.executionClass
+      || !requestSha256
+      || normalized.requestSha256 !== requestSha256
+      || normalized.protocolSha256 !== protocolSha256
+      || !jobExecutionDecisionIsMonotone(job.executionDecision, normalized)) {
+      this.failJob(job, "Ausführungsentscheidung ist ungültig, widersprüchlich oder nicht monoton; Lauf bleibt fail-closed.");
+      return false;
+    }
+    if (normalized.executionClass === "cpu-only") {
+      const binding = job.experiment;
+      const commonBindingMatches = Boolean(
+        binding
+        && binding.arm === "candidate"
+        && binding.baselineJobId === normalized.cpuReuse.baselineJobId
+        && binding.baselineOutputName === normalized.cpuReuse.baselineOutputName
+        && binding.baselineRequestSha256 === normalized.cpuReuse.baselineRequestSha256
+        && binding.protocolSha256 === normalized.protocolSha256,
+      );
+      let operationBindingMatches = false;
+      if (normalized.operation.kind === "ffmpeg-audio-retime"
+        && !("reuseKind" in normalized.cpuReuse)) {
+        operationBindingMatches = binding?.variableId === "lipforcing-program-audio-delay-ms"
+          && normalized.operation.deltaMs
+            === job.request.postprocess.lipForcing.programAudioDelayMs
+              - normalized.cpuReuse.sourceProgramAudioDelayMs;
+      } else if (normalized.operation.kind === "paired-artifact-promotion"
+        && "reuseKind" in normalized.cpuReuse
+        && normalized.cpuReuse.reuseKind === "lipforcing-raw-mux-pair") {
+        operationBindingMatches = binding?.variableId === "lipforcing-raw-output-profile"
+          && validRawOutputExperimentBinding(job.request, binding) !== null
+          && normalized.operation.authoritySha256 === normalized.cpuReuse.authority.sha256;
+      }
+      if (!commonBindingMatches
+        || !operationBindingMatches
+        || !binding
+        || job.dgxJobId !== null
+        || job.dgxSubmitPending) {
+        this.failJob(job, "CPU-only-Entscheidung widerspricht der eingefrorenen Baseline- oder DGX-Bindung.");
+        return false;
+      }
+    }
+    job.executionClass = normalized.executionClass;
+    job.executionDecision = normalized;
+    if (job.runProvenance) job.runProvenance = bindRunExecutionDecision(job.runProvenance, normalized);
+    // This durable write is the process/queue fence. Callers may spawn or
+    // submit only after it returned successfully.
+    this.changed();
+    return true;
+  }
+
   private appendLog(job: RuntimeJob, value: string): void {
     job.logs.push(cleanLogLine(value));
     if (job.logs.length > MAX_LOG_LINES) job.logs.splice(0, job.logs.length - MAX_LOG_LINES);
   }
 
+  private emitChangedSnapshot(): void {
+    const snapshot = this.list();
+    // EventEmitter.emit() stops at the first throwing listener. Invoke its raw
+    // listener wrappers individually so one broken SSE/client observer cannot
+    // starve every listener registered after it; once() wrappers retain their
+    // normal self-removal behavior when invoked.
+    for (const listener of this.rawListeners("changed")) {
+      try {
+        (listener as (jobs: StudioJob[]) => void).call(this, snapshot);
+      } catch (error) {
+        process.stderr.write(
+          `LTX Studio Changed-Listener ist fehlgeschlagen; durable Mutation bleibt gültig: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`,
+        );
+      }
+    }
+  }
+
   private changed(): void {
     this.persist();
-    this.emit("changed", this.list());
+    this.emitChangedSnapshot();
+  }
+
+  private restoreOutputAuthorityArchive(): void {
+    if (!existsSync(this.outputAuthorityArchivePath)) return;
+    try {
+      const entries = parseOutputAuthorityArchive(
+        readProtectedJsonFile(this.outputAuthorityArchivePath, 128 * 1024 * 1024),
+      );
+      if (!entries) throw new Error("Output-Authority-Archiv ist strukturell oder kryptografisch ungueltig.");
+      for (const entry of entries) this.outputAuthorityArchive.set(entry.id, entry);
+    } catch {
+      // Never trust a partially written or edited ledger. Reconciliation below
+      // revokes every marker/raw pair that no current terminal job can prove.
+      this.outputAuthorityArchive.clear();
+      this.outputAuthorityArchiveNeedsRewrite = true;
+    }
+  }
+
+  private persistOutputAuthorityArchive(): void {
+    const value: PersistedOutputAuthorityArchive = {
+      schemaVersion: "ltx-studio-output-authority-archive.v1",
+      entries: [...this.outputAuthorityArchive.values()]
+        .sort((left, right) => left.finishedAt!.localeCompare(right.finishedAt!)),
+    };
+    this.commitManagedSnapshot({
+      path: this.outputAuthorityArchivePath,
+      value,
+      recoveryRelativePath: this.recovery
+        ? `${this.recovery.targetRelativePath}.output-authority.v1.json`
+        : null,
+    });
+    this.outputAuthorityArchiveNeedsRewrite = false;
+  }
+
+  private archivePublishedJob(job: RuntimeJob): void {
+    const archived = archivedOutputAuthorityFromJob(job);
+    if (!archived) throw new Error("Terminaler Job konnte nicht in das Output-Authority-Archiv gebunden werden.");
+    const archiveSnapshot = new Map(this.outputAuthorityArchive);
+    for (const [archivedId, entry] of this.outputAuthorityArchive) {
+      if (archivedId !== job.id && entry.outputName === job.outputName) {
+        this.outputAuthorityArchive.delete(archivedId);
+      }
+    }
+    this.outputAuthorityArchive.set(job.id, archived);
+    try {
+      this.persistOutputAuthorityArchive();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        this.outputAuthorityArchive.clear();
+        for (const [jobId, entry] of archiveSnapshot) {
+          this.outputAuthorityArchive.set(jobId, entry);
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Reconciliation has no authority to destroy an unclaimed media artifact.
+   * Marker removal and private quarantine are both best-effort: if either
+   * operation fails, the raw pathname may remain as a name reservation, but
+   * it cannot be served or mutated because no archive/job authority is kept.
+   */
+  private revokeUntrustedOutputPublicationPreservingRaw(
+    outputPath: string,
+    quarantineRoot: string,
+  ): void {
+    try {
+      this.outputAuthorityReconciliationOperations.removePublicationAuthority(outputPath);
+    } catch {
+      // The archive/job match below is the mandatory public authority half.
+    }
+    try {
+      this.outputAuthorityReconciliationOperations.quarantineUnreleased(
+        outputPath,
+        quarantineRoot,
+      );
+    } catch {
+      // Preserve the only remaining raw bytes in place; the name stays reserved.
+    }
+    try {
+      this.outputAuthorityReconciliationOperations.removePublicationAuthority(outputPath);
+    } catch {
+      // A surviving marker is inert without the archive/job claim removed below.
+    }
+  }
+
+  private reconcileOutputAuthorityArchive(): void {
+    let changed = this.outputAuthorityArchiveNeedsRewrite;
+    for (const job of this.jobs.values()) {
+      if (job.status !== "completed" || !job.outputPublication) continue;
+      const archived = archivedOutputAuthorityFromJob(job);
+      if (!archived) continue;
+      for (const [archivedId, entry] of this.outputAuthorityArchive) {
+        if (archivedId !== job.id && entry.outputName === job.outputName) {
+          this.outputAuthorityArchive.delete(archivedId);
+          changed = true;
+        }
+      }
+      if (JSON.stringify(this.outputAuthorityArchive.get(job.id)) !== JSON.stringify(archived)) {
+        this.outputAuthorityArchive.set(job.id, archived);
+        changed = true;
+      }
+    }
+
+    for (const [jobId, entry] of [...this.outputAuthorityArchive]) {
+      const outputPath = join(outputRoot, entry.outputName);
+      const publication = readValidOutputPublicationAuthority(outputRoot, entry.outputName);
+      const expected = normalizeOutputPublicationAuthority(entry.outputPublication, outputPath);
+      if (publication && expected && canonicalJson(publication) === canonicalJson(expected)) continue;
+      this.revokeUntrustedOutputPublicationPreservingRaw(
+        outputPath,
+        join(hybridRoot, jobId),
+      );
+      this.outputAuthorityArchive.delete(jobId);
+      changed = true;
+    }
+
+    try {
+      for (const entry of readdirSync(outputRoot, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(OUTPUT_PUBLICATION_SUFFIX)) continue;
+        const outputName = entry.name.slice(0, -OUTPUT_PUBLICATION_SUFFIX.length);
+        if ([...this.outputAuthorityArchive.values()].some((authority) => authority.outputName === outputName)) {
+          continue;
+        }
+        const outputPath = join(outputRoot, outputName);
+        this.revokeUntrustedOutputPublicationPreservingRaw(
+          outputPath,
+          join(hybridRoot, `orphan-publication-${randomUUID()}`),
+        );
+      }
+    } catch {
+      // A missing output directory has no public bytes to reconcile.
+    }
+    if (changed
+      || (this.outputAuthorityArchive.size > 0 && !existsSync(this.outputAuthorityArchivePath))) {
+      this.persistOutputAuthorityArchive();
+    }
+  }
+
+  private reconcileOutputAuthorityArchiveAtStartup(context: string): void {
+    try {
+      this.reconcileOutputAuthorityArchive();
+    } catch (error) {
+      // Archive reconciliation is part of the same startup authority boundary
+      // as jobs.json. A rewrite failure must keep the server alive in sticky
+      // HOLD so health/recovery remain observable; it must never crash startup
+      // or expose an in-memory archive whose durability is unknown.
+      if (!this.persistenceHold) {
+        this.enterPersistenceHold(error, context);
+      }
+    }
   }
 
   private persist(): void {
     const values = [...this.jobs.values()]
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .map(persistedJob);
-    if (this.recovery) {
-      this.recovery.coordinator.commitJson({
-        targetKind: "job",
-        targetRelativePath: this.recovery.targetRelativePath,
-        expectedAbsolutePath: this.storagePath,
-        value: values,
-      });
-      return;
-    }
-    const temporaryPath = `${this.storagePath}.tmp`;
-    writeFileSync(temporaryPath, JSON.stringify(values, null, 2), { mode: 0o600 });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, this.storagePath);
+    this.commitJobSnapshot(values);
   }
 
   private restore(): void {
-    if (!existsSync(this.storagePath)) return;
+    this.restoreOutputAuthorityArchive();
+    if (!existsSync(this.storagePath)) {
+      this.reconcileOutputAuthorityArchiveAtStartup(
+        `Output-Authority-Archiv ${this.outputAuthorityArchivePath} konnte beim leeren Startup nicht beweiskräftig abgeglichen werden`,
+      );
+      return;
+    }
     try {
-      const stored = JSON.parse(readFileSync(this.storagePath, "utf8")) as PersistedStudioJob[];
+      const parsed = JSON.parse(readFileSync(this.storagePath, "utf8")) as unknown;
+      if (!Array.isArray(parsed)) {
+        throw new Error("Persistierter Job-Snapshot ist kein Array.");
+      }
+      const seenIds = new Set<string>();
+      const legacyImportIds = new Set<string>();
+      const stored: PersistedStudioJob[] = [];
+      for (const candidate of parsed) {
+        const entry = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+          ? candidate as Record<string, unknown>
+          : null;
+        if (!entry) continue;
+        const rawId = entry.id;
+        if (typeof rawId === "string") {
+          if (seenIds.has(rawId)) {
+            throw new Error(`Persistierter Job-Snapshot enthält die doppelte Job-ID ${rawId}.`);
+          }
+          seenIds.add(rawId);
+        }
+        const validId = typeof rawId === "string" && STUDIO_JOB_ID_PATTERN.test(rawId);
+        const validStatuses = [
+          "queued", "running", "paused", "completed", "failed", "cancelled", "interrupted",
+        ];
+        const validStatus = typeof entry.status === "string" && validStatuses.includes(entry.status);
+        const activeOrUnclearStatus = !validStatus
+          || (validStatus && isActiveJobStatus(entry.status as JobStatus));
+        const rawDgxClaim = entry.dgxJobId !== undefined && entry.dgxJobId !== null;
+        const validDgxJobId = isDgxJobId(entry.dgxJobId);
+        const executionDecision = entry.executionDecision
+          && typeof entry.executionDecision === "object"
+          && !Array.isArray(entry.executionDecision)
+          ? entry.executionDecision as Record<string, unknown>
+          : null;
+        const operation = executionDecision?.operation
+          && typeof executionDecision.operation === "object"
+          && !Array.isArray(executionDecision.operation)
+          ? executionDecision.operation as Record<string, unknown>
+          : null;
+        const activeExecutionClaim = validStatus
+          && isActiveJobStatus(entry.status as JobStatus)
+          && (executionDecision?.executionClass === "pending"
+            || (executionDecision?.executionClass === "cpu-only"
+              && (operation?.state === "prepared" || operation?.state === "running")));
+        let migratedRequest: GenerationRequest | null = null;
+        try {
+          migratedRequest = migrateGenerationRequest(structuredClone(entry.request));
+        } catch {
+          migratedRequest = null;
+        }
+        const terminalLegacyStatus = validStatus
+          && !isActiveJobStatus(entry.status as JobStatus)
+          && (["completed", "failed", "cancelled", "interrupted"] as const)
+            .includes(entry.status as LegacyTerminalStatus);
+        const legacyImportCandidate = terminalLegacyStatus
+          && entry.legacyHistory === undefined
+          && !Object.hasOwn(entry, "executionClass")
+          && !Object.hasOwn(entry, "executionDecision")
+          && entry.localProcessProtocol === undefined
+          && entry.startSource === undefined
+          && entry.startDeferred === undefined
+          && entry.dgxSubmitPending !== true
+          && entry.dgxSubmitStartedAt === undefined
+          && entry.dgxPreparedAdmission === undefined
+          && entry.dgxPreparedAdmissionSha256 === undefined
+          && entry.dgxLeaseReceipt === undefined
+          && entry.dgxTerminalDelivery === undefined
+          && entry.dgxTerminalReceipt === undefined
+          && entry.localProcessSpawnPending === undefined
+          && entry.localProcessGroupPending === undefined
+          && entry.localProcessGroupIdentity === undefined
+          && entry.ownedDockerContainer === undefined
+          && entry.ownedDockerContainerRecoveryBlocked === undefined
+          && entry.outputPublicationCommitPending === undefined
+          && entry.outputPublication === undefined;
+        const normalizedLegacyHistory = normalizeLegacyTerminalHistory(
+          entry.legacyHistory,
+          outputRoot,
+        );
+        const legacyHistoryValid = entry.legacyHistory === undefined
+          || Boolean(
+            validId
+            && migratedRequest
+            && terminalLegacyStatus
+            && !rawDgxClaim
+            && normalizedLegacyHistory
+            && canonicalJson(entry.legacyHistory) === canonicalJson(normalizedLegacyHistory)
+            && normalizedLegacyHistory.jobId === rawId
+            && normalizedLegacyHistory.originalStatus === entry.status
+            && normalizedLegacyHistory.outputName === migratedRequest.outputName
+            && normalizedLegacyHistory.finishedAt === (entry.finishedAt ?? null)
+            && normalizedLegacyHistory.requestSha256
+              === createHash("sha256").update(canonicalJson(entry.request)).digest("hex"),
+          );
+        const authorityClaim = activeOrUnclearStatus
+          || rawDgxClaim
+          || entry.legacyHistory !== undefined
+          || entry.outputPublicationCommitPending !== undefined
+          || entry.dgxSubmitPending === true
+          || entry.dgxSubmitStartedAt !== undefined
+          || entry.dgxPreparedAdmission !== undefined
+          || entry.dgxPreparedAdmissionSha256 !== undefined
+          || entry.dgxLeaseReceipt !== undefined
+          || entry.dgxTerminalDelivery !== undefined
+          || entry.dgxTerminalReceipt !== undefined
+          || entry.localProcessSpawnPending !== undefined
+          || entry.localProcessGroupPending === true
+          || entry.localProcessGroupIdentity !== undefined
+          || entry.ownedDockerContainer !== undefined
+          || entry.ownedDockerContainerRecoveryBlocked === true
+          || entry.outputPublication !== undefined
+          || entry.startDeferred !== undefined
+          || activeExecutionClaim;
+        const normalizedTerminalDelivery = normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery);
+        const terminalDeliveryValid = entry.dgxTerminalDelivery === undefined
+          || (validDgxJobId
+            && normalizedTerminalDelivery !== undefined
+            && canonicalJson(entry.dgxTerminalDelivery) === canonicalJson(normalizedTerminalDelivery));
+        const normalizedTerminalReceipt = normalizeDgxTerminalReceipt(entry.dgxTerminalReceipt);
+        const normalizedLeaseReceipt = normalizeDgxLeaseReceipt(entry.dgxLeaseReceipt);
+        const leaseReceiptValid = entry.dgxLeaseReceipt === undefined
+          || (validId
+            && validDgxJobId
+            && normalizedLeaseReceipt !== undefined
+            && normalizedLeaseReceipt.studioJobId === rawId
+            && normalizedLeaseReceipt.dgxJobId === entry.dgxJobId
+            && normalizedLeaseReceipt.requestedBy === `ltx-studio:${rawId}`
+            && normalizedLeaseReceipt.idempotencyKey === `ltx-studio:${rawId}`
+            && canonicalJson(entry.dgxLeaseReceipt) === canonicalJson(normalizedLeaseReceipt)
+            && entry.dgxSubmitPending !== true
+            && entry.dgxSubmitStartedAt === undefined
+            && entry.dgxPreparedAdmission === undefined
+            && entry.dgxPreparedAdmissionSha256 === undefined
+            && entry.dgxTerminalReceipt === undefined);
+        const terminalReceiptValid = entry.dgxTerminalReceipt === undefined
+          || (validId
+            && validDgxJobId
+            && normalizedTerminalReceipt !== undefined
+            && normalizedTerminalReceipt.studioJobId === rawId
+            && normalizedTerminalReceipt.dgxJobId === entry.dgxJobId
+            && normalizedTerminalReceipt.idempotencyKey === `ltx-studio:${rawId}`
+            && canonicalJson(entry.dgxTerminalReceipt) === canonicalJson(normalizedTerminalReceipt)
+            && !isActiveJobStatus(entry.status as JobStatus)
+            && entry.dgxSubmitPending !== true
+            && entry.dgxSubmitStartedAt === undefined
+            && entry.dgxPreparedAdmission === undefined
+            && entry.dgxPreparedAdmissionSha256 === undefined
+            && entry.dgxLeaseReceipt === undefined
+            && entry.dgxTerminalDelivery === undefined
+            && entry.localProcessSpawnPending !== true
+            && entry.localProcessGroupPending !== true
+            && entry.localProcessGroupIdentity === undefined
+            && entry.ownedDockerContainer === undefined
+            && entry.ownedDockerContainerRecoveryBlocked !== true);
+        const processGroupValid = entry.localProcessGroupPending === true
+          ? isLocalProcessGroupIdentity(entry.localProcessGroupIdentity)
+          : entry.localProcessGroupIdentity === undefined;
+        const spawnMarkerValid = entry.localProcessSpawnPending === undefined
+          || (entry.localProcessSpawnPending === true
+            && entry.localProcessGroupPending !== true
+            && entry.localProcessGroupIdentity === undefined);
+        const submitStartedAtValid = entry.dgxSubmitStartedAt === undefined
+          || (entry.dgxSubmitPending === true
+            && typeof entry.dgxSubmitStartedAt === "string"
+            && Number.isFinite(Date.parse(entry.dgxSubmitStartedAt)));
+        const normalizedPreparedAdmission = normalizePreparedAdmission(entry.dgxPreparedAdmission);
+        const preparedAdmissionValid = entry.dgxSubmitPending === true
+          ? Boolean(
+              normalizedPreparedAdmission
+              && entry.dgxPreparedAdmissionSha256 === preparedAdmissionSha256(normalizedPreparedAdmission)
+              && normalizedPreparedAdmission.requested_by === `ltx-studio:${rawId}`
+              && canonicalJson(entry.dgxPreparedAdmission) === canonicalJson(normalizedPreparedAdmission)
+            )
+          : entry.dgxPreparedAdmission === undefined
+            && entry.dgxPreparedAdmissionSha256 === undefined;
+        const dgxAuthorityCombinationValid = entry.dgxSubmitPending === true
+          ? !rawDgxClaim
+            && entry.dgxLeaseReceipt === undefined
+            && entry.dgxTerminalDelivery === undefined
+            && entry.dgxTerminalReceipt === undefined
+          : rawDgxClaim
+            ? legacyImportCandidate
+              || ((entry.dgxTerminalReceipt !== undefined) !== (entry.dgxLeaseReceipt !== undefined)
+                && (entry.dgxTerminalDelivery === undefined || entry.dgxLeaseReceipt !== undefined))
+            : entry.dgxLeaseReceipt === undefined
+              && entry.dgxTerminalDelivery === undefined
+              && entry.dgxTerminalReceipt === undefined;
+        const terminalLocalLeaseHasDelivery = !validStatus
+          || isActiveJobStatus(entry.status as JobStatus)
+          || entry.dgxLeaseReceipt === undefined
+          || entry.dgxTerminalDelivery !== undefined;
+        const ownedContainerValid = entry.ownedDockerContainer === undefined
+          || (validId
+            && validDgxJobId
+            && normalizeOwnedDockerContainerAuthority(
+              entry.ownedDockerContainer,
+              rawId as string,
+              entry.dgxJobId as string,
+            ) !== null);
+        const markerlessLegacyActiveExecution = entry.localProcessProtocol !== "fd-gate.v1"
+          && (entry.status === "running" || entry.status === "paused")
+          && entry.localProcessSpawnPending !== true
+          && entry.localProcessGroupPending !== true
+          && entry.ownedDockerContainer === undefined;
+        const processProtocolValid = entry.localProcessProtocol === undefined
+          || entry.localProcessProtocol === "fd-gate.v1";
+        const spawnProtocolValid = entry.localProcessSpawnPending !== true
+          || entry.localProcessProtocol === "fd-gate.v1";
+        const completedWithUnsettledLocalAuthority = entry.status === "completed"
+          && (entry.localProcessSpawnPending === true
+            || entry.localProcessGroupPending === true
+            || entry.ownedDockerContainer !== undefined
+            || entry.ownedDockerContainerRecoveryBlocked === true);
+        const startDeferredValid = entry.startDeferred === undefined
+          || (entry.startDeferred === true
+            && (["queued", "interrupted", "cancelled", "failed"] as const).includes(
+              entry.status as "queued" | "interrupted" | "cancelled" | "failed",
+            )
+            && (entry.startedAt === null || entry.startedAt === undefined)
+            && !rawDgxClaim
+            && entry.dgxSubmitPending !== true
+            && entry.localProcessSpawnPending !== true
+            && entry.localProcessGroupPending !== true
+            && entry.ownedDockerContainer === undefined);
+        const hasExecutionClass = Object.hasOwn(entry, "executionClass");
+        const hasExecutionDecision = Object.hasOwn(entry, "executionDecision");
+        const normalizedExecutionDecision = hasExecutionDecision
+          ? normalizeJobExecutionDecision(entry.executionDecision)
+          : null;
+        const executionMarkerStructurallyValid = hasExecutionDecision
+          ? Boolean(
+              normalizedExecutionDecision
+              && hasExecutionClass
+              && entry.executionClass === normalizedExecutionDecision.executionClass,
+            )
+          : !hasExecutionClass || isJobExecutionClass(entry.executionClass);
+        const invalidExecutionMarkerOwnsUnsettledAuthority = !executionMarkerStructurallyValid
+          && (
+            entry.status === "running"
+            || entry.status === "paused"
+            || rawDgxClaim
+            || entry.dgxSubmitPending === true
+            || entry.dgxTerminalDelivery !== undefined
+            || entry.dgxTerminalReceipt !== undefined
+            || entry.localProcessSpawnPending === true
+            || entry.localProcessGroupPending === true
+            || entry.localProcessGroupIdentity !== undefined
+            || entry.ownedDockerContainer !== undefined
+            || entry.ownedDockerContainerRecoveryBlocked === true
+            || entry.outputPublicationCommitPending !== undefined
+            || entry.outputPublication !== undefined
+          );
+        const normalizedOutputPublication = migratedRequest
+          ? normalizeOutputPublicationAuthority(
+              entry.outputPublication,
+              join(outputRoot, migratedRequest.outputName),
+            )
+          : null;
+        const outputPublicationValid = entry.outputPublication === undefined
+          || Boolean(
+            normalizedOutputPublication
+            && canonicalJson(entry.outputPublication) === canonicalJson(normalizedOutputPublication),
+          );
+        const normalizedPublicationCommit = normalizeOutputPublicationCommitPending(
+          entry.outputPublicationCommitPending,
+        );
+        const publicationCommitValid = entry.outputPublicationCommitPending === undefined
+          || Boolean(
+            validId
+            && migratedRequest
+            && validStatus
+            && isActiveJobStatus(entry.status as JobStatus)
+            && normalizedPublicationCommit
+            && canonicalJson(entry.outputPublicationCommitPending)
+              === canonicalJson(normalizedPublicationCommit)
+            && normalizedOutputPublication
+            && normalizedOutputPublication.jobId === rawId
+            && normalizedOutputPublication.outputName === migratedRequest.outputName
+            && normalizedOutputPublication.publishedAt === normalizedPublicationCommit.completedAt
+            && entry.finishedAt === normalizedPublicationCommit.completedAt
+            && normalizedExecutionDecision
+            && normalizedExecutionDecision.executionClass !== "pending"
+            && entry.executionClass === normalizedExecutionDecision.executionClass
+            && entry.dgxTerminalDelivery === undefined
+            && entry.dgxTerminalReceipt === undefined
+            && entry.dgxSubmitPending !== true
+            && entry.localProcessSpawnPending !== true
+            && entry.localProcessGroupPending !== true
+            && entry.localProcessGroupIdentity === undefined
+            && entry.ownedDockerContainer === undefined
+            && entry.ownedDockerContainerRecoveryBlocked !== true
+            && entry.startDeferred !== true,
+          );
+        if (authorityClaim && (
+          !validId
+          || !migratedRequest
+          || !validStatus
+          || (rawDgxClaim && !validDgxJobId)
+          || !terminalDeliveryValid
+          || !leaseReceiptValid
+          || !terminalReceiptValid
+          || !spawnMarkerValid
+          || !processGroupValid
+          || !submitStartedAtValid
+          || !preparedAdmissionValid
+          || !dgxAuthorityCombinationValid
+          || !terminalLocalLeaseHasDelivery
+          || !ownedContainerValid
+          || markerlessLegacyActiveExecution
+          || !processProtocolValid
+          || !spawnProtocolValid
+          || completedWithUnsettledLocalAuthority
+          || !startDeferredValid
+          || invalidExecutionMarkerOwnsUnsettledAuthority
+          || !outputPublicationValid
+          || !legacyHistoryValid
+          || !publicationCommitValid
+        )) {
+          throw new Error(
+            `Persistierter Authority-Job ${typeof rawId === "string" ? rawId : "<ohne UUID>"} ist strukturell widersprüchlich.`,
+          );
+        }
+        // Authority-free legacy debris is intentionally discarded. It cannot
+        // own compute, a remote lease, or a public artifact.
+        if (!validId || !migratedRequest) continue;
+        if (legacyImportCandidate) legacyImportIds.add(rawId);
+        stored.push(entry as unknown as PersistedStudioJob);
+      }
       const retained = [
         ...stored.slice(0, MAX_JOBS),
         ...stored.slice(MAX_JOBS).filter((entry) => {
+          // Every imported v1 terminal record is a durable negative-authority
+          // tombstone, including failures without playable bytes. Dropping one
+          // would let an old experiment/project reference look like an unknown
+          // modern job and regain retry/continuity authority after MAX_JOBS.
+          const hasLegacyHistory = entry.legacyHistory !== undefined
+            || legacyImportIds.has(entry.id);
+          // Controlled-experiment retries also require the exact previous
+          // terminal attempt. Keep that bounded subset so a missing job never
+          // becomes an implicit retry grant.
+          const hasExperimentBinding = entry.experiment !== undefined && entry.experiment !== null;
           const hasPendingTerminal = normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery) !== undefined;
+          const hasTerminalReceipt = normalizeDgxTerminalReceipt(entry.dgxTerminalReceipt) !== undefined;
           const hasPendingSubmit = entry.dgxSubmitPending === true;
+          const hasLeaseReceipt = normalizeDgxLeaseReceipt(entry.dgxLeaseReceipt) !== undefined;
+          const hasPendingLocalProcess = entry.localProcessSpawnPending === true
+            || entry.localProcessGroupPending === true;
+          const hasPendingOwnedContainer = entry.ownedDockerContainer !== undefined
+            || entry.ownedDockerContainerRecoveryBlocked === true;
+          const hasPendingPublicationCommit = normalizeOutputPublicationCommitPending(
+            entry.outputPublicationCommitPending,
+          ) !== undefined;
           const hasActiveRemoteLease = isActiveJobStatus(entry.status)
-            && typeof entry.dgxJobId === "string"
-            && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId);
-          return hasPendingTerminal || hasPendingSubmit || hasActiveRemoteLease;
+            && isDgxJobId(entry.dgxJobId);
+          const hasCancelledRemoteLeaseWithoutDelivery = entry.status === "cancelled"
+            && isDgxJobId(entry.dgxJobId)
+            && !hasPendingTerminal
+            && !hasTerminalReceipt;
+          return hasLegacyHistory
+            || hasExperimentBinding
+            || hasPendingTerminal
+            || hasPendingSubmit
+            || hasLeaseReceipt
+            || hasPendingLocalProcess
+            || hasPendingOwnedContainer
+            || hasPendingPublicationCommit
+            || hasActiveRemoteLease
+            || hasCancelledRemoteLeaseWithoutDelivery;
         }),
       ];
+      let restorationRequiresPersist = false;
       for (const entry of retained) {
-        let migratedRequest = migrateGenerationRequest(entry.request);
-        if (!migratedRequest || typeof entry.id !== "string" || !/^[0-9a-f-]{36}$/i.test(entry.id)) continue;
+        const authorityBoundRequest = structuredClone(entry.request);
+        const authorityRequestSha256 = createHash("sha256")
+          .update(canonicalJson(authorityBoundRequest))
+          .digest("hex");
+        let migratedRequest = migrateGenerationRequest(structuredClone(authorityBoundRequest));
+        if (!migratedRequest || typeof entry.id !== "string" || !STUDIO_JOB_ID_PATTERN.test(entry.id)) continue;
+        const rawRequestRecord = authorityBoundRequest && typeof authorityBoundRequest === "object"
+          && !Array.isArray(authorityBoundRequest)
+          ? authorityBoundRequest as Record<string, unknown>
+          : null;
+        const rawTextToAudio = rawRequestRecord?.textToAudio;
+        const legacyTextToAudioPeakCeilingUnset = migratedRequest.mode === "text-to-audio"
+          && (!rawTextToAudio
+            || typeof rawTextToAudio !== "object"
+            || Array.isArray(rawTextToAudio)
+            || !Object.hasOwn(rawTextToAudio, "peakCeilingDbfs"));
         const storedStatus: JobStatus = ["queued", "running", "paused", "completed", "failed", "cancelled", "interrupted"]
           .includes(entry.status) ? entry.status : "interrupted";
-        const dgxJobId = typeof entry.dgxJobId === "string" && /^dgx-job-[0-9a-z-]+$/i.test(entry.dgxJobId)
-          ? entry.dgxJobId
-          : null;
-        const recoverableLocalQueue = storedStatus === "queued" && dgxJobId === null;
+        const storedPublicationCommit = normalizeOutputPublicationCommitPending(
+          entry.outputPublicationCommitPending,
+        );
+        if (storedPublicationCommit) restorationRequiresPersist = true;
+        const storedLegacyHistory = normalizeLegacyTerminalHistory(entry.legacyHistory, outputRoot);
+        const importLegacyTerminal = !storedLegacyHistory
+          && (["completed", "failed", "cancelled", "interrupted"] as const)
+            .includes(storedStatus as LegacyTerminalStatus)
+          && !Object.hasOwn(entry, "executionClass")
+          && !Object.hasOwn(entry, "executionDecision")
+          && entry.localProcessProtocol === undefined
+          && entry.startSource === undefined
+          && entry.startDeferred === undefined
+          && entry.dgxSubmitPending !== true
+          && entry.dgxSubmitStartedAt === undefined
+          && entry.dgxPreparedAdmission === undefined
+          && entry.dgxPreparedAdmissionSha256 === undefined
+          && entry.dgxLeaseReceipt === undefined
+          && entry.dgxTerminalDelivery === undefined
+          && entry.dgxTerminalReceipt === undefined
+          && entry.localProcessSpawnPending === undefined
+          && entry.localProcessGroupPending === undefined
+          && entry.localProcessGroupIdentity === undefined
+          && entry.ownedDockerContainer === undefined
+          && entry.ownedDockerContainerRecoveryBlocked === undefined
+          && entry.outputPublicationCommitPending === undefined
+          && entry.outputPublication === undefined;
+        const legacyHistory = storedLegacyHistory ?? (importLegacyTerminal
+          ? captureLegacyTerminalHistory(outputRoot, {
+              jobId: entry.id,
+              status: storedStatus as LegacyTerminalStatus,
+              outputName: migratedRequest.outputName,
+              finishedAt: validTimestamp(entry.finishedAt, null),
+              dgxJobId: isDgxJobId(entry.dgxJobId) ? entry.dgxJobId : null,
+              rawRequest: authorityBoundRequest,
+              migratedRequest,
+              runProvenance: entry.runProvenance,
+              identityEvidence: entry.identityEvidence,
+              experiment: entry.experiment,
+              importedAt: now(),
+            })
+          : null);
+        if (importLegacyTerminal) restorationRequiresPersist = true;
+        // A pre-v1.1 DGX id is retained solely inside the explicitly
+        // non-authoritative history receipt. It must never become a lease.
+        const dgxJobId = legacyHistory
+          ? null
+          : isDgxJobId(entry.dgxJobId) ? entry.dgxJobId : null;
+        const restoredOwnedDockerContainer = normalizeOwnedDockerContainerAuthority(
+          entry.ownedDockerContainer,
+          entry.id,
+          dgxJobId,
+        );
+        const ownedDockerContainerRecoveryBlocked = entry.ownedDockerContainerRecoveryBlocked === true
+          || (entry.ownedDockerContainer !== undefined && !restoredOwnedDockerContainer);
+        if (entry.ownedDockerContainer !== undefined
+          && (!restoredOwnedDockerContainer
+            || canonicalJson(entry.ownedDockerContainer) !== canonicalJson(restoredOwnedDockerContainer))) {
+          restorationRequiresPersist = true;
+        }
+        const locallyQueuedWithoutDgx = storedStatus === "queued" && dgxJobId === null;
+        const deferredStartFence = entry.startDeferred === true;
         const experimentBindingResult = experimentRunBindingSchema.safeParse(entry.experiment);
         const projectBindingResult = projectRunBindingSchema.safeParse(entry.project);
         const experimentBinding = experimentBindingResult.success ? experimentBindingResult.data : null;
         const projectBinding = projectBindingResult.success ? projectBindingResult.data : null;
+        const experimentBindingPresent = entry.experiment !== undefined && entry.experiment !== null;
+        const experimentSourceClaimed = entry.startSource === "experiment";
         const projectBindingInvalid = entry.project !== undefined
           && entry.project !== null
           && !projectBindingResult.success;
-        if (recoverableLocalQueue && !experimentBinding && !projectBinding && !projectBindingInvalid) {
-          migratedRequest = withOfficialSpeechModelPaths(migratedRequest);
-        }
+        const executableRequestCandidate = locallyQueuedWithoutDgx
+          && !experimentBinding
+          && !projectBinding
+          && !projectBindingInvalid
+          ? withOfficialSpeechModelPaths(migratedRequest)
+          : migratedRequest;
+        const executableRequestDiffers = canonicalJson(executableRequestCandidate)
+          !== canonicalJson(authorityBoundRequest);
+        const activeRequestMigrationConflict = isActiveJobStatus(storedStatus)
+          && executableRequestDiffers;
+        if (!executableRequestDiffers) migratedRequest = executableRequestCandidate;
         const projectBindingMismatch = Boolean(
           projectBinding
-          && createHash("sha256").update(canonicalJson(migratedRequest)).digest("hex")
-            !== projectBinding.requestSha256,
+          && authorityRequestSha256 !== projectBinding.requestSha256,
         );
         const authorityConflict = Boolean(experimentBinding && projectBinding);
         const brokenProjectAuthority = projectBindingInvalid || projectBindingMismatch || authorityConflict;
+        const rawOutputCandidate = migratedRequest.postprocess.lipForcing.rawOutputProfile
+          === experimentalLipForcingRawOutputProfile;
+        const requestBoundExperimentBinding = validRequestBoundExperimentBinding(
+          migratedRequest,
+          experimentBinding,
+        );
+        const brokenExperimentAuthority = isActiveJobStatus(storedStatus)
+          && (experimentBindingPresent || experimentSourceClaimed)
+          && requestBoundExperimentBinding === null;
+        const brokenRawOutputExperimentAuthority = rawOutputCandidate && (
+          validRawOutputExperimentBinding(migratedRequest, experimentBinding) === null
+          || projectBinding !== null
+        );
+        const executionAuthority = restoreExecutionAuthority(
+          entry,
+          authorityBoundRequest,
+          migratedRequest,
+          experimentBinding,
+          dgxJobId,
+          storedPublicationCommit ? "completed" : storedStatus,
+        );
+        const brokenExecutionAuthority = executionAuthority.error !== null;
+        const incompatibleLegacyT2AExecution = legacyTextToAudioPeakCeilingUnset
+          && isActiveJobStatus(storedStatus);
+        const restoredSpawnPending = entry.localProcessSpawnPending === true;
+        if (activeRequestMigrationConflict
+          || brokenExperimentAuthority
+          || brokenRawOutputExperimentAuthority
+          || (deferredStartFence && isActiveJobStatus(storedStatus))
+          || restoredSpawnPending
+          || entry.localProcessProtocol !== "fd-gate.v1") {
+          restorationRequiresPersist = true;
+        }
+        const recoverableLocalQueue = locallyQueuedWithoutDgx
+          && !deferredStartFence
+          && !restoredSpawnPending
+          && !brokenExecutionAuthority
+          && !activeRequestMigrationConflict
+          && !brokenExperimentAuthority
+          && !brokenRawOutputExperimentAuthority
+          && !executionAuthority.cpuResumeAmbiguous;
         let status: JobStatus = recoverableLocalQueue
           ? "queued"
           : isActiveJobStatus(storedStatus) ? "interrupted" : storedStatus;
-        if (brokenProjectAuthority) status = "interrupted";
+        if (brokenExecutionAuthority) status = "failed";
+        if (activeRequestMigrationConflict) status = "failed";
+        if (brokenExperimentAuthority) status = "failed";
+        if (brokenRawOutputExperimentAuthority) status = "failed";
+        if (brokenProjectAuthority && !activeRequestMigrationConflict) status = "interrupted";
         const plan = buildCommand(migratedRequest);
-        let outputReady = false;
-        if (status === "completed") {
+        let outputFileExists = false;
+        try {
+          const outputStats = lstatSync(plan.outputPath);
+          outputFileExists = !outputStats.isSymbolicLink() && outputStats.isFile() && outputStats.size > 0;
+        } catch {
+          outputFileExists = false;
+        }
+        const publication = outputFileExists
+          ? readValidOutputPublicationAuthority(outputRoot, migratedRequest.outputName)
+          : null;
+        const expectedDecisionSha256 = executionAuthority.executionDecision
+          ? createHash("sha256").update(canonicalJson(executionAuthority.executionDecision)).digest("hex")
+          : null;
+        const storedOutputPublication = normalizeOutputPublicationAuthority(
+          entry.outputPublication,
+          plan.outputPath,
+        );
+        const expectedJobAuthoritySha256 = executionAuthority.executionDecision
+          && executionAuthority.executionDecision.executionClass !== "pending"
+          && storedOutputPublication
+          && typeof entry.finishedAt === "string"
+          ? terminalJobAuthoritySha256({
+              jobId: entry.id,
+              status: "completed",
+              outputName: migratedRequest.outputName,
+              finishedAt: entry.finishedAt,
+              executionClass: executionAuthority.executionDecision.executionClass,
+              executionDecisionSha256: expectedDecisionSha256!,
+              requestSha256: executionAuthority.executionDecision.requestSha256,
+              protocolSha256: executionAuthority.executionDecision.protocolSha256,
+              jobPersistenceRevision: storedOutputPublication.jobPersistenceRevision,
+            })
+          : null;
+        const publicationAuthorityMatches = Boolean(
+          publication
+          && storedOutputPublication
+          && canonicalJson(publication) === canonicalJson(storedOutputPublication)
+          && publication.jobId === entry.id
+          && publication.publishedAt === entry.finishedAt
+          && expectedDecisionSha256
+          && publication.executionDecisionSha256 === expectedDecisionSha256
+          && expectedJobAuthoritySha256
+          && publication.jobAuthoritySha256 === expectedJobAuthoritySha256,
+        );
+        const publicationMatchesPreparedCommit = Boolean(
+          storedPublicationCommit
+          && isActiveJobStatus(storedStatus)
+          && !brokenExecutionAuthority
+          && !activeRequestMigrationConflict
+          && !brokenExperimentAuthority
+          && !brokenRawOutputExperimentAuthority
+          && !brokenProjectAuthority
+          && publicationAuthorityMatches
+          && publication
+          && publication.publishedAt === storedPublicationCommit.completedAt,
+        );
+        const publicationMatchesJob = Boolean(
+          (storedStatus === "completed" || publicationMatchesPreparedCommit)
+          && publicationAuthorityMatches,
+        );
+        if (publicationMatchesPreparedCommit) status = "completed";
+        const legacyOutputReady = Boolean(
+          legacyHistory?.artifact
+          && legacyHistory.originalStatus === "completed"
+          && legacyHistory.jobId === entry.id
+          && legacyHistory.outputName === migratedRequest.outputName
+          && legacyHistory.requestSha256 === authorityRequestSha256
+          // migratedRequestSha256 is preserved as an import-time audit fact.
+          // The exact raw request digest above remains stable across future
+          // migration defaults and is the only durable request binding here.
+          && legacyArtifactStatsStillMatch(legacyHistory),
+        );
+        let outputReady = publicationMatchesJob || legacyOutputReady;
+        let restoredOutputQuarantined = false;
+        let restoredOutputPreservedInPlace = false;
+        const shouldQuarantineRaw = outputFileExists && !publicationMatchesJob && !legacyHistory;
+        if (!outputFileExists) {
           try {
-            const outputStats = statSync(plan.outputPath);
-            outputReady = outputStats.isFile() && outputStats.size > 0;
+            removeOutputPublicationAuthority(plan.outputPath);
           } catch {
-            outputReady = false;
+            // With no raw pathname the marker cannot authorize bytes; the
+            // restored job is still downgraded below and persisted fail-closed.
           }
-          if (!outputReady) status = "failed";
+          if (entry.outputPublication !== undefined) restorationRequiresPersist = true;
+        }
+        if (shouldQuarantineRaw) {
+          try {
+            restoredOutputQuarantined = quarantineRestoredUnpublishedArtifact(
+              plan.outputPath,
+              join(hybridRoot, entry.id),
+              this.outputAuthorityReconciliationOperations,
+            ) !== null;
+          } catch {
+            // Recovery is not deletion authority. The raw pathname remains
+            // unserved and reserves its output name until an operator or a
+            // later restart can move it into the private quarantine safely.
+            restoredOutputPreservedInPlace = existsSync(plan.outputPath);
+          }
+          outputReady = false;
+          restorationRequiresPersist = true;
+        }
+        if (restoredOutputPreservedInPlace && isActiveJobStatus(status)) {
+          // In particular, a locally queued job must never overwrite or reuse
+          // ambiguous bytes that recovery could not move out of the way.
+          status = "interrupted";
+        }
+        if (storedStatus === "completed" && !outputReady && !legacyHistory) {
+          status = "failed";
         }
         const interrupted = status === "interrupted";
         const missingOutput = storedStatus === "completed" && !outputReady;
+        const terminalizedDuringRestore = isActiveJobStatus(storedStatus)
+          && !isActiveJobStatus(status);
         const storedProgress = typeof entry.progress === "number" && Number.isFinite(entry.progress)
           ? Math.min(100, Math.max(0, entry.progress))
           : null;
         const restoredTerminalDelivery = dgxJobId
           ? normalizeDgxTerminalDelivery(entry.dgxTerminalDelivery)
           : undefined;
+        const restoredTerminalReceipt = dgxJobId
+          ? normalizeDgxTerminalReceipt(entry.dgxTerminalReceipt)
+          : undefined;
+        const restoredLeaseReceipt = dgxJobId
+          ? normalizeDgxLeaseReceipt(entry.dgxLeaseReceipt)
+          : undefined;
+        const recoveredPublicationDelivery = publicationMatchesPreparedCommit
+          && dgxJobId
+          && restoredLeaseReceipt
+          && !restoredTerminalDelivery
+          && !restoredTerminalReceipt
+          && storedPublicationCommit
+          ? {
+              state: "completed" as const,
+              metadata: storedPublicationCommit.completionMetadata,
+              attempts: 0,
+              lastError: null,
+              updatedAt: now(),
+            }
+          : undefined;
         const restoredProcessGroupIdentity = entry.localProcessGroupPending === true
           && isLocalProcessGroupIdentity(entry.localProcessGroupIdentity)
           ? entry.localProcessGroupIdentity
           : undefined;
-        const interruptedRemoteDelivery = interrupted
+        const interruptedRemoteDelivery = (
+          interrupted
+          || brokenExecutionAuthority
+          || activeRequestMigrationConflict
+          || brokenExperimentAuthority
+          || brokenRawOutputExperimentAuthority
+        )
           && isActiveJobStatus(storedStatus)
           && dgxJobId
+          && restoredLeaseReceipt
           && !restoredTerminalDelivery
           ? {
               state: "cancelled" as const,
@@ -4226,21 +12072,118 @@ export class JobManager extends EventEmitter {
               updatedAt: now(),
             }
           : undefined;
+        const cancelledRemoteDelivery = storedStatus === "cancelled"
+          && dgxJobId
+          && restoredLeaseReceipt
+          && !restoredTerminalDelivery
+          && !restoredTerminalReceipt
+          ? {
+              state: "cancelled" as const,
+              metadata: {
+                current_step: "restart reconciliation for cancelled Studio job with remote lease",
+                last_error: "Terminal delivery authority was absent; GET/idempotent cancel is required before release",
+              },
+              attempts: 0,
+              lastError: null,
+              updatedAt: now(),
+            }
+          : undefined;
         const restoredLogs = Array.isArray(entry.logs)
           ? entry.logs.filter((line): line is string => typeof line === "string").slice(-MAX_LOG_LINES).map(cleanLogLine)
           : [];
+        if (publicationMatchesPreparedCommit) {
+          restoredLogs.push(
+            "Studio-Neustart: dauerhaft vorbereiteter Publikationscommit samt Marker verifiziert; lokale Completion und erst jetzt Remote-completed wiederhergestellt.",
+          );
+        } else if (storedPublicationCommit) {
+          restoredLogs.push(
+            "Studio-Neustart: vorbereiteter Publikationscommit besitzt keinen exakt passenden Marker; Ausgabe bleibt unveröffentlicht und Remote-completed ist gesperrt.",
+          );
+        }
         if (interruptedRemoteDelivery) {
           restoredLogs.push("Studio-Neustart: Remote-Queue-Lease wird als cancelled abgemeldet.");
+        } else if (cancelledRemoteDelivery) {
+          restoredLogs.push(
+            "Studio-Neustart: cancelled Job mit Remote-Lease ohne Zustellmarker wird defensiv per GET/idempotentem Cancel abgeglichen.",
+          );
+          restorationRequiresPersist = true;
         } else if (recoverableLocalQueue && status === "queued") {
           restoredLogs.push(
             entry.dgxSubmitPending === true
-              ? "Studio-Neustart: unklarer Queue-Submit wird vor jeder Fortsetzung autoritativ abgeglichen."
+              ? "Studio-Neustart: unklarer Einmal-Submit wird ausschließlich über positive Queue-Evidenz abgeglichen."
               : "Studio-Neustart: rein lokal wartender Job wird automatisch fortgesetzt.",
+          );
+        }
+        if (deferredStartFence) {
+          restoredLogs.push(
+            "Studio-Neustart: vorbereiteter Job war noch nicht dauerhaft zum Start freigegeben und bleibt unterbrochen.",
+          );
+        }
+        if (restoredSpawnPending) {
+          restoredLogs.push(
+            "Studio-Neustart: ein Prozess blieb vor der dauerhaften PG-Bindung am Parent-FD-Gate; "
+              + "ohne den verlorenen Parent-Token kann der Zielprozess nicht execen und wird niemals automatisch wiederholt.",
           );
         }
         if (brokenProjectAuthority) {
           restoredLogs.push(
             "Studio-Neustart: ungültige oder widersprüchliche Projektbindung; Job bleibt fail-closed unterbrochen.",
+          );
+        }
+        if (brokenExecutionAuthority) {
+          restoredLogs.push(
+            `Studio-Neustart: ungültige oder widersprüchliche ExecutionDecision.v5/v6; ältere Autorität bleibt terminal fail-closed. ${executionAuthority.error}`,
+          );
+        } else if (executionAuthority.cpuResumeAmbiguous) {
+          restoredLogs.push(
+            "Studio-Neustart: eine persistierte CPU-Ausführung wird wegen unklarem Spawn-/Prozesszustand niemals automatisch wiederholt.",
+          );
+        }
+        if (incompatibleLegacyT2AExecution) {
+          restoredLogs.push(
+            "Studio-Neustart: historischer T2A-Request ohne Peak-Grenze wird nicht still mit -3 dBFS ausgeführt.",
+          );
+        }
+        if (activeRequestMigrationConflict && !incompatibleLegacyT2AExecution) {
+          restoredLogs.push(
+            "Studio-Neustart: aktive Request-Migration wich von der gebundenen Ausführungsrepräsentation ab; "
+            + "der Job bleibt vor jedem Start terminal fail-closed.",
+          );
+        }
+        if (brokenExperimentAuthority && !brokenRawOutputExperimentAuthority) {
+          restoredLogs.push(
+            "Studio-Neustart: behauptete Experimentquelle besitzt keine exakt requestgebundene "
+              + "Experimentautorität; der Job bleibt terminal fail-closed.",
+          );
+        }
+        if (brokenRawOutputExperimentAuthority) {
+          restoredLogs.push(
+            "Studio-Neustart: experimentelles LipForcing-Rohvideo-Profil ohne exakt passende "
+              + "Kandidatenarm-Bindung; der Job bleibt terminal fail-closed.",
+          );
+        }
+        if (restoredOutputPreservedInPlace) {
+          restoredLogs.push(
+            "Studio-Neustart: Ausgabe ohne gültige Publikationsautorität konnte nicht privat "
+              + "quarantänisiert werden; Rohdaten bleiben unverändert am reservierten Pfad, "
+              + "sind 404/fail-closed und der Job wird nicht automatisch wieder gestartet.",
+          );
+        } else if (restoredOutputQuarantined) {
+          restoredLogs.push(
+            "Studio-Neustart: Ausgabe ohne gültige dauerhafte Publikationsautorität wurde in den privaten Quarantänebereich verschoben.",
+          );
+        } else if (storedStatus === "completed" && !outputReady) {
+          restoredLogs.push(
+            legacyHistory
+              ? "Legacy-Import: historische Ausgabe blieb unverändert am Ursprungsort, ist wegen fehlender oder abweichender Alt-Evidenz aber nicht lesbar."
+              : "Studio-Neustart: abgeschlossene Ausgabe besitzt keinen passenden dauerhaften Publikationsmarker und bleibt 404/fail-closed.",
+          );
+        }
+        if (importLegacyTerminal) {
+          restoredLogs.push(
+            legacyOutputReady
+              ? "Legacy-Import v1.1: historisches Medium unverändert und nur lesbar erhalten; keine ExecutionDecision-, DGX-Lease-, Experiment-, Analyse- oder Qualitäts-GO-Autorität."
+              : "Legacy-Import v1.1: terminale Historie ohne moderne Autorität übernommen; keine automatische Wiederholung oder DGX-Mutation.",
           );
         }
         if (entry.localProcessGroupPending === true) {
@@ -4250,27 +12193,72 @@ export class JobManager extends EventEmitter {
               : "Studio-Neustart: Remote-Lease bleibt gesperrt, weil für die frühere lokale Prozessgruppe keine sichere Identität vorliegt.",
           );
         }
+        if (restoredOwnedDockerContainer) {
+          restoredLogs.push(
+            `Studio-Neustart: eigener Docker-Container ${restoredOwnedDockerContainer.name} wird nur nach exakter Labelprüfung bereinigt; bis zum Abwesenheitsbeweis bleibt die Remote-Lease gesperrt.`,
+          );
+        } else if (ownedDockerContainerRecoveryBlocked) {
+          restoredLogs.push(
+            "Studio-Neustart: persistierte Docker-Containerautorität ist ungültig; keine Containeraktion und keine lokale/DGX-Freigabe ohne Operatorprüfung.",
+          );
+        }
+        const normalizedStoredRunProvenance = normalizeRunProvenance(entry.runProvenance);
+        const restoredRunProvenance = executionAuthority.operationInterruptedOnRestore
+          && executionAuthority.executionDecision
+          && normalizedStoredRunProvenance
+          ? bindRunExecutionDecision(normalizedStoredRunProvenance, executionAuthority.executionDecision)
+          : normalizedStoredRunProvenance;
+        if (executionAuthority.operationInterruptedOnRestore) {
+          restorationRequiresPersist = true;
+          restoredLogs.push(
+            "Studio-Neustart: vorbereitete/laufende CPU-Operation wurde dauerhaft interrupted; sie wird niemals automatisch wiederholt.",
+          );
+        }
         this.jobs.set(entry.id, {
           ...entry,
           id: entry.id,
           mode: migratedRequest.mode,
           prompt: migratedRequest.prompt,
           outputName: migratedRequest.outputName,
-          outputUrl: status === "completed" ? `/api/jobs/${entry.id}/output` : null,
+          outputUrl: status === "completed" && outputReady ? `/api/jobs/${entry.id}/output` : null,
           createdAt: validTimestamp(entry.createdAt, now())!,
           startedAt: validTimestamp(entry.startedAt, null),
           request: migratedRequest,
           status,
-          finishedAt: interrupted ? now() : validTimestamp(entry.finishedAt, null),
+          // Preserve terminal audit history exactly across repeated restarts.
+          // A fresh timestamp is created only for an active persisted job that
+          // this restore pass itself terminalizes fail-closed.
+          finishedAt: publicationMatchesPreparedCommit && storedPublicationCommit
+            ? storedPublicationCommit.completedAt
+            : terminalizedDuringRestore
+              ? now()
+              : validTimestamp(entry.finishedAt, null),
           progress: status === "completed"
             ? 100
             : storedProgress === null ? null : Math.min(MAX_RUNNING_PROCESS_PROGRESS, storedProgress),
-          error: brokenProjectAuthority
+          error: brokenRawOutputExperimentAuthority
+            ? "Experimentelles LipForcing-Rohvideo-Profil besitzt keine exakt requestgebundene Kandidatenarm-Autorität."
+            : brokenExperimentAuthority
+              ? "Persistierte Experimentquelle besitzt keine exakt requestgebundene Experimentautorität."
+            : brokenProjectAuthority
             ? "Persistierte Projektbindung ist ungültig oder stimmt nicht mit dem Request überein."
+            : brokenExecutionAuthority
+              ? executionAuthority.error
+            : activeRequestMigrationConflict
+              ? incompatibleLegacyT2AExecution
+                ? "Historischer T2A-Request ohne gebundene Peak-Grenze darf nicht still verändert ausgeführt werden."
+                : "Aktive Request-Migration weicht von der gebundenen Ausführungsrepräsentation ab."
             : interrupted
-              ? "Studio wurde während des Jobs neu gestartet."
-            : missingOutput
-              ? "Die gespeicherte Ausgabedatei ist nicht mehr vorhanden."
+              ? deferredStartFence
+                ? "Studio wurde vor der dauerhaften Startfreigabe des vorbereiteten Jobs neu gestartet."
+                : "Studio wurde während des Jobs neu gestartet."
+            : missingOutput && !legacyHistory
+              ? restoredOutputPreservedInPlace
+                ? "Die gespeicherte Ausgabe besitzt keine gültige Publikationsautorität; "
+                  + "ihre Rohdaten bleiben unverändert am reservierten, nicht lesbaren Pfad."
+                : "Die gespeicherte Ausgabedatei ist nicht mehr vorhanden."
+              : legacyHistory && storedStatus === "completed" && !legacyOutputReady
+                ? "Historische Ausgabe ist mangels unveränderter Alt-Evidenz nur als Jobverlauf erhalten."
               : typeof entry.error === "string" ? entry.error : null,
           logs: restoredLogs.slice(-MAX_LOG_LINES),
           command: plan.displayCommand,
@@ -4280,6 +12268,10 @@ export class JobManager extends EventEmitter {
             : null,
           experiment: experimentBinding,
           project: projectBinding,
+          outputPublication: publicationMatchesJob && storedOutputPublication
+            ? storedOutputPublication
+            : undefined,
+          outputPublicationCommitPending: undefined,
           runtimeMs: typeof entry.runtimeMs === "number" && Number.isFinite(entry.runtimeMs) && entry.runtimeMs >= 0
             ? entry.runtimeMs
             : null,
@@ -4307,44 +12299,125 @@ export class JobManager extends EventEmitter {
                 resumeBelowC: typeof entry.thermalProfile.resumeBelowC === "number"
                   && Number.isFinite(entry.thermalProfile.resumeBelowC)
                   ? entry.thermalProfile.resumeBelowC
-                  : Math.min(entry.thermalProfile.baselineC + 0.1, thermalPauseC - 0.1),
+                  : historicalThermalResumeBelowC(
+                    entry.thermalProfile.baselineC,
+                    typeof entry.thermalProfile.pauseAtC === "number"
+                      && Number.isFinite(entry.thermalProfile.pauseAtC)
+                      ? entry.thermalProfile.pauseAtC
+                      : thermalPauseC,
+                  ),
                 updatedAt: validTimestamp(entry.thermalProfile.updatedAt, now())!,
               }
             : thermalProfileFromLogs(entry.logs),
           dgxJobId,
+          dgxJobTerminal: Boolean(restoredTerminalReceipt),
           dgxTerminalDelivery: dgxJobId
-            ? restoredTerminalDelivery ?? interruptedRemoteDelivery
+            ? restoredTerminalDelivery
+              ?? recoveredPublicationDelivery
+              ?? interruptedRemoteDelivery
+              ?? cancelledRemoteDelivery
             : undefined,
+          dgxTerminalReceipt: restoredTerminalReceipt,
+          dgxLeaseReceipt: restoredLeaseReceipt,
+          localProcessSpawnPending: undefined,
           localProcessGroupPending: entry.localProcessGroupPending === true || undefined,
           localProcessGroupIdentity: restoredProcessGroupIdentity,
+          ownedDockerContainer: restoredOwnedDockerContainer ?? undefined,
+          ownedDockerContainerIdDurablyCommitted:
+            restoredOwnedDockerContainer?.containerId ? true : undefined,
+          ownedDockerContainerRecoveryBlocked: ownedDockerContainerRecoveryBlocked || undefined,
           dgxSubmitPending: entry.dgxSubmitPending === true || undefined,
           dgxSubmitStartedAt: entry.dgxSubmitPending === true
             ? validTimestamp(entry.dgxSubmitStartedAt, now()) ?? undefined
             : undefined,
+          dgxPreparedAdmission: entry.dgxSubmitPending === true
+            ? normalizePreparedAdmission(entry.dgxPreparedAdmission)
+            : undefined,
+          dgxPreparedAdmissionSha256: entry.dgxSubmitPending === true
+            && typeof entry.dgxPreparedAdmissionSha256 === "string"
+            ? entry.dgxPreparedAdmissionSha256
+            : undefined,
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
-          runProvenance: normalizeRunProvenance(entry.runProvenance),
-          startSource: jobStartSources.includes(entry.startSource as JobStartSource)
-            ? entry.startSource as JobStartSource
-            : projectBinding
-              ? "project"
-              : experimentBinding
-                ? "experiment"
+          runProvenance: restoredRunProvenance,
+          executionClass: executionAuthority.executionClass,
+          executionDecision: executionAuthority.executionDecision,
+          localProcessProtocol: "fd-gate.v1",
+          startSource: projectBinding
+            ? "project"
+            : requestBoundExperimentBinding
+              ? "experiment"
+              : entry.startSource !== "experiment"
+                && jobStartSources.includes(entry.startSource as JobStartSource)
+                ? entry.startSource as JobStartSource
                 : typeof entry.variantOf === "string" && /^[0-9a-f-]{36}$/i.test(entry.variantOf)
                   ? "rerun"
                   : "restored",
+          // Preserve the private fence as durable evidence that this terminal
+          // job never crossed the start-arm commit point. This keeps repeated
+          // restarts stable without ever exposing or re-queueing it.
+          startDeferred: deferredStartFence,
           plan,
+          authorityBoundRequest,
+          authorityRequestSha256,
+          legacyTextToAudioPeakCeilingUnset,
+          legacyHistory: legacyHistory ?? undefined,
         });
         if (status === "queued") this.queue.push(entry.id);
       }
-    } catch {
-      // Invalid history never blocks a fresh local studio session.
+      for (const job of this.jobs.values()) {
+        if (job.request.postprocess.lipForcing.rawOutputProfile
+          !== experimentalLipForcingRawOutputProfile
+          || !(isActiveJobStatus(job.status) || job.status === "interrupted")) continue;
+        const baselineAuthority = this.rawOutputBaselineImageAuthority(job);
+        if (!baselineAuthority.error) continue;
+        job.status = "failed";
+        job.finishedAt = now();
+        job.outputUrl = null;
+        job.error = `Studio-Neustart: ${baselineAuthority.error}`;
+        this.appendLog(job, `${job.error} Der Kandidat wird nicht erneut eingereiht.`);
+        const queuedIndex = this.queue.indexOf(job.id);
+        if (queuedIndex >= 0) this.queue.splice(queuedIndex, 1);
+        if (job.dgxJobId && !job.dgxTerminalDelivery) {
+          job.dgxTerminalDelivery = {
+            state: "cancelled",
+            metadata: {
+              current_step: "raw-output baseline container authority failed during restore",
+              last_error: baselineAuthority.error,
+            },
+            attempts: 0,
+            lastError: null,
+            updatedAt: now(),
+          };
+        }
+        restorationRequiresPersist = true;
+      }
+      if (restorationRequiresPersist) this.persist();
+    } catch (error) {
+      // An existing but unreadable/non-parseable job snapshot may contain the
+      // only durable PG, Docker-ID or DGX-lease authority. Treating it as an
+      // empty fresh session would permit new work while orphaned compute is
+      // still live. Keep the manager in a sticky restart-required HOLD and do
+      // not reconcile/publicize outputs from an authority-less view.
+      if (!isJobPersistenceHoldError(error)) {
+        this.enterPersistenceHold(
+          error,
+          `vorhandener Job-Snapshot ${this.storagePath} ist nicht beweiskräftig les- und wiederherstellbar`,
+        );
+      }
+      return;
     }
+    this.reconcileOutputAuthorityArchiveAtStartup(
+      `Output-Authority-Archiv ${this.outputAuthorityArchivePath} konnte nach Job-Restore nicht beweiskräftig abgeglichen werden`,
+    );
   }
 
   private trimHistory(): void {
     const entries = [...this.jobs.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     for (const job of entries.slice(MAX_JOBS)) {
-      if (!isActiveJobStatus(job.status) && !job.dgxTerminalDelivery) this.jobs.delete(job.id);
+      if (!job.legacyHistory
+        && !job.experiment
+        && !isActiveJobStatus(job.status)
+        && !this.jobSettlementPending(job)) this.jobs.delete(job.id);
     }
   }
 }

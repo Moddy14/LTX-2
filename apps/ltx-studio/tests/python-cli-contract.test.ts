@@ -28,12 +28,23 @@ describe("Python CLI source contract", () => {
     expect(source(filename)).toContain("enhance_prompt=args.enhance_prompt");
   });
 
-  it.each(pipelineFiles.filter((filename) => !["ti2vid_one_stage.py", "dubit.py", "t2a_one_stage.py"].includes(filename)))(
+  it.each(pipelineFiles.filter((filename) => ![
+    "ti2vid_one_stage.py",
+    "dubit.py",
+    "t2a_one_stage.py",
+    "a2vid_two_stage.py",
+  ].includes(filename)))(
     "wires the VAE tiling switch in %s",
     (filename) => {
       expect(source(filename)).toContain("None if args.disable_tiling else");
     },
   );
+
+  it("wires A2V tiling through its typed v1.3 helper", () => {
+    const a2vSource = source("a2vid_two_stage.py");
+    expect(a2vSource).toContain("return None if disable_tiling else AUTO_TILING");
+    expect(a2vSource).toContain("tiling_config=_a2vid_tiling_config(args.disable_tiling)");
+  });
 
   it("defines shared prompt, quantization, LoRA, and tiling flags", () => {
     const argsSource = source("utils/args.py");
@@ -79,11 +90,17 @@ describe("Python CLI source contract", () => {
     expect(t2aSource).toContain("LTXAudioOnlyModelConfigurator");
     expect(t2aSource).toContain("LTXV_AUDIO_ONLY_MODEL_COMFY_RENAMING_MAP");
     expect(t2aSource).toContain("DISTILLED_SIGMAS");
+    expect(t2aSource).toContain("EulerAncestralDiffusionStep()");
+    expect(t2aSource).toContain("euler_ancestral_denoising_loop");
+    expect(t2aSource).toContain("model_dtype=torch.float32");
+    expect(t2aSource).toContain("model_input_dtype=torch.bfloat16");
     expect(t2aSource).toContain("EulerCfgPpDiffusionStep()");
     expect(t2aSource).toContain("euler_cfg_pp_denoising_loop");
-    expect(t2aSource).toContain("force_uncond_pass=official_comfy_workflow");
+    expect(t2aSource).toContain("_official_comfy_t2a_stage_kwargs(seed, official_comfy_sampler)");
+    expect(t2aSource).toContain('official_comfy_sampler == "euler-ancestral-cfg-pp"');
     expect(t2aSource).toContain('"--official-comfy-workflow"');
-    expect(t2aSource).toContain("encode_audio(audio=audio");
+    expect(t2aSource).toContain('"--official-comfy-sampler"');
+    expect(t2aSource).toMatch(/encode_audio\(\s*audio=audio,/u);
     expect(t2aSource).not.toContain("VideoDecoder");
   });
 
@@ -143,7 +160,9 @@ describe("Python CLI source contract", () => {
     expect(icLoraSource).toContain("EulerCfgPpDiffusionStep(");
     expect(icLoraSource).toContain("euler_cfg_pp_denoising_loop");
     expect(icLoraSource).toContain("force_uncond_pass=True");
-    expect(icLoraSource).toContain("frozen=initial_audio_latent is not None");
+    expect(icLoraSource).toContain("freeze=initial_audio_latent is not None");
+    expect(icLoraSource).toContain("freeze=preserved_audio is not None");
+    expect(icLoraSource).toContain("**_pipeline_prompt_arguments(args)");
     expect(icLoraSource).toContain("vae_encode_audio(decoded_audio, enc, None)");
     expect(icLoraUtilsSource).toContain("repeat_static_reference_video(video, num_frames)");
   });
@@ -194,15 +213,46 @@ describe("Python CLI source contract", () => {
         pipelineSource.lastIndexOf("images=images"),
       );
     }
+    // v1.3 retains the sampler selector only for T2V/I2V. IA2V has a fixed
+    // upstream sampler and Studio's argv parity is asserted in command.test.
+    const t2vSource = source("ti2vid_two_stages.py");
+    expect(t2vSource).toContain('"--official-comfy-sampler"');
+    expect(t2vSource).toContain("EulerAncestralDiffusionStep()");
+    expect(t2vSource).toContain("euler_ancestral_denoising_loop");
+    expect(t2vSource).toContain("model_dtype=torch.float32");
+    expect(t2vSource).toContain("model_input_dtype=torch.bfloat16");
+    expect(t2vSource).toContain("stage_1_kwargs");
+    expect(t2vSource).toContain("stage_2_kwargs");
+    expect(t2vSource).toContain("EulerDiffusionStep()");
+    expect(t2vSource).toContain("euler_denoising_loop");
+    expect(t2vSource).toContain('"state_dtype": torch.float32');
     expect(source("ic_lora.py")).toContain(
       "official_comfy_prompt_enhancement=official_comfy_workflow",
     );
   });
 
+  it("enforces the v1.3 IA2V parser contract as soon as the upstream source version lands", () => {
+    const pyproject = readFileSync(resolve(repoRoot, "packages/ltx-pipelines/pyproject.toml"), "utf8");
+    const version = pyproject.match(/^version = "(\d+)\.(\d+)\.(\d+)"$/mu);
+    expect(version).not.toBeNull();
+    const v13OrNewer = Number(version?.[1]) > 1
+      || (Number(version?.[1]) === 1 && Number(version?.[2]) >= 3);
+    const a2vSource = source("a2vid_two_stage.py");
+    expect(a2vSource).toContain('"--audio-max-duration"');
+    if (!v13OrNewer) return;
+
+    expect(a2vSource).not.toContain('"--official-comfy-sampler"');
+    expect(a2vSource).toContain("resolve_a2vid_cli_duration");
+    expect(a2vSource).toContain("num_frames_from_audio_duration");
+    expect(a2vSource).toContain("action.default = None");
+    expect(a2vSource).toContain("num_frames=args.num_frames");
+    expect(a2vSource).toContain("audio_max_duration=args.audio_max_duration");
+  });
+
   it("pins the current official ComfyUI refinement schedule exactly", () => {
     const constantsSource = source("utils/constants.py");
     expect(constantsSource).toContain(
-      "OFFICIAL_COMFY_STAGE_2_SIGMA_VALUES = [0.85, 0.725, 0.421875, 0.0]",
+      "OFFICIAL_COMFY_STAGE_2_SIGMA_VALUES = [0.85, 0.725, 0.4219, 0.0]",
     );
     expect(constantsSource).toContain("OFFICIAL_COMFY_STAGE_2_SEED = 42");
   });

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   admissionPreflightPlan,
@@ -94,6 +94,23 @@ describe("admissionPreflight", () => {
     expect(report.verdict).toBe("nicht-pruefbar");
     expect(report.steps[0].message).toContain("nicht erreichbar");
   });
+
+  it("reports DFR qualification HOLD without calling the admission client", async () => {
+    const check = vi.fn(async () => accepted);
+
+    const report = await admissionPreflight(validRequest("dfr"), check);
+
+    expect(check).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      verdict: "hold",
+      steps: [{
+        decision: "dfr-v1.3-qualification-hold",
+        accepted: false,
+        estimatedMemoryGiB: 0,
+      }],
+    });
+    expect(report.notes.join(" ")).toContain("keine DGX-Admission");
+  });
 });
 
 describe("preflight wiring", () => {
@@ -102,6 +119,26 @@ describe("preflight wiring", () => {
 
     expect(indexSource).toContain("app.post(\"/api/admission/preflight\"");
     expect(indexSource).toContain("admissionPreflight(payload)");
+  });
+
+  it("routes experiment checks through the server-bound arm and a strictly read-only output view", () => {
+    const indexSource = readFileSync(fileURLToPath(new URL("../server/index.ts", import.meta.url)), "utf8");
+    const routeStart = indexSource.indexOf(
+      'app.post("/api/experiments/:id/runs/:arm/preflight"',
+    );
+    const routeEnd = indexSource.indexOf(
+      'app.post("/api/experiments/:id/runs/:arm"',
+      routeStart + 1,
+    );
+    const routeSource = indexSource.slice(routeStart, routeEnd);
+
+    expect(routeStart).toBeGreaterThanOrEqual(0);
+    expect(routeEnd).toBeGreaterThan(routeStart);
+    expect(routeSource).toContain("experiments.bindingFor(experiment.id, arm)");
+    expect(routeSource).toContain("outputs.inspectExperimentPreflightEvidence([outputName], authorityJobs)");
+    expect(routeSource).toContain("experimentAdmissionPreflight(experiment, arm");
+    expect(routeSource).not.toContain("outputs.list(");
+    expect(routeSource).not.toContain("outputs.reusableLtxBaseCandidates(");
   });
 
   it("keeps the job runner's refiner budget on the shared source", () => {

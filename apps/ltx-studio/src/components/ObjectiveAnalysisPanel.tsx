@@ -2,6 +2,7 @@ import { CircleStop, LoaderCircle, RefreshCw, ScanFace, SlidersHorizontal } from
 import { useState } from "react";
 
 import { fieldHelp } from "../fieldHelp";
+import { phonemeVisemeMeasurementWindow } from "../objectiveAnalysisCoverage";
 import type { StudioOutput } from "../types";
 import { InfoTooltip } from "./Controls";
 
@@ -73,6 +74,9 @@ export function ObjectiveAnalysisPanel({
     ? result.phonemeViseme
     : null;
   const phonemeVisemeMeasurement = phonemeViseme?.measurement ?? null;
+  const measurementWindow = phonemeVisemeMeasurementWindow(result);
+  const partialMeasurementWindow = measurementWindow.status === "partial";
+  const measurementOnly = phonemeViseme?.status === "measurement-only";
   const dialogue = result?.schemaVersion === "ltx-studio-objective-quality.v6"
     || result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.dialogue
@@ -80,13 +84,16 @@ export function ObjectiveAnalysisPanel({
   const artifactFace = result?.schemaVersion === "ltx-studio-objective-quality.v7"
     ? result.face
     : null;
-  const provenance = output.provenance;
-  const provenanceModelCount = provenance?.files.filter((file) => file.role.startsWith("model:")).length ?? 0;
-  const provenanceInputCount = provenance?.files.filter((file) => file.role.startsWith("input:")).length ?? 0;
-  const dirtyCodeCount = provenance?.code.filter((repository) => repository.dirty).length ?? 0;
+  const provenance = output.provenanceSummary;
   const showIdentityMetrics = identity && ["measured", "insufficient"].includes(identity.status);
   const statusLabel = analysis?.status === "completed"
-    ? phonemeVisemeMeasurement ? "Lip-Sync geprüft" : "Prüfung unvollständig"
+    ? measurementOnly
+      ? partialMeasurementWindow
+        ? "Lip-Sync gemessen (Teilfenster) · keine Product-GO-Freigabe"
+        : "Lip-Sync gemessen · keine Product-GO-Freigabe"
+      : phonemeViseme?.status === "measured" && phonemeViseme.productGo.status === "passed"
+        ? "Lip-Sync Product-GO freigegeben"
+      : "Prüfung unvollständig"
     : analysis ? statusLabels[analysis.status] : "Nicht gemessen";
   const dialogueVerdict = dialogue?.wordErrorRate !== null && dialogue?.wordErrorRate !== undefined
     ? `${dialogue.recognizedWordCount} von ${dialogue.expectedWordCount} Wörtern erkannt, `
@@ -113,10 +120,12 @@ export function ObjectiveAnalysisPanel({
   const showLipSyncRetry = bilabialClosureF1 !== null
     && bilabialClosureF1 < 0.8
     && recommendedReferenceStrength !== null;
-  const lipSyncHeadline = !phonemeVisemeMeasurement
+  const lipSyncHeadline = measurementOnly
+    ? "Lip-Sync gemessen · keine Product-GO-Freigabe"
+    : !phonemeVisemeMeasurement
     ? "Lip-Sync konnte nicht vollständig geprüft werden"
     : bilabialClosureF1 === null
-      ? "Lip-Sync geprüft, aber nicht eindeutig"
+      ? "Lip-Sync-Messung nicht eindeutig"
       : bilabialClosureF1 < 0.5
         ? "Lip-Sync nicht ausreichend"
         : bilabialClosureF1 < 0.8
@@ -179,6 +188,22 @@ export function ObjectiveAnalysisPanel({
         <div className="objective-analysis__progress" role="status">
           <LoaderCircle className="spin" size={15} />
           <span>CPU-Analyse läuft</span>
+        </div>
+      ) : null}
+
+      {partialMeasurementWindow ? (
+        <div
+          className="objective-analysis__measurement-window"
+          role="note"
+          aria-label="Lip-Sync-Messfenster unvollständig"
+        >
+          <strong>Die Lip-Sync-Messung deckt nicht den gesamten Clip ab.</strong>
+          <p>
+            {measurementWindow.totalDurationSeconds === null
+              ? `Messfenster ${measurementWindow.usableDurationSeconds?.toFixed(1).replace(".", ",")} Sekunden; die Gesamtdauer war nicht messbar. `
+              : `Messfenster ${measurementWindow.usableDurationSeconds?.toFixed(1).replace(".", ",")} von ${measurementWindow.totalDurationSeconds.toFixed(1).replace(".", ",")} Sekunden (${Math.round((measurementWindow.coverageRatio ?? 0) * 100)} %). `}
+            Das Ergebnis gilt nur für diesen Ausschnitt.
+          </p>
         </div>
       ) : null}
 
@@ -491,7 +516,7 @@ export function ObjectiveAnalysisPanel({
               phonemeViseme?.status === "measured"
                 ? "Bestanden"
                 : phonemeViseme?.status === "measurement-only"
-                  ? "Prüfung aktiv"
+                  ? "Gemessen · keine Product-GO-Freigabe"
                 : phonemeViseme?.status === "failed"
                   ? "Prüfung fehlgeschlagen"
                   : phonemeViseme?.status === "insufficient"
@@ -554,7 +579,7 @@ export function ObjectiveAnalysisPanel({
           <div className="objective-analysis__metrics" aria-label="Laufprovenienz">
             <MetricRow
               label="Manifest"
-              value={provenance.fingerprint}
+              value={provenance.equality.run}
               help={fieldHelp.objectiveProvenanceFingerprint}
             />
             <MetricRow
@@ -564,24 +589,22 @@ export function ObjectiveAnalysisPanel({
             />
             <MetricRow
               label="Gebundene Modelle"
-              value={String(provenanceModelCount)}
+              value={provenance.equality.models ? "Gleichheit belegt" : "Nicht belegt"}
               help={fieldHelp.objectiveProvenanceModels}
             />
             <MetricRow
               label="Gebundene Eingaben"
-              value={String(provenanceInputCount)}
+              value={provenance.equality.inputs ? "Gleichheit belegt" : "Nicht belegt"}
               help={fieldHelp.objectiveProvenanceInputs}
             />
             <MetricRow
               label="Codezustand"
-              value={dirtyCodeCount === 0
-                ? `${provenance.code.length} Repository(s), sauber`
-                : `${dirtyCodeCount} von ${provenance.code.length} Repository(s) mit gebundenem Diff`}
+              value={provenance.equality.code ? "Gleichheitstoken vorhanden" : "Nicht belegt"}
               help={fieldHelp.objectiveProvenanceCode}
             />
             <MetricRow
               label="Runtime"
-              value={provenance.runtime.fingerprint}
+              value={provenance.equality.runtime}
               help={fieldHelp.objectiveProvenanceRuntime}
             />
           </div>

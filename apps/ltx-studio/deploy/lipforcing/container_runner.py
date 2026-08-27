@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import random
 import re
+import stat
 import subprocess
 import sys
 
@@ -22,6 +23,16 @@ OFFICIAL_FPS = 25
 CHUNK_SIZE = 3
 RELEASED_T_LIST = ("0.999", "0.769", "0.0")
 LIPFORCING_CODE_COMMIT = "fc864771eb347ca3ccaaef9c0b583ff6ccc9f184"
+RAW_OUTPUT_PROFILES = (
+    "h264-crf13-mux-crf18-v1",
+    "h264-crf13-mux-copy-v1",
+)
+DEFAULT_RAW_OUTPUT_PROFILE = RAW_OUTPUT_PROFILES[0]
+PAIRED_ROOT = Path("/paired")
+PAIRED_OUTPUTS = {
+    "pre_mux": PAIRED_ROOT / "pre-mux-crf13.mp4",
+    "pre_mux_receipt": PAIRED_ROOT / "pre-mux-receipt.json",
+}
 WAN_REVISION = "a064a6c71f5be440641209c07bf2a5ce7a2ff5e4"
 TEXT_ENCODER_SHA256 = "7cace0da2b446bbbbc57d031ab6cf163a3d59b366da94e5afe36745b746fd81d"
 
@@ -74,6 +85,57 @@ def require_file(path: Path, label: str) -> Path:
     if not resolved.is_file() or resolved.stat().st_size <= 0:
         raise RuntimeError(f"{label} is missing or empty: {resolved}")
     return resolved
+
+
+def validate_paired_outputs(
+    output: str,
+    raw_output_profile: str,
+    pre_mux: str | None,
+    pre_mux_receipt: str | None,
+) -> bool:
+    values = (pre_mux, pre_mux_receipt)
+    if not any(value is not None for value in values):
+        return False
+    if any(value is None or value == "" for value in values):
+        raise RuntimeError("LipForcing paired output arguments must be complete and non-empty.")
+    if raw_output_profile != DEFAULT_RAW_OUTPUT_PROFILE:
+        raise RuntimeError("LipForcing paired output is restricted to the baseline profile.")
+    if (
+        Path(output) != PAIRED_OUTPUTS["pre_mux"]
+        or Path(str(pre_mux)) != PAIRED_OUTPUTS["pre_mux"]
+        or Path(str(pre_mux_receipt)) != PAIRED_OUTPUTS["pre_mux_receipt"]
+    ):
+        raise RuntimeError("LipForcing paired outputs must use the sealed /paired layout.")
+    metadata = PAIRED_ROOT.lstat()
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_uid != os.geteuid()
+    ):
+        raise RuntimeError("LipForcing paired output directory is not private and owned.")
+    if any(PAIRED_ROOT.iterdir()):
+        raise RuntimeError("LipForcing paired output directory must be empty.")
+    return True
+
+
+def require_private_paired_artifact(path: Path, label: str) -> Path:
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o400
+        or metadata.st_nlink != 1
+        or metadata.st_size <= 0
+        or metadata.st_uid != os.geteuid()
+    ):
+        raise RuntimeError(f"{label} is not a sealed private artifact: {path}")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise RuntimeError(f"{label} changed while it was opened: {path}")
+    finally:
+        os.close(descriptor)
+    return path
 
 
 def sha256_file(path: Path) -> str:
@@ -250,8 +312,22 @@ def main() -> int:
         choices=["wan-vae", "streaming-taehv"],
         default="wan-vae",
     )
+    parser.add_argument(
+        "--raw-output-profile",
+        choices=RAW_OUTPUT_PROFILES,
+        default=DEFAULT_RAW_OUTPUT_PROFILE,
+    )
+    parser.add_argument("--paired-premux-output")
+    parser.add_argument("--paired-premux-receipt-output")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
+
+    paired_mode = validate_paired_outputs(
+        args.output,
+        args.raw_output_profile,
+        args.paired_premux_output,
+        args.paired_premux_receipt_output,
+    )
 
     video = require_file(Path(args.video), "LipForcing input video")
     audio = require_file(Path(args.audio), "LipForcing driving audio")
@@ -308,10 +384,29 @@ def main() -> int:
         f"({args.decoder}, {latent_frames} latent frames).",
         flush=True,
     )
-    result = subprocess.run(command, cwd="/workspace/LipForcing", env=os.environ.copy())
+    child_environment = os.environ.copy()
+    child_environment["LTX_LIPFORCING_RAW_OUTPUT_PROFILE"] = args.raw_output_profile
+    if paired_mode:
+        child_environment["LTX_LIPFORCING_PAIRED_PREMUX_OUTPUT"] = str(
+            PAIRED_OUTPUTS["pre_mux"]
+        )
+        child_environment["LTX_LIPFORCING_PAIRED_PREMUX_RECEIPT_OUTPUT"] = str(
+            PAIRED_OUTPUTS["pre_mux_receipt"]
+        )
+    result = subprocess.run(command, cwd="/workspace/LipForcing", env=child_environment)
     if result.returncode != 0:
         raise RuntimeError(f"LipForcing inference exited with code {result.returncode}.")
     require_file(output, "LipForcing raw output")
+    if paired_mode:
+        expected_names = {path.name for path in PAIRED_OUTPUTS.values()}
+        actual_names = {path.name for path in PAIRED_ROOT.iterdir()}
+        if actual_names != expected_names:
+            raise RuntimeError("LipForcing paired output directory has unexpected artifacts.")
+        for name, label in (
+            ("pre_mux", "LipForcing paired pre-mux export"),
+            ("pre_mux_receipt", "LipForcing paired pre-mux receipt"),
+        ):
+            require_private_paired_artifact(PAIRED_OUTPUTS[name], label)
     print(f"LipForcing raw output ready: {output}", flush=True)
     return 0
 

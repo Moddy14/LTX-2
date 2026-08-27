@@ -6,6 +6,10 @@
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 packages/ltx-pipelines/tests/assets/*.wav filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
+# GitHub does not accept new LFS objects in a public fork. These four bounded
+# release-evaluation fixtures are therefore stored as ordinary Git blobs so a
+# fresh clone of the published release contains the exact holdout inputs.
+apps/ltx-studio/docs/evidence/holdout/*.png -filter -diff -merge -text
 *.jpeg filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.webp filter=lfs diff=lfs merge=lfs -text

@@ -1,14 +1,27 @@
-# LTX Studio
+# LTX Studio — LTX-2.5 Split-BF16
 
-Local, loopback-only production UI for the native LTX-2 pipelines.
+LTX Studio is a local, loopback-only control UI for native LTX pipelines. The
+current editor starts with the pinned LTX-2.5 Split-Pack using BF16 components
+and no quantization, and uses that contract by default for modes with an
+audited native LTX-2.5 implementation. Required transformer, text-encoder, VAE,
+duration-head, LoRA, and upscaler assets are admitted only after the applicable
+inventory and SHA-256 checks succeed.
 
-## Official LTX-2.3 workflow parity
+The LTX-2.3 monolith and its FP8/LoRA workflow contracts are retained only for
+reproducible legacy jobs and explicitly labelled legacy profiles. They are not
+an automatic fallback for missing LTX-2.5 components, and a stored LTX-2.3 job
+is never silently migrated to LTX-2.5. The implemented safety and provenance
+controls describe execution authority; they do not by themselves certify a
+release, subjective output quality, or a SOTA result.
 
-The Studio mirrors all six workflows from the
+## Legacy LTX-2.3 workflow compatibility
+
+The legacy compatibility layer retains the six workflow contracts documented
+by the
 [official ComfyUI LTX-2.3 guide](https://docs.comfy.org/tutorials/video/ltx/ltx-2-3).
 It executes the native `ltx_pipelines` implementation instead of importing a ComfyUI graph:
 
-| Official workflow | Studio mode | Native execution contract |
+| Legacy workflow reference | Studio mode | Native execution contract |
 | --- | --- | --- |
 | Text to Video (T2V) | Official Text / Image to Video without an image | Dev FP8, Comfy dynamic-rank distilled 1.1 at `0.5`, Base-Gemma by default, optional official-template Gemma LoRA at `1.0`, fixed 8-step first stage and Euler x2 stage at `0.85, 0.725, 0.421875, 0.0` |
 | Image to Video (I2V) | Official Text / Image to Video with the first-frame image | Same model and sampler contract as T2V, with first-stage image strength `0.7` and second-stage strength `1.0` |
@@ -17,8 +30,8 @@ It executes the native `ltx_pipelines` implementation instead of importing a Com
 | IC-LoRA Union Control | IC-LoRA Union Control | Distilled FP8, Union Control LoRA, Base-Gemma by default, optional official-template Gemma LoRA at `1.0`, fixed 8-step single stage with Euler Ancestral RF, depth/MoGe, Canny, or prepared pose control, no spatial upscaler |
 | ID-LoRA | ID-LoRA TalkVid | Dev FP8, Comfy dynamic-rank distilled 1.1 at `0.5`, TalkVid ID-LoRA at `1.0`, reference image at `0.7` in stage 1 and `1.0` in stage 2, reference audio, fixed 8-step first stage and 3-step x2 stage |
 
-This parity claim is deliberately limited to the six workflows on that ComfyUI
-guide page. At the audited `ComfyUI-LTXVideo` revision
+This compatibility scope is deliberately limited to the six workflows on that
+ComfyUI guide page. At the audited `ComfyUI-LTXVideo` revision
 `3b9c5cde4700917074823d45e25401d81049f8fc`, the repository linked from that
 page also publishes dedicated LTX-2.3 examples for motion-track control, HDR
 IC-LoRA, Ingredients, spatial inpainting, outpainting, generative pixel spatial
@@ -35,7 +48,7 @@ future pipeline implementations rather than a current pipeline.
 As in the current official graphs, T2V, I2V, IA2V, and ID-LoRA use the user-selected
 seed only for stage 1. Their x2 refinement uses a separate `RandomNoise` stream fixed
 to seed `42`; the native implementations create an independent generator for that stage.
-Base-Gemma is the release-safe default. The separately selectable Gemma abliterated
+Base-Gemma is the default for this legacy contract. The separately selectable Gemma abliterated
 LoRA mirrors the official template but remains blocked from production and SOTA release
 claims until its license and provenance are attested. When enabled, it is isolated to
 the optional prompt-generation pass; final diffusion conditioning is encoded again with
@@ -50,6 +63,22 @@ published `8+3` sigma schedules, and independent stage seeds. Reference preparat
 scaling to approximately the published `1920 x 1088` pixel area; a square reference therefore targets `1472 x 1472`.
 Stored requests created before this integration are explicitly migrated to `Native Distilled (Legacy)` and remain
 reproducible rather than silently changing model stacks.
+
+## Official DFR v1.3.0 contract
+
+DFR is pinned to LTX-2 tag `v1.3.0` (`598ab41247a77dbfe29b5186e915bcf4f9040ec7`). It uses the direct
+LTX-2.5 Distilled BF16 transformer, not the former Dev-transformer plus Distilled-LoRA combination. The separate
+Detailing IC-LoRA is mandatory and upstream fixes its strength at `0.5`; Studio therefore exposes only its path,
+never a strength or disable switch. Temporal upscalings are `0`, `1`, or `2`, spatial upscalings are `1` or `2`,
+and spatial level `2` requires a 128-pixel raster. The mode-specific UHD preset is consequently
+`3840 x 2176`, not `3840 x 2160`.
+
+The gated Detailing model is not currently present and SHA-256-verified on this installation, so the GUI states
+DFR as HOLD and admission remains fail-closed. Legacy DFR drafts retain safe prompt/settings data, but an obsolete
+Dev-transformer path is cleared and a formerly disabled Detailing path is not silently activated. Historical
+pre-v1.3 DFR records remain visibly available with an explicit non-executable marker; they are never semantically
+replayed. The command and merged native runtime preserve fractional frame-rate values through the final mux without
+integer truncation.
 
 ComfyUI and the native pipelines package the Gemma text encoder differently.
 Studio uses the native full Gemma directory instead of ComfyUI's single
@@ -124,6 +153,20 @@ Open `http://127.0.0.1:4318`. Development mode uses the Vite UI on
 npm run dev
 ```
 
+The T2A audio evaluator is release-authoritative only inside an installed,
+verified sealed release. During local development, diagnostic measurements can
+be enabled explicitly:
+
+```bash
+LTX_STUDIO_T2A_DEVELOPMENT_MEASUREMENT=1 npm run dev
+```
+
+Development measurements use the same offline worker and sandbox, but they are
+bound to the current server process and are always labelled as unattested.
+Their technical metrics remain useful for iteration; they can never grant
+Product-GO or IA2V handoff. Omitting the setting keeps T2A analysis fail-closed,
+and sealed releases reject the development setting entirely.
+
 Opening the UI performs only lightweight health and read-only Runtime API checks. A generation starts only after
 schema and path validation, an output-space check, and native LTX admission. Runtime prompt enhancement
 reuses the required Gemma encoder and does not reserve the Qwen lane. The runner uses an argument vector without a
@@ -133,25 +176,48 @@ signals the process group belonging to the job being cancelled. It does not stop
 applications. Active Avatar, Qwen, and ComfyUI lanes are displayed without lifecycle controls.
 
 Resource admission has one authority. Before queue submission, Studio checks only the non-orchestrated output
-filesystem, so low RAM or swap cannot hide the job from the Orchestrator. After `accepted`, Studio immediately requests
-the authoritative `accepted -> starting` transition. The Runtime API then evaluates its current memory, reservations,
-queue winner, thermal state, protected workloads, and permitted reclaim policy. A retryable start fence leaves the
-remote job unchanged and Studio polls at the returned interval; Studio never stops another service itself. A Studio
-restart durably schedules
-`cancelled` delivery for every remote lease that was still active. A queue submit without an authoritative HTTP
-response is persisted before the request and reconciled by the stable `ltx-studio:<job-id>` requester key before any
-resubmission, including after a restart.
+filesystem, so low RAM or swap cannot hide the job from the Orchestrator. For each immutable Studio UUID, Studio sends
+exactly one queue `POST`. Before that request leaves the process, it durably persists the complete prepared admission
+request, its SHA-256, the submit timestamp, and the stable requester/idempotency key
+`ltx-studio:<studio-uuid>`. The same Studio UUID is never submitted a second time.
+
+An authoritative positive submit response is converted to a `DgxLeaseReceipt` and committed before Studio performs a
+job-specific queue `GET`, heartbeat, or state `PATCH`. If the sole `POST` ends without an authoritative response,
+Studio performs only read-only queue-list discovery. It may adopt only one positive record in `accepted` or `queued`
+whose exposed job ID, caller, idempotency key, source, job type, runtime, priority, exclusivity, state, reservation and
+creation time all match, with `created_at` no earlier than the durably recorded local submit start; absence is never
+evidence that the `POST` did not apply. The current queue-list projection
+does not expose the original request-body SHA-256, so this recovery path
+cannot independently prove hidden admission fields such as memory, TTL, or scheduling metadata. That residual is
+contained by the trusted loopback Runtime API, its authenticated caller boundary, the unguessable Studio UUID, and the
+locally persisted request digest; cryptographic request-body proof requires a future orchestrator projection field.
+The positive discovery result is also committed as a durable `DgxLeaseReceipt` before any job-specific `GET` or
+`PATCH`. An operator-requested rerun or retry therefore creates a new Studio UUID and a new one-POST contract rather
+than reusing the ambiguous UUID.
+
+After `accepted`, Studio requests the authoritative `accepted -> starting` transition. The Runtime API then evaluates
+its current memory, reservations, queue winner, thermal state, protected workloads, and permitted reclaim policy. A
+retryable start fence leaves the remote job unchanged and Studio polls at the returned interval; Studio never stops
+another service itself. A Studio restart durably schedules `cancelled` delivery for every still-active lease, but that
+delivery remains fenced behind its durable lease receipt and local process/container absence proofs.
 
 The queue start fence treats only the documented `qwen_gate_active` conflict and bounded Runtime API transport failures
 as retryable. After a failed `accepted -> starting` request, Studio reads the authoritative remote state before retrying:
 an already `starting` or `running` job proceeds without a duplicate transition, `accepted` waits, and unrelated conflicts
 remain terminal. This also contains the failure mode where the Runtime API closes a request without an HTTP response.
 While Studio owns an active queue job, it sends an authenticated
-`POST /dgx/jobs/<job-id>/heartbeat` at least every 60 seconds. Routine heartbeats update only
-`runner_last_seen_at` and a descriptive runtime phase. Studio sets `progressed: true` only after the native pipeline
-parser has observed a new Euler step; a durable checkpoint is reported by the following `pausing` transition with
-its artifact and a new `current_step`. Failed heartbeat attempts retain a pending Euler progress claim for the next retry. The heartbeat loop is drained before
-`paused` or a terminal transition so a late request cannot revive or mutate a released lease.
+`POST /dgx/jobs/<job-id>/heartbeat` every 45 seconds by default. The first heartbeat is sent immediately. At the default interval,
+an independent 90-second deadline without an exact, caller-bound heartbeat acknowledgement stops local compute
+fail-closed; an explicit lease loss or a mismatched acknowledgement stops it immediately. Ten minutes without newly
+observed pipeline progress triggers the separate no-progress fail-stop even if liveness acknowledgements continue.
+
+Routine heartbeats update `runner_last_seen_at` and a descriptive runtime phase. Studio sets `progressed: true` only
+after the native pipeline parser has observed a new Euler step; a durable checkpoint is reported by the following
+`pausing` transition with its artifact and a new `current_step`. A failed heartbeat retains a pending Euler progress
+claim for a later retry, but publication is blocked from the first failure until a later exact acknowledgement clears
+the failure. No DGX-backed output or publication marker is released without a fresh, error-free heartbeat ACK for the
+same durable lease. The heartbeat loop is drained before `paused` or a terminal transition so a late request cannot
+revive or mutate a released lease.
 
 Cooperatively checkpointable LTX runs are durable segment waiters. Their submitted
 `estimated_memory_gib` and `resource_profile.required_gib` are both floored at the measured 58 GiB waiter contract,
@@ -163,8 +229,8 @@ After a Studio crash, the replacement process never signals that old ID; it scan
 the pending terminal delivery only after the recorded group is absent or the host boot ID has changed.
 
 During generation, the runner measures the hottest plausible host sensor from sysfs every ten seconds. Three
-consecutive readings at or above 90 C pause only the detached LTX process group with `SIGSTOP`. Five readings below
-that run's pre-launch thermal baseline resume the same process with `SIGCONT`, preserving its in-memory Python and
+consecutive readings at or above 90 C pause only the detached LTX process group with `SIGSTOP`. Five readings at or
+below the fixed 66 C resume threshold resume the same process with `SIGCONT`, preserving its in-memory Python and
 CUDA state. Persistent sensor blindness also pauses fail-closed. This is an in-memory thermal pause, not a
 disk checkpoint: a Studio restart, process crash, or host restart cannot resume that state. Every completed run logs
 its host baseline, peak, and observed rise so an LTX-specific start threshold can be calibrated instead of copying a
@@ -207,15 +273,17 @@ itself.
 | `LTX_STUDIO_MIN_SWAP_FREE_GIB` | `4` | Legacy planning metadata retained in the config API; not a post-admission gate |
 | `LTX_STUDIO_THERMAL_PAUSE_C` | `90` | Hardware-level host temperature that can trigger a thermal pause |
 | `LTX_STUDIO_THERMAL_PAUSE_POLLS` | `3` | Consecutive hot readings required before pausing |
-| `LTX_STUDIO_THERMAL_RESUME_POLLS` | `5` | Consecutive readings below the run baseline required before resuming |
+| `LTX_STUDIO_THERMAL_RESUME_C` | `66` | Safe fixed resume threshold; must stay at least 1 C below the hardware pause threshold |
+| `LTX_STUDIO_THERMAL_RESUME_POLLS` | `5` | Consecutive readings at or below the configured resume threshold required before resuming |
 | `LTX_STUDIO_THERMAL_UNREADABLE_POLLS` | `3` | Consecutive missing readings before pausing fail-closed |
 | `LTX_STUDIO_THERMAL_POLL_INTERVAL_MS` | `10000` | Runtime thermal polling interval |
 | `LTX_STUDIO_THERMAL_START_SAMPLES` | `5` | Samples used for the pre-launch host baseline |
 | `LTX_STUDIO_THERMAL_START_SAMPLE_INTERVAL_MS` | `1000` | Delay between baseline samples |
-| `LTX_STUDIO_DGX_HEARTBEAT_INTERVAL_MS` | `45000` (maximum `60000`) | Owner-liveness POST interval for active DGX queue jobs |
+| `LTX_STUDIO_DGX_HEARTBEAT_INTERVAL_MS` | `45000` (maximum `60000`) | Owner-liveness POST interval; the default derives the independent 90-second missing-ACK fail-stop |
+| `LTX_STUDIO_DGX_NO_PROGRESS_TIMEOUT_MS` | `600000` (minimum `60000`) | Fail-stop deadline without newly observed durable pipeline progress; default 10 minutes |
 | `LTX_STUDIO_DATA_DIR` | `<repository>/.ltx-studio` | Private runtime data directory |
 | `LTX_STUDIO_PROJECT_ACTOR_ID` | `local-uid-<uid>` | Server-controlled identifier written to append-only project revisions |
-| `LTX_STUDIO_MODEL_ROOTS` | `/home/moddy/LTX-2.3-max` | Colon-separated, bounded model discovery roots |
+| `LTX_STUDIO_MODEL_ROOTS` | `/home/moddy/LTX-2.3-max:/home/moddy/LTX-2.5` | Colon-separated, bounded model discovery roots; LTX-2.3 is legacy and LTX-2.5 Split-BF16 is the current standard |
 | `LTX_STUDIO_LIPFORCING_IMAGE` | `ltx-studio-lipforcing:14b-cu131` | Pinned offline LipForcing 14B runtime image |
 | `LTX_STUDIO_LIPFORCING_MODEL_ROOT` | `/home/moddy/models/lipforcing-14b` | Hash-verified LipForcing, Wan VAE, wav2vec2, text embedding, TAEHV, and manifest root |
 | `LTX_STUDIO_PHONEME_VISEME_MANIFEST` | unset | v1 blocked/release-candidate, v2 MFA measurement-only, or v3 CTC/eSpeak measurement-only manifest for the owned CPU phoneme/viseme evaluator; every non-Product-GO state fails closed |

@@ -1,10 +1,12 @@
+import argparse
 import logging
+import math
 from functools import partial
 
 import torch
 
 from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
-from ltx_core.components.diffusion_steps import EulerCfgPpDiffusionStep
+from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep, EulerCfgPpDiffusionStep
 from ltx_core.components.guiders import (
     MultiModalGuiderFactory,
     MultiModalGuiderParams,
@@ -35,13 +37,75 @@ from ltx_pipelines.utils.constants import DISTILLED_SIGMAS
 from ltx_pipelines.utils.denoisers import FactoryGuidedDenoiser
 from ltx_pipelines.utils.media_io import encode_audio
 from ltx_pipelines.utils.model_paths import ModelPaths
-from ltx_pipelines.utils.samplers import euler_cfg_pp_denoising_loop
+from ltx_pipelines.utils.official_comfy import resolve_official_comfy_cli_sampler
+from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop, euler_cfg_pp_denoising_loop
 from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode
 
 # Placeholder pixel dimensions used for ``VideoPixelShape`` construction.
 # Audio-only generation reads ``frames`` and ``fps`` from the pixel shape via
 # ``AudioLatentShape.from_video_pixel_shape`` (height/width are unused).
 _AUDIO_ONLY_PLACEHOLDER_RES = 512
+
+
+def _parse_audio_peak_ceiling_dbfs(value: str) -> float:
+    """Reject invalid peak ceilings during CLI parsing, before model allocation."""
+    try:
+        ceiling = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a finite number between -60 and 0 dBFS") from exc
+
+    if not math.isfinite(ceiling) or not -60.0 <= ceiling <= 0.0:
+        raise argparse.ArgumentTypeError("must be a finite number between -60 and 0 dBFS")
+    return ceiling
+
+
+def _official_comfy_t2a_stage_kwargs(
+    seed: int,
+    sampler: str,
+) -> dict[str, object]:
+    """Return the explicitly selected official 2.3 or 2.5 T2A sampler contract."""
+    if sampler == "euler-ancestral":
+        return {
+            "stepper": EulerAncestralDiffusionStep(),
+            "state_dtype": torch.float32,
+            "loop": partial(
+                euler_ancestral_denoising_loop,
+                noise_seed=seed,
+                # ComfyUI samples its latent trajectory in FP32 even when the
+                # transformer weights are BF16.
+                model_dtype=torch.float32,
+                model_input_dtype=torch.bfloat16,
+            ),
+        }
+    if sampler == "euler-ancestral-cfg-pp":
+        return {
+            "stepper": EulerCfgPpDiffusionStep(),
+            "loop": partial(euler_cfg_pp_denoising_loop, noise_seed=seed),
+        }
+    raise ValueError(f"Unsupported official T2A sampler: {sampler}")
+
+
+def _resolve_official_comfy_t2a_sampler(
+    *,
+    official_comfy_workflow: bool,
+    requested_sampler: str | None,
+    model_paths: ModelPaths,
+) -> str:
+    """Bind an omitted CLI sampler to the checkpoint-generation contract.
+
+    Official LTX-2.3 T2A is distributed as a monolith and uses CFG++, whereas
+    the official LTX-2.5 workflow is the split-pack path and uses plain RF
+    Euler ancestral.  The GUI always passes an explicit value; this resolver
+    closes the equivalent direct-CLI path without changing the programmatic
+    pipeline default retained for older callers.
+    """
+    return resolve_official_comfy_cli_sampler(
+        official_comfy_workflow=official_comfy_workflow,
+        requested_sampler=requested_sampler,
+        model_paths=model_paths,
+        monolith_default="euler-ancestral-cfg-pp",
+        split_default="euler-ancestral",
+    )
 
 
 class T2AOneStagePipeline:
@@ -110,7 +174,7 @@ class T2AOneStagePipeline:
             device=self.device,
         )
 
-    def __call__(  # noqa: PLR0913
+    def __call__(  # noqa: PLR0913, PLR0917
         self,
         prompt: str,
         negative_prompt: str,
@@ -124,6 +188,7 @@ class T2AOneStagePipeline:
         max_batch_size: int = 1,
         sigmas: torch.Tensor | None = None,
         official_comfy_workflow: bool = False,
+        official_comfy_sampler: str = "euler-ancestral-cfg-pp",
     ) -> Audio:
         require_num_frames_source(num_frames, self.duration_predictor)
         generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -134,7 +199,6 @@ class T2AOneStagePipeline:
             enhance_first_prompt=enhance_prompt,
             enhance_static_cache=enhance_static_cache,
             enhance_prompt_image=None,
-            enhance_prompt_seed=seed,
         )
         a_context_p = ctx_p.audio_encoding
         a_context_n = ctx_n.audio_encoding
@@ -149,9 +213,7 @@ class T2AOneStagePipeline:
             else DISTILLED_SIGMAS
             if official_comfy_workflow
             else self._scheduler.execute(steps=num_inference_steps)
-        ).to(
-            dtype=torch.float32, device=self.device
-        )
+        ).to(dtype=torch.float32, device=self.device)
 
         # Normalize to a guider factory. Plain ``MultiModalGuiderParams`` (the default /
         # CLI case) becomes a simple sigma-independent guider, but callers may also pass
@@ -162,12 +224,7 @@ class T2AOneStagePipeline:
             negative_context=a_context_n,
         )
 
-        stage_kwargs = {}
-        if official_comfy_workflow:
-            stage_kwargs = {
-                "stepper": EulerCfgPpDiffusionStep(),
-                "loop": partial(euler_cfg_pp_denoising_loop, noise_seed=seed),
-            }
+        stage_kwargs = _official_comfy_t2a_stage_kwargs(seed, official_comfy_sampler) if official_comfy_workflow else {}
 
         _, audio_state = self.stage(
             denoiser=FactoryGuidedDenoiser(
@@ -175,9 +232,7 @@ class T2AOneStagePipeline:
                 a_context=a_context_p,
                 video_guider_factory=None,
                 audio_guider_factory=audio_guider_factory,
-                # ComfyUI disables its CFG=1 optimization for CFG++ so the
-                # sampler always receives the unconditional prediction.
-                force_uncond_pass=official_comfy_workflow,
+                force_uncond_pass=(official_comfy_workflow and official_comfy_sampler == "euler-ancestral-cfg-pp"),
             ),
             sigmas=resolved_sigmas,
             noiser=noiser,
@@ -202,9 +257,35 @@ def main() -> None:
     parser.add_argument(
         "--official-comfy-workflow",
         action="store_true",
-        help="Use the official LTX-2.3 T2A 8-sigma schedule and Euler ancestral CFG++ sampler.",
+        help="Use the fixed official Comfy T2A 8-sigma schedule.",
+    )
+    parser.add_argument(
+        "--official-comfy-sampler",
+        choices=("euler-ancestral-cfg-pp", "euler-ancestral"),
+        default=None,
+        help=(
+            "Sampler bound to the source workflow: CFG++ for LTX-2.3; "
+            "plain Euler ancestral for LTX-2.5. When omitted, the checkpoint "
+            "layout selects the matching official sampler."
+        ),
+    )
+    parser.add_argument(
+        "--audio-peak-ceiling-dbfs",
+        type=_parse_audio_peak_ceiling_dbfs,
+        default=None,
+        metavar="DBFS",
+        help=(
+            "Attenuate decoded floating-point audio before PCM conversion so its sample peak does not "
+            "exceed this dBFS ceiling. This is not a true-peak limiter; quiet audio is never amplified. "
+            "Omit to preserve upstream behavior."
+        ),
     )
     args = parser.parse_args()
+    official_comfy_sampler = _resolve_official_comfy_t2a_sampler(
+        official_comfy_workflow=args.official_comfy_workflow,
+        requested_sampler=args.official_comfy_sampler,
+        model_paths=args.model_paths,
+    )
     pipeline = T2AOneStagePipeline(
         model_paths=args.model_paths,
         loras=tuple(args.lora) if args.lora else (),
@@ -234,9 +315,14 @@ def main() -> None:
         enhance_static_cache=args.enhance_static_cache,
         max_batch_size=args.max_batch_size,
         official_comfy_workflow=args.official_comfy_workflow,
+        official_comfy_sampler=official_comfy_sampler,
     )
 
-    encode_audio(audio=audio, output_path=args.output_path)
+    encode_audio(
+        audio=audio,
+        output_path=args.output_path,
+        peak_ceiling_dbfs=args.audio_peak_ceiling_dbfs,
+    )
 
 
 if __name__ == "__main__":

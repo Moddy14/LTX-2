@@ -9,7 +9,7 @@ supported-markers = [
 ]
 
 [manifest]
-overrides = [{ name = "nvidia-cudnn-cu13", specifier = "==9.21.1.3" }]
+overrides = [{ name = "nvidia-cudnn-cu13", specifier = "==9.24.0.43" }]
 
 [[package]]
 name = "accelerate"
@@ -316,7 +316,7 @@ wheels = [
 
 [[package]]
 name = "ltx-core"
-version = "1.2.0"
+version = "1.3.0"
 source = { editable = "../../../packages/ltx-core" }
 dependencies = [
     { name = "accelerate" },
@@ -327,6 +327,7 @@ dependencies = [
     { name = "scipy" },
     { name = "torch" },
     { name = "torchaudio" },
+    { name = "torchvision" },
     { name = "transformers" },
 ]
 
@@ -340,9 +341,13 @@ requires-dist = [
     { name = "numpy" },
     { name = "safetensors" },
     { name = "scipy", specifier = ">=1.14" },
-    { name = "torch", specifier = "~=2.7", index = "https://download.pytorch.org/whl/cu132" },
+    { name = "torch", marker = "sys_platform != 'darwin'", specifier = "~=2.7", index = "https://download.pytorch.org/whl/cu132" },
+    { name = "torch", marker = "sys_platform == 'darwin'", specifier = "~=2.7" },
     { name = "torch", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'natten') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'natten')", specifier = "==2.13.0", index = "https://download.pytorch.org/whl/cu132" },
-    { name = "torchaudio", index = "https://download.pytorch.org/whl/test/cu132/" },
+    { name = "torchaudio", marker = "sys_platform != 'darwin'", index = "https://download.pytorch.org/whl/test/cu132/" },
+    { name = "torchaudio", marker = "sys_platform == 'darwin'" },
+    { name = "torchvision", marker = "sys_platform != 'darwin'", index = "https://download.pytorch.org/whl/cu132" },
+    { name = "torchvision", marker = "sys_platform == 'darwin'" },
     { name = "transformers", specifier = ">=5.8.0,<5.15" },
 ]
 provides-extras = ["natten"]
@@ -352,11 +357,12 @@ dev = [{ name = "scikit-image", specifier = ">=0.25.2" }]
 
 [[package]]
 name = "ltx-pipelines"
-version = "1.2.0"
+version = "1.3.0"
 source = { editable = "../../../packages/ltx-pipelines" }
 dependencies = [
     { name = "av" },
     { name = "cloudpickle" },
+    { name = "kornia" },
     { name = "ltx-core" },
     { name = "openimageio" },
     { name = "pillow" },
@@ -367,6 +373,7 @@ dependencies = [
 requires-dist = [
     { name = "av" },
     { name = "cloudpickle", specifier = ">=3.1" },
+    { name = "kornia", specifier = "==0.8.2" },
     { name = "ltx-core", editable = "../../../packages/ltx-core" },
     { name = "openimageio" },
     { name = "pillow" },
@@ -383,6 +390,7 @@ dependencies = [
     { name = "kornia" },
     { name = "ltx-core" },
     { name = "ltx-pipelines" },
+    { name = "natten" },
     { name = "openai-whisper" },
     { name = "opencv-python-headless" },
     { name = "openimageio" },
@@ -401,6 +409,7 @@ requires-dist = [
     { name = "kornia", specifier = "==0.8.2" },
     { name = "ltx-core", editable = "../../../packages/ltx-core" },
     { name = "ltx-pipelines", editable = "../../../packages/ltx-pipelines" },
+    { name = "natten", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", url = "https://github.com/SHI-Labs/NATTEN/releases/download/v0.21.7/natten-0.21.7%2Btorch2130cu132-cp312-cp312-linux_aarch64.whl" },
     { name = "openai-whisper", specifier = "==20250625" },
     { name = "opencv-python-headless", specifier = "==4.13.0.92" },
     { name = "openimageio", specifier = "==3.1.15.0" },
@@ -459,6 +468,14 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e0/47/dd32fa426cc72114383ac549964eecb20ecfd886d1e5ccf5340b55b02f57/mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f", size = 508106, upload-time = "2023-03-07T16:47:11.061Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c", size = 536198, upload-time = "2023-03-07T16:47:09.197Z" },
+]
+
+[[package]]
+name = "natten"
+version = "0.21.7+torch2130cu132"
+source = { url = "https://github.com/SHI-Labs/NATTEN/releases/download/v0.21.7/natten-0.21.7%2Btorch2130cu132-cp312-cp312-linux_aarch64.whl" }
+wheels = [
+    { url = "https://github.com/SHI-Labs/NATTEN/releases/download/v0.21.7/natten-0.21.7%2Btorch2130cu132-cp312-cp312-linux_aarch64.whl", hash = "sha256:f2745ee3ad50f58b8aa3c4496b67461afcbdb088051eb929b090b88d241bcef1" },
 ]
 
 [[package]]
@@ -530,13 +547,13 @@ wheels = [
 
 [[package]]
 name = "nvidia-cudnn-cu13"
-version = "9.21.1.3"
+version = "9.24.0.43"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cublas" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/02/cb3d000ed411cb3750f95ee1a83cb2684e885225c3d2be0226d8f799cdee/nvidia_cudnn_cu13-9.21.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:a214b59b49a6a5abe23b8a8f6cdb338e366b2a97b8d85891e2397e4a970f8c3e", size = 513428540, upload-time = "2026-04-21T15:52:25.832Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/30/7c257e3d5cb4fecb147b93895c66e29c93f8e76d74b45bb418ff0587c4ec/nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:a6812a554a1ff0413e9c52b84c26c050380649ab9615f9c16bded368ce9f421f", size = 650976863, upload-time = "2026-07-02T16:23:39.248Z" },
 ]
 
 [[package]]

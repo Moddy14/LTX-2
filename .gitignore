@@ -36,11 +36,16 @@ wandb/
 *.jpg
 *.jpeg
 *.json
+!apps/ltx-studio/docs/evidence/lipsync-delay-calibration-2026-08-25.json
+!apps/ltx-studio/deploy/lipforcing/runtime-patch-provenance.v1.json
 *.m4a
 *.mov
 *.mp3
 *.mp4
 *.png
+!apps/ltx-studio/docs/evidence/holdout/
+!apps/ltx-studio/docs/evidence/holdout/*.png
+!apps/ltx-studio/docs/evidence/holdout/manifest.v1.json
 *.wav
 *.webp
 

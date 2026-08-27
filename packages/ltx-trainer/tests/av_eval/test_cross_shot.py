@@ -12,7 +12,7 @@ import pytest
 from ltx_trainer.av_eval import CrossShotProtocolError, build_cross_shot_protocol_report, document_sha256
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-PROTOCOL_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "cross-shot-protocol.v1.json"
+PROTOCOL_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "cross-shot-protocol.v2.json"
 
 
 def _draft() -> dict[str, object]:
@@ -21,20 +21,26 @@ def _draft() -> dict[str, object]:
 
 def _design_report(required: int = 40) -> dict[str, object]:
     return {
-        "schema_version": "ltx-sota-power-report.v1",
+        "schema_version": "ltx-sota-power-report.v2",
         "design_digest": "1" * 64,
         "delta_catalog_digest": "2" * 64,
         "vbench_gate_catalog_digest": "3" * 64,
         "status": "ready-to-freeze",
         "blockers": [],
         "familywise_alpha": 0.05,
-        "planning_hypothesis_count": 50,
-        "per_endpoint_planning_alpha": 0.001,
+        "planning_hypothesis_count": 265,
+        "per_endpoint_planning_alpha": 0.05 / 265,
         "target_power": 0.9,
         "endpoint_requirements": [],
         "required_independent_units": required,
         "required_clips": required * 3,
         "strata_quotas_digest": "4" * 64,
+        "surface_digest": "5" * 64,
+        "candidate_surface_binding_digest": "5" * 64,
+        "candidate_surface_entry_count": 25,
+        "strata_quota_semantics_digest": "6" * 64,
+        "vbench_claim_count": 21,
+        "vbench_gate_count": 126,
     }
 
 
@@ -109,6 +115,16 @@ def test_cross_shot_protocol_rejects_power_mismatch() -> None:
     changed_delta["endpoint_bindings"][0]["delta_basis_sha256"] = "f" * 64  # type: ignore[index]
     with pytest.raises(CrossShotProtocolError, match="frozen D0a delta catalog"):
         build_cross_shot_protocol_report(changed_delta, design_report=design_report)
+
+
+def test_cross_shot_protocol_rejects_a_relabelled_frozen90_report() -> None:
+    protocol, design_report = _ready()
+    design_report["vbench_claim_count"] = 15
+    design_report["vbench_gate_count"] = 90
+    design_report["planning_hypothesis_count"] = 193
+
+    with pytest.raises(CrossShotProtocolError, match="complete current D0a planning family"):
+        build_cross_shot_protocol_report(protocol, design_report=design_report)
 
 
 def test_cross_shot_cli_reports_draft_hold(tmp_path: Path) -> None:

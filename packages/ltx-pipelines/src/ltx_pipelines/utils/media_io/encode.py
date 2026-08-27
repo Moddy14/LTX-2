@@ -17,8 +17,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from ltx_core.color.audio_mux import prepare_audio_stream as _prepare_audio_stream
 from ltx_core.color.audio_mux import normalize_audio_waveform as _normalize_audio_waveform
+from ltx_core.color.audio_mux import prepare_audio_stream as _prepare_audio_stream
 from ltx_core.color.audio_mux import validate_audio_waveform as _validate_audio_waveform
 from ltx_core.color.audio_mux import write_audio as _write_audio
 from ltx_core.color.hlg import encode_linear_hdr_frames_to_hlg_mp4
@@ -62,6 +62,38 @@ def _fit_audio_to_video_duration(
             frame_rate,
         )
     return Audio(waveform=samples, sampling_rate=audio.sampling_rate)
+
+
+def _apply_audio_peak_ceiling(audio: Audio, peak_ceiling_dbfs: float | None) -> Audio:
+    """Attenuate floating-point audio before PCM conversion when its sample peak exceeds a ceiling.
+
+    The operation never amplifies quiet material. Applying it before ``_write_audio`` is
+    important: that shared mux helper clips floating-point samples to ``[-1, 1]`` before
+    converting them to PCM, so lowering an already-written WAV cannot restore clipped peaks.
+    This is intentionally not presented as a true-peak limiter or dynamics repair stage.
+    """
+    if peak_ceiling_dbfs is None:
+        return audio
+    ceiling = float(peak_ceiling_dbfs)
+    if not math.isfinite(ceiling) or not -60.0 <= ceiling <= 0.0:
+        raise ValueError("peak_ceiling_dbfs must be finite and between -60 and 0 dBFS.")
+    samples = audio.waveform
+    if not samples.is_floating_point():
+        raise ValueError("peak_ceiling_dbfs requires a floating-point audio waveform.")
+    if not bool(torch.isfinite(samples).all()):
+        raise ValueError("audio.waveform contains non-finite samples.")
+    peak = float(samples.abs().amax().item())
+    target_peak = 10.0 ** (ceiling / 20.0)
+    if peak == 0.0 or peak <= target_peak:
+        return audio
+    gain = target_peak / peak
+    logger.info(
+        "Attenuating audio by %.2f dB to enforce a %.2f dBFS peak ceiling (raw peak %.6f).",
+        20.0 * math.log10(gain),
+        ceiling,
+        peak,
+    )
+    return Audio(waveform=samples * gain, sampling_rate=audio.sampling_rate)
 
 
 def _encode_hdr_video_outputs(
@@ -270,13 +302,14 @@ def encode_video(
     return None
 
 
-def encode_audio(audio: Audio, output_path: str) -> None:
+def encode_audio(audio: Audio, output_path: str, *, peak_ceiling_dbfs: float | None = None) -> None:
     """Save an audio waveform as a 16-bit PCM ``.wav`` file at the source sampling rate.
     Reuses :func:`_write_audio` (the same muxing path used by :func:`encode_video`);
     the only difference is a PCM (``pcm_s16le``) stream in a WAV container instead of
     the AAC stream used for muxed video.
     """
     _validate_audio_waveform(audio)
+    prepared_audio = _apply_audio_peak_ceiling(audio, peak_ceiling_dbfs)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     container = av.open(output_path, mode="w")
     audio_stream = container.add_stream("pcm_s16le", rate=audio.sampling_rate)
@@ -284,7 +317,7 @@ def encode_audio(audio: Audio, output_path: str) -> None:
     audio_stream.codec_context.layout = "stereo"
     audio_stream.codec_context.time_base = Fraction(1, audio.sampling_rate)
     try:
-        _write_audio(container, audio_stream, audio)
+        _write_audio(container, audio_stream, prepared_audio)
     finally:
         container.close()
     logger.info(f"Audio saved to {output_path}")

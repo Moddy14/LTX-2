@@ -13,6 +13,9 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from test_complete import _bundle as _complete_bundle
+from test_complete import _catalog as _complete_catalog
+from test_complete import _design as _complete_design
 
 from ltx_trainer.av_eval.authorization import (
     build_consumption_event,
@@ -21,16 +24,21 @@ from ltx_trainer.av_eval.authorization import (
     studio_sha256_document,
 )
 from ltx_trainer.av_eval.calibration import build_calibration_gate_report
-from ltx_trainer.av_eval.design import document_sha256
+from ltx_trainer.av_eval.complete import build_complete_d1_report
+from ltx_trainer.av_eval.design import build_power_report, document_sha256
 from ltx_trainer.av_eval.freeze_preflight import FreezePreflightError, build_f0_preflight_report
 from ltx_trainer.av_eval.holdout import HoldoutDecisionError, build_q2_qualification_report
+from ltx_trainer.av_eval.surface_contract import (
+    CURRENT_VBENCH_CLAIM_IDS,
+    build_candidate_vbench_surface_binding,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 PREREGISTRATION_PATH = (
     REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "preregistration.v2.json"
 )
 CALIBRATION_PATH = (
-    REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v1.json"
+    REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v2.json"
 )
 MATRIX_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "comparator-matrix.v1.json"
 LANDSCAPE_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "anchor-landscape.v1.json"
@@ -81,7 +89,7 @@ def _rights_catalog(*, blocked_evaluator_id: str | None) -> dict[str, Any]:
     return catalog
 
 
-def _fixture(
+def _fixture(  # noqa: PLR0913, PLR0915
     *,
     now: datetime = NOW,
     q1_sota_status: str = "anchor-pilot-pass",
@@ -93,6 +101,8 @@ def _fixture(
     soak_jobs: int = 50,
     pause_mode_families: list[str] | None = None,
     evaluator_rights_failure: str | None = None,
+    relabelled_frozen90_design: bool = False,
+    d1_payload_variant: str | None = None,
 ) -> dict[str, Any]:
     release_digest = "1" * 64
     holdout_digest = "3" * 64
@@ -145,7 +155,7 @@ def _fixture(
                 ],
                 "rights": {"status": "conditional", "evidenceIds": ["rights.ltx-core"]},
             }
-            for index, claim_id in enumerate(TARGETS)
+            for index, claim_id in enumerate(CURRENT_VBENCH_CLAIM_IDS)
         ],
     }
     if include_audio_candidate:
@@ -169,26 +179,73 @@ def _fixture(
         )
     surface_digest = studio_sha256_document(surface)
 
-    design_digest = "7" * 64
     calibration_digest = "8" * 64
-    calibration_catalog = _frozen_calibration_catalog(preregistration_digest, design_digest)
+    surface_binding = build_candidate_vbench_surface_binding(surface)
+    design = _complete_design()
+    design["vbench_gate_catalog"]["candidate_surface"] = copy.deepcopy(surface_binding)
+    design_report = build_power_report(design)
+    design_digest = design_report["design_digest"]
+    calibration_catalog = _complete_catalog(design)
+    calibration_catalog["preregistration_digest"] = preregistration_digest
     calibration_catalog_digest = build_calibration_gate_report(calibration_catalog)["catalog_digest"]
+    d1_bundle = _complete_bundle(calibration_catalog, design)
+    fixed_report = d1_bundle["fixed_report"]
+    vbench_report = d1_bundle["vbench_report"]
+    shared_bindings = {
+        "dataset_digest": calibration_digest,
+        "preregistration_digest": preregistration_digest,
+        "release_digest": release_digest,
+        "design_digest": design_digest,
+        "surface_digest": surface_binding["surface_digest"],
+        "candidate_surface_binding_digest": surface_binding["projection_digest"],
+        "strata_plan_digest": design_report["strata_quotas_digest"],
+    }
+    fixed_report.update(shared_bindings)
+    fixed_report["calibration_catalog_digest"] = calibration_catalog_digest
+    vbench_report.update(shared_bindings)
+    vbench_report["vbench_gate_catalog_digest"] = design_report["vbench_gate_catalog_digest"]
+    vbench_report["design_report_digest"] = document_sha256(design_report)
+    offset_contract = fixed_report["offset_contract"]
+    offset_contract.update(
+        {
+            "design_digest": design_digest,
+            "design_report_digest": document_sha256(design_report),
+            "power_report_digest": document_sha256(design_report),
+            "strata_quotas_digest": design_report["strata_quotas_digest"],
+            "required_independent_units": design_report["required_independent_units"],
+        }
+    )
+    d1_report = build_complete_d1_report(
+        d1_bundle,
+        calibration_catalog=calibration_catalog,
+        design=design,
+    )
+    if d1_payload_variant == "empty":
+        d1_report["metrics"] = []
+    elif d1_payload_variant == "extra":
+        d1_report["unregistered_evidence"] = True
+    elif d1_payload_variant == "legacy":
+        d1_report["schema_version"] = "ltx-av-eval-complete-d1-report.v1"
+    elif d1_payload_variant == "mixed":
+        d1_report["fixed_report"]["schema_version"] = "ltx-av-eval-fixed-d1-report.v1"
+    elif d1_payload_variant is not None:
+        raise AssertionError(f"unsupported synthetic D1 payload variant: {d1_payload_variant}")
+    published_design_report = copy.deepcopy(design_report)
+    if relabelled_frozen90_design:
+        published_design_report.update(
+            planning_hypothesis_count=193,
+            vbench_claim_count=15,
+            vbench_gate_count=90,
+        )
     detailed_reports: dict[str, dict[str, Any]] = {
         "d0-readiness": {
             "schema_version": "ltx-av-eval-product-readiness-report.v1",
             "status": "ready-to-freeze",
             "blockers": [],
         },
-        "d0a-design": {
-            "schema_version": "ltx-sota-power-report.v1",
-            "status": "ready-to-freeze",
-            "blockers": [],
-            "design_digest": design_digest,
-            "required_independent_units": 30,
-            "planning_hypothesis_count": 193,
-        },
+        "d0a-design": published_design_report,
         "d0a-pilot-binding": {
-            "schema_version": "ltx-sota-design-pilot-binding.v1",
+            "schema_version": "ltx-sota-design-pilot-binding.v2",
             "status": "ready-to-freeze",
             "blockers": [],
             "pilot_report_digest": "1" * 64,
@@ -198,25 +255,21 @@ def _fixture(
             "evaluator_bundle_digest": "5" * 64,
             "design_digest": design_digest,
             "power_report_digest": "pending",
-            "required_independent_units": 30,
-            "required_clips": 90,
-            "planning_hypothesis_count": 193,
+            "surface_digest": surface_binding["surface_digest"],
+            "candidate_surface_binding_digest": surface_binding["projection_digest"],
+            "required_independent_units": design_report["required_independent_units"],
+            "required_clips": design_report["required_clips"],
+            "planning_hypothesis_count": published_design_report["planning_hypothesis_count"],
         },
-        "d1-calibration": {
-            "schema_version": "ltx-av-eval-complete-d1-report.v1",
-            "verdict": "pass",
-            "release_digest": release_digest,
-            "preregistration_digest": preregistration_digest,
-            "design_digest": design_digest,
-            "dataset_digest": calibration_digest,
-            "calibration_catalog_digest": calibration_catalog_digest,
-        },
+        "d1-calibration": d1_report,
         "q0-cross-shot": {
-            "schema_version": "ltx-av-eval-cross-shot-decision.v1",
+            "schema_version": "ltx-av-eval-cross-shot-decision.v2",
             "verdict": "winner",
             "release_digest": release_digest,
             "preregistration_digest": preregistration_digest,
             "design_digest": design_digest,
+            "surface_digest": surface_binding["surface_digest"],
+            "candidate_surface_binding_digest": surface_binding["projection_digest"],
             "dataset_digest": calibration_digest,
             "prompt_set_digest": commitments["prompt_set_sha256"],
             "rating_protocol_digest": commitments["rating_protocol_sha256"],
@@ -277,9 +330,7 @@ def _fixture(
             "recovery_slo_breaches": 0,
         },
     }
-    detailed_reports["d0a-pilot-binding"]["power_report_digest"] = document_sha256(
-        detailed_reports["d0a-design"]
-    )
+    detailed_reports["d0a-pilot-binding"]["power_report_digest"] = document_sha256(published_design_report)
     detailed_digests = {name: document_sha256(report) for name, report in detailed_reports.items()}
 
     keys: dict[str, Ed25519PrivateKey] = {}
@@ -428,10 +479,11 @@ def _fixture(
         qualification_reports.append({"document": report, "signature": sign(report, "qualification-key-01")})
         qualification_digests[kind] = studio_sha256_document(report)
     candidate = {
-        "schema_version": "ltx-av-eval-f0-candidate.v1",
+        "schema_version": "ltx-av-eval-f0-candidate.v2",
         "candidate_id": "final-candidate-001",
         "release_digest": release_digest,
         "surface_digest": surface_digest,
+        "candidate_surface_binding_digest": surface_binding["projection_digest"],
         "mapping_sha256": mapping_digest,
         "rights_evidence_catalog_digest": rights["evidenceCatalogDigest"],
         "holdout_digest": holdout_digest,
@@ -465,7 +517,7 @@ def _fixture(
         "surface": surface,
         "detailed_reports": detailed_reports,
         "qualification_bundle": {
-            "schema_version": "ltx-av-eval-f0-qualification-bundle.v1",
+            "schema_version": "ltx-av-eval-f0-qualification-bundle.v2",
             "reports": qualification_reports,
         },
         "now": now,
@@ -591,6 +643,21 @@ def test_complete_f0_preflight_binds_the_single_q2_authorization() -> None:
     assert first["target_sota_claim_ids"] == TARGETS
 
 
+def test_f0_rejects_a_relabelled_frozen90_design_report() -> None:
+    fixture = _fixture(relabelled_frozen90_design=True)
+
+    with pytest.raises(FreezePreflightError, match="current candidate VBench matrix"):
+        build_f0_preflight_report(**fixture)
+
+
+@pytest.mark.parametrize("variant", ["empty", "extra", "legacy", "mixed"])
+def test_f0_denies_noncanonical_d1_payloads_even_when_the_candidate_binds_them(variant: str) -> None:
+    fixture = _fixture(d1_payload_variant=variant)
+
+    with pytest.raises(FreezePreflightError, match="complete canonical v2 report"):
+        build_f0_preflight_report(**fixture)
+
+
 def test_f0_rejects_a_signed_technical_pass_without_the_full_soak() -> None:
     fixture = _fixture(soak_jobs=49)
 
@@ -713,8 +780,10 @@ def _passing_objective_report(
     *,
     fixture: dict[str, Any],
     catalog: dict[str, Any],
+    generated_at: datetime,
 ) -> dict[str, Any]:
     catalog_report = build_calibration_gate_report(catalog)
+    required_units = fixture["detailed_reports"]["d0a-design"]["required_independent_units"]
     required = [*catalog["gates"]]
     required.extend(
         {
@@ -743,8 +812,8 @@ def _passing_objective_report(
                 "direction": gate["direction"],
                 "decision_value": gate["decision_value"],
                 "decision": "pass",
-                "independent_units": 30,
-                "clips": 90,
+                "independent_units": required_units,
+                "clips": required_units * 3,
                 "strata_digest": "d" * 64,
             }
         )
@@ -761,7 +830,7 @@ def _passing_objective_report(
         "evaluator_digest": catalog_report["evaluator_fingerprints_digest"],
         "thresholds_digest": catalog_report["catalog_digest"],
         "producer_id": "independent-q2-scorer",
-        "generated_at": _timestamp(NOW + timedelta(seconds=2)),
+        "generated_at": _timestamp(generated_at),
         "verdict": "pass",
         "warnings": [],
         "metrics": metrics,
@@ -773,7 +842,10 @@ def _passing_q2_results(
     matrix: dict[str, Any],
     gates: dict[str, Any],
     catalog: dict[str, Any],
+    *,
+    generated_at: datetime,
 ) -> dict[str, Any]:
+    required_units = fixture["detailed_reports"]["d0a-design"]["required_independent_units"]
     rows: list[dict[str, Any]] = []
     row_index = 0
     for claim in matrix["claims"]:
@@ -783,14 +855,15 @@ def _passing_q2_results(
             for gate in gates["gates"]
             if gate["claim_id"] == claim["claim_id"]
         )
-        for component_index in range(30):
+        component_count = required_units if claim["claim_id"] in TARGETS else 30
+        for component_index in range(component_count):
             for arm_id in included:
                 rows.append(
                     {
-                        "row_id": f"row-{row_index:04d}",
+                        "row_id": f"row-{row_index:08d}",
                         "claim_id": claim["claim_id"],
-                        "sample_id": f"sample-{component_index:02d}",
-                        "leakage_component_id": f"component-{component_index:02d}",
+                        "sample_id": f"sample-{component_index:08d}",
+                        "leakage_component_id": f"component-{component_index:08d}",
                         "generation_seed": 7,
                         "arm_id": arm_id,
                         "status": "completed",
@@ -848,16 +921,16 @@ def _passing_q2_results(
                 "blinded": True,
                 "randomized_arm_order": True,
                 "normalization": "identical-loudness-and-timeline.v1",
-                "independent_units": 30,
-                "ratings": 90,
+                "independent_units": required_units,
+                "ratings": required_units * 3,
                 "metrics": metrics,
             }
         )
     return {
-        "schema_version": "ltx-av-eval-q2-results.v1",
+        "schema_version": "ltx-av-eval-q2-results.v2",
         "producer_id": "independent-q2-scorer",
         "writer_id": "independent-q2-writer",
-        "generated_at": _timestamp(NOW + timedelta(seconds=2)),
+        "generated_at": _timestamp(generated_at),
         "release_digest": candidate["release_digest"],
         "surface_digest": candidate["surface_digest"],
         "preregistration_digest": candidate["preregistration_digest"],
@@ -869,9 +942,14 @@ def _passing_q2_results(
         "objective_reports": [
             {
                 "surface_entry_id": f"surface-{entry_index:02d}",
-                "report": _passing_objective_report(claim_id, fixture=fixture, catalog=catalog),
+                "report": _passing_objective_report(
+                    claim_id,
+                    fixture=fixture,
+                    catalog=catalog,
+                    generated_at=generated_at,
+                ),
             }
-            for entry_index, claim_id in enumerate(TARGETS)
+            for entry_index, claim_id in enumerate(CURRENT_VBENCH_CLAIM_IDS)
         ],
         "comparator_results": {
             "schema_version": "ltx-av-eval-holdout-comparator-results.v1",
@@ -888,19 +966,24 @@ def _passing_q2_results(
 
 
 def test_q2_assembles_only_consumed_objective_mos_and_anchor_passes(tmp_path: Path) -> None:
+    now = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=2)
     matrix, landscape, gates = _q2_comparator_contracts()
     matrix_digest = document_sha256(matrix)
     holdout_signing_key = _key()
     fixture = _fixture(
+        now=now,
         baseline_matrix_digest=matrix_digest,
         holdout_signing_key=holdout_signing_key,
         include_audio_candidate=True,
     )
-    catalog = _frozen_calibration_catalog(
-        fixture["raw"]["preregistration_digest"],
-        fixture["detailed_reports"]["d1-calibration"]["design_digest"],
+    catalog = copy.deepcopy(fixture["detailed_reports"]["d1-calibration"]["calibration_catalog"])
+    results = _passing_q2_results(
+        fixture,
+        matrix,
+        gates,
+        catalog,
+        generated_at=now + timedelta(seconds=2),
     )
-    results = _passing_q2_results(fixture, matrix, gates, catalog)
     consumption_root = tmp_path / "consumption"
     consumption_root.mkdir(mode=0o700)
     event_args = {
@@ -910,7 +993,7 @@ def test_q2_assembles_only_consumed_objective_mos_and_anchor_passes(tmp_path: Pa
         "writer_id": results["writer_id"],
     }
     holdout_private, _holdout_public = holdout_signing_key
-    for event, occurred_at in (("started", NOW), ("consumed", NOW + timedelta(seconds=1))):
+    for event, occurred_at in (("started", now), ("consumed", now + timedelta(seconds=1))):
         document = build_consumption_event(event=event, occurred_at=occurred_at, **event_args)  # type: ignore[arg-type]
         signature = {
             "schemaVersion": "ltx-studio-detached-signature.v1",
@@ -943,7 +1026,7 @@ def test_q2_assembles_only_consumed_objective_mos_and_anchor_passes(tmp_path: Pa
         "comparator_matrix": matrix,
         "landscape": landscape,
         "consumption_root": consumption_root,
-        "now": NOW + timedelta(seconds=2),
+        "now": now + timedelta(seconds=2),
     }
 
     report = build_q2_qualification_report(results, **arguments)
@@ -963,10 +1046,11 @@ def test_q2_assembles_only_consumed_objective_mos_and_anchor_passes(tmp_path: Pa
         build_q2_qualification_report(failed_mos, **arguments)
 
     underpowered = copy.deepcopy(results)
+    required_units = fixture["detailed_reports"]["d0a-design"]["required_independent_units"]
     underpowered["comparator_results"]["rows"] = [
         row
         for row in underpowered["comparator_results"]["rows"]
-        if row["leakage_component_id"] != "component-29"
+        if row["leakage_component_id"] != f"component-{required_units - 1:08d}"
     ]
     with pytest.raises(HoldoutDecisionError, match="power requirement"):
         build_q2_qualification_report(underpowered, **arguments)

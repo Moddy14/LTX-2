@@ -8,6 +8,7 @@ import {
   q2RunnerContractSchema,
   validateQ2RunnerLaunch,
 } from "../server/q2Runner.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -15,15 +16,24 @@ function fixture() {
   const runnerDigest = sha("q2-runner");
   const releaseDigest = sha("release");
   const surfaceDigest = sha("surface");
+  const runtimeInstallSealSha256 = sha("runtime-seal");
+  const runtimeTreeSha256 = sha("runtime-tree");
+  const runtimePolicySha256 = sha("runtime-policy");
+  const nodeExecutableSha256 = sha("node-executable");
   const runtimeSandboxDigest = sha("runtime-sandbox");
   const orchestratorContractDigest = sha("orchestrator-contract");
   const holdoutInputManifestDigest = sha("input-root-manifest");
   const outputRootPolicyDigest = sha("output-policy");
   const contract = q2RunnerContractSchema.parse({
-    schemaVersion: "q2-runner.v1",
+    schemaVersion: "q2-runner.v3",
     runnerDigest,
     releaseDigest,
     surfaceDigest,
+    runtimeInstallSealSha256,
+    runtimeTreeSha256,
+    runtimePolicySha256,
+    nodeExecutableSha256,
+    runtimeTrust: runtimeTrustFixture,
     runtimeSandboxDigest,
     orchestratorContractDigest,
     uid: 42042,
@@ -39,10 +49,15 @@ function fixture() {
     directGpuCapability: "orchestrator-grant-only",
   });
   const authorization = evaluationAuthorizationSchema.parse({
-    schemaVersion: "ltx-studio-evaluation-authorization.v1",
+    schemaVersion: "ltx-studio-evaluation-authorization.v3",
     authorizationId: "q2-evaluation-001",
     releaseDigest,
     surfaceDigest,
+    runtimeInstallSealSha256,
+    runtimeTreeSha256,
+    runtimePolicySha256,
+    nodeExecutableSha256,
+    runtimeTrust: runtimeTrustFixture,
     preregistrationDigest: sha("preregistration"),
     q2RunnerDigest: runnerDigest,
     q2RunnerContractDigest: q2RunnerContractDigest(contract),
@@ -102,7 +117,7 @@ function fixture() {
     gpuDeviceReachableWithoutGrant: false,
     gpuDeviceReachableWithGrant: true,
     grant: {
-      schemaVersion: "q2-orchestrator-admission-grant.v1",
+      schemaVersion: "q2-orchestrator-admission-grant.v3",
       grantId: "00000000-0000-4000-8000-000000000701",
       jobId: "q2-holdout-job-001",
       consumerId: contract.consumerId,
@@ -110,6 +125,11 @@ function fixture() {
       orchestratorContractDigest: contract.orchestratorContractDigest,
       runnerDigest: contract.runnerDigest,
       releaseDigest: contract.releaseDigest,
+      runtimeInstallSealSha256: contract.runtimeInstallSealSha256,
+      runtimeTreeSha256: contract.runtimeTreeSha256,
+      runtimePolicySha256: contract.runtimePolicySha256,
+      nodeExecutableSha256: contract.nodeExecutableSha256,
+      runtimeTrust: runtimeTrustFixture,
       issuedAt: "2026-08-15T00:20:00Z",
       notBefore: "2026-08-15T00:21:00Z",
       expiresAt: "2026-08-15T11:30:00Z",

@@ -28,7 +28,10 @@ export function classifyModelFile(path: string): ModelKind | null {
     return "text-encoder";
   }
   if (extension !== ".safetensors" || !name.includes("ltx")) return null;
-  if (name === "ltx-2.5-22b-distilled-transformer-bf16.safetensors") return "transformer";
+  if ([
+    "ltx-2.5-22b-dev-transformer-bf16.safetensors",
+    "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+  ].includes(name)) return "transformer";
   if ([
     "ltx-2.5-video-vae-bf16.safetensors",
     "ltx-2.5-video-vae-conv-bf16.safetensors",
@@ -37,6 +40,13 @@ export function classifyModelFile(path: string): ModelKind | null {
   if (name === "ltx-2.5-duration-head-bf16.safetensors") return "duration-head";
   if (name === "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors") {
     return "spatial-upscaler";
+  }
+  if (name === "ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors") {
+    return "temporal-upscaler";
+  }
+  if (name === "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+    || name === "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors") {
+    return "lora";
   }
   if (name.startsWith("ltx-2.5-")) return null;
   if (name.includes("spatial-upscaler")) return "spatial-upscaler";

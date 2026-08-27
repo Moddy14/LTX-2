@@ -17,7 +17,7 @@ from ltx_trainer.av_eval import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
+DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v2.json"
 
 
 def _observations(*, units: int = 3, repeats: int = 2) -> dict[str, object]:
@@ -63,7 +63,7 @@ def _observations(*, units: int = 3, repeats: int = 2) -> dict[str, object]:
     for index, row in enumerate(rows):
         row["observation_id"] = f"observation-{index:04d}"
     return {
-        "schema_version": "ltx-sota-design-pilot-observations.v1",
+        "schema_version": "ltx-sota-design-pilot-observations.v2",
         "split_role": "design-pilot",
         "frozen_dataset_digest": "a" * 64,
         "split_assignment_digest": "b" * 64,
@@ -143,7 +143,7 @@ def _ready_design_and_observations() -> tuple[dict[str, object], dict[str, objec
     for index, row in enumerate(rows):
         row["observation_id"] = f"observation-{index:04d}"
     observations = {
-        "schema_version": "ltx-sota-design-pilot-observations.v1",
+        "schema_version": "ltx-sota-design-pilot-observations.v2",
         "split_role": "design-pilot",
         "frozen_dataset_digest": "1" * 64,
         "split_assignment_digest": "2" * 64,
@@ -252,7 +252,7 @@ def test_pilot_freeze_binding_prevents_optimistic_power_inputs() -> None:
 
     assert report["status"] == "ready-to-freeze"
     assert report["blockers"] == []
-    assert report["planning_hypothesis_count"] == 193
+    assert report["planning_hypothesis_count"] == 265
     assert report["required_independent_units"] >= 30
 
     understated_cluster = copy.deepcopy(design)

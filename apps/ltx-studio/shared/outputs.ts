@@ -4,6 +4,7 @@ import type { OutputAnalysisRecord } from "./objectiveQuality.js";
 import type { RunProvenance } from "./provenance.js";
 import type { ExperimentRunBinding } from "./experiments.js";
 import type { ProjectRunBinding } from "./projects.js";
+import type { JobExecutionDecision } from "./jobExecution.js";
 
 export type StudioOutput = {
   name: string;
@@ -21,7 +22,10 @@ export type StudioOutput = {
   provenance?: RunProvenance | null;
   experiment?: ExperimentRunBinding | null;
   project?: ProjectRunBinding | null;
+  executionDecision?: JobExecutionDecision | null;
   experimentRequestVerified?: boolean;
+  /** Explicitly separates modern publication authority from preserved pre-v1.1 history. */
+  trustStatus?: "verified-publication" | "legacy-unattested";
 };
 
 export type DeletedStudioOutput = {

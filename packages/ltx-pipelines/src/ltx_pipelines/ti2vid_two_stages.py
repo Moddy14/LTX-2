@@ -1,9 +1,11 @@
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
+from functools import partial
 
 import torch
 
 from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
+from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep, EulerDiffusionStep
 from ltx_core.components.guiders import (
     MultiModalGuiderFactory,
     MultiModalGuiderParams,
@@ -17,7 +19,7 @@ from ltx_core.model.transformer.compiling import CompilationConfig
 from ltx_core.model.video_vae import AUTO_TILING, AutoTiling, TilingConfig, get_video_chunks_number
 from ltx_core.model.video_vae.transformer import DiffVAEMode
 from ltx_core.quantization import QuantizationPolicy
-from ltx_core.types import Audio, VideoPixelShape
+from ltx_core.types import VideoPixelShape
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     add_generated_keyframes_arg,
@@ -59,7 +61,63 @@ from ltx_pipelines.utils.media_io import (
     vae_dtype_for_hdr,
 )
 from ltx_pipelines.utils.model_paths import ModelPaths
-from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode
+from ltx_pipelines.utils.official_comfy import resolve_official_comfy_cli_sampler
+from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop, euler_denoising_loop
+from ltx_pipelines.utils.types import DEFAULT_AUTO_DURATION, AutoDuration, ModalitySpec, OffloadMode, PipelineOutput
+
+
+def _official_comfy_ti2v_stage_1_kwargs(
+    *,
+    enabled: bool,
+    sampler: str,
+    seed: int,
+) -> dict[str, object]:
+    """Bind official LTX-2.5 T2V/I2V stage 1 to its published ancestral sampler."""
+    if not enabled or sampler == "deterministic":
+        return {}
+    if sampler != "euler-ancestral":
+        raise ValueError(f"Unsupported official T2V/I2V sampler: {sampler}")
+    return {
+        "stepper": EulerAncestralDiffusionStep(),
+        "state_dtype": torch.float32,
+        "loop": partial(
+            euler_ancestral_denoising_loop,
+            noise_seed=seed,
+            # ComfyUI keeps the latent sampling trajectory in FP32.
+            model_dtype=torch.float32,
+            model_input_dtype=torch.bfloat16,
+        ),
+    }
+
+
+def _official_comfy_ti2v_stage_2_kwargs(*, enabled: bool) -> dict[str, object]:
+    """Keep official deterministic stage 2 in FP32 around BF16 weights."""
+    if not enabled:
+        return {}
+    return {
+        "state_dtype": torch.float32,
+        "stepper": EulerDiffusionStep(),
+        "loop": partial(
+            euler_denoising_loop,
+            model_dtype=torch.float32,
+            model_input_dtype=torch.bfloat16,
+        ),
+    }
+
+
+def _resolve_official_comfy_ti2v_sampler(
+    *,
+    official_comfy_workflow: bool,
+    requested_sampler: str | None,
+    model_paths: ModelPaths,
+) -> str:
+    return resolve_official_comfy_cli_sampler(
+        official_comfy_workflow=official_comfy_workflow,
+        requested_sampler=requested_sampler,
+        model_paths=model_paths,
+        monolith_default="deterministic",
+        split_default="euler-ancestral",
+    )
 
 
 def _stage_1_denoiser(
@@ -133,7 +191,7 @@ class TI2VidTwoStagesPipeline:
     images parameter.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         model_paths: ModelPaths,
         distilled_lora: list[LoraPathStrengthAndSDOps],
@@ -141,6 +199,7 @@ class TI2VidTwoStagesPipeline:
         loras: list[LoraPathStrengthAndSDOps],
         gemma_loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
         official_comfy_workflow: bool = False,
+        official_comfy_sampler: str = "deterministic",
         device: torch.device | None = None,
         quantization: QuantizationPolicy | None = None,
         registry: Registry | None = None,
@@ -154,6 +213,7 @@ class TI2VidTwoStagesPipeline:
         self.dtype = torch.bfloat16
         self._scheduler = LTX2Scheduler()
         self._official_comfy_workflow = official_comfy_workflow
+        self._official_comfy_sampler = official_comfy_sampler
 
         self.prompt_encoder = PromptEncoder(
             model_paths,
@@ -227,7 +287,7 @@ class TI2VidTwoStagesPipeline:
             alloc_trim_strategy=alloc_trim_strategy,
         )
 
-    def __call__(  # noqa: PLR0913
+    def __call__(  # noqa: PLR0913, PLR0917
         self,
         prompt: str,
         negative_prompt: str,
@@ -249,7 +309,7 @@ class TI2VidTwoStagesPipeline:
         stage_2_sigmas: torch.Tensor = STAGE_2_DISTILLED_SIGMAS,
         color_space: HDRColorSpace | None = None,
         generated_keyframes: int | Sequence[int] = 0,
-    ) -> tuple[Iterator[torch.Tensor], Audio, int, TilingConfig | None]:
+    ) -> PipelineOutput:
         require_num_frames_source(num_frames, self.duration_predictor)
         images = self.image_conditioner.resolve_crf(images)
         assert_resolution(height=height, width=width, is_two_stage=True)
@@ -267,7 +327,6 @@ class TI2VidTwoStagesPipeline:
             enhance_first_prompt=enhance_prompt,
             enhance_static_cache=enhance_static_cache,
             enhance_prompt_image=images[0][0] if len(images) > 0 else None,
-            enhance_prompt_seed=seed,
         )
         v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
         v_context_n, a_context_n = ctx_n.video_encoding, ctx_n.audio_encoding
@@ -298,11 +357,7 @@ class TI2VidTwoStagesPipeline:
             height=height // 2,
             fps=frame_rate,
         )
-        stage_1_images = (
-            cap_image_conditioning_strength(images, 0.7)
-            if self._official_comfy_workflow
-            else images
-        )
+        stage_1_images = cap_image_conditioning_strength(images, 0.7) if self._official_comfy_workflow else images
         stage_1_conditionings = self.image_conditioner(
             lambda enc: combined_image_conditionings(
                 images=stage_1_images,
@@ -344,6 +399,11 @@ class TI2VidTwoStagesPipeline:
             video=ModalitySpec(context=v_context_p, conditionings=stage_1_conditionings),
             audio=ModalitySpec(context=a_context_p),
             max_batch_size=max_batch_size,
+            **_official_comfy_ti2v_stage_1_kwargs(
+                enabled=self._official_comfy_workflow,
+                sampler=self._official_comfy_sampler,
+                seed=seed,
+            ),
         )
         if video_state is None or audio_state is None:
             raise RuntimeError("The first LTX-2.3 stage returned an incomplete AV latent.")
@@ -391,6 +451,7 @@ class TI2VidTwoStagesPipeline:
                 noise_scale=stage_2_sigmas[0].item(),
                 initial_latent=audio_state.latent,
             ),
+            **_official_comfy_ti2v_stage_2_kwargs(enabled=self._official_comfy_workflow),
         )
         if video_state is None or stage_2_audio_state is None:
             raise RuntimeError("The second LTX-2.3 stage returned an incomplete AV latent.")
@@ -403,7 +464,7 @@ class TI2VidTwoStagesPipeline:
                 stage_2_audio_latent=stage_2_audio_state.latent,
             )
         )
-        return decoded_video, decoded_audio, num_frames, tiling_config
+        return PipelineOutput(decoded_video, decoded_audio, num_frames, tiling_config, None, video_state.latent)
 
 
 @torch.inference_mode()
@@ -414,9 +475,24 @@ def main() -> None:
     parser.add_argument(
         "--official-comfy-workflow",
         action="store_true",
-        help="Use the official LTX-2.3 8+3 schedule and distilled LoRA in both stages.",
+        help="Use the fixed official Comfy T2V/I2V 8+3 schedules and stage-2 seed.",
+    )
+    parser.add_argument(
+        "--official-comfy-sampler",
+        choices=("deterministic", "euler-ancestral"),
+        default=None,
+        help=(
+            "Explicit sampler profile; LTX-2.5 uses Euler ancestral in stage 1; "
+            "stage 2 remains deterministic Euler. When omitted, the checkpoint "
+            "layout selects the matching official stage-1 sampler."
+        ),
     )
     args = parser.parse_args()
+    official_comfy_sampler = _resolve_official_comfy_ti2v_sampler(
+        official_comfy_workflow=args.official_comfy_workflow,
+        requested_sampler=args.official_comfy_sampler,
+        model_paths=args.model_paths,
+    )
     pipeline = TI2VidTwoStagesPipeline(
         model_paths=args.model_paths,
         distilled_lora=args.distilled_lora,
@@ -424,6 +500,7 @@ def main() -> None:
         loras=tuple(args.lora) if args.lora else (),
         gemma_loras=tuple(args.gemma_lora) if args.gemma_lora else (),
         official_comfy_workflow=args.official_comfy_workflow,
+        official_comfy_sampler=official_comfy_sampler,
         quantization=args.quantization,
         compilation_config=args.compile,
         offload_mode=args.offload_mode,
@@ -432,7 +509,7 @@ def main() -> None:
     )
     hdr = resolve_hdr_color_space(images=args.images, hdr=args.hdr)
     vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
-    video, audio, num_frames, tiling_config = pipeline(
+    result = pipeline(
         prompt=args.prompt,
         negative_prompt=args.negative_prompt,
         seed=args.seed,
@@ -468,11 +545,11 @@ def main() -> None:
     )
 
     encode_video(
-        video=video,
+        video=result.video,
         fps=args.frame_rate,
-        audio=audio,
+        audio=result.audio,
         output_path=args.output_path,
-        video_chunks_number=get_video_chunks_number(num_frames, tiling_config),
+        video_chunks_number=get_video_chunks_number(result.num_frames, result.tiling_config),
         color_space=hdr,
     )
 

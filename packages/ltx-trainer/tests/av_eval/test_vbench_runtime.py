@@ -14,7 +14,7 @@ from ltx_trainer.av_eval import VBenchRuntimeError, build_vbench_source_report, 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 CONFIG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "vbench-i2v-source.v1.json"
-DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
+DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v2.json"
 
 
 def _load(path: Path) -> dict[str, object]:

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from ltx_core.loader.fuse_loras import apply_loras
@@ -13,7 +14,8 @@ def _state_dict(values: dict[str, torch.Tensor]) -> StateDict:
     )
 
 
-def test_comfy_lora_alpha_scales_each_dynamic_rank() -> None:
+def test_comfy_lora_alpha_scales_each_dynamic_rank(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     model = _state_dict({"layer.weight": torch.zeros((2, 2), dtype=torch.bfloat16)})
     lora = _state_dict(
         {
@@ -28,7 +30,8 @@ def test_comfy_lora_alpha_scales_each_dynamic_rank() -> None:
     assert torch.equal(fused.sd["layer.weight"], torch.ones((2, 2), dtype=torch.bfloat16))
 
 
-def test_lora_without_alpha_keeps_legacy_strength_semantics() -> None:
+def test_lora_without_alpha_keeps_legacy_strength_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     model = _state_dict({"layer.weight": torch.zeros((2, 2), dtype=torch.bfloat16)})
     lora = _state_dict(
         {

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDefaultRequest,
+  dfrOutputGeometry,
   generationRequestSchema,
   hasDialogueIntent,
   mergeGenerationRequest,
   migrateGenerationRequest,
+  isLegacyDfrRequest,
   pipelineModes,
   withLongCatLipsyncDisabled,
   type GenerationRequest,
@@ -22,7 +24,69 @@ describe("generationRequestSchema", () => {
     expect(createDefaultRequest("text-to-audio").enhancePrompt).toBe(false);
     expect(createDefaultRequest("text-to-audio").outputName).toBe("ltx-text-to-audio.wav");
     expect(createDefaultRequest("text-to-audio").audioGuidance.cfgScale).toBe(1);
+    expect(createDefaultRequest("text-to-audio").audioGuidance.modalityScale).toBe(1);
+    expect(createDefaultRequest("text-to-audio").textToAudio.peakCeilingDbfs).toBe(-3);
     expect(createDefaultRequest("two-stage").models.gemmaLora.enabled).toBe(false);
+  });
+
+  it("rejects a no-op cross-modal guidance override for audio-only T2A", () => {
+    const request = validRequest("text-to-audio");
+    request.audioGuidance.modalityScale = 3;
+
+    const parsed = generationRequestSchema.safeParse(request);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: ["audioGuidance", "modalityScale"] }),
+      ]));
+    }
+  });
+
+  it("rejects ineffective or incomplete T2A guidance combinations", () => {
+    const missingStgBlock = validRequest("text-to-audio");
+    missingStgBlock.audioGuidance.stgScale = 0.5;
+    expect(generationRequestSchema.safeParse(missingStgBlock).success).toBe(false);
+
+    const inertStgBlock = validRequest("text-to-audio");
+    inertStgBlock.audioGuidance.stgBlocks = [29];
+    expect(generationRequestSchema.safeParse(inertStgBlock).success).toBe(false);
+
+    const inertRescale = validRequest("text-to-audio");
+    inertRescale.audioGuidance.rescaleScale = 0.7;
+    expect(generationRequestSchema.safeParse(inertRescale).success).toBe(false);
+
+    const activeCfgRescale = validRequest("text-to-audio");
+    activeCfgRescale.audioGuidance.cfgScale = 1.1;
+    activeCfgRescale.audioGuidance.rescaleScale = 0.7;
+    expect(generationRequestSchema.safeParse(activeCfgRescale).success).toBe(true);
+
+    const activeStg = validRequest("text-to-audio");
+    activeStg.audioGuidance.stgScale = 0.5;
+    activeStg.audioGuidance.stgBlocks = [29];
+    expect(generationRequestSchema.safeParse(activeStg).success).toBe(true);
+  });
+
+  it("bounds T2A peak protection and rejects hidden no-op overrides in video modes", () => {
+    const unsafe = validRequest("text-to-audio");
+    unsafe.textToAudio.peakCeilingDbfs = 0;
+    expect(generationRequestSchema.safeParse(unsafe).success).toBe(false);
+
+    const hidden = validRequest("distilled");
+    hidden.textToAudio.peakCeilingDbfs = -6;
+    const parsed = generationRequestSchema.safeParse(hidden);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: ["textToAudio", "peakCeilingDbfs"] }),
+      ]));
+    }
+  });
+
+  it("migrates stored requests without T2A peak protection to the safe default", () => {
+    const legacy = structuredClone(validRequest("text-to-audio")) as Partial<GenerationRequest>;
+    delete legacy.textToAudio;
+
+    expect(migrateGenerationRequest(legacy)?.textToAudio).toEqual({ peakCeilingDbfs: -3 });
   });
 
   it("keeps Base-Gemma as the default and preserves legacy LoRA intent", () => {
@@ -81,6 +145,201 @@ describe("generationRequestSchema", () => {
       expect(generationRequestSchema.safeParse(validLtx25SplitRequest(mode)).success).toBe(true);
     },
   );
+
+  it("defaults DFR to the pinned v1.3 split pack and an honest missing-detailer HOLD", () => {
+    const request = createDefaultRequest("dfr");
+    expect(request).toMatchObject({
+      mode: "dfr",
+      models: { layout: "split", generation: "2.5" },
+      dfr: {
+        temporalUpscalings: 0,
+        spatialUpscalings: 1,
+        temporalUpscalerPath: "",
+        detailingLoraPath: "",
+      },
+    });
+  });
+
+  it("validates the v1.3 DFR assets, upscaling flags and 128er grid fail closed", () => {
+    const request = validLtx25SplitRequest("dfr");
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+
+    const monolith = structuredClone(request);
+    monolith.models.layout = "monolith";
+    monolith.models.generation = "2.3";
+    expect(generationRequestSchema.safeParse(monolith).success).toBe(false);
+
+    const devTransformer = structuredClone(request);
+    devTransformer.models.transformerPath =
+      "/models/ltx-2.5/ltx-2.5-22b-dev-transformer-bf16.safetensors";
+    expect(generationRequestSchema.safeParse(devTransformer).success).toBe(false);
+
+    const obsoleteDistilledLora = structuredClone(request);
+    obsoleteDistilledLora.models.loras = [{
+      path: "/models/ltx-2.5/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+      strength: 1,
+    }];
+    expect(generationRequestSchema.safeParse(obsoleteDistilledLora).success).toBe(false);
+
+    const duplicateDetailer = structuredClone(request);
+    duplicateDetailer.models.loras = [{
+      path: duplicateDetailer.dfr!.detailingLoraPath,
+      strength: 0.5,
+    }];
+    const duplicateResult = generationRequestSchema.safeParse(duplicateDetailer);
+    expect(duplicateResult.success).toBe(false);
+    if (!duplicateResult.success) {
+      expect(duplicateResult.error.issues).toContainEqual(expect.objectContaining({
+        path: ["models", "loras", 0, "path"],
+        message: expect.stringContaining("nicht zusätzlich"),
+      }));
+    }
+
+    const disabledTiling = structuredClone(request);
+    disabledTiling.tiling = false;
+    expect(generationRequestSchema.safeParse(disabledTiling).success).toBe(false);
+
+    const temporal = structuredClone(request);
+    temporal.dfr!.temporalUpscalings = 1;
+    temporal.dfr!.temporalUpscalerPath = "";
+    expect(generationRequestSchema.safeParse(temporal).success).toBe(false);
+    temporal.dfr!.temporalUpscalerPath =
+      "/models/ltx-2.5/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors";
+    expect(generationRequestSchema.safeParse(temporal).success).toBe(true);
+
+    const detailing = structuredClone(request);
+    detailing.dfr!.detailingLoraPath = "";
+    expect(generationRequestSchema.safeParse(detailing).success).toBe(false);
+    detailing.dfr!.detailingLoraPath = "/models/unpinned-detailer.safetensors";
+    expect(generationRequestSchema.safeParse(detailing).success).toBe(false);
+    detailing.dfr!.detailingLoraPath =
+      "/models/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors";
+    expect(generationRequestSchema.safeParse(detailing).success).toBe(true);
+
+    const spatial = structuredClone(request);
+    spatial.dfr!.spatialUpscalings = 2;
+    spatial.height = 1088;
+    expect(generationRequestSchema.safeParse(spatial).success).toBe(false);
+    spatial.height = 1024;
+    expect(generationRequestSchema.safeParse(spatial).success).toBe(true);
+
+    const fractionalFps = structuredClone(request);
+    fractionalFps.frameRate = 24_000 / 1_001;
+    expect(generationRequestSchema.safeParse(fractionalFps).success).toBe(true);
+  });
+
+  it("derives exact DFR v1.3 final geometry for 0/1/2 temporal rounds", () => {
+    const request = validLtx25SplitRequest("dfr");
+    request.numFrames = 121;
+    request.frameRate = 24_000 / 1_001;
+    request.dfr!.spatialUpscalings = 2;
+
+    expect(dfrOutputGeometry(request)).toMatchObject({
+      width: request.width,
+      height: request.height,
+      numFrames: 121,
+      frameRate: 24_000 / 1_001,
+      temporalFactor: 1,
+    });
+    request.dfr!.temporalUpscalings = 1;
+    expect(dfrOutputGeometry(request)).toMatchObject({
+      numFrames: 241,
+      frameRate: 48_000 / 1_001,
+      temporalFactor: 2,
+    });
+    request.dfr!.temporalUpscalings = 2;
+    const final = dfrOutputGeometry(request);
+    expect(final).toMatchObject({
+      numFrames: 481,
+      frameRate: 96_000 / 1_001,
+      temporalFactor: 4,
+    });
+    expect(final.durationSeconds).toBeCloseTo(120 / (24_000 / 1_001), 12);
+  });
+
+  it("migrates legacy DFR fields but clears the obsolete Dev-transformer authority", () => {
+    const legacy = structuredClone(validLtx25SplitRequest("dfr")) as unknown as Record<string, unknown> & {
+      models: GenerationRequest["models"];
+      dfr: Record<string, unknown>;
+    };
+    legacy.models.transformerPath =
+      "/models/ltx-2.5/ltx-2.5-22b-dev-transformer-bf16.safetensors";
+    legacy.models.distilledLora = {
+      path: "/models/ltx-2.5/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+      strength: 1,
+    };
+    legacy.models.loras = [
+      {
+        path: "/models/ltx-2.5/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+        strength: 1,
+      },
+      { path: "/models/custom-style.safetensors", strength: 0.6 },
+    ];
+    legacy.dfr = {
+      distilledLora: {
+        path: "/models/ltx-2.5/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+        strength: 1,
+      },
+      temporalUpsampleRounds: 2,
+      temporalUpscalerPath:
+        "/models/ltx-2.5/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors",
+      detailingLora: {
+        enabled: true,
+        path: "/models/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        strength: 0.8,
+      },
+    };
+
+    const migrated = mergeGenerationRequest(legacy);
+    expect(migrated.models.transformerPath).toBe("");
+    expect(migrated.models.distilledLora).toEqual({ path: "", strength: 1 });
+    expect(migrated.models.loras).toEqual([
+      { path: "/models/custom-style.safetensors", strength: 0.6 },
+    ]);
+    expect(migrated.dfr).toEqual({
+      temporalUpscalings: 2,
+      spatialUpscalings: 1,
+      temporalUpscalerPath:
+        "/models/ltx-2.5/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors",
+      detailingLoraPath:
+        "/models/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+    });
+    expect(isLegacyDfrRequest(migrated)).toBe(true);
+    expect(isLegacyDfrRequest(migrateGenerationRequest(legacy)!)).toBe(true);
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+
+    migrated.models.transformerPath =
+      "/models/ltx-2.5/ltx-2.5-22b-distilled-transformer-bf16.safetensors";
+    delete migrated.legacyExecution;
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+  });
+
+  it("keeps a formerly disabled legacy detailer on HOLD instead of enabling its stale path", () => {
+    const legacy = structuredClone(validLtx25SplitRequest("dfr")) as unknown as {
+      dfr: Record<string, unknown>;
+    };
+    legacy.dfr = {
+      temporalUpsampleRounds: 0,
+      temporalUpscalerPath: "",
+      detailingLora: {
+        enabled: false,
+        path: "/models/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        strength: 1,
+      },
+    };
+
+    const migrated = mergeGenerationRequest(legacy);
+    expect(migrated.dfr?.detailingLoraPath).toBe("");
+    expect(isLegacyDfrRequest(migrated)).toBe(true);
+    expect(generationRequestSchema.safeParse(migrated).success).toBe(true);
+  });
+
+  it("does not materialize DFR fields while parsing legacy frozen requests", () => {
+    const legacy = structuredClone(validRequest("distilled")) as Record<string, unknown>;
+    delete legacy.dfr;
+    const parsed = generationRequestSchema.parse(legacy);
+    expect(Object.hasOwn(parsed, "dfr")).toBe(false);
+  });
 
   it("models the official single-stage preview without requiring an upscaler", () => {
     const request = validLtx25SplitRequest("distilled");
@@ -275,10 +534,12 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
   });
 
-  it.each(["pixel-upscaler", "v2v-instant-shave"] as const)(
+  it.each(["pixel-upscaler", "v2v-deblur", "v2v-instant-shave"] as const)(
     "requires exactly one source video and no separate image for %s",
     (profile) => {
-      const request = validRequest("ic-lora");
+      const request = profile === "v2v-deblur"
+        ? validLtx25SplitRequest("ic-lora")
+        : validRequest("ic-lora");
       request.icLora.profile = profile;
       request.icLora.controlType = "prepared";
       request.images = [];
@@ -293,6 +554,26 @@ describe("generationRequestSchema", () => {
       expect(generationRequestSchema.safeParse(request).success).toBe(false);
     },
   );
+
+  it("binds Deblur strength 1 only to the current LTX-2.5 split V2V contract", () => {
+    const split = validLtx25SplitRequest("ic-lora");
+    split.icLora.profile = "v2v-deblur";
+    split.images = [];
+    expect(generationRequestSchema.safeParse(split).success).toBe(true);
+
+    split.icLora.lora.strength = 0.9;
+    expect(generationRequestSchema.safeParse(split).success).toBe(false);
+
+    const legacyOnSplit = validLtx25SplitRequest("ic-lora");
+    legacyOnSplit.icLora.profile = "v2v-instant-shave";
+    legacyOnSplit.images = [];
+    expect(generationRequestSchema.safeParse(legacyOnSplit).success).toBe(false);
+
+    const deblurOnMonolith = validRequest("ic-lora");
+    deblurOnMonolith.icLora.profile = "v2v-deblur";
+    deblurOnMonolith.images = [];
+    expect(generationRequestSchema.safeParse(deblurOnMonolith).success).toBe(false);
+  });
 
   it("requires one image and a track sequence for Motion Track", () => {
     const request = validRequest("ic-lora");
@@ -599,6 +880,7 @@ describe("generationRequestSchema", () => {
     expect(request.postprocess.lipForcing).toEqual({
       enabled: false,
       decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
       mouthDelayMs: 0,
       programAudioDelayMs: 0,
     });
@@ -607,6 +889,18 @@ describe("generationRequestSchema", () => {
 
     request.postprocess.lipForcing.decoder = "streaming-taehv";
     expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    request.postprocess.lipForcing.rawOutputProfile = "h264-crf13-mux-copy-v1";
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    expect(generationRequestSchema.safeParse({
+      ...request,
+      postprocess: {
+        ...request.postprocess,
+        lipForcing: {
+          ...request.postprocess.lipForcing,
+          rawOutputProfile: "unregistered-mux-profile",
+        },
+      },
+    }).success).toBe(false);
     request.postprocess.lipForcing.mouthDelayMs = 501;
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
     request.postprocess.lipForcing.mouthDelayMs = 125;
@@ -617,6 +911,20 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(request).success).toBe(true);
     request.postprocess.museTalk.enabled = true;
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
+  });
+
+  it("migrates a stored pre-profile request only to the command-compatible LipForcing default", () => {
+    const legacy = structuredClone(validRequest("lipdub")) as unknown as {
+      postprocess: { lipForcing: Record<string, unknown> };
+    };
+    delete legacy.postprocess.lipForcing.rawOutputProfile;
+
+    expect(generationRequestSchema.safeParse(legacy).success).toBe(false);
+    expect(migrateGenerationRequest(legacy)?.postprocess.lipForcing.rawOutputProfile)
+      .toBe("h264-crf13-mux-crf18-v1");
+
+    legacy.postprocess.lipForcing.rawOutputProfile = "unregistered-mux-profile";
+    expect(migrateGenerationRequest(legacy)).toBeNull();
   });
 
   it("requires the native LipDub reference contract", () => {

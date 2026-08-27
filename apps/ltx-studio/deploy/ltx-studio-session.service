@@ -1,5 +1,5 @@
 [Unit]
-Description=LTX Studio :4318 with sealed phoneme-viseme evaluator
+Description=LTX Studio development session (unsealed; never production)
 After=dgx-runtime-api.service
 Wants=dgx-runtime-api.service
 
@@ -12,6 +12,9 @@ EnvironmentFile=/opt/ltx-studio-phoneme-viseme/ltx-studio.env
 ExecStart=/home/moddy/.nvm/versions/node/v24.18.0/bin/npm start
 Restart=on-failure
 RestartSec=3
+# The sealed T2A evaluator has a bound RuntimeMax of about 7:09 minutes. Keep
+# the parent alive long enough to prove that its transient unit is terminal.
+TimeoutStopSec=8min
 # A render subprocess may be picked by the kernel OOM killer for a foreign
 # allocation (2026-08-06: killed at 39 GiB, 19 GiB below its own admission).
 # Keep the server alive so it can mark the job interrupted instead of losing

@@ -33,7 +33,7 @@ Videoqualität auf der DGX abgenommen wurde.
 | IC-LoRA Union Control | implementiert | Depth/Canny/Pose je separat abnehmen |
 | IC-LoRA Ingredients | implementiert | Identitäts-/Requisiten-Holdout |
 | IC-LoRA Motion Track | implementiert | Track-Treue und Artefaktrate |
-| V2V IC-LoRA | implementiert | exakte LoRA-Variante und V2V-Holdout abnehmen |
+| V2V IC-LoRA | implementiert | Deblur-Wirkung sowie Bewegungs- und Detailtreue im V2V-Holdout abnehmen |
 | A2V Two Stage Distilled | nicht implementiert | 2.5-Vertrag, Audio-Freeze-Äquivalenz, Tests |
 | IC-LoRA Inpaint Two Stage | nicht implementiert | Masken- und Two-Stage-Vertrag, Tests |
 | IC-LoRA Outpaint Two Stage | nicht implementiert | Canvas-/Maskenvertrag, Tests |
@@ -42,12 +42,14 @@ Die sechs offiziellen Graphen aus der vorgeschlagenen Kern-Auswahl sind damit te
 T2A ist zusätzlich gebunden. Die beiden Community-FullRes-Kandidaten bleiben bis zum Abschluss der
 Provenienzprüfung außerhalb des Produkt- und Claim-Surfaces.
 
-Bekannte V2V-Abweichung: Der gepinnte JSON-Graph referenziert derzeit die 2.3-Deblur-IC-LoRA,
-während sein offizielles README „Instant Shave“ als mitgeliefertes Beispiel beschreibt. Das Studio
-bindet seinen vorhandenen V2V-Pfad deshalb weiterhin an die separat gepinnte Instant-Shave-LoRA und
-weist die Workflow-JSON plus die tatsächlich ausgeführte LoRA gemeinsam in der Run-Provenienz aus.
-Das ist als bewusst parametrisierte Variante vertretbar, aber kein bitidentischer Nachbau des
-JSON-Beispiels; beide LoRA-Arme müssen im Holdout getrennt benannt und abgenommen werden.
+Der ausführbare gepinnte V2V-JSON-Graph ist für den Laufvertrag maßgeblich: Er referenziert die
+2.3-Deblur-IC-LoRA mit Stärke 1,0. Das Studio bindet diesen aktuellen offiziellen LTX-2.5-Pfad daher
+an die separat nach Revision, Größe und SHA-256 gepinnte Deblur-LoRA. Der ältere
+Instant-Shave-Ablauf bleibt ausdrücklich als LTX-2.3-Legacy-Arm mit seinem Triggerwort REMOVEBEARD
+getrennt. Ein Offline-Semantikvertrag koppelt Workflow-Digest, Profil, Modellidentität und Stärke;
+eine spätere Graphänderung ohne erneute Modellprüfung lässt den Katalogtest fehlschlagen. Das
+offizielle README beschreibt derzeit noch Instant Shave und wird deshalb nicht als ausführbare
+Parameterquelle verwendet.
 
 ## Modellarme für die Spark
 

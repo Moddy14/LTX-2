@@ -10,7 +10,7 @@ from pathlib import Path
 DISTRIBUTION = "torch"
 EXPECTED_VERSION = "2.13.0+cu132"
 ORIGINAL_REQUIREMENT = b'Requires-Dist: nvidia-cudnn-cu13==9.20.0.48; platform_system == "Linux"\n'
-NORMALIZED_REQUIREMENT = b'Requires-Dist: nvidia-cudnn-cu13==9.21.1.3; platform_system == "Linux"\n'
+NORMALIZED_REQUIREMENT = b'Requires-Dist: nvidia-cudnn-cu13==9.24.0.43; platform_system == "Linux"\n'
 
 
 def fail(message: str) -> None:

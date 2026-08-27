@@ -1,4 +1,10 @@
-import { estimateResources, requestComputeUnits, type ResourceEstimate } from "../shared/estimates.js";
+import { usesAudioDerivedA2vFrames } from "../shared/a2vDuration.js";
+import {
+  estimateResources,
+  requestComputeUnits,
+  type EstimateOptions,
+  type ResourceEstimate,
+} from "../shared/estimates.js";
 import type { GenerationRequest } from "../shared/pipelines.js";
 import type { StudioJob } from "./jobs.js";
 import * as mediaProbe from "./mediaProbe.js";
@@ -23,6 +29,13 @@ function requestWithReferenceVideoSizing(request: GenerationRequest): Generation
   };
 }
 
+function estimateOptionsForRequest(request: GenerationRequest): EstimateOptions {
+  if (!usesAudioDerivedA2vFrames(request)) return {};
+  return {
+    audioSourceDurationSeconds: mediaProbe.probeAudioDurationSeconds(request.audio.path),
+  };
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -34,15 +47,19 @@ export function estimateRequest(
   jobs: readonly Pick<StudioJob, "status" | "mode" | "runtimeMs" | "request">[],
 ): ResourceEstimate {
   const sizedRequest = requestWithReferenceVideoSizing(request);
-  const base = estimateResources(sizedRequest);
+  const estimateOptions = estimateOptionsForRequest(sizedRequest);
+  const base = estimateResources(sizedRequest, estimateOptions);
   const samples = jobs.filter((job) =>
     job.status === "completed" && job.mode === request.mode && job.runtimeMs !== null && job.runtimeMs > 0,
   );
   if (samples.length < 2) return { ...base, etaSamples: samples.length };
-  const targetUnits = requestComputeUnits(sizedRequest);
-  const normalizedSeconds = samples.map((job) =>
-    (job.runtimeMs! / 1_000) * (targetUnits / requestComputeUnits(requestWithReferenceVideoSizing(job.request))),
-  );
+  const targetUnits = requestComputeUnits(sizedRequest, estimateOptions);
+  const normalizedSeconds = samples.map((job) => {
+    const sizedSample = requestWithReferenceVideoSizing(job.request);
+    return (job.runtimeMs! / 1_000) * (
+      targetUnits / requestComputeUnits(sizedSample, estimateOptionsForRequest(sizedSample))
+    );
+  });
   return {
     ...base,
     etaSeconds: Math.max(1, Math.round(median(normalizedSeconds))),

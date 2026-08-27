@@ -12,6 +12,7 @@ import {
 } from "../shared/activation.js";
 import { qualificationTicketClaimSchema } from "../shared/qualificationRegistry.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import { runtimeTrustBindingSchema } from "../shared/runtimeTrust.js";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const timestampSchema = z.string().datetime({ offset: false, precision: 0 });
@@ -34,7 +35,7 @@ const brokerTerminalSchema = z.object({
 });
 
 export const qualificationBrokerRequestSchema = z.object({
-  schemaVersion: z.literal("ltx-studio-qualification-broker-request.v1"),
+  schemaVersion: z.literal("ltx-studio-qualification-broker-request.v3"),
   requestId: z.uuid(),
   action: z.enum(qualificationBrokerActions),
   requestedAt: timestampSchema,
@@ -42,6 +43,11 @@ export const qualificationBrokerRequestSchema = z.object({
   expectedHeadSha256: sha256Schema,
   expectedReleaseDigest: sha256Schema,
   expectedSurfaceDigest: sha256Schema,
+  expectedRuntimeInstallSealSha256: sha256Schema,
+  expectedRuntimeTreeSha256: sha256Schema,
+  expectedRuntimePolicySha256: sha256Schema,
+  expectedNodeExecutableSha256: sha256Schema,
+  expectedRuntimeTrust: runtimeTrustBindingSchema,
   claim: qualificationTicketClaimSchema,
   terminal: brokerTerminalSchema.nullable(),
 }).strict().superRefine((request, context) => {
@@ -226,7 +232,12 @@ function assertPreflight(snapshot: RuntimeActivationSnapshot, request: Qualifica
   if (snapshot.generation !== request.expectedGeneration
     || snapshot.activationHeadSha256 !== request.expectedHeadSha256
     || snapshot.releaseDigest !== request.expectedReleaseDigest
-    || snapshot.surfaceDigest !== request.expectedSurfaceDigest) {
+    || snapshot.surfaceDigest !== request.expectedSurfaceDigest
+    || snapshot.runtimeInstallSealSha256 !== request.expectedRuntimeInstallSealSha256
+    || snapshot.runtimeTreeSha256 !== request.expectedRuntimeTreeSha256
+    || snapshot.runtimePolicySha256 !== request.expectedRuntimePolicySha256
+    || snapshot.nodeExecutableSha256 !== request.expectedNodeExecutableSha256
+    || canonicalJson(snapshot.runtimeTrust) !== canonicalJson(request.expectedRuntimeTrust)) {
     throw new Error("Qualification broker request has a stale activation binding");
   }
 }
@@ -247,6 +258,11 @@ function assertCommittedEnvelope(
     || record.generation !== request.expectedGeneration
     || record.release.releaseDigest !== request.expectedReleaseDigest
     || record.release.surfaceDigest !== request.expectedSurfaceDigest
+    || record.release.runtimeInstallSealSha256 !== request.expectedRuntimeInstallSealSha256
+    || record.release.runtimeTreeSha256 !== request.expectedRuntimeTreeSha256
+    || record.release.runtimePolicySha256 !== request.expectedRuntimePolicySha256
+    || record.release.nodeExecutableSha256 !== request.expectedNodeExecutableSha256
+    || canonicalJson(record.release.runtimeTrust) !== canonicalJson(request.expectedRuntimeTrust)
     || record.state !== "qualification_only") {
     throw new Error("Qualification broker receipt activation binding mismatch");
   }
@@ -287,6 +303,10 @@ export class QualificationBrokerClient {
       || snapshot.generation !== request.expectedGeneration
       || snapshot.releaseDigest !== request.expectedReleaseDigest
       || snapshot.surfaceDigest !== request.expectedSurfaceDigest
+      || snapshot.runtimeInstallSealSha256 !== request.expectedRuntimeInstallSealSha256
+      || snapshot.runtimeTreeSha256 !== request.expectedRuntimeTreeSha256
+      || snapshot.runtimePolicySha256 !== request.expectedRuntimePolicySha256
+      || snapshot.nodeExecutableSha256 !== request.expectedNodeExecutableSha256
       || snapshot.activationHeadSha256 !== committedHead) {
       throw new Error("Qualification broker commit is not the verified anchored runtime head");
     }

@@ -4,6 +4,10 @@ import {
 } from "../shared/activation.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
 import { verifyReleasePromotionBundle } from "../shared/releaseAudit.js";
+import type {
+  ReleaseSecurityAuditBinding,
+  SecurityAuditArtifactReader,
+} from "../shared/securityAudit.js";
 
 export function validateReleasePromotion(options: {
   now: Date;
@@ -16,6 +20,13 @@ export function validateReleasePromotion(options: {
   authorization: { document: unknown; signature: unknown };
   auditEnvelope: unknown;
   rightsAttestation: { document: unknown; signature: unknown };
+  securityAudit: {
+    document: unknown;
+    signature: unknown;
+    sha256: string;
+  };
+  securityAuditBinding: ReleaseSecurityAuditBinding;
+  securityAuditReadArtifact: SecurityAuditArtifactReader;
   trustPolicy: unknown;
   trustPolicyDigest: string;
 }) {
@@ -24,6 +35,11 @@ export function validateReleasePromotion(options: {
     expectedGeneration: options.expectedGeneration,
     expectedReleaseDigest: options.expectedRelease.releaseDigest,
     expectedSurfaceDigest: options.expectedRelease.surfaceDigest,
+    expectedRuntimeInstallSealSha256: options.expectedRelease.runtimeInstallSealSha256,
+    expectedRuntimeTreeSha256: options.expectedRelease.runtimeTreeSha256,
+    expectedRuntimePolicySha256: options.expectedRelease.runtimePolicySha256,
+    expectedNodeExecutableSha256: options.expectedRelease.nodeExecutableSha256,
+    expectedRuntimeTrust: options.expectedRelease.runtimeTrust,
     expectedRightsPolicyEvidenceDigest: options.expectedRelease.rights.policyEvidenceDigest,
     expectedReleasedSurfaceEntryIds: options.expectedReleasedSurfaceEntryIds,
     evidence: options.evidence,
@@ -31,6 +47,9 @@ export function validateReleasePromotion(options: {
     authorization: options.authorization,
     auditEnvelope: options.auditEnvelope,
     rightsAttestation: options.rightsAttestation,
+    securityAudit: options.securityAudit,
+    securityAuditBinding: options.securityAuditBinding,
+    securityAuditReadArtifact: options.securityAuditReadArtifact,
     trustPolicy: options.trustPolicy,
     trustPolicyDigest: options.trustPolicyDigest,
   });

@@ -13,6 +13,7 @@ import {
   type ActivationJournalRecord,
 } from "../shared/activation.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const roots: string[] = [];
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -42,6 +43,11 @@ async function fixture() {
   const release = {
     releaseDigest: sha("release"),
     surfaceDigest: sha("surface"),
+    runtimeInstallSealSha256: sha("runtime-seal"),
+    runtimeTreeSha256: sha("runtime-tree"),
+    runtimePolicySha256: sha("runtime-policy"),
+    nodeExecutableSha256: sha("node-executable"),
+    runtimeTrust: runtimeTrustFixture,
     rights: {
       policyEvidenceDigest: sha("rights-evidence"),
       attestationSeriesId: "rights-series-001",
@@ -49,7 +55,7 @@ async function fixture() {
     },
   };
   const first = signedActivation({
-    schemaVersion: "ltx-studio-activation-journal-record.v1",
+    schemaVersion: "ltx-studio-activation-journal-record.v3",
     recordId: "00000000-0000-4000-8000-000000000021",
     sequence: 0,
     generation: 1,
@@ -128,9 +134,14 @@ async function fixture() {
     }],
   };
   const rightsDocument = {
-    schemaVersion: "ltx-studio-runtime-rights-snapshot.v1",
+    schemaVersion: "ltx-studio-runtime-rights-snapshot.v3",
     releaseDigest: release.releaseDigest,
     surfaceDigest: release.surfaceDigest,
+    runtimeInstallSealSha256: release.runtimeInstallSealSha256,
+    runtimeTreeSha256: release.runtimeTreeSha256,
+    runtimePolicySha256: release.runtimePolicySha256,
+    nodeExecutableSha256: release.nodeExecutableSha256,
+    runtimeTrust: release.runtimeTrust,
     policyEvidenceDigest: release.rights.policyEvidenceDigest,
     attestationSeriesId: release.rights.attestationSeriesId,
     version: 4,
@@ -191,6 +202,11 @@ describe("file-backed runtime activation provider", () => {
       activationHeadSha256: activationEnvelopeDigest(promotion),
       releaseDigest: promotion.record.release.releaseDigest,
       surfaceDigest: promotion.record.release.surfaceDigest,
+      runtimeInstallSealSha256: promotion.record.release.runtimeInstallSealSha256,
+      runtimeTreeSha256: promotion.record.release.runtimeTreeSha256,
+      runtimePolicySha256: promotion.record.release.runtimePolicySha256,
+      nodeExecutableSha256: promotion.record.release.nodeExecutableSha256,
+      runtimeTrust: runtimeTrustFixture,
       rightsCurrent: true,
       releasedSurfaceEntryIds: ["two-stage.text.prompt.base-gemma.post.none"],
     });

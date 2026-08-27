@@ -105,7 +105,7 @@ export class ThermalPauseGuard {
     if (paused) {
       this.hotStreak = 0;
       this.unreadableStreak = temperatureC === null ? this.unreadableStreak + 1 : 0;
-      this.coolStreak = temperatureC !== null && temperatureC < this.options.resumeBelowC
+      this.coolStreak = temperatureC !== null && temperatureC <= this.options.resumeBelowC
         ? this.coolStreak + 1
         : 0;
       if (this.coolStreak >= this.options.resumePolls) {

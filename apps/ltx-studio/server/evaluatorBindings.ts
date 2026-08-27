@@ -86,7 +86,7 @@ export function capturePinnedPathRevision(
 }
 
 export function openPinnedPaths(expected: PinnedPathRevision[]): {
-  bindReadOnlyProperty: (path: string) => string;
+  bindReadOnlyProperty: (path: string, destination?: string) => string;
   sourcePath: (path: string) => string;
   sha256: (path: string, maximumBytes: number) => string;
   verifyUnchanged: () => void;
@@ -138,9 +138,10 @@ export function openPinnedPaths(expected: PinnedPathRevision[]): {
       const entry = entryFor(path);
       return `/proc/${process.pid}/fd/${entry.descriptor}`;
     },
-    bindReadOnlyProperty: (path) => {
+    bindReadOnlyProperty: (path, destination = path) => {
       const entry = entryFor(path);
-      return `--property=BindReadOnlyPaths=/proc/${process.pid}/fd/${entry.descriptor}:${path}`;
+      validatePath(destination);
+      return `--property=BindReadOnlyPaths=/proc/${process.pid}/fd/${entry.descriptor}:${destination}`;
     },
     sha256: (path, maximumBytes) => {
       const entry = entryFor(path);

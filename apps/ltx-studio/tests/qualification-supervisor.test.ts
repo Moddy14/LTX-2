@@ -21,11 +21,17 @@ import {
   type QualificationLaunchPlan,
   type QualificationSupervisorOperations,
 } from "../server/qualificationSupervisor.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const release = {
   releaseDigest: hash("release"),
   surfaceDigest: hash("surface"),
+  runtimeInstallSealSha256: hash("runtime-seal"),
+  runtimeTreeSha256: hash("runtime-tree"),
+  runtimePolicySha256: hash("runtime-policy"),
+  nodeExecutableSha256: hash("node-executable"),
+  runtimeTrust: runtimeTrustFixture,
   rights: {
     policyEvidenceDigest: hash("rights"),
     attestationSeriesId: "rights-series-001",
@@ -68,6 +74,11 @@ function fixture(options: { failAction?: QualificationBrokerRequest["action"]; i
       activationHeadSha256: head,
       releaseDigest: release.releaseDigest,
       surfaceDigest: release.surfaceDigest,
+      runtimeInstallSealSha256: release.runtimeInstallSealSha256,
+      runtimeTreeSha256: release.runtimeTreeSha256,
+      runtimePolicySha256: release.runtimePolicySha256,
+      nodeExecutableSha256: release.nodeExecutableSha256,
+      runtimeTrust: runtimeTrustFixture,
       rightsCurrent: true,
       releasedSurfaceEntryIds: [],
     }),
@@ -106,7 +117,7 @@ function fixture(options: { failAction?: QualificationBrokerRequest["action"]; i
       } as const;
       const nextState = { accept: "accepted", arm: "armed", start: "started", terminalize: "terminal" } as const;
       const record = {
-        schemaVersion: "ltx-studio-activation-journal-record.v1" as const,
+        schemaVersion: "ltx-studio-activation-journal-record.v3" as const,
         recordId: request.requestId,
         sequence: sequence++,
         generation: 1,

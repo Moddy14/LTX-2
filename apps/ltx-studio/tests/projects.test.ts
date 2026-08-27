@@ -11,6 +11,7 @@ import {
   projectValueSha256,
 } from "../server/projectStore.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import { isLegacyDfrRequest } from "../shared/pipelines.js";
 import {
   projectCreateRequestSchema,
   projectOutputCaptureRequestSchema,
@@ -53,6 +54,48 @@ function outputEvidence(
 }
 
 describe("persistent project history", () => {
+  it("keeps canonical pre-v1.3 DFR projects visible but permanently non-executable", async () => {
+    const root = await projectRoot();
+    const store = new ProjectStore(root);
+    const created = store.create({ title: "DFR Altbestand", description: "", actorId });
+    const current = validRequest("dfr");
+    current.outputName = "legacy-dfr-project.mp4";
+    const added = store.addShot(created.projectId, {
+      expectedRevision: 1,
+      title: "Historischer DFR Shot",
+      request: current,
+      continuity: null,
+      actorId,
+    });
+    expect(added.revision).toBe(2);
+    const revisionPath = join(root, created.projectId, "00000002.json");
+    const persisted = JSON.parse(await readFile(revisionPath, "utf8")) as typeof added;
+    const requestRevision = persisted.project.shots[0]!.requestRevisions[0]!;
+    requestRevision.request.models.transformerPath =
+      "/models/ltx-2.5/ltx-2.5-22b-dev-transformer-bf16.safetensors";
+    requestRevision.request.dfr = {
+      temporalUpsampleRounds: 0,
+      detailingLora: { enabled: false, path: "", strength: 1 },
+    } as unknown as typeof requestRevision.request.dfr;
+    requestRevision.requestSha256 = projectValueSha256(requestRevision.request);
+    const historicalBytes = canonicalJson(persisted);
+    await writeFile(revisionPath, historicalBytes, "utf8");
+
+    const restored = new ProjectStore(root);
+    const visible = restored.get(created.projectId);
+    expect(visible).not.toBeNull();
+    expect(isLegacyDfrRequest(
+      visible!.project.shots[0]!.requestRevisions[0]!.request,
+    )).toBe(true);
+    expect(restored.listAvailable()).toMatchObject({ warnings: [] });
+    expect(() => restored.bindingForRun(
+      created.projectId,
+      visible!.revision,
+      visible!.project.shots[0]!.id,
+    )).toThrow("historischem DFR-Altbestand");
+    expect(await readFile(revisionPath, "utf8")).toBe(historicalBytes);
+  });
+
   it("preserves shot, continuity, retake, output and approval history in a hash chain", async () => {
     const store = new ProjectStore(await projectRoot());
     const created = store.create({

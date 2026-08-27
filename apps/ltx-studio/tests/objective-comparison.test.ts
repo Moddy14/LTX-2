@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AvSyncRawMetrics, IdentityMetrics } from "../shared/objectiveQuality.js";
-import type { StudioOutput } from "../shared/outputs.js";
+import type { PublicStudioOutput as StudioOutput } from "../shared/outputPublic.js";
 import { notApplicableDialogueEvaluation } from "../shared/dialogueEvaluator.js";
 import {
   comparisonCompatibility,
@@ -43,12 +43,38 @@ function output(
   };
   return {
     name,
+    url: `/api/outputs/${name}`,
+    sizeBytes: 1_000,
+    modifiedAt: "2026-07-25T00:00:00.000Z",
+    changedAt: "2026-07-25T00:00:01.000Z",
+    revisionToken: `eq1_revision-${name}`,
     jobId,
+    jobStatus: "completed",
     request,
+    settingsAvailable: true,
+    qualityReview: null,
     analysis: {
-      schemaVersion: "ltx-studio-output-analysis.v4",
-      evaluatorFingerprint: "test-evaluator.v1",
+      schemaVersion: "ltx-studio-public-output-analysis.v1",
+      sourceSchemaVersion: "ltx-studio-output-analysis.v4",
+      outputName: name,
+      outputRevisionToken: `eq1_revision-${name}`,
+      jobId,
+      analysisId: name.startsWith("a")
+        ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        : "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      attempt: 1,
       status: "completed",
+      progress: 100,
+      createdAt: "2026-07-25T00:00:00.000Z",
+      startedAt: "2026-07-25T00:00:00.000Z",
+      finishedAt: "2026-07-25T00:00:01.000Z",
+      updatedAt: "2026-07-25T00:00:01.000Z",
+      error: null,
+      equality: {
+        evaluator: "eq1_evaluator",
+        expectedDialogue: null,
+        identityModel: "eq1_identity-model",
+      },
       result: {
         schemaVersion: "ltx-studio-objective-quality.v4",
         analyzerVersion: "ffprobe-yunet5-sface-avmotion-pv.v4",
@@ -65,77 +91,48 @@ function output(
         avSync,
       },
     },
-    provenance: {
-      schemaVersion: "ltx-studio-run-provenance.v1",
+    provenanceSummary: {
+      schemaVersion: "ltx-studio-public-output-provenance-summary.v1",
+      status: "verified",
       capturedAt: "2026-07-25T00:00:00.000Z",
       verifiedAt: "2026-07-25T00:00:01.000Z",
-      files: [{
-        role: "input:conditioning-audio",
-        path: "/inputs/audio.wav",
-        kind: "file",
-        sizeBytes: 1,
-        modifiedAtMs: 1,
-        changedAtMs: 1,
-        fileId: "1",
-        sha256: "a".repeat(64),
-        entries: [],
-      }, {
-        role: "model:checkpoint",
-        path: "/models/ltx.safetensors",
-        kind: "file",
-        sizeBytes: 1,
-        modifiedAtMs: 1,
-        changedAtMs: 1,
-        fileId: "2",
-        sha256: "9".repeat(64),
-        entries: [],
-      }],
-      code: [{
-        repositoryRoot: "/repo",
-        commit: "b".repeat(40),
-        dirty: false,
-        trackedDiffSha256: "c".repeat(64),
-        untracked: [],
-        fingerprint: "d".repeat(64),
-      }],
-      runtime: {
-        platform: "linux",
-        architecture: "arm64",
-        kernelRelease: "test",
-        nodeVersion: "test",
-        pythonExecutable: "/python",
-        pythonVersion: "3.12",
-        packages: {},
-        ffmpegVersion: "test",
-        fingerprint: "e".repeat(64),
+      release: null,
+      equality: {
+        run: "eq1_run",
+        inputs: "eq1_inputs",
+        models: "eq1_models",
+        code: "eq1_code",
+        runtime: "eq1_runtime",
       },
-      fingerprint: "f".repeat(64),
     },
+    experiment: null,
+    project: null,
+    experimentRequestVerified: false,
   } as unknown as StudioOutput;
 }
 
 function bindGuidanceExperiment(left: StudioOutput, right: StudioOutput): void {
   right.request!.videoGuidance.modalityScale = 5;
   const common = {
-    schemaVersion: "ltx-studio-experiment-run.v1" as const,
+    schemaVersion: "ltx-studio-public-experiment-run.v1" as const,
     experimentId: "33333333-3333-4333-8333-333333333333",
-    protocolSha256: "3".repeat(64),
+    protocolEqualityToken: "eq1_protocol",
     kind: "ablation" as const,
     variableId: "a2v-guidance",
     changedRequestPaths: ["videoGuidance.modalityScale"],
-    baselineRequestSha256: "4".repeat(64),
+    baselineRequestEqualityToken: "eq1_baseline-request",
     baselineOutputName: left.name,
   };
   left.experiment = {
     ...common,
     arm: "baseline",
-    requestSha256: "4".repeat(64),
+    requestEqualityToken: "eq1_baseline-request",
     baselineJobId: null,
   };
   right.experiment = {
     ...common,
     arm: "candidate",
-    requestSha256: "5".repeat(64),
+    requestEqualityToken: "eq1_candidate-request",
     baselineJobId: left.jobId,
   };
   left.experimentRequestVerified = true;
@@ -156,6 +153,20 @@ describe("objective A/B comparison", () => {
       expect.objectContaining({ id: "videoGuidance.modalityScale", left: "3", right: "5" }),
     ]));
     expect(settingsDifferences(left, right).map((difference) => difference.id)).not.toContain("seed");
+  });
+
+  it("marks a dormant A2V frame request as audio-controlled", () => {
+    const left = validRequest("audio-to-video");
+    const right = structuredClone(left);
+    left.numFrames = 9;
+    right.numFrames = 217;
+
+    expect(settingsDifferences(left, right)).toContainEqual({
+      id: "numFrames",
+      label: "Expliziter Framewert (inaktiv · Audio-Maximaldauer steuert)",
+      left: "9",
+      right: "217",
+    });
   });
 
   it("computes B-minus-A metrics and direction only for calibrated metric intent", () => {
@@ -198,7 +209,7 @@ describe("objective A/B comparison", () => {
       const analysis = candidate.analysis as NonNullable<StudioOutput["analysis"]> & {
         result: Record<string, unknown> & { face: Record<string, unknown> };
       };
-      analysis.schemaVersion = "ltx-studio-output-analysis.v7";
+      analysis.sourceSchemaVersion = "ltx-studio-output-analysis.v7";
       analysis.result = {
         ...analysis.result,
         schemaVersion: "ltx-studio-objective-quality.v7",
@@ -251,7 +262,7 @@ describe("objective A/B comparison", () => {
       const analysis = candidate.analysis as NonNullable<StudioOutput["analysis"]> & {
         result: Record<string, unknown>;
       };
-      analysis.schemaVersion = "ltx-studio-output-analysis.v6";
+      analysis.sourceSchemaVersion = "ltx-studio-output-analysis.v6";
       analysis.result = {
         ...analysis.result,
         schemaVersion: "ltx-studio-objective-quality.v6",
@@ -279,6 +290,103 @@ describe("objective A/B comparison", () => {
     }
   });
 
+  it("shows full-window phoneme/viseme diagnostics as neutral raw values while Product-GO is blocked", () => {
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    for (const [candidate, lag, bilabial, opening, rounding, speech, pause] of [
+      [left, 42, 0.15625, 0.2787, 0.1674, 0.3564, 0.2368],
+      [right, 0, 0.2388, 0.3189, 0.1122, 0.3582, 0.2308],
+    ] as const) {
+      const analysis = candidate.analysis as NonNullable<StudioOutput["analysis"]> & {
+        result: Record<string, unknown>;
+      };
+      analysis.sourceSchemaVersion = "ltx-studio-output-analysis.v7";
+      analysis.result = {
+        ...analysis.result,
+        schemaVersion: "ltx-studio-objective-quality.v7",
+        phonemeViseme: {
+          status: "insufficient",
+          blockerCode: "measurement-insufficient",
+          error: "Product-GO blocked",
+          manifestReleaseId: "measurement-test",
+          manifestSha256: "1".repeat(64),
+          preprocessingVersion: "ctc-espeak-mediapipe-de-pts.v1",
+          visemeMapVersion: "viseme15-en-de.v1",
+          gateVersion: null,
+          productGo: { status: "blocked", reason: "Uncalibrated holdout" },
+          offset: {
+            status: "measured",
+            gatePassed: false,
+            estimatedOffsetMilliseconds: lag,
+            confidence: 0.04,
+          },
+          content: {
+            status: "insufficient",
+            gatePassed: false,
+            frameMacroF1: null,
+            transitionF1: null,
+          },
+          measurement: {
+            method: "ctc-espeak-mediapipe-de.v1",
+            runnerFingerprint: "2".repeat(64),
+            expectedDialogueSha256: "3".repeat(64),
+            globalAvLagMilliseconds: lag,
+            lagConfidence: 0.04,
+            bilabialClosureF1: bilabial,
+            openingCorrelation: opening,
+            roundingCorrelation: rounding,
+            speechMotionRecall: speech,
+            pauseLeakRatio: pause,
+            phoneCoverage: 1,
+            unknownPhones: [],
+            faceTrackCoverage: 1,
+            mouthTrackCoverage: 1,
+            multiFaceFrameRatio: 0,
+            medianBlurVariance: 20,
+            yawP95Degrees: 5,
+            pitchP95Degrees: 5,
+            usableDurationSeconds: 10.04,
+            sampledFrames: 241,
+          },
+        },
+      } as unknown as typeof analysis.result;
+    }
+
+    const metrics = objectiveComparisonMetrics(left, right);
+    const values = new Map(metrics.map((metric) => [metric.id, metric]));
+    expect(values.get("phoneme-viseme-absolute-lag")).toMatchObject({ left: 42, right: 0 });
+    expect(values.get("phoneme-viseme-bilabial-closure")).toMatchObject({
+      left: 0.15625,
+      right: 0.2388,
+    });
+    expect(values.get("phoneme-viseme-opening-correlation")).toMatchObject({
+      left: 0.2787,
+      right: 0.3189,
+    });
+    expect(values.get("phoneme-viseme-rounding-correlation")).toMatchObject({
+      left: 0.1674,
+      right: 0.1122,
+    });
+    expect(values.get("phoneme-viseme-speech-motion-recall")).toMatchObject({
+      left: 0.3564,
+      right: 0.3582,
+    });
+    expect(values.get("phoneme-viseme-pause-leak")).toMatchObject({
+      left: 0.2368,
+      right: 0.2308,
+    });
+    for (const id of [
+      "phoneme-viseme-absolute-lag",
+      "phoneme-viseme-bilabial-closure",
+      "phoneme-viseme-opening-correlation",
+      "phoneme-viseme-rounding-correlation",
+      "phoneme-viseme-speech-motion-recall",
+      "phoneme-viseme-pause-leak",
+    ]) {
+      expect(metricTrend(values.get(id)!)).toBe("neutral");
+    }
+  });
+
   it("detects prompt differences beyond the displayed preview and gates incompatible analyses", () => {
     const leftRequest = validRequest("audio-to-video");
     leftRequest.prompt = `${"same ".repeat(30)}left`;
@@ -298,6 +406,35 @@ describe("objective A/B comparison", () => {
     expect(compatibility.reasons).toContain(
       "Der tatsächliche Request-Diff entspricht nicht der eingefrorenen Einzelfaktoränderung.",
     );
+  });
+
+  it("does not mistake dormant A2V frame fields for an effective duration difference", () => {
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    bindGuidanceExperiment(left, right);
+    left.request!.numFrames = 9;
+    right.request!.numFrames = 217;
+
+    const compatibility = comparisonCompatibility(left, right);
+    expect(compatibility.reasons).not.toContain("Dauer oder Bildrate unterscheiden sich.");
+    expect(compatibility.reasons).toContain(
+      "Der tatsächliche Request-Diff entspricht nicht der eingefrorenen Einzelfaktoränderung.",
+    );
+  });
+
+  it("prefers measured output timing over the requested A2V timeline", () => {
+    const left = output("a.mp4");
+    const right = output("b.mp4");
+    bindGuidanceExperiment(left, right);
+    Object.assign(left.analysis!.result!.technical, { frames: 113, fps: 24 });
+    Object.assign(right.analysis!.result!.technical, { frames: 121, fps: 24 });
+
+    expect(comparisonCompatibility(left, right).reasons).toContain(
+      "Dauer oder Bildrate unterscheiden sich.",
+    );
+
+    Object.assign(right.analysis!.result!.technical, { frames: 113, fps: 24 });
+    expect(comparisonCompatibility(left, right)).toEqual({ comparable: true, reasons: [] });
   });
 
   it("orders a bound experiment as baseline then candidate regardless of click order", () => {

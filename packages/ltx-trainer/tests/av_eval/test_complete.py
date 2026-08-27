@@ -9,19 +9,25 @@ from pathlib import Path
 from statistics import NormalDist
 
 import pytest
+from test_bundle import _reports as _fixed_source_reports
+from test_offset_calibration import _anchors as _offset_anchors
+from test_offset_calibration import _built_context as _offset_context
 
 from ltx_trainer.av_eval import (
     CompleteD1Error,
     build_calibration_gate_report,
     build_complete_d1_report,
+    build_fixed_d1_report,
+    build_offset_measurements,
     build_power_report,
     build_vbench_measurements,
     document_sha256,
 )
+from ltx_trainer.av_eval.complete import validate_complete_d1_report
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-CATALOG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v1.json"
-DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
+CATALOG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v2.json"
+DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v2.json"
 
 
 def _design() -> dict[str, object]:
@@ -112,14 +118,49 @@ def _fixed_report(catalog: dict[str, object], design: dict[str, object]) -> dict
                 "decision": "pass",
             }
         )
+    design_report = build_power_report(design)
+    strata_digest = design_report["strata_quotas_digest"]
+    offset_contract = {
+        "abstention_policy_digest": "f" * 64,
+        "bootstrap": {"replicates": 10_000, "confidence_level": 0.95, "seed": 11_082_026},
+        "control_deck_digest": "0" * 64,
+        "dataset_manifest_digest": "5" * 64,
+        "design_digest": design_report["design_digest"],
+        "design_report_digest": document_sha256(design_report),
+        "fit_split_manifest_digest": "6" * 64,
+        "evaluation_split_manifest_digest": "7" * 64,
+        "output_split_manifest_digest": "8" * 64,
+        "calibration_policy_digest": "9" * 64,
+        "operating_point_digest": "a" * 64,
+        "offset_evaluator_digest": "d" * 64,
+        "power_report_digest": document_sha256(design_report),
+        "strata_quotas_digest": strata_digest,
+        "required_independent_units": design_report["required_independent_units"],
+        "raw_score_threshold": 0.5,
+        "bootstrap_rng": "numpy-pcg64-derived-sha256-seeds.v1",
+        "binomial_interval": "component-clopper-pearson-95-bonferroni-strata.v2",
+        "uncertainty_method": "component-clopper-pearson-plus-cluster-bootstrap-simultaneous-strata.v2",
+        "component_weighting": "equal-total-weight-per-transitive-component.v1",
+        "calibration_abstention_semantics": (
+            "conditional-on-non-abstained-with-separate-abstention-gates.v1"
+        ),
+        "grid_replicates_per_cell": 1,
+        "ece_bins": 10,
+    }
     return {
-        "schema_version": "ltx-av-eval-fixed-d1-report.v1",
+        "schema_version": "ltx-av-eval-fixed-d1-report.v2",
+        "bundle_digest": "0" * 64,
         "calibration_catalog_digest": build_calibration_gate_report(catalog)["catalog_digest"],
         "dataset_digest": "1" * 64,
         "preregistration_digest": "2" * 64,
         "release_digest": "3" * 64,
         "design_digest": document_sha256(design),
-        "strata_plan_digest": "4" * 64,
+        "surface_digest": design_report["surface_digest"],
+        "candidate_surface_binding_digest": design_report["candidate_surface_binding_digest"],
+        "strata_plan_digest": strata_digest,
+        "source_report_digests": {"synthetic": "1" * 64},
+        "offset_contract": offset_contract,
+        "verdict": "pass",
         "metrics": metrics,
     }
 
@@ -176,15 +217,28 @@ def _vbench_report(design: dict[str, object]) -> dict[str, object]:
             }
         )
     metrics.sort(key=lambda metric: metric["metric_id"])
+    design_report = build_power_report(design)
     return {
-        "schema_version": "ltx-av-eval-vbench-measurements.v1",
+        "schema_version": "ltx-av-eval-vbench-measurements.v2",
+        "input_digest": "0" * 64,
         "dataset_digest": "1" * 64,
         "preregistration_digest": "2" * 64,
         "release_digest": "3" * 64,
+        "surface_digest": design_report["surface_digest"],
+        "candidate_surface_binding_digest": design_report["candidate_surface_binding_digest"],
         "design_digest": document_sha256(design),
-        "strata_plan_digest": "4" * 64,
+        "strata_plan_digest": design_report["strata_quotas_digest"],
+        "vbench_gate_catalog_digest": document_sha256(design["vbench_gate_catalog"]),
+        "repository_commit": "b" * 40,
+        "config_digest": "c" * 64,
         "runtime_digest": _runtime_report()["runtime_digest"],
-        "design_report_digest": document_sha256(build_power_report(design)),
+        "comparator_matrix_digest": "6" * 64,
+        "bootstrap": {"replicates": 10_000, "confidence_level": 0.95, "seed": 11_082_026},
+        "multiplicity": "holm",
+        "familywise_alpha": 0.05,
+        "hypotheses": 252,
+        "verdict": "pass",
+        "design_report_digest": document_sha256(design_report),
         "metrics": metrics,
     }
 
@@ -206,11 +260,13 @@ def _scored_vbench_report(design: dict[str, object]) -> dict[str, object]:
     observations.sort(key=lambda observation: observation["observation_id"])
     return build_vbench_measurements(
         {
-            "schema_version": "ltx-av-eval-vbench-observations.v1",
+            "schema_version": "ltx-av-eval-vbench-observations.v2",
             "dataset_digest": "1" * 64,
             "preregistration_digest": "2" * 64,
             "release_digest": "3" * 64,
-            "strata_plan_digest": "4" * 64,
+            "surface_digest": build_power_report(design)["surface_digest"],
+            "candidate_surface_binding_digest": build_power_report(design)["candidate_surface_binding_digest"],
+            "strata_plan_digest": build_power_report(design)["strata_quotas_digest"],
             "design_digest": document_sha256(design),
             "vbench_gate_catalog_digest": document_sha256(design["vbench_gate_catalog"]),
             "repository_commit": "b" * 40,
@@ -226,7 +282,7 @@ def _scored_vbench_report(design: dict[str, object]) -> dict[str, object]:
 
 def _bundle(catalog: dict[str, object], design: dict[str, object]) -> dict[str, object]:
     return {
-        "schema_version": "ltx-av-eval-complete-d1-bundle.v1",
+        "schema_version": "ltx-av-eval-complete-d1-bundle.v2",
         "report_id": "complete-d1-candidate-01",
         "producer_id": "independent-calibration-scorer-01",
         "generated_at": "2026-08-11T18:00:00Z",
@@ -250,8 +306,33 @@ def test_complete_d1_report_is_deterministic_and_covers_the_full_surface_gate_ma
 
     assert first == second
     assert first["verdict"] == "pass"
-    assert len(first["metrics"]) == 127
+    assert len(first["metrics"]) == 170
     assert first["metrics"] == sorted(first["metrics"], key=lambda metric: metric["metric_id"])
+    assert first["offset_contract"] == bundle["fixed_report"]["offset_contract"]
+
+
+def test_complete_d1_v2_validator_denies_empty_extra_legacy_and_mixed_payloads() -> None:
+    design = _design()
+    catalog = _catalog(design)
+    design_report = build_power_report(design)
+    canonical = build_complete_d1_report(_bundle(catalog, design), calibration_catalog=catalog, design=design)
+
+    empty = copy.deepcopy(canonical)
+    empty["metrics"] = []
+    extra = copy.deepcopy(canonical)
+    extra["unregistered_evidence"] = True
+    legacy = copy.deepcopy(canonical)
+    legacy["schema_version"] = "ltx-av-eval-complete-d1-report.v1"
+    mixed = copy.deepcopy(canonical)
+    mixed["vbench_report"]["schema_version"] = "ltx-av-eval-vbench-measurements.v1"
+
+    for payload in (empty, extra, legacy, mixed):
+        with pytest.raises(CompleteD1Error):
+            validate_complete_d1_report(
+                payload,
+                calibration_catalog=catalog,
+                design_report=design_report,
+            )
 
 
 def test_complete_d1_accepts_the_executable_vbench_scorer_output() -> None:
@@ -262,7 +343,7 @@ def test_complete_d1_accepts_the_executable_vbench_scorer_output() -> None:
     report = build_complete_d1_report(bundle, calibration_catalog=catalog, design=design)
 
     assert report["verdict"] == "pass"
-    assert len(report["metrics"]) == 127
+    assert len(report["metrics"]) == 170
 
 
 def test_complete_d1_report_recomputes_fixed_and_vbench_decisions() -> None:
@@ -317,6 +398,93 @@ def test_complete_d1_recomputes_the_vbench_runtime_fingerprint() -> None:
         build_complete_d1_report(drift, calibration_catalog=catalog, design=design)
 
 
+def test_complete_d1_recomputes_the_offset_d0a_contract() -> None:
+    design = _design()
+    catalog = _catalog(design)
+    drift = _bundle(catalog, design)
+    drift["fixed_report"]["offset_contract"]["required_independent_units"] -= 1  # type: ignore[index]
+
+    with pytest.raises(CompleteD1Error, match="exact D0a units"):
+        build_complete_d1_report(drift, calibration_catalog=catalog, design=design)
+
+    evaluator_drift = _bundle(catalog, design)
+    evaluator_drift["fixed_report"]["offset_contract"]["offset_evaluator_digest"] = "f" * 64  # type: ignore[index]
+    with pytest.raises(CompleteD1Error, match="offset evaluator fingerprint"):
+        build_complete_d1_report(evaluator_drift, calibration_catalog=catalog, design=design)
+
+    bootstrap_drift = _bundle(catalog, design)
+    bootstrap_drift["fixed_report"]["offset_contract"]["bootstrap"]["replicates"] = 9_999  # type: ignore[index]
+    with pytest.raises(CompleteD1Error, match="frozen bootstrap contract"):
+        build_complete_d1_report(bootstrap_drift, calibration_catalog=catalog, design=design)
+
+
+def test_real_offset_v2_builder_propagates_through_fixed_and_complete_reports() -> None:
+    deck, calibrator, _observation_deck, observations = _offset_context()
+    offset_report = build_offset_measurements(
+        observations,
+        control_deck=deck,
+        calibrator=calibrator,
+        **_offset_anchors(),
+    )
+    design = deck["design"]
+    catalog = _catalog(design)
+    catalog["preregistration_digest"] = offset_report["preregistration_digest"]
+    for fingerprint in catalog["evaluator_fingerprints"]:
+        if fingerprint["evaluator_id"] == "offset-evaluator":
+            fingerprint["sha256"] = offset_report["offset_evaluator_digest"]
+    reports = _fixed_source_reports(catalog)
+    for report in reports.values():
+        report["dataset_digest"] = offset_report["dataset_digest"]
+        report["preregistration_digest"] = offset_report["preregistration_digest"]
+        report["release_digest"] = offset_report["release_digest"]
+        report["strata_plan_digest"] = offset_report["strata_plan_digest"]
+        report["bootstrap"] = offset_report["bootstrap"]
+    reports["offset"] = offset_report
+    power_report = build_power_report(design)
+    fixed_report = build_fixed_d1_report(
+        {
+            "schema_version": "ltx-av-eval-fixed-d1-bundle.v2",
+            "bundle_id": "real-offset-v2-e2e",
+            "dataset_digest": offset_report["dataset_digest"],
+            "preregistration_digest": offset_report["preregistration_digest"],
+            "release_digest": offset_report["release_digest"],
+            "design_digest": offset_report["design_digest"],
+            "surface_digest": power_report["surface_digest"],
+            "candidate_surface_binding_digest": power_report["candidate_surface_binding_digest"],
+            "strata_plan_digest": offset_report["strata_plan_digest"],
+            "bootstrap": offset_report["bootstrap"],
+            "reports": reports,
+        },
+        calibration_catalog=catalog,
+    )
+    vbench_report = _vbench_report(design)
+    for field in ("dataset_digest", "preregistration_digest", "release_digest", "strata_plan_digest"):
+        vbench_report[field] = fixed_report[field]
+    complete = build_complete_d1_report(
+        {
+            "schema_version": "ltx-av-eval-complete-d1-bundle.v2",
+            "report_id": "real-offset-v2-e2e",
+            "producer_id": "independent-calibration-scorer-01",
+            "generated_at": "2026-08-25T12:00:00Z",
+            "runner_digest": "f" * 64,
+            "fixed_report": fixed_report,
+            "vbench_report": vbench_report,
+            "vbench_runtime_report": _runtime_report(),
+        },
+        calibration_catalog=catalog,
+        design=design,
+    )
+
+    assert fixed_report["offset_contract"]["design_report_digest"] == document_sha256(
+        build_power_report(design)
+    )
+    assert complete["offset_contract"] == fixed_report["offset_contract"]
+    assert complete["offset_contract"]["required_independent_units"] == deck["power_report"][
+        "required_independent_units"
+    ]
+    assert complete["verdict"] == "fail"  # Honest HOLD: simultaneous worst-skin FAR upper bound is > 0.03.
+
+
 def test_complete_d1_cli_emits_decided_report(tmp_path: Path) -> None:
     design = _design()
     catalog = _catalog(design)
@@ -349,5 +517,5 @@ def test_complete_d1_cli_emits_decided_report(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     report = json.loads(result.stdout)
-    assert report["schema_version"] == "ltx-av-eval-complete-d1-report.v1"
+    assert report["schema_version"] == "ltx-av-eval-complete-d1-report.v2"
     assert report["verdict"] == "pass"

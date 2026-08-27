@@ -19,11 +19,17 @@ import {
   type QualificationTicketCheckpoint,
   type QualificationTicketClaim,
 } from "../shared/qualificationRegistry.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const release = {
   releaseDigest: sha("release"),
   surfaceDigest: sha("surface"),
+  runtimeInstallSealSha256: sha("runtime-seal"),
+  runtimeTreeSha256: sha("runtime-tree"),
+  runtimePolicySha256: sha("runtime-policy"),
+  nodeExecutableSha256: sha("node-executable"),
+  runtimeTrust: runtimeTrustFixture,
   rights: {
     policyEvidenceDigest: sha("rights"),
     attestationSeriesId: "rights-series-001",
@@ -74,7 +80,7 @@ function append(
 function fixture() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const authorization = qualificationAuthorizationSchema.parse({
-    schemaVersion: "qualification-authorization.v1",
+    schemaVersion: "qualification-authorization.v3",
     authorizationId: "qualification-r0l-001",
     generation: 1,
     release,
@@ -127,7 +133,7 @@ function fixture() {
     }],
   };
   const first = envelope({
-    schemaVersion: "ltx-studio-activation-journal-record.v1",
+    schemaVersion: "ltx-studio-activation-journal-record.v3",
     recordId: "00000000-0000-4000-8000-000000000001",
     sequence: 0,
     generation: 1,

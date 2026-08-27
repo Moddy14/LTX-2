@@ -41,6 +41,13 @@ def _step_state(
     return replace(state, latent=stepper.step(state.latent, denoised, sigmas, step_idx))
 
 
+def _latent_to_dtype(state: LatentState | None, dtype: torch.dtype | None) -> LatentState | None:
+    """Cast only a state's evolving latent, preserving all conditioning metadata."""
+    if state is None or dtype is None or state.latent.dtype is dtype:
+        return state
+    return replace(state, latent=state.latent.to(dtype))
+
+
 def euler_denoising_loop(
     sigmas: torch.Tensor,
     video_state: LatentState | None,
@@ -48,6 +55,9 @@ def euler_denoising_loop(
     stepper: DiffusionStepProtocol,
     transformer: X0Model,
     denoiser: Denoiser,
+    *,
+    model_dtype: torch.dtype | None = None,
+    model_input_dtype: torch.dtype | None = None,
 ) -> tuple[LatentState | None, LatentState | None]:
     """
     Perform the joint audio-video denoising loop over a diffusion schedule.
@@ -71,18 +81,38 @@ def euler_denoising_loop(
         A callable implementing :class:`Denoiser`. It is invoked as
         ``denoiser(transformer, video_state, audio_state, sigmas, step_index)``
         and must return a :class:`~ltx_pipelines.utils.types.DenoisedLatentResult`.
+    model_dtype:
+        Optional dtype for the persisted sampler state. ``None`` preserves the
+        historical input dtype.
+    model_input_dtype:
+        Optional dtype used only for denoiser/transformer-bound latents. This
+        allows an FP32 sampler trajectory around BF16 model weights.
     ### Returns
     tuple[LatentState | None, LatentState | None]
         Final ``(video_state, audio_state)`` after the denoising loop.
     """
+    # Normalize before restore so a saved high-precision trajectory cannot be
+    # downcast merely because a freshly built reference state used model dtype.
+    video_state = _latent_to_dtype(video_state, model_dtype)
+    audio_state = _latent_to_dtype(audio_state, model_dtype)
     loop_index, start_step, video_state, audio_state = restore_euler_checkpoint(sigmas, video_state, audio_state)
     for step_idx in tqdm(range(start_step, len(sigmas) - 1)):
-        video_result, audio_result = denoiser(transformer, video_state, audio_state, sigmas, step_idx)
+        model_video_state = _latent_to_dtype(video_state, model_input_dtype)
+        model_audio_state = _latent_to_dtype(audio_state, model_input_dtype)
+        video_result, audio_result = denoiser(
+            transformer,
+            model_video_state,
+            model_audio_state,
+            sigmas,
+            step_idx,
+        )
         denoised_video = video_result.denoised if video_result is not None else None
         denoised_audio = audio_result.denoised if audio_result is not None else None
 
         video_state = _step_state(video_state, denoised_video, stepper, sigmas, step_idx)
         audio_state = _step_state(audio_state, denoised_audio, stepper, sigmas, step_idx)
+        video_state = _latent_to_dtype(video_state, model_dtype)
+        audio_state = _latent_to_dtype(audio_state, model_dtype)
 
         checkpoint_and_yield_if_requested(
             loop_index=loop_index,
@@ -250,7 +280,7 @@ def _inject_sde_noise(
     return x_next
 
 
-def res2s_audio_video_denoising_loop(  # noqa: PLR0913,PLR0915,PLR0912
+def res2s_audio_video_denoising_loop(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
     sigmas: torch.Tensor,
     video_state: LatentState | None,
     audio_state: LatentState | None,
@@ -530,7 +560,7 @@ class _ModalityStep:
         return cls(modality=modality, state=state, step_fn=step_fn, denoised=denoised)
 
 
-def _ancestral_euler_denoising_loop(
+def _ancestral_euler_denoising_loop(  # noqa: PLR0913,PLR0917
     sigmas: torch.Tensor,
     video_state: LatentState | None,
     audio_state: LatentState | None,
@@ -539,6 +569,7 @@ def _ancestral_euler_denoising_loop(
     noise_seed: int,
     new_noise_fn: Callable[[torch.Tensor, torch.Generator], torch.Tensor],
     model_dtype: torch.dtype,
+    model_input_dtype: torch.dtype | None,
     draw_noise: bool,
     make_step_fn: Callable[[DenoisedLatentResult | None, str], Callable[..., torch.Tensor]],
 ) -> tuple[LatentState | None, LatentState | None]:
@@ -546,9 +577,11 @@ def _ancestral_euler_denoising_loop(
     Shared driver for the ancestral (noise-injecting) Euler denoising loops.
     Steps each present modality in float32, re-applies the conditioning mask
     after noise injection, and short-circuits to the denoised prediction on a
-    terminal zero sigma. When both modalities are present, noise is drawn from
-    the same seeded generator (video first, audio second) so the random
-    sequence is consistent.
+    terminal zero sigma. ``model_dtype`` controls the persisted sampler state;
+    ``model_input_dtype`` can independently cast only the transformer-bound
+    latent, matching ComfyUI's FP32 sampler state around BF16 model weights.
+    When both modalities are present, noise is drawn from the same seeded
+    generator (video first, audio second) so the random sequence is consistent.
     ### Parameters
     draw_noise:
         Whether to draw a noise tensor per modality per step. When ``False``,
@@ -568,6 +601,8 @@ def _ancestral_euler_denoising_loop(
     if video_state is None and audio_state is None:
         raise ValueError("At least one of video_state or audio_state must be provided")
 
+    video_state = _latent_to_dtype(video_state, model_dtype)
+    audio_state = _latent_to_dtype(audio_state, model_dtype)
     loop_index, start_step, video_state, audio_state = restore_euler_checkpoint(
         sigmas,
         video_state,
@@ -576,6 +611,7 @@ def _ancestral_euler_denoising_loop(
     present_state = video_state if video_state is not None else audio_state
     generator = torch.Generator(device=present_state.latent.device).manual_seed(noise_seed)
     states: dict[str, LatentState | None] = {"video": video_state, "audio": audio_state}
+    resolved_model_input_dtype = model_input_dtype or model_dtype
 
     # Cooperative checkpoints contain updated latents rather than generator
     # state. Replay only the already-consumed draws in the canonical
@@ -590,7 +626,15 @@ def _ancestral_euler_denoising_loop(
                 new_noise_fn(audio_state.latent, generator)
 
     for step_idx in tqdm(range(start_step, len(sigmas) - 1)):
-        video_result, audio_result = denoiser(transformer, states["video"], states["audio"], sigmas, step_idx)
+        model_video_state = _latent_to_dtype(states["video"], resolved_model_input_dtype)
+        model_audio_state = _latent_to_dtype(states["audio"], resolved_model_input_dtype)
+        video_result, audio_result = denoiser(
+            transformer,
+            model_video_state,
+            model_audio_state,
+            sigmas,
+            step_idx,
+        )
         pending = [
             _ModalityStep.from_modality_result(modality, state, result, make_step_fn)
             for modality, state, result in (
@@ -644,6 +688,7 @@ def euler_ancestral_denoising_loop(
     noise_seed: int = -1,
     new_noise_fn: Callable[[torch.Tensor, torch.Generator], torch.Tensor] = _get_plain_noise,
     model_dtype: torch.dtype = torch.bfloat16,
+    model_input_dtype: torch.dtype | None = None,
 ) -> tuple[LatentState | None, LatentState | None]:
     """
     Joint audio-video denoising loop using the ancestral (SDE) Euler sampler.
@@ -679,6 +724,11 @@ def euler_ancestral_denoising_loop(
     model_dtype:
         Dtype for latent state updates. Default ``bfloat16``. Pass
         ``torch.float32`` to keep the sampling trajectory in full precision.
+    model_input_dtype:
+        Optional dtype for the latent passed into the denoiser/transformer.
+        Defaults to ``model_dtype``. Set this to ``bfloat16`` with an FP32
+        ``model_dtype`` when BF16 weights require BF16 model inputs while the
+        surrounding sampler trajectory must remain FP32.
     ### Returns
     tuple[LatentState | None, LatentState | None]
         Final ``(video_state, audio_state)`` after the denoising loop.
@@ -695,6 +745,7 @@ def euler_ancestral_denoising_loop(
         noise_seed=noise_seed,
         new_noise_fn=new_noise_fn,
         model_dtype=model_dtype,
+        model_input_dtype=model_input_dtype,
         # Gated on eta alone: at s_noise=0 the step still applies its variance-preserving
         # rescale, so it must not fall back to the noise-free branch.
         draw_noise=stepper.eta > 0,
@@ -713,6 +764,7 @@ def euler_cfg_pp_denoising_loop(
     noise_seed: int = -1,
     new_noise_fn: Callable[[torch.Tensor, torch.Generator], torch.Tensor] = _get_plain_noise,
     model_dtype: torch.dtype = torch.bfloat16,
+    model_input_dtype: torch.dtype | None = None,
 ) -> tuple[LatentState | None, LatentState | None]:
     """
     Joint audio-video denoising loop using the CFG++ corrected Euler sampler.
@@ -746,6 +798,9 @@ def euler_cfg_pp_denoising_loop(
         :func:`_get_new_noise` for the normalized variant used in res2s.
     model_dtype:
         Dtype for latent state updates. Default ``bfloat16``.
+    model_input_dtype:
+        Optional dtype for denoiser/transformer-bound latents. Defaults to
+        ``model_dtype`` so existing CFG++ callers retain their current behavior.
     ### Returns
     tuple[LatentState | None, LatentState | None]
         Final ``(video_state, audio_state)`` after the denoising loop.
@@ -773,6 +828,7 @@ def euler_cfg_pp_denoising_loop(
         noise_seed=noise_seed,
         new_noise_fn=new_noise_fn,
         model_dtype=model_dtype,
+        model_input_dtype=model_input_dtype,
         draw_noise=stepper.eta > 0 and stepper.s_noise > 0,
         make_step_fn=make_step_fn,
     )

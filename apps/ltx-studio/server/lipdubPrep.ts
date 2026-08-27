@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 
 import type { GenerationRequest } from "../shared/pipelines.js";
 import type { PreparedLipDubReference } from "../shared/plan.js";
-import { uploadRoot } from "./config.js";
+import { hostTcbExecutables, uploadRoot } from "./config.js";
 import { probeVideoMetadata } from "./mediaProbe.js";
 import {
   chooseLipDubConstantFps,
@@ -25,6 +25,7 @@ export class LipDubReferencePreparationError extends Error {
 
 type PreparedLipDubReferenceFile = Omit<PreparedLipDubReference, "asset"> & {
   file: AssetFile;
+  command: string;
 };
 
 export type LipDubReferencePreparationInput = Pick<GenerationRequest, "width" | "height"> & {
@@ -89,7 +90,7 @@ function preparationWindow(
 
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(hostTcbExecutables.ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     let timedOut = false;
     const timeout = setTimeout(() => {

@@ -19,6 +19,7 @@ import {
   type ActivationJournalRecord,
 } from "../shared/activation.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const roots: string[] = [];
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -39,7 +40,7 @@ class MemoryAnchor implements ActivationHeadAnchor {
 
 function envelope(overrides: Partial<ActivationJournalRecord> = {}): ActivationJournalEnvelope {
   const record: ActivationJournalRecord = {
-    schemaVersion: "ltx-studio-activation-journal-record.v1",
+    schemaVersion: "ltx-studio-activation-journal-record.v3",
     recordId: "00000000-0000-4000-8000-000000000011",
     sequence: 0,
     generation: 1,
@@ -50,6 +51,11 @@ function envelope(overrides: Partial<ActivationJournalRecord> = {}): ActivationJ
     release: {
       releaseDigest: sha("release"),
       surfaceDigest: sha("surface"),
+      runtimeInstallSealSha256: sha("runtime-seal"),
+      runtimeTreeSha256: sha("runtime-tree"),
+      runtimePolicySha256: sha("runtime-policy"),
+      nodeExecutableSha256: sha("node-executable"),
+      runtimeTrust: runtimeTrustFixture,
       rights: {
         policyEvidenceDigest: sha("rights"),
         attestationSeriesId: "rights-series-001",

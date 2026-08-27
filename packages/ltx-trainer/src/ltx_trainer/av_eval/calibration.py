@@ -5,10 +5,16 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .design import document_sha256
+from .design import CURRENT_VBENCH_CLAIM_IDS, document_sha256
 
-CALIBRATION_SCHEMA = "ltx-av-eval-calibration-gates.v1"
-CALIBRATION_REPORT_SCHEMA = "ltx-av-eval-calibration-gate-report.v1"
+LEGACY_CALIBRATION_SCHEMA = "ltx-av-eval-calibration-gates.v1"
+CALIBRATION_SCHEMA = "ltx-av-eval-calibration-gates.v2"
+LEGACY_CALIBRATION_REPORT_SCHEMA = "ltx-av-eval-calibration-gate-report.v1"
+CALIBRATION_REPORT_SCHEMA = "ltx-av-eval-calibration-gate-report.v2"
+CALIBRATION_REPORT_SCHEMA_BY_CATALOG = {
+    LEGACY_CALIBRATION_SCHEMA: LEGACY_CALIBRATION_REPORT_SCHEMA,
+    CALIBRATION_SCHEMA: CALIBRATION_REPORT_SCHEMA,
+}
 FINGERPRINT_IDS = {
     "artifact-evaluator",
     "asr-model",
@@ -20,7 +26,7 @@ FINGERPRINT_IDS = {
     "sharpness-evaluator",
     "vbench-runtime",
 }
-VBENCH_CLAIMS = (
+LEGACY_VBENCH_CLAIMS = (
     "audio-driven-video.image-audio-to-video",
     "audio-driven-video.image-audio-to-video.refined.longcat-lipsync",
     "controlled-video.first-last-frame",
@@ -37,6 +43,7 @@ VBENCH_CLAIMS = (
     "reference-video-redubbing.official-comfy-hq",
     "video-edit.retake",
 )
+VBENCH_CLAIMS = CURRENT_VBENCH_CLAIM_IDS
 VBENCH_DIMENSIONS = (
     "aesthetic-quality",
     "background-consistency",
@@ -45,8 +52,15 @@ VBENCH_DIMENSIONS = (
     "motion-smoothness",
     "subject-consistency",
 )
+LEGACY_EXPECTED_VBENCH_METRIC_IDS = {
+    f"vbench.{claim}.{dimension}" for claim in LEGACY_VBENCH_CLAIMS for dimension in VBENCH_DIMENSIONS
+}
 EXPECTED_VBENCH_METRIC_IDS = {
     f"vbench.{claim}.{dimension}" for claim in VBENCH_CLAIMS for dimension in VBENCH_DIMENSIONS
+}
+EXPECTED_VBENCH_METRIC_IDS_BY_SCHEMA = {
+    LEGACY_CALIBRATION_SCHEMA: LEGACY_EXPECTED_VBENCH_METRIC_IDS,
+    CALIBRATION_SCHEMA: EXPECTED_VBENCH_METRIC_IDS,
 }
 GATE_SPECS: dict[str, tuple[str, str, float | None, str]] = {
     "artifact-event-far-ci-upper": ("lower", "ci-upper", 0.01, "overall"),
@@ -64,11 +78,33 @@ GATE_SPECS: dict[str, tuple[str, str, float | None, str]] = {
     "asr-wer-estimate": ("lower", "estimate", 0.05, "overall"),
     "asr-wer-estimate-worst-stratum": ("lower", "estimate", 0.10, "worst-registered-stratum"),
     "av-brier-score": ("lower", "estimate", 0.10, "overall"),
+    "av-brier-score-worst-stratum": ("lower", "estimate", None, "worst-registered-stratum"),
     "av-calibration-ece": ("lower", "estimate", 0.05, "overall"),
+    "av-calibration-ece-worst-stratum": ("lower", "estimate", None, "worst-registered-stratum"),
+    "av-correspondence-far-ci-upper": ("lower", "ci-upper", 0.01, "overall"),
+    "av-correspondence-far-ci-upper-worst-stratum": (
+        "lower",
+        "ci-upper",
+        0.03,
+        "worst-registered-stratum",
+    ),
+    "av-correspondence-frr-ci-upper": ("lower", "ci-upper", 0.05, "overall"),
+    "av-correspondence-frr-ci-upper-worst-stratum": (
+        "lower",
+        "ci-upper",
+        0.10,
+        "worst-registered-stratum",
+    ),
     "av-evaluator-bootstrap95-upper-ms": ("lower", "ci-upper", 40.0, "overall"),
     "av-evaluator-median-absolute-error-ms": ("lower", "estimate", 20.0, "overall"),
     "av-evaluator-p95-absolute-error-ms": ("lower", "estimate", 40.0, "overall"),
     "av-evaluator-within-one-frame-ci-lower": ("higher", "ci-lower", 0.95, "overall"),
+    "av-evaluator-within-one-frame-ci-lower-worst-stratum": (
+        "higher",
+        "ci-lower",
+        0.90,
+        "worst-registered-stratum",
+    ),
     "av-in-domain-false-abstention-ci-upper": ("lower", "ci-upper", 0.05, "overall"),
     "av-ood-abstention-recall-ci-lower": ("higher", "ci-lower", 0.95, "overall"),
     "av-output-offset-p95-ms": ("lower", "estimate", 80.0, "overall"),
@@ -106,6 +142,24 @@ GATE_SPECS: dict[str, tuple[str, str, float | None, str]] = {
     "identity-frr-ci-upper-worst-stratum": ("lower", "ci-upper", 0.10, "worst-registered-stratum"),
     "identity-tar-ci-lower": ("higher", "ci-lower", 0.95, "overall"),
     "sharpness-relative-face-ci-lower": ("higher", "ci-lower", None, "worst-registered-stratum"),
+}
+V2_ONLY_GATE_IDS = frozenset(
+    {
+        "av-brier-score-worst-stratum",
+        "av-calibration-ece-worst-stratum",
+        "av-correspondence-far-ci-upper",
+        "av-correspondence-far-ci-upper-worst-stratum",
+        "av-correspondence-frr-ci-upper",
+        "av-correspondence-frr-ci-upper-worst-stratum",
+        "av-evaluator-within-one-frame-ci-lower-worst-stratum",
+    }
+)
+LEGACY_GATE_SPECS = {
+    metric_id: spec for metric_id, spec in GATE_SPECS.items() if metric_id not in V2_ONLY_GATE_IDS
+}
+GATE_SPECS_BY_SCHEMA = {
+    LEGACY_CALIBRATION_SCHEMA: LEGACY_GATE_SPECS,
+    CALIBRATION_SCHEMA: GATE_SPECS,
 }
 
 
@@ -166,9 +220,10 @@ def _validate_fingerprints(raw: object) -> list[str]:
     return blockers
 
 
-def _validate_gates(raw: object) -> tuple[list[str], list[str]]:
+def _validate_gates(raw: object, *, catalog_schema: str) -> tuple[list[str], list[str]]:
     if not isinstance(raw, list):
         raise CalibrationError("gates must be a list")
+    gate_specs = GATE_SPECS_BY_SCHEMA[catalog_schema]
     identifiers: list[str] = []
     blockers: list[str] = []
     for index, gate in enumerate(raw):
@@ -181,9 +236,9 @@ def _validate_gates(raw: object) -> tuple[list[str], list[str]]:
         )
         metric_id = _identifier(gate["metric_id"], f"gate {index}.metric_id")
         identifiers.append(metric_id)
-        if metric_id not in GATE_SPECS:
+        if metric_id not in gate_specs:
             raise CalibrationError(f"unknown D1 metric: {metric_id}")
-        direction, decision_value, fixed_threshold, scope = GATE_SPECS[metric_id]
+        direction, decision_value, fixed_threshold, scope = gate_specs[metric_id]
         if (gate["direction"], gate["decision_value"], gate["scope"]) != (direction, decision_value, scope):
             raise CalibrationError(f"gate semantics changed for {metric_id}")
         threshold = _threshold(gate["threshold"], f"gate {metric_id}.threshold", nullable=True)
@@ -193,16 +248,16 @@ def _validate_gates(raw: object) -> tuple[list[str], list[str]]:
             blockers.append(f"threshold-missing:{metric_id}")
         if _sha256(gate["basis_evidence_sha256"], f"gate {metric_id}.basis", nullable=True) is None:
             blockers.append(f"basis-evidence-missing:{metric_id}")
-    if identifiers != sorted(set(identifiers)) or set(identifiers) != set(GATE_SPECS):
+    if identifiers != sorted(set(identifiers)) or set(identifiers) != set(gate_specs):
         raise CalibrationError("gates must exactly match the sorted D1 metric catalog")
     return identifiers, blockers
 
 
-def _validate_vbench_metric_ids(raw: object) -> list[str]:
+def _validate_vbench_metric_ids(raw: object, *, catalog_schema: str) -> list[str]:
     if not isinstance(raw, list) or not raw:
         raise CalibrationError("vbench_metric_ids must be a non-empty list")
     identifiers = [_identifier(value, f"vbench_metric_ids[{index}]") for index, value in enumerate(raw)]
-    if identifiers != sorted(EXPECTED_VBENCH_METRIC_IDS):
+    if identifiers != sorted(EXPECTED_VBENCH_METRIC_IDS_BY_SCHEMA[catalog_schema]):
         raise CalibrationError("VBench metric IDs must exactly match the sorted D0a claim/dimension matrix")
     return identifiers
 
@@ -247,22 +302,23 @@ def build_calibration_gate_report(raw: object) -> dict[str, Any]:
         },
         "calibration catalog",
     )
-    if raw["schema_version"] != CALIBRATION_SCHEMA or raw["status"] not in {"draft", "frozen"}:
+    catalog_schema = raw["schema_version"]
+    if catalog_schema not in CALIBRATION_REPORT_SCHEMA_BY_CATALOG or raw["status"] not in {"draft", "frozen"}:
         raise CalibrationError("unsupported calibration schema or status")
     _identifier(raw["catalog_id"], "catalog_id")
     blockers = _validate_fingerprints(raw["evaluator_fingerprints"])
     for field in ("design_digest", "preregistration_digest", "vbench_gate_catalog_digest"):
         if _sha256(raw[field], field, nullable=True) is None:
             blockers.append(f"{field.replace('_', '-')}-missing")
-    metric_ids, gate_blockers = _validate_gates(raw["gates"])
-    vbench_metric_ids = _validate_vbench_metric_ids(raw["vbench_metric_ids"])
+    metric_ids, gate_blockers = _validate_gates(raw["gates"], catalog_schema=catalog_schema)
+    vbench_metric_ids = _validate_vbench_metric_ids(raw["vbench_metric_ids"], catalog_schema=catalog_schema)
     vbench_decision = _validate_vbench_decision(raw["vbench_decision"])
     blockers.extend(gate_blockers)
     blockers = sorted(blockers)
     if raw["status"] == "frozen" and blockers:
         raise CalibrationError(f"frozen calibration catalog is incomplete: {blockers}")
     return {
-        "schema_version": CALIBRATION_REPORT_SCHEMA,
+        "schema_version": CALIBRATION_REPORT_SCHEMA_BY_CATALOG[catalog_schema],
         "catalog_digest": document_sha256(raw),
         "status": "ready-to-freeze" if not blockers else "hold",
         "blockers": blockers,

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import {
+  defaultLipForcingRawOutputProfile,
+  experimentalLipForcingRawOutputProfile,
   generationRequestSchema,
   isAudioConditionedMode,
   outputNameSchema,
@@ -31,6 +33,21 @@ export const experimentCandidateSchema = z.discriminatedUnion("variable", [
     variable: z.literal("lipforcing-enabled"),
   }).strict(),
   z.object({
+    variable: z.literal("lipforcing-decoder"),
+    value: z.enum(["wan-vae", "streaming-taehv"]),
+  }).strict(),
+  z.object({
+    variable: z.literal("lipforcing-raw-output-profile"),
+  }).strict(),
+  z.object({
+    variable: z.literal("lipforcing-mouth-delay-ms"),
+    value: z.number().int().min(-500).max(500),
+  }).strict(),
+  z.object({
+    variable: z.literal("lipforcing-program-audio-delay-ms"),
+    value: z.number().int().min(-500).max(500),
+  }).strict(),
+  z.object({
     variable: z.literal("replicate-seed"),
     value: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   }).strict(),
@@ -52,9 +69,57 @@ export const experimentCreateInputSchema = z.object({
   baselineRequest: generationRequestSchema,
   baselineOutputName: outputNameSchema.optional(),
   candidate: experimentCandidateSchema,
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (
+    value.candidate.variable === "lipforcing-raw-output-profile"
+    && value.baselineOutputName !== undefined
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["baselineOutputName"],
+      message: "Das LipForcing-Rohvideo-Experiment benötigt einen frisch gerenderten Baseline-Arm.",
+    });
+  }
+});
 
 export type ExperimentCreateInput = z.infer<typeof experimentCreateInputSchema>;
+
+export function experimentRequiresFreshBaseline(candidate: ExperimentCandidate): boolean {
+  return candidate.variable === "lipforcing-raw-output-profile";
+}
+
+export function rawMuxPairV1BaselineError(request: GenerationRequest): string | null {
+  if (!request.postprocess.lipForcing.enabled) {
+    return "Das gepaarte Rohvideo-Experiment benötigt aktives LipForcing.";
+  }
+  if (request.postprocess.lipForcing.rawOutputProfile !== defaultLipForcingRawOutputProfile) {
+    return "Das gepaarte Rohvideo-Experiment benötigt das registrierte CRF18-Baseline-Profil.";
+  }
+  if (request.postprocess.longcatLipsync.enabled
+    || request.postprocess.latentSync.enabled
+    || request.postprocess.museTalk.enabled) {
+    return "Raw-Mux-Paar v1 erlaubt neben LipForcing keinen weiteren Lippenrefiner.";
+  }
+  if (request.audio.finalMix.path) {
+    return "Raw-Mux-Paar v1 erlaubt keinen nachgelagerten FinalMix; beide Arme müssen direkt aus derselben Timeline stammen.";
+  }
+  const explicitSpeechPath = isAudioConditionedMode(request.mode)
+    ? request.audio.path
+    : request.mode === "lipdub" ? request.lipDub.referenceVideo.path : "";
+  if (!explicitSpeechPath) {
+    return "Raw-Mux-Paar v1 benötigt eine explizite, in beiden Armen identische LipForcing-Sprachspur.";
+  }
+  return null;
+}
+
+export function rawMuxPairV1CandidateError(request: GenerationRequest): string | null {
+  if (request.postprocess.lipForcing.rawOutputProfile !== experimentalLipForcingRawOutputProfile) {
+    return "Das gepaarte Rohvideo-Experiment benötigt das registrierte Mux-copy-Kandidatenprofil.";
+  }
+  const baselineShape = structuredClone(request);
+  baselineShape.postprocess.lipForcing.rawOutputProfile = defaultLipForcingRawOutputProfile;
+  return rawMuxPairV1BaselineError(baselineShape);
+}
 
 export const experimentBaselineEvidenceSchema = z.object({
   outputName: outputNameSchema,
@@ -97,6 +162,16 @@ export const controlledExperimentSchema = z.object({
     experimentRunArmSchema.extend({ arm: z.literal("candidate") }),
   ]),
 }).strict().superRefine((value, context) => {
+  if (
+    value.candidate.variable === "lipforcing-raw-output-profile"
+    && value.baselineEvidence !== null
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["baselineEvidence"],
+      message: "Das LipForcing-Rohvideo-Experiment erlaubt ausschließlich einen frisch gerenderten Baseline-Arm.",
+    });
+  }
   if (value.status === "superseded") {
     if (!value.supersededAt || !value.supersededReason) {
       context.addIssue({
@@ -168,6 +243,10 @@ export const experimentVariableLabels: Record<ExperimentVariableId, string> = {
   "reference-image-crf": "Referenzbild-CRF",
   "lipdub-reference-strength": "LipDub-Referenzstärke",
   "lipforcing-enabled": "LipForcing an",
+  "lipforcing-decoder": "LipForcing: Decoder",
+  "lipforcing-raw-output-profile": "LipForcing: Rohvideo-Mux",
+  "lipforcing-mouth-delay-ms": "LipForcing: Modell-Steuerung (ms)",
+  "lipforcing-program-audio-delay-ms": "LipForcing: hörbarer Tonversatz (ms)",
   "replicate-seed": "Seed-Replikat",
   resolution: "Auflösung",
 };
@@ -188,6 +267,14 @@ export function allowedExperimentPaths(candidate: ExperimentCandidate): string[]
       return ["lipDub.referenceVideo.strength"];
     case "lipforcing-enabled":
       return ["postprocess.lipForcing.enabled"];
+    case "lipforcing-decoder":
+      return ["postprocess.lipForcing.decoder"];
+    case "lipforcing-raw-output-profile":
+      return ["postprocess.lipForcing.rawOutputProfile"];
+    case "lipforcing-mouth-delay-ms":
+      return ["postprocess.lipForcing.mouthDelayMs"];
+    case "lipforcing-program-audio-delay-ms":
+      return ["postprocess.lipForcing.programAudioDelayMs"];
     case "replicate-seed":
       return ["seed"];
     case "resolution":
@@ -231,6 +318,38 @@ export function applyExperimentCandidate(
         throw new Error("Der LipForcing-Vergleich benötigt eine Baseline ohne aktiven Lippenrefiner.");
       }
       request.postprocess.lipForcing.enabled = true;
+      break;
+    case "lipforcing-decoder": {
+      if (!request.postprocess.lipForcing.enabled) {
+        throw new Error("Der LipForcing-Decoder ist nur bei aktivem LipForcing als kontrollierte Variable zulässig.");
+      }
+      const alternate = request.postprocess.lipForcing.decoder === "wan-vae"
+        ? "streaming-taehv"
+        : "wan-vae";
+      if (candidate.value !== alternate) {
+        throw new Error("Der LipForcing-Decoder-Kandidat muss exakt der alternative Decoder der Baseline sein.");
+      }
+      request.postprocess.lipForcing.decoder = candidate.value;
+      break;
+    }
+    case "lipforcing-raw-output-profile":
+      {
+        const rawMuxPairError = rawMuxPairV1BaselineError(request);
+        if (rawMuxPairError) throw new Error(rawMuxPairError);
+      }
+      request.postprocess.lipForcing.rawOutputProfile = experimentalLipForcingRawOutputProfile;
+      break;
+    case "lipforcing-mouth-delay-ms":
+      if (!request.postprocess.lipForcing.enabled) {
+        throw new Error("Die LipForcing-Modell-Steuerung ist nur bei aktivem LipForcing zulässig.");
+      }
+      request.postprocess.lipForcing.mouthDelayMs = candidate.value;
+      break;
+    case "lipforcing-program-audio-delay-ms":
+      if (!request.postprocess.lipForcing.enabled) {
+        throw new Error("Der hörbare LipForcing-Tonversatz ist nur bei aktivem LipForcing zulässig.");
+      }
+      request.postprocess.lipForcing.programAudioDelayMs = candidate.value;
       break;
     case "replicate-seed":
       request.seed = candidate.value;

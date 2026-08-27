@@ -1,0 +1,80 @@
+[Unit]
+Description=LTX Studio sealed release %i
+After=network-online.target dgx-runtime-api.service
+Wants=network-online.target dgx-runtime-api.service
+JoinsNamespaceOf=
+
+[Service]
+Type=simple
+User=moddy
+Group=moddy
+DynamicUser=no
+WorkingDirectory=/opt/ltx-studio/releases/%i/apps/ltx-studio
+Environment=LTX_STUDIO_SEALED_RELEASE=1
+Environment=LTX_STUDIO_EXPECTED_RELEASE_DIGEST=%i
+Environment=LTX_STUDIO_DATA_DIR=/var/lib/ltx-studio
+Environment=HF_HUB_OFFLINE=1
+Environment=PYTHONNOUSERSITE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+PassEnvironment=
+UnsetEnvironment=NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH LD_DEBUG LD_DEBUG_OUTPUT DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH PYTHONHOME PYTHONPATH PYTHONSTARTUP PYTHONINSPECT PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+ExecCondition=/usr/libexec/ltx-studio/node-v24/bin/node /usr/libexec/ltx-studio/root-bootstrap-v1.mjs verify-start --release-digest %i
+ExecStartPre=
+ExecStart=/opt/ltx-studio/releases/%i/apps/ltx-studio/runtime/.venv/bin/node /opt/ltx-studio/releases/%i/apps/ltx-studio/server/index.js
+ExecStartPost=
+ExecReload=
+ExecStop=
+ExecStopPost=
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=8min
+OOMPolicy=continue
+UMask=0077
+StateDirectory=ltx-studio
+StateDirectoryMode=0700
+PrivateTmp=yes
+PrivateDevices=no
+PrivateNetwork=no
+PrivateMounts=no
+ProtectHome=read-only
+ProtectSystem=strict
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=default
+ProcSubset=all
+LockPersonality=yes
+NoNewPrivileges=no
+RestrictRealtime=yes
+RestrictSUIDSGID=no
+RestrictNamespaces=~cgroup ipc mnt net pid user uts
+SystemCallArchitectures=native
+DevicePolicy=auto
+DeviceAllow=
+AmbientCapabilities=
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETGID CAP_SETUID CAP_SETPCAP CAP_LINUX_IMMUTABLE CAP_NET_BIND_SERVICE CAP_NET_BROADCAST CAP_NET_ADMIN CAP_NET_RAW CAP_IPC_LOCK CAP_IPC_OWNER CAP_SYS_MODULE CAP_SYS_RAWIO CAP_SYS_CHROOT CAP_SYS_PTRACE CAP_SYS_PACCT CAP_SYS_ADMIN CAP_SYS_BOOT CAP_SYS_NICE CAP_SYS_RESOURCE CAP_SYS_TIME CAP_SYS_TTY_CONFIG CAP_MKNOD CAP_LEASE CAP_AUDIT_WRITE CAP_AUDIT_CONTROL CAP_SETFCAP CAP_MAC_OVERRIDE CAP_MAC_ADMIN CAP_SYSLOG CAP_WAKE_ALARM CAP_BLOCK_SUSPEND CAP_AUDIT_READ CAP_PERFMON CAP_BPF CAP_CHECKPOINT_RESTORE
+LoadCredential=
+LoadCredentialEncrypted=
+SetCredential=
+SetCredentialEncrypted=
+ImportCredential=
+BindPaths=
+BindReadOnlyPaths=
+ReadWritePaths=
+ReadOnlyPaths=
+InaccessiblePaths=
+RootDirectory=
+RootImage=
+TemporaryFileSystem=
+NetworkNamespacePath=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8
+IPAddressAllow=::1/128
+
+[Install]
+WantedBy=multi-user.target

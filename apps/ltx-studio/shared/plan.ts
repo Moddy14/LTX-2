@@ -1,5 +1,12 @@
 import type { GenerationRequest } from "./pipelines.js";
-import type { StudioAsset } from "./assets.js";
+import type { PublicStudioAsset } from "./assetPublic.js";
+import type { QualificationHold } from "./qualificationHold.js";
+
+export type PlanExecutionDisposition = Readonly<{
+  /** A plan is diagnostic only and never an admission or start authorization. */
+  status: "preview-only" | "qualification-hold";
+  qualificationHold: QualificationHold | null;
+}>;
 
 export type PlanSuggestion = {
   id: "lipdub-reference-format";
@@ -10,7 +17,7 @@ export type PlanSuggestion = {
 };
 
 export type PreparedLipDubReference = {
-  asset: StudioAsset;
+  asset: PublicStudioAsset;
   target: {
     width: number;
     height: number;
@@ -22,11 +29,10 @@ export type PreparedLipDubReference = {
     startSeconds: number;
     requestedDurationSeconds: number;
   } | null;
-  command: string;
 };
 
 export type PreparedImageCrop = {
-  asset: StudioAsset;
+  asset: PublicStudioAsset;
   source: {
     width: number;
     height: number;
@@ -56,7 +62,6 @@ export type PreparedImageCrop = {
   /** Nur bei "bokeh": Breite der weichen Kante in Pixeln. */
   feather: number | null;
   scaleFilter: "lanczos";
-  command: string;
 };
 
 export type ImageCropFit = "stretch" | "bokeh";

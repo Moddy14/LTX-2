@@ -1,4 +1,10 @@
 import type { ActivationState, RuntimeActivationSnapshot } from "../shared/activation.js";
+import { canonicalJson } from "../shared/canonicalJson.js";
+import {
+  assertRuntimeTrustAuthorizesRelease,
+  type RuntimeTrustBinding,
+} from "../shared/runtimeTrust.js";
+import { deriveReleaseSurfaceEntries } from "../shared/releaseSurface.js";
 
 export const jobStartSources = ["direct", "project", "experiment", "rerun", "restored"] as const;
 
@@ -14,7 +20,7 @@ export type JobStartDecision = {
   allowed: boolean;
   mode: "development" | ActivationState;
   reason: string;
-  schemaVersion: "ltx-studio-bootstrap-start-enforcer.v1" | "ltx-studio-activation-start-enforcer.v1";
+  schemaVersion: "ltx-studio-bootstrap-start-enforcer.v3" | "ltx-studio-activation-start-enforcer.v3";
   generation: number | null;
   activationHeadSha256: string | null;
 };
@@ -30,13 +36,18 @@ export type JobStartEnforcer = {
 
 const DEVELOPMENT_REASON = "Unversiegelter Entwicklungsmodus; Release-Autorisierung ist nicht anwendbar.";
 const BLOCKED_REASON = "Versiegelter Release ist fail-closed: Es ist noch kein signierter Activation-State aktiv.";
+const ACTIVATABLE_SURFACE_ENTRY_IDS = new Set(
+  deriveReleaseSurfaceEntries()
+    .filter(({ targetStatus }) => targetStatus === "candidate")
+    .map(({ id }) => id),
+);
 
 export function bootstrapJobStartEnforcer(sealedRelease: boolean): JobStartEnforcer {
   const status: JobStartStatus = {
     productStartsAllowed: !sealedRelease,
     mode: sealedRelease ? "blocked" : "development",
     reason: sealedRelease ? BLOCKED_REASON : DEVELOPMENT_REASON,
-    schemaVersion: "ltx-studio-bootstrap-start-enforcer.v1",
+    schemaVersion: "ltx-studio-bootstrap-start-enforcer.v3",
     generation: null,
     activationHeadSha256: null,
   };
@@ -53,6 +64,11 @@ export type RuntimeActivationProvider = {
 export function activationJobStartEnforcer(options: {
   expectedReleaseDigest: string;
   expectedSurfaceDigest: string;
+  expectedRuntimeInstallSealSha256: string;
+  expectedRuntimeTreeSha256: string;
+  expectedRuntimePolicySha256: string;
+  expectedNodeExecutableSha256: string;
+  expectedRuntimeTrust: RuntimeTrustBinding;
   activation: RuntimeActivationProvider;
 }): JobStartEnforcer {
   const inspect = (): JobStartStatus & { snapshot: RuntimeActivationSnapshot | null } => {
@@ -61,28 +77,50 @@ export function activationJobStartEnforcer(options: {
       productStartsAllowed: false,
       mode: "hold",
       reason,
-      schemaVersion: "ltx-studio-activation-start-enforcer.v1",
+      schemaVersion: "ltx-studio-activation-start-enforcer.v3",
       generation: null,
       activationHeadSha256: null,
       snapshot: null,
     });
+    try {
+      assertRuntimeTrustAuthorizesRelease(options.expectedRuntimeTrust, "Product start");
+    } catch (error) {
+      return failure(error instanceof Error ? error.message : String(error));
+    }
     try {
       snapshot = options.activation.read();
     } catch (error) {
       return failure(`Activation-State ist nicht verifizierbar: ${error instanceof Error ? error.message : String(error)}`);
     }
     const base = {
-      schemaVersion: "ltx-studio-activation-start-enforcer.v1" as const,
+      schemaVersion: "ltx-studio-activation-start-enforcer.v3" as const,
       generation: snapshot.generation,
       activationHeadSha256: snapshot.activationHeadSha256,
       snapshot,
     };
     if (snapshot.releaseDigest !== options.expectedReleaseDigest
-      || snapshot.surfaceDigest !== options.expectedSurfaceDigest) {
-      return { ...base, snapshot: null, productStartsAllowed: false, mode: "hold", reason: "Activation-State ist an einen anderen Release oder eine andere Surface gebunden." };
+      || snapshot.surfaceDigest !== options.expectedSurfaceDigest
+      || snapshot.runtimeInstallSealSha256 !== options.expectedRuntimeInstallSealSha256
+      || snapshot.runtimeTreeSha256 !== options.expectedRuntimeTreeSha256
+      || snapshot.runtimePolicySha256 !== options.expectedRuntimePolicySha256
+      || snapshot.nodeExecutableSha256 !== options.expectedNodeExecutableSha256
+      || canonicalJson(snapshot.runtimeTrust) !== canonicalJson(options.expectedRuntimeTrust)) {
+      return { ...base, snapshot: null, productStartsAllowed: false, mode: "hold", reason: "Activation-State ist an eine andere Release- oder Runtime-Identität gebunden." };
     }
     if (!snapshot.rightsCurrent) {
       return { ...base, snapshot: null, productStartsAllowed: false, mode: "hold", reason: "Der aktuelle Rights-Snapshot fehlt, ist veraltet oder widerrufen." };
+    }
+    const nonActivatableEntryId = snapshot.releasedSurfaceEntryIds.find(
+      (id) => !ACTIVATABLE_SURFACE_ENTRY_IDS.has(id),
+    );
+    if (nonActivatableEntryId) {
+      return {
+        ...base,
+        snapshot: null,
+        productStartsAllowed: false,
+        mode: "hold",
+        reason: `Activation-State enthält den blockierten oder nicht deklarierten Surface-Eintrag ${nonActivatableEntryId}.`,
+      };
     }
     const productStartsAllowed = (snapshot.state === "production_provisional" || snapshot.state === "production_stable")
       && snapshot.releasedSurfaceEntryIds.length > 0;

@@ -13,6 +13,7 @@ import {
 import type { StudioJob } from "../server/jobs.js";
 import { OutputLibrary } from "../server/outputs.js";
 import { validRequest } from "./fixtures.js";
+import { publishCompletedOutputFixture } from "./output-publication-fixture.js";
 
 const roots: string[] = [];
 
@@ -95,6 +96,7 @@ describe("output provenance RPO-0 persistence", () => {
     const data = await fixture();
     const job = completedJob("journaled-output.mp4");
     await writeFile(join(data.outputRoot, job.outputName), "video-bytes", "utf8");
+    publishCompletedOutputFixture(data.outputRoot, job);
     const library = new OutputLibrary(data.storage);
     library.recordCompleted([job]);
 
@@ -112,6 +114,7 @@ describe("output provenance RPO-0 persistence", () => {
     const crashed = await fixture("after_target");
     const job = completedJob("crashed-output.mp4");
     await writeFile(join(crashed.outputRoot, job.outputName), "video-bytes", "utf8");
+    publishCompletedOutputFixture(crashed.outputRoot, job);
     const library = new OutputLibrary(crashed.storage);
     expect(() => library.recordCompleted([job])).toThrow(/synthetic provenance crash after_target/);
 

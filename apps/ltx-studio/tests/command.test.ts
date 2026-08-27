@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { pipelineModes } from "../shared/pipelines.js";
+import { mergeGenerationRequest, pipelineModes } from "../shared/pipelines.js";
 import {
   buildCommand,
   renderPrompt,
@@ -18,6 +18,7 @@ const expectedModules = {
   "two-stage-hq": "ltx_pipelines.ti2vid_two_stages_hq",
   "one-stage": "ltx_pipelines.ti2vid_one_stage",
   distilled: "ltx_pipelines.distilled",
+  dfr: "ltx_pipelines.dfr_pipeline",
   "text-to-audio": "ltx_pipelines.t2a_one_stage",
   "ic-lora": "ltx_pipelines.ic_lora",
   "id-lora": "ltx_pipelines.id_lora",
@@ -46,8 +47,15 @@ describe("buildCommand", () => {
 
     expect(plan.outputPath.endsWith(".wav")).toBe(true);
     expect(plan.args).toContain("--official-comfy-workflow");
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--official-comfy-sampler", "euler-ancestral-cfg-pp",
+    ]));
     expect(plan.args).toContain("--checkpoint-path");
     expect(plan.args).toContain("--negative-prompt");
+    expect(plan.args.slice(plan.args.indexOf("--audio-peak-ceiling-dbfs"), plan.args.indexOf("--audio-peak-ceiling-dbfs") + 2)).toEqual([
+      "--audio-peak-ceiling-dbfs",
+      "-3",
+    ]);
     expect(plan.args).not.toContain("--distilled-lora");
     expect(plan.args).not.toContain("--height");
     expect(plan.args).not.toContain("--width");
@@ -80,6 +88,10 @@ describe("buildCommand", () => {
     expect(plan.args).not.toContain("--checkpoint-path");
     expect(plan.args).not.toContain("--distilled-checkpoint-path");
     expect(plan.args).not.toContain("--gemma-root");
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--sampler-profile",
+      "official-comfy",
+    ]));
     expect(plan.requiredPaths).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: request.models.transformerPath, label: "LTX-2.5 Transformer", kind: "file" }),
       expect.objectContaining({ path: request.models.textEncoderPath, label: "LTX-2.5 Textencoder", kind: "file" }),
@@ -91,6 +103,120 @@ describe("buildCommand", () => {
       expectedSizeBytes: 42_018_190_584,
       expectedSha256: "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
     });
+  });
+
+  it("keeps legacy distilled on the native sampler profile", () => {
+    const plan = buildCommand(validRequest("distilled"));
+
+    expect(plan.args).not.toContain("--sampler-profile");
+  });
+
+  it("builds the pinned v1.3 DFR single-call CLI with mandatory fixed-strength detailing", () => {
+    const request = validLtx25SplitRequest("dfr");
+    const plan = buildCommand(request);
+
+    expect(plan.args.slice(0, 3)).toEqual(["-I", "-m", "ltx_pipelines.dfr_pipeline"]);
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--transformer-path", request.models.transformerPath,
+      "--spatial-upsampler-path", request.models.spatialUpscalerPath,
+      "--detailing-lora", request.dfr!.detailingLoraPath,
+      "--temporal-upscalings", "0",
+      "--spatial-upscalings", "1",
+    ]));
+    expect(plan.args).not.toContain("--checkpoint-path");
+    expect(plan.args).not.toContain("--distilled-checkpoint-path");
+    expect(plan.args).not.toContain("--temporal-upsampler-path");
+    expect(plan.args).not.toContain("--distilled-lora");
+    expect(plan.args).not.toContain("--num-inference-steps");
+    expect(plan.args).not.toContain("--disable-tiling");
+    const detailingIndex = plan.args.indexOf("--detailing-lora");
+    expect(plan.args.slice(detailingIndex, detailingIndex + 3)).toEqual([
+      "--detailing-lora",
+      request.dfr!.detailingLoraPath,
+      "--temporal-upscalings",
+    ]);
+    expect(plan.requiredPaths).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "LTX-2.5 Transformer",
+        expectedSizeBytes: 42_018_190_584,
+        expectedSha256: "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
+      }),
+      expect.objectContaining({
+        label: "DFR Detailing IC-LoRA",
+        expectedSizeBytes: 327_322_640,
+        expectedSha256: "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d",
+      }),
+    ]));
+  });
+
+  it("fails closed without ever applying the mandatory DFR detailer twice", () => {
+    const request = validLtx25SplitRequest("dfr");
+    request.models.loras = [{ path: request.dfr!.detailingLoraPath, strength: 1.7 }];
+    request.tiling = false;
+
+    const plan = buildCommand(request);
+    expect(plan.args).not.toContain("--disable-tiling");
+    expect(plan.args).not.toContain("--lora");
+    expect(plan.args.filter((value) => value === request.dfr!.detailingLoraPath)).toHaveLength(1);
+    expect(validateRequestPlan(request, plan)).toContain(
+      "Die verpflichtende DFR Detailing IC-LoRA ist bereits fest mit Stärke 0,5 gebunden und darf nicht zusätzlich als normale LoRA erscheinen.",
+    );
+  });
+
+  it("keeps historical pre-v1.3 DFR planning visibly non-executable", () => {
+    const stored = structuredClone(validLtx25SplitRequest("dfr")) as unknown as {
+      models: ReturnType<typeof validLtx25SplitRequest>["models"];
+      dfr: Record<string, unknown>;
+    };
+    stored.models.transformerPath =
+      "/models/ltx-2.5/ltx-2.5-22b-dev-transformer-bf16.safetensors";
+    stored.dfr = { temporalUpsampleRounds: 0, detailingLora: { enabled: false, path: "" } };
+    const legacy = mergeGenerationRequest(stored);
+
+    expect(validateRequestPlan(legacy, buildCommand(legacy))).toEqual([
+      expect.stringContaining("nur lesbar"),
+    ]);
+  });
+
+  it("emits the official temporal/spatial upscaling flags and conditional temporal asset", () => {
+    const request = validLtx25SplitRequest("dfr");
+    request.dfr!.temporalUpscalings = 2;
+    request.dfr!.spatialUpscalings = 2;
+    request.height = 768;
+    request.dfr!.temporalUpscalerPath =
+      "/models/ltx-2.5/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors";
+    const plan = buildCommand(request);
+
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--temporal-upscalings", "2",
+      "--spatial-upscalings", "2",
+      "--temporal-upsampler-path", request.dfr!.temporalUpscalerPath,
+      "--detailing-lora", request.dfr!.detailingLoraPath,
+    ]));
+    expect(plan.requiredPaths).toContainEqual(expect.objectContaining({
+      label: "DFR Temporal Upscaler",
+      expectedSha256: "2bc3300f2b3c3c1834d72164fbf13a3b9fd73e5a741e8a2c3f4035f89a75c3fe",
+    }));
+    expect(plan.requiredPaths).toContainEqual(expect.objectContaining({
+      label: "DFR Detailing IC-LoRA",
+      expectedSha256: "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d",
+    }));
+  });
+
+  it("preserves a fractional DFR playback rate in the command contract without integer truncation", () => {
+    const request = validLtx25SplitRequest("dfr");
+    request.frameRate = 24_000 / 1_001;
+    request.dfr!.temporalUpscalings = 1;
+    request.dfr!.temporalUpscalerPath =
+      "/models/ltx-2.5/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors";
+
+    const args = buildCommand(request).args;
+    expect(args).toEqual(expect.arrayContaining([
+      "--frame-rate", String(24_000 / 1_001),
+      "--temporal-upscalings", "1",
+    ]));
+    expect(args).not.toEqual(expect.arrayContaining(["--frame-rate", "23"]));
+    expect(args).not.toEqual(expect.arrayContaining(["--frame-rate", "24"]));
   });
 
   it("emits the official single-stage preview without upscaler provenance", () => {
@@ -109,11 +235,15 @@ describe("buildCommand", () => {
     const plan = buildCommand(request);
 
     expect(plan.args).toContain("--transformer-path");
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--official-comfy-sampler", "euler-ancestral",
+    ]));
     expect(plan.args).not.toContain("--video-vae-path");
     expect(plan.args).not.toContain(request.models.videoVaePath);
     expect(plan.args).not.toContain(request.models.distilledLora.path);
     expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
     expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "LTX-2.5 Video-VAE" }));
+    expect(plan.args).toEqual(expect.arrayContaining(["--audio-peak-ceiling-dbfs", "-3"]));
   });
 
   it("does not stack the legacy distilled LoRA onto official LTX-2.5 IC-LoRA", () => {
@@ -167,6 +297,27 @@ describe("buildCommand", () => {
     ]);
   });
 
+  it("keeps DFR on HOLD when the mandatory v1.3 detailing model is missing", () => {
+    const request = validLtx25SplitRequest("dfr");
+    const inventory: ModelInventory = {
+      roots: [],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: recommendedModelAssets.map((asset) => ({
+        ...asset,
+        present: asset.id !== "ltx25-dfr-detailing-lora",
+        integrity: asset.id === "ltx25-dfr-detailing-lora" ? "missing" as const : "verified" as const,
+      })),
+    };
+
+    expect(validateOfficialSpeechInventory(request, inventory)).toEqual([
+      "LTX-2.5 DFR Detailing IC-LoRA x2: offizielles Asset ist nicht vollständig "
+      + "SHA-256-verifiziert (Status: missing).",
+    ]);
+  });
+
   it("builds FLF2V with only the official distilled checkpoint and two guide images", () => {
     const plan = buildCommand(validRequest("keyframes"));
 
@@ -179,13 +330,20 @@ describe("buildCommand", () => {
     expect(plan.args.filter((value) => value === "--image")).toHaveLength(2);
   });
 
-  it("builds official T2V/I2V and IA2V with the fixed native Comfy workflow contract", () => {
+  it("builds official T2V/I2V and IA2V with their fixed native Comfy workflow contracts", () => {
     for (const mode of ["two-stage", "image-audio-to-video"] as const) {
       const request = validRequest(mode);
       const args = buildCommand(request).args;
       const loraIndex = args.indexOf("--distilled-lora");
 
       expect(args).toContain("--official-comfy-workflow");
+      if (mode === "two-stage") {
+        expect(args).toEqual(expect.arrayContaining([
+          "--official-comfy-sampler", "deterministic",
+        ]));
+      } else {
+        expect(args).not.toContain("--official-comfy-sampler");
+      }
       expect(args).not.toContain("--num-inference-steps");
       expect(args).not.toContain("--video-cfg-guidance-scale");
       expect(args).toEqual(expect.arrayContaining(["--negative-prompt", request.negativePrompt]));
@@ -208,6 +366,7 @@ describe("buildCommand", () => {
       "--negative-prompt", request.negativePrompt,
     ]));
     expect(plan.args).not.toContain("--checkpoint-path");
+    expect(plan.args).not.toContain("--official-comfy-sampler");
     expect(plan.args).not.toContain("--distilled-lora");
     expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
   });
@@ -463,11 +622,14 @@ describe("buildCommand", () => {
   it.each([
     ["motion-track", "euler-ancestral-cfg-pp", false, false],
     ["pixel-upscaler", "euler-cfg-pp", true, false],
+    ["v2v-deblur", "euler-ancestral-rf", true, false],
     ["v2v-instant-shave", "euler-ancestral-cfg-pp", true, true],
   ] as const)(
     "builds the official %s IC-LoRA contract",
     (profile, sampler, freezesAudio, prefixesPrompt) => {
-      const request = validRequest("ic-lora");
+      const request = profile === "v2v-deblur"
+        ? validLtx25SplitRequest("ic-lora")
+        : validRequest("ic-lora");
       request.icLora.profile = profile;
       request.icLora.controlType = "prepared";
       request.images = profile === "motion-track" ? request.images : [];
@@ -488,10 +650,40 @@ describe("buildCommand", () => {
         "1",
       ]));
       expect(args.includes("--freeze-control-audio")).toBe(freezesAudio);
+      expect(args).toEqual(expect.arrayContaining([
+        "--lora",
+        `/models/${profile}.safetensors`,
+        "1",
+      ]));
       const rendered = args[args.indexOf("--prompt") + 1];
       expect(rendered.startsWith("REMOVEBEARD ")).toBe(prefixesPrompt);
     },
   );
+
+  it("routes split LTX-2.5 Motion Track to plain Euler ancestral", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    request.icLora.profile = "motion-track";
+    request.icLora.controlType = "prepared";
+    request.icLora.videoConditioning = [
+      { path: "/inputs/source.mp4", name: "source.mp4", strength: 1 },
+    ];
+    request.icLora.lora.path = "/models/motion-track.safetensors";
+
+    expect(buildCommand(request).args).toEqual(expect.arrayContaining([
+      "--official-comfy-sampler",
+      "euler-ancestral-rf",
+    ]));
+  });
+
+  it("blocks split LTX-2.5 Union Control until its official second stage exists", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    request.icLora.profile = "union-control";
+
+    expect(validateRequestPlan(request, buildCommand(request))).toContain(
+      "LTX-2.5 Union Control ist im gepinnten offiziellen Workflow zweistufig; "
+      + "die native Stage-2-/Upscaler-Implementierung fehlt noch. Der Start bleibt bis zum Vertragsnachweis gesperrt.",
+    );
+  });
 
   it.each([
     ["inpainting", "inpaint", true],

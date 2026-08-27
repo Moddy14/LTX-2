@@ -1,10 +1,14 @@
 import torch
 
+from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep, EulerDiffusionStep
 from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.components.schedulers import LTX2Scheduler
 from ltx_pipelines.ti2vid_two_stages import (
     _final_audio_latent,
+    _official_comfy_ti2v_stage_1_kwargs,
+    _official_comfy_ti2v_stage_2_kwargs,
+    _resolve_official_comfy_ti2v_sampler,
     _stage_1_denoiser,
     _stage_1_sigmas,
     _stage_2_schedule,
@@ -16,8 +20,75 @@ from ltx_pipelines.utils.constants import (
     STAGE_2_DISTILLED_SIGMAS,
 )
 from ltx_pipelines.utils.denoisers import FactoryGuidedDenoiser, SimpleDenoiser
+from ltx_pipelines.utils.model_paths import ModelPaths
+from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop, euler_denoising_loop
 
 CPU = torch.device("cpu")
+
+
+def test_ltx25_ti2v_binds_plain_ancestral_sampler_and_seed() -> None:
+    kwargs = _official_comfy_ti2v_stage_1_kwargs(
+        enabled=True,
+        sampler="euler-ancestral",
+        seed=42,
+    )
+
+    assert isinstance(kwargs["stepper"], EulerAncestralDiffusionStep)
+    assert kwargs["state_dtype"] is torch.float32
+    loop = kwargs["loop"]
+    assert loop.func is euler_ancestral_denoising_loop
+    assert loop.keywords == {
+        "noise_seed": 42,
+        "model_dtype": torch.float32,
+        "model_input_dtype": torch.bfloat16,
+    }
+
+
+def test_legacy_ti2v_sampler_default_remains_unchanged() -> None:
+    assert (
+        _official_comfy_ti2v_stage_1_kwargs(
+            enabled=True,
+            sampler="deterministic",
+            seed=42,
+        )
+        == {}
+    )
+
+
+def test_omitted_ti2v_cli_sampler_tracks_the_model_layout() -> None:
+    split = ModelPaths.from_split(transformer_path="transformer.safetensors")
+    monolith = ModelPaths.from_monolith("ltx-2.3.safetensors", "gemma")
+
+    assert (
+        _resolve_official_comfy_ti2v_sampler(
+            official_comfy_workflow=True,
+            requested_sampler=None,
+            model_paths=split,
+        )
+        == "euler-ancestral"
+    )
+    assert (
+        _resolve_official_comfy_ti2v_sampler(
+            official_comfy_workflow=True,
+            requested_sampler=None,
+            model_paths=monolith,
+        )
+        == "deterministic"
+    )
+
+
+def test_ltx25_ti2v_stage_two_is_deterministic_with_fp32_state() -> None:
+    kwargs = _official_comfy_ti2v_stage_2_kwargs(enabled=True)
+
+    assert kwargs["state_dtype"] is torch.float32
+    assert isinstance(kwargs["stepper"], EulerDiffusionStep)
+    loop = kwargs["loop"]
+    assert loop.func is euler_denoising_loop
+    assert loop.keywords == {
+        "model_dtype": torch.float32,
+        "model_input_dtype": torch.bfloat16,
+    }
+    assert _official_comfy_ti2v_stage_2_kwargs(enabled=False) == {}
 
 
 def _denoiser(official: bool) -> SimpleDenoiser | FactoryGuidedDenoiser:

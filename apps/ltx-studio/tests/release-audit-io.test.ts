@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +10,8 @@ import { describe, expect, it } from "vitest";
 import { loadVerifiedReleaseRoot, openEvidenceRoot, readOwnerPrivateKey } from "../scripts/release-audit-io-lib.mjs";
 import { canonicalJson } from "../shared/canonicalJson.js";
 import { createHash } from "node:crypto";
+// @ts-expect-error The immutable operator CLI helper is plain ESM JavaScript.
+import { releaseArtifacts } from "../scripts/release-manifest-lib.mjs";
 
 function digest(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
@@ -49,22 +52,60 @@ describe("release audit file boundaries", () => {
     expect(readOwnerPrivateKey(unsafe)).toBe(canonicalJson({ value: 1 }));
   });
 
-  it("verifies the canonical manifest and complete artifact tree before loading audit code", () => {
-    const root = mkdtempSync(join(tmpdir(), "ltx-audit-release-"));
+  it("keeps production location mandatory while the artifact inventory remains independently testable", () => {
     const manifest = {
-      schemaVersion: "ltx-studio-release-manifest.v1",
+      schemaVersion: "ltx-studio-release-manifest.v4",
       artifacts: [],
     };
     const bytes = canonicalJson(manifest);
+    const expectedDigest = digest(bytes);
+    const anchor = mkdtempSync(join(tmpdir(), "ltx-audit-release-"));
+    const parent = join(anchor, "opt", "ltx-studio", "releases");
+    const root = join(parent, expectedDigest);
+    mkdirSync(root, { recursive: true, mode: 0o755 });
+    for (const path of [join(anchor, "opt"), join(anchor, "opt", "ltx-studio"), parent]) {
+      chmodSync(path, 0o755);
+    }
     const manifestPath = join(root, "release-manifest.json");
     writeFileSync(manifestPath, bytes, { mode: 0o644 });
 
-    expect(loadVerifiedReleaseRoot(root, digest(bytes)).releaseDigest).toBe(
-      digest(bytes),
-    );
+    expect(() => loadVerifiedReleaseRoot(root, expectedDigest, { staticOnly: true }))
+      .toThrow(/exactly \/opt\/ltx-studio\/releases/i);
+    expect(releaseArtifacts(root)).toEqual([]);
     writeFileSync(join(root, "rogue.txt"), "drift", { mode: 0o644 });
-    expect(() => loadVerifiedReleaseRoot(root, digest(bytes))).toThrow(
-      /artifact drift/i,
-    );
+    expect(releaseArtifacts(root)).toMatchObject([{ path: "rogue.txt", type: "file" }]);
   });
+
+  it("does not unlock the trusted-parent fixture override from production environment strings", () => {
+    const moduleUrl = new URL("../scripts/release-audit-io-lib.mjs", import.meta.url).href;
+    const releaseDigest = "a".repeat(64);
+    const anchor = mkdtempSync(join(tmpdir(), "ltx-audit-forged-vitest-"));
+    const releaseRoot = join(anchor, releaseDigest);
+    mkdirSync(releaseRoot, { mode: 0o755 });
+    const script = `
+      import { loadVerifiedReleaseRoot } from ${JSON.stringify(moduleUrl)};
+      globalThis.__vitest_worker__ = { ctx: { workerId: 1 }, filepath: "/forged/tests/fake.test.ts" };
+      loadVerifiedReleaseRoot(${JSON.stringify(releaseRoot)}, ${JSON.stringify(releaseDigest)}, {
+        staticOnly: true,
+        testOnlyTrustedParent: {
+          expectedParent: ${JSON.stringify(anchor)},
+          trustAnchor: ${JSON.stringify(anchor)},
+          expectedUid: ${process.getuid!()},
+          expectedGid: ${process.getgid!()},
+        },
+      });
+    `;
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        VITEST: "true",
+        VITEST_WORKER_ID: "1",
+        VITEST_POOL_ID: "1",
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/exactly \/opt\/ltx-studio\/releases/i);
+  });
+
 });

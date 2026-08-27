@@ -6,7 +6,9 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   writeFileSync,
@@ -15,8 +17,13 @@ import { arch, platform, release } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { GenerationRequest } from "../shared/pipelines.js";
+import {
+  normalizeJobExecutionDecision,
+  type JobExecutionDecision,
+} from "../shared/jobExecution.js";
 import type {
   ProvenanceCodeEvidence,
+  ProvenanceContainerImageEvidence,
   ProvenanceFileEntry,
   ProvenanceFileEvidence,
   ProvenanceRuntimeEvidence,
@@ -31,12 +38,18 @@ import {
   latentSyncInsightFaceRoot,
   latentSyncVaeRoot,
   latentSyncWhisperPath,
+  lipForcingImage,
   lipForcingModelRoot,
   longcatProjectRoot,
   museTalkModelRoot,
   provenanceCachePath,
   repoRoot,
 } from "./config.js";
+import {
+  captureLipForcingImageIdentity,
+  lipForcingImageIdentity,
+  verifyLipForcingImageIdentity,
+} from "./dockerImageIdentity.js";
 
 type FileRevision = {
   sizeBytes: number;
@@ -59,7 +72,10 @@ type HashCacheState = {
 
 const MAX_HASH_CACHE_RECORDS = 10_000;
 const MAX_UNTRACKED_CODE_FILES = 512;
+const MAX_PYTHON_PACKAGE_FILES = 4_096;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
+const LTX_PIPELINES_IMPORT_NAME = "ltx_pipelines";
+const LTX_PIPELINES_PROVENANCE_ROLE = "runtime:python-package:ltx_pipelines";
 const REQUIRED_GEMMA_FILES = [
   "config.json",
   "generation_config.json",
@@ -403,10 +419,170 @@ function firstLine(command: string, args: string[]): string | null {
   }
 }
 
-function captureRuntimeEvidence(executable: string): ProvenanceRuntimeEvidence {
-  const resolvedExecutable = isAbsolute(executable)
+type PythonPackageResolution = {
+  pythonExecutable: string;
+  moduleOrigin: string;
+  packageRoots: string[];
+};
+
+function resolvedPythonExecutable(executable: string): string {
+  const candidate = isAbsolute(executable)
     ? executable
-    : firstLine("which", [executable]) ?? executable;
+    : firstLine("which", [executable]);
+  if (!candidate || !isAbsolute(candidate)) {
+    throw new Error(`Python-Runtime ist nicht eindeutig auflösbar: ${executable}`);
+  }
+  return resolve(candidate);
+}
+
+function resolvePythonPackage(
+  executable: string,
+  importName: string,
+): { executable: string; resolution: PythonPackageResolution } {
+  const resolvedExecutable = resolvedPythonExecutable(executable);
+  const script = [
+    "import importlib.util as u,json,pathlib,sys",
+    `name=${JSON.stringify(importName)}`,
+    "spec=u.find_spec(name)",
+    "if spec is None or spec.origin is None:",
+    "  raise RuntimeError(f'Python package {name!r} is not importable')",
+    "roots=list(spec.submodule_search_locations or [])",
+    "print(json.dumps({",
+    "  'pythonExecutable':str(pathlib.Path(sys.executable).resolve(strict=True)),",
+    "  'moduleOrigin':str(pathlib.Path(spec.origin).resolve(strict=True)),",
+    "  'packageRoots':[str(pathlib.Path(value).resolve(strict=True)) for value in roots],",
+    "},sort_keys=True))",
+  ].join("\n");
+  const parsed = JSON.parse(execFileSync(resolvedExecutable, ["-I", "-c", script], {
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  })) as Partial<PythonPackageResolution>;
+  if (typeof parsed.pythonExecutable !== "string"
+    || !isAbsolute(parsed.pythonExecutable)
+    || typeof parsed.moduleOrigin !== "string"
+    || !isAbsolute(parsed.moduleOrigin)
+    || !Array.isArray(parsed.packageRoots)
+    || parsed.packageRoots.length !== 1
+    || parsed.packageRoots.some((root) => typeof root !== "string" || !isAbsolute(root))) {
+    throw new Error(`Python-Paketauflösung für ${importName} ist strukturell ungültig.`);
+  }
+  const invokedExecutable = resolve(resolvedExecutable);
+  const actualExecutable = resolve(parsed.pythonExecutable);
+  if (realpathSync(invokedExecutable) !== realpathSync(actualExecutable)) {
+    throw new Error(
+      `Konfiguriertes Python und ausgeführtes Python stimmen nicht überein: ${invokedExecutable}`,
+    );
+  }
+  return {
+    executable: resolvedExecutable,
+    resolution: parsed as PythonPackageResolution,
+  };
+}
+
+function pythonPackageRelativeFiles(root: string): string[] {
+  const packageRoot = resolve(root);
+  const rootStats = lstatSync(packageRoot);
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw new Error(`Python-Paketwurzel ist kein reguläres Verzeichnis: ${packageRoot}`);
+  }
+  const files: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      if (entry.name === "__pycache__") continue;
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Python-Paket enthält einen symbolischen Link: ${path}`);
+      }
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw new Error(`Python-Paket enthält keine reguläre Datei: ${path}`);
+      }
+      if (/\.(?:pyc|pyo)$/i.test(entry.name)) continue;
+      files.push(relative(packageRoot, path).split(sep).join("/"));
+      if (files.length > MAX_PYTHON_PACKAGE_FILES) {
+        throw new Error(
+          `Python-Paket enthält mehr als ${MAX_PYTHON_PACKAGE_FILES} bindbare Dateien: ${packageRoot}`,
+        );
+      }
+    }
+  };
+  visit(packageRoot);
+  if (files.length === 0) throw new Error(`Python-Paket enthält keine bindbaren Dateien: ${packageRoot}`);
+  return files.sort();
+}
+
+export async function capturePythonPackageManifest(
+  executable: string,
+  importName = LTX_PIPELINES_IMPORT_NAME,
+  role = LTX_PIPELINES_PROVENANCE_ROLE,
+): Promise<ProvenanceFileEvidence> {
+  const { resolution } = resolvePythonPackage(executable, importName);
+  const root = resolve(resolution.packageRoots[0]);
+  const moduleOrigin = resolve(resolution.moduleOrigin);
+  if (moduleOrigin !== join(root, "__init__.py")) {
+    throw new Error(
+      `Python-Import ${importName} stammt nicht aus der erwarteten Paketwurzel: ${moduleOrigin}`,
+    );
+  }
+  const rootStats = lstatSync(root);
+  const entries: ProvenanceFileEntry[] = [];
+  for (const relativePath of pythonPackageRelativeFiles(root)) {
+    const evidence = await captureProvenanceFile(join(root, relativePath), role, relativePath);
+    entries.push(evidence.entries[0]);
+  }
+  const contentManifest = entries.map(({ relativePath, sizeBytes, sha256 }) => ({
+    relativePath,
+    sizeBytes,
+    sha256,
+  }));
+  return {
+    role,
+    path: root,
+    kind: "python-package-manifest",
+    sizeBytes: entries.reduce((total, entry) => total + entry.sizeBytes, 0),
+    modifiedAtMs: rootStats.mtimeMs,
+    changedAtMs: rootStats.ctimeMs,
+    fileId: String(rootStats.ino),
+    sha256: sha256Text(stableJson(contentManifest)),
+    entries,
+  };
+}
+
+export async function verifyPythonPackageBinding(
+  evidence: ProvenanceFileEvidence,
+  executable: string,
+  importName = LTX_PIPELINES_IMPORT_NAME,
+): Promise<string | null> {
+  if (evidence.kind !== "python-package-manifest") {
+    return `Python-Paketbindung hat den falschen Evidenztyp: ${evidence.kind}`;
+  }
+  try {
+    const current = await capturePythonPackageManifest(executable, importName, evidence.role);
+    if (current.path !== evidence.path) {
+      return `Python-Importpfad hat sich geändert: ${evidence.path} -> ${current.path}`;
+    }
+    if (current.sha256 !== evidence.sha256) {
+      return `Python-Paketinhalt hat sich geändert: ${evidence.path}`;
+    }
+    const expectedFiles = evidence.entries.map((entry) => entry.relativePath);
+    const currentFiles = current.entries.map((entry) => entry.relativePath);
+    if (stableJson(currentFiles) !== stableJson(expectedFiles)) {
+      return `Python-Paketdateien haben sich geändert: ${evidence.path}`;
+    }
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : `Python-Paketbindung ist nicht verifizierbar: ${importName}`;
+  }
+}
+
+function captureRuntimeEvidence(executable: string): ProvenanceRuntimeEvidence {
+  const resolvedExecutable = resolvedPythonExecutable(executable);
   const script = [
     "import importlib.metadata as m,json,platform,sys",
     "names=['torch','transformers','diffusers','safetensors','accelerate','ltx-pipelines','ltx-core']",
@@ -443,11 +619,66 @@ function provenanceFingerprint(value: Omit<RunProvenance, "fingerprint" | "verif
   return sha256Text(stableJson(value));
 }
 
+export function runProvenanceFingerprintMatches(evidence: RunProvenance): boolean {
+  const base = {
+    schemaVersion: evidence.schemaVersion,
+    capturedAt: evidence.capturedAt,
+    files: evidence.files,
+    code: evidence.code,
+    runtime: evidence.runtime,
+    upstreamContracts: evidence.upstreamContracts ?? [],
+    release: evidence.release,
+    ...(evidence.containerImages !== undefined
+      ? { containerImages: evidence.containerImages }
+      : {}),
+    ...(evidence.executionDecision ? { executionDecision: evidence.executionDecision } : {}),
+  };
+  return provenanceFingerprint(base) === evidence.fingerprint;
+}
+
+/**
+ * A CPU-only artifact promotion executes none of the baseline's model, Python,
+ * code, or container inputs.  Fork its already verified historical authority
+ * without carrying the baseline job's ExecutionDecision; callers add only the
+ * private immutable promotion inputs and the new v6 decision afterwards.
+ */
+export function forkVerifiedRunProvenanceForArtifactPromotion(
+  evidence: RunProvenance,
+): RunProvenance {
+  if (!evidence.verifiedAt || !runProvenanceFingerprintMatches(evidence)) {
+    throw new Error("Historische Baseline-Laufprovenienz ist nicht verifiziert oder ihr Fingerprint driftete.");
+  }
+  const base = structuredClone({
+    schemaVersion: evidence.schemaVersion,
+    capturedAt: evidence.capturedAt,
+    files: evidence.files,
+    code: evidence.code,
+    runtime: evidence.runtime,
+    upstreamContracts: evidence.upstreamContracts ?? [],
+    release: evidence.release,
+    ...(evidence.containerImages !== undefined
+      ? { containerImages: evidence.containerImages }
+      : {}),
+  });
+  return {
+    ...base,
+    verifiedAt: null,
+    fingerprint: provenanceFingerprint(base),
+  };
+}
+
 export async function captureRunProvenance(
   request: GenerationRequest,
   plan: CommandPlan,
+  options: {
+    expectedLipForcingImage?: ProvenanceContainerImageEvidence;
+  } = {},
 ): Promise<RunProvenance> {
+  if (!request.postprocess.lipForcing.enabled && options.expectedLipForcingImage) {
+    throw new Error("Eine gebundene LipForcing-Image-Identität ist nur für aktive LipForcing-Läufe zulässig.");
+  }
   const files = await captureRequiredFiles(plan.requiredPaths);
+  files.push(await capturePythonPackageManifest(plan.executable));
   if (request.postprocess.longcatLipsync.enabled) {
     files.push(
       await captureProvenanceFile(join(appRoot, "scripts", "longcat-hybrid.py"), "code:longcat-adapter"),
@@ -563,6 +794,14 @@ export async function captureRunProvenance(
         "code:lipforcing-runtime-patch",
       ),
       await captureProvenanceFile(
+        join(appRoot, "deploy", "lipforcing", "runtime-patch-provenance.v1.json"),
+        "code:lipforcing-runtime-patch-provenance",
+      ),
+      await captureProvenanceFile(
+        join(appRoot, "deploy", "lipforcing", "raw_output_mux.py"),
+        "code:lipforcing-raw-output-mux",
+      ),
+      await captureProvenanceFile(
         join(appRoot, "deploy", "lipforcing", "timeline.py"),
         "code:lipforcing-timeline",
       ),
@@ -631,6 +870,19 @@ export async function captureRunProvenance(
   for (const root of codeRoots) code.push(await captureCodeEvidence(root));
   const runtime = captureRuntimeEvidence(plan.executable);
   const upstreamContracts = upstreamWorkflowContractsForRequest(request);
+  let containerImages: ProvenanceContainerImageEvidence[] | undefined;
+  if (request.postprocess.lipForcing.enabled) {
+    if (options.expectedLipForcingImage) {
+      if (lipForcingImageIdentity([options.expectedLipForcingImage]) === null) {
+        throw new Error("Die erwartete LipForcing-Image-Identität ist strukturell ungültig.");
+      }
+      const imageError = verifyLipForcingImageIdentity(options.expectedLipForcingImage);
+      if (imageError) throw new Error(imageError);
+      containerImages = [structuredClone(options.expectedLipForcingImage)];
+    } else {
+      containerImages = [captureLipForcingImageIdentity(lipForcingImage)];
+    }
+  }
   const capturedAt = new Date().toISOString();
   const base = {
     schemaVersion: "ltx-studio-run-provenance.v2" as const,
@@ -640,6 +892,7 @@ export async function captureRunProvenance(
     runtime,
     upstreamContracts,
     release: releaseIdentity,
+    ...(containerImages !== undefined ? { containerImages } : {}),
   };
   return {
     ...base,
@@ -665,6 +918,36 @@ export async function bindRunProvenanceFile(
     runtime: evidence.runtime,
     upstreamContracts: evidence.upstreamContracts ?? [],
     release: evidence.release,
+    ...(evidence.containerImages !== undefined
+      ? { containerImages: evidence.containerImages }
+      : {}),
+    ...(evidence.executionDecision ? { executionDecision: evidence.executionDecision } : {}),
+  };
+  return {
+    ...base,
+    verifiedAt: null,
+    fingerprint: provenanceFingerprint(base),
+  };
+}
+
+export function bindRunExecutionDecision(
+  evidence: RunProvenance,
+  decision: JobExecutionDecision,
+): RunProvenance {
+  const normalized = normalizeJobExecutionDecision(decision);
+  if (!normalized) throw new Error("Ausführungsentscheidung ist strukturell ungültig.");
+  const base = {
+    schemaVersion: evidence.schemaVersion,
+    capturedAt: evidence.capturedAt,
+    files: evidence.files,
+    code: evidence.code,
+    runtime: evidence.runtime,
+    upstreamContracts: evidence.upstreamContracts ?? [],
+    release: evidence.release,
+    ...(evidence.containerImages !== undefined
+      ? { containerImages: evidence.containerImages }
+      : {}),
+    executionDecision: normalized,
   };
   return {
     ...base,
@@ -691,10 +974,12 @@ export function verifyProvenanceFileEvidence(evidence: ProvenanceFileEvidence): 
     expected.deviceId = current.deviceId;
     return revisionsEqual(current, expected) ? null : `Dateirevision hat sich geändert: ${evidence.path}`;
   }
-  const currentRelative = gemmaRelativeFiles(evidence.path);
+  const currentRelative = evidence.kind === "python-package-manifest"
+    ? pythonPackageRelativeFiles(evidence.path)
+    : gemmaRelativeFiles(evidence.path);
   const expectedRelative = evidence.entries.map((entry) => entry.relativePath);
   if (stableJson(currentRelative) !== stableJson(expectedRelative)) {
-    return `Gemma-Manifestdateien haben sich geändert: ${evidence.path}`;
+    return `${evidence.kind === "python-package-manifest" ? "Python-Paketdateien" : "Gemma-Manifestdateien"} haben sich geändert: ${evidence.path}`;
   }
   for (const entry of evidence.entries) {
     const path = join(evidence.path, entry.relativePath);
@@ -703,7 +988,7 @@ export function verifyProvenanceFileEvidence(evidence: ProvenanceFileEvidence): 
       || Math.abs(current.modifiedAtMs - entry.modifiedAtMs) >= 1
       || Math.abs(current.changedAtMs - entry.changedAtMs) >= 1
       || current.fileId !== entry.fileId) {
-      return `Gemma-Manifestrevision hat sich geändert: ${path}`;
+      return `${evidence.kind === "python-package-manifest" ? "Python-Paketrevision" : "Gemma-Manifestrevision"} hat sich geändert: ${path}`;
     }
   }
   return null;
@@ -714,6 +999,10 @@ export async function verifyRunProvenance(
   request: GenerationRequest,
 ): Promise<{ evidence: RunProvenance; error: string | null }> {
   try {
+    if ((evidence.executionDecision || evidence.containerImages !== undefined)
+      && !runProvenanceFingerprintMatches(evidence)) {
+      return { evidence, error: "Gebundene Laufprovenienz stimmt nicht mit ihrem Fingerprint überein." };
+    }
     if (evidence.schemaVersion === "ltx-studio-run-provenance.v2"
       && stableJson(evidence.release) !== stableJson(releaseIdentity)) {
       return { evidence, error: "Die gebundene Release-Identität stimmt nicht mit dem laufenden Server überein." };
@@ -726,6 +1015,40 @@ export async function verifyRunProvenance(
           error: "Der gebundene offizielle Workflow-Vertrag stimmt nicht mehr mit dem Auftrag überein.",
         };
       }
+    }
+    const lipForcingImageEvidence = lipForcingImageIdentity(evidence.containerImages);
+    if (request.postprocess.lipForcing.enabled) {
+      if (!lipForcingImageEvidence) {
+        return {
+          evidence,
+          error: "Die tatsächliche unveränderliche LipForcing-Containeridentität fehlt oder ist ungültig.",
+        };
+      }
+      const imageError = verifyLipForcingImageIdentity(lipForcingImageEvidence);
+      if (imageError) return { evidence, error: imageError };
+    } else if (evidence.containerImages !== undefined) {
+      return {
+        evidence,
+        error: "LipForcing-Containeridentität ist für einen Auftrag ohne LipForcing nicht zulässig.",
+      };
+    }
+    const pythonPackageEvidence = evidence.files.filter(
+      (file) => file.role === LTX_PIPELINES_PROVENANCE_ROLE,
+    );
+    if (evidence.schemaVersion === "ltx-studio-run-provenance.v2"
+      && (pythonPackageEvidence.length !== 1
+        || pythonPackageEvidence[0].kind !== "python-package-manifest")) {
+      return {
+        evidence,
+        error: "Die tatsächlich importierte ltx_pipelines-Runtime ist nicht eindeutig kryptografisch gebunden.",
+      };
+    }
+    if (pythonPackageEvidence.length === 1) {
+      const packageError = await verifyPythonPackageBinding(
+        pythonPackageEvidence[0],
+        evidence.runtime.pythonExecutable,
+      );
+      if (packageError) return { evidence, error: packageError };
     }
     for (const file of evidence.files) {
       const error = verifyProvenanceFileEvidence(file);
@@ -792,7 +1115,7 @@ function validFileEvidence(value: unknown): value is ProvenanceFileEvidence {
     && item.role.length <= 200
     && typeof item.path === "string"
     && isAbsolute(item.path)
-    && ["file", "directory-manifest"].includes(item.kind ?? "")
+    && ["file", "directory-manifest", "python-package-manifest"].includes(item.kind ?? "")
     && typeof item.sizeBytes === "number"
     && Number.isFinite(item.sizeBytes)
     && item.sizeBytes > 0
@@ -873,10 +1196,43 @@ function validReleaseIdentity(value: unknown): boolean {
     && typeof item.verified === "boolean"
     && nullableHash(item.releaseDigest)
     && nullableHash(item.manifestSha256)
+    && nullableHash(item.surfaceDigest)
+    && nullableHash(item.runtimeInstallSealSha256)
+    && nullableHash(item.runtimeTreeSha256)
+    && nullableHash(item.runtimePolicySha256)
+    && nullableHash(item.nodeExecutableSha256)
+    && nullableHash(item.expectedHostTcbAttestationSha256)
     && nullableCommit(item.sourceCommit)
     && (item.sealed
-      ? item.verified === true && item.releaseDigest !== null && item.manifestSha256 === item.releaseDigest
-      : item.verified === false && item.releaseDigest === null && item.manifestSha256 === null && item.sourceCommit === null);
+      ? item.verified === true
+        && item.releaseDigest !== null
+        && item.manifestSha256 === item.releaseDigest
+        && item.surfaceDigest !== null
+        && item.runtimeInstallSealSha256 !== null
+        && item.runtimeTreeSha256 !== null
+        && item.runtimePolicySha256 !== null
+        && item.nodeExecutableSha256 !== null
+        && item.expectedHostTcbAttestationSha256 !== null
+      : item.verified === false
+        && item.releaseDigest === null
+        && item.manifestSha256 === null
+        && item.surfaceDigest === null
+        && item.sourceCommit === null
+        && item.runtimeInstallSealSha256 === null
+        && item.runtimeTreeSha256 === null
+        && item.runtimePolicySha256 === null
+        && item.nodeExecutableSha256 === null
+        && item.expectedHostTcbAttestationSha256 === null);
+}
+
+function validContainerImages(value: unknown): value is ProvenanceContainerImageEvidence[] {
+  if (!Array.isArray(value) || value.length !== 1
+    || !value[0] || typeof value[0] !== "object" || Array.isArray(value[0])) return false;
+  try {
+    return lipForcingImageIdentity(value as ProvenanceContainerImageEvidence[]) !== null;
+  } catch {
+    return false;
+  }
 }
 
 export function normalizeRunProvenance(value: unknown): RunProvenance | null {
@@ -895,6 +1251,8 @@ export function normalizeRunProvenance(value: unknown): RunProvenance | null {
       && (!Array.isArray(item.upstreamContracts) || !item.upstreamContracts.every(validUpstreamContract)))
     || (item.schemaVersion === "ltx-studio-run-provenance.v2" && !validReleaseIdentity(item.release))
     || (item.schemaVersion === "ltx-studio-run-provenance.v1" && item.release !== undefined)
+    || (item.containerImages !== undefined && !validContainerImages(item.containerImages))
+    || (item.executionDecision !== undefined && !normalizeJobExecutionDecision(item.executionDecision))
     || typeof item.fingerprint !== "string"
     || !HASH_PATTERN.test(item.fingerprint)) return null;
   return structuredClone(item as RunProvenance);

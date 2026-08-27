@@ -12,17 +12,26 @@ from .authorization import (
     verify_detached_signature,
 )
 from .comparator_result import DECISION_SCHEMA as Q1_DECISION_SCHEMA
-from .complete import COMPLETE_D1_REPORT_SCHEMA
+from .complete import CompleteD1Error, validate_complete_d1_report
 from .cross_shot_result import CROSS_SHOT_DECISION_SCHEMA
+from .design import (
+    CURRENT_PLANNING_HYPOTHESIS_COUNT,
+    CURRENT_VBENCH_CLAIM_COUNT,
+    CURRENT_VBENCH_GATE_COUNT,
+    document_sha256,
+)
 from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
-from .design import document_sha256
 from .governance import GovernanceError, validate_preregistration
 from .pilot import PilotError, validate_design_pilot_binding_report
 from .readiness import READINESS_REPORT_SCHEMA
+from .surface_contract import SurfaceContractError, build_candidate_vbench_surface_binding
 
-F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v1"
-F0_REPORT_SCHEMA = "ltx-av-eval-f0-preflight-report.v1"
-QUALIFICATION_BUNDLE_SCHEMA = "ltx-av-eval-f0-qualification-bundle.v1"
+LEGACY_F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v1"
+LEGACY_F0_REPORT_SCHEMA = "ltx-av-eval-f0-preflight-report.v1"
+LEGACY_QUALIFICATION_BUNDLE_SCHEMA = "ltx-av-eval-f0-qualification-bundle.v1"
+F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v2"
+F0_REPORT_SCHEMA = "ltx-av-eval-f0-preflight-report.v2"
+QUALIFICATION_BUNDLE_SCHEMA = "ltx-av-eval-f0-qualification-bundle.v2"
 STUDIO_QUALIFICATION_SCHEMA = "ltx-studio-qualification-report.v1"
 STUDIO_RIGHTS_SCHEMA = "ltx-studio-rights-attestation.v1"
 STUDIO_TRUST_SCHEMA = "ltx-studio-trusted-keys.v1"
@@ -176,6 +185,7 @@ def _validate_candidate(raw: object) -> tuple[dict[str, Any], dict[str, str], di
             "candidate_id",
             "release_digest",
             "surface_digest",
+            "candidate_surface_binding_digest",
             "mapping_sha256",
             "rights_evidence_catalog_digest",
             "holdout_digest",
@@ -199,6 +209,7 @@ def _validate_candidate(raw: object) -> tuple[dict[str, Any], dict[str, str], di
     for field in (
         "release_digest",
         "surface_digest",
+        "candidate_surface_binding_digest",
         "mapping_sha256",
         "rights_evidence_catalog_digest",
         "holdout_digest",
@@ -374,13 +385,19 @@ def _validate_sota_evaluator_rights(
             raise FreezePreflightError(f"SOTA evaluator rights are blocked: {evidence_id}")
 
 
-def _validate_surface(  # noqa: PLR0912
+def _validate_surface(  # noqa: PLR0912, PLR0915
     candidate: dict[str, Any], raw: object, rights_attestation: object
 ) -> tuple[dict[str, set[str]], set[str]]:
     if not isinstance(raw, dict) or raw.get("schemaVersion") != "candidate-release-surface.v1":
         raise FreezePreflightError("candidate release surface schema mismatch")
     if studio_sha256_document(raw) != candidate["surface_digest"]:
         raise FreezePreflightError("candidate release surface digest mismatch")
+    try:
+        surface_binding = build_candidate_vbench_surface_binding(raw)
+    except SurfaceContractError as error:
+        raise FreezePreflightError(f"candidate VBench surface rejected: {error}") from error
+    if surface_binding["projection_digest"] != candidate["candidate_surface_binding_digest"]:
+        raise FreezePreflightError("candidate release surface projection digest mismatch")
     entries = raw.get("entries")
     if not isinstance(entries, list):
         raise FreezePreflightError("candidate release surface entries must be a list")
@@ -463,6 +480,14 @@ def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
         raise FreezePreflightError("D0a design report schema mismatch")
     if design.get("status") != "ready-to-freeze" or design.get("blockers") != []:
         raise FreezePreflightError("D0a design report is not ready-to-freeze")
+    if (
+        design.get("planning_hypothesis_count") != CURRENT_PLANNING_HYPOTHESIS_COUNT
+        or design.get("vbench_claim_count") != CURRENT_VBENCH_CLAIM_COUNT
+        or design.get("vbench_gate_count") != CURRENT_VBENCH_GATE_COUNT
+    ):
+        raise FreezePreflightError("D0a design report does not cover the current candidate VBench matrix")
+    _sha256(design.get("surface_digest"), "D0a full release surface")
+    _sha256(design.get("candidate_surface_binding_digest"), "D0a candidate surface binding")
     try:
         validate_design_pilot_binding_report(pilot_binding)
     except PilotError as error:
@@ -475,8 +500,19 @@ def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
         raise FreezePreflightError("D0a pilot binding changes the required independent-unit count")
     if pilot_binding["planning_hypothesis_count"] != design.get("planning_hypothesis_count"):
         raise FreezePreflightError("D0a pilot binding changes the planning hypothesis family")
-    if not isinstance(d1, dict) or d1.get("schema_version") != COMPLETE_D1_REPORT_SCHEMA or d1.get("verdict") != "pass":
+    try:
+        validated_d1 = validate_complete_d1_report(d1, design_report=design)
+    except CompleteD1Error as error:
+        raise FreezePreflightError(f"D1 report is not a complete canonical v2 report: {error}") from error
+    if validated_d1["verdict"] != "pass":
         raise FreezePreflightError("D1 report is not a complete pass")
+    for field in ("surface_digest", "candidate_surface_binding_digest"):
+        if (
+            design.get(field) != candidate[field]
+            or pilot_binding.get(field) != candidate[field]
+            or d1.get(field) != candidate[field]
+        ):
+            raise FreezePreflightError(f"D0a, pilot, and D1 do not share the signed {field}")
     if not isinstance(q0, dict) or q0.get("schema_version") != CROSS_SHOT_DECISION_SCHEMA:
         raise FreezePreflightError("Q0 decision schema mismatch")
     if q0.get("verdict") not in {"winner", "abstention"}:
@@ -554,6 +590,11 @@ def _validate_detailed_reports(  # noqa: PLR0912, PLR0915
         raise FreezePreflightError("Q1 target claims do not match F0")
     if d1.get("design_digest") != design.get("design_digest") or q0.get("design_digest") != design.get("design_digest"):
         raise FreezePreflightError("D0a design digest is not shared by D1 and Q0")
+    if (
+        q0.get("surface_digest") != candidate["surface_digest"]
+        or q0.get("candidate_surface_binding_digest") != candidate["candidate_surface_binding_digest"]
+    ):
+        raise FreezePreflightError("Q0 does not bind the signed current release surface")
     if d1.get("dataset_digest") != q0.get("dataset_digest") or d1.get("dataset_digest") != q1.get(
         "calibration_dataset_digest"
     ):
@@ -891,6 +932,7 @@ def build_f0_preflight_report(  # noqa: PLR0913
         "candidate_id": candidate["candidate_id"],
         "release_digest": candidate["release_digest"],
         "surface_digest": candidate["surface_digest"],
+        "candidate_surface_binding_digest": candidate["candidate_surface_binding_digest"],
         "preregistration_digest": candidate["preregistration_digest"],
         "rights_attestation_digest": candidate["rights_attestation_digest"],
         "evaluation_authorization_digest": candidate["evaluation_authorization_digest"],

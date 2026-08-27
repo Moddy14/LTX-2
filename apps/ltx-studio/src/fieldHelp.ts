@@ -48,7 +48,7 @@ export const fieldHelp = {
   audioStart:
     "Wofür: Überspringt den angegebenen Anfang der Audiodatei. Empfehlung: 0 für den Dateianfang oder die exakte Startzeit in Sekunden, zum Beispiel 12,5.",
   audioDuration:
-    "Wofür: Begrenzt den verwendeten Audioausschnitt. Empfehlung: leer für automatische Dauer oder eine positive Sekundenangabe passend zur gewünschten Szene.",
+    "Wofür: Eine gesetzte maximale Dauer ist in LTX v1.3 der alleinige Dauer-Treiber; die Framezahl wird aus dem effektiv decodierten Audioausschnitt abgeleitet. Leer bedeutet: Die explizite GUI-Framezahl begrenzt den Lauf und das Audio wird passend getrimmt.",
   lipDubReferenceStrength:
     "Wofür: Regelt, wie stark LipDub das Bild des Referenzvideos festhält. Empfehlung: 1,0 wie im offiziellen Workflow. Der gemessene Vergleich mit 0,8 verschlechterte bei dieser Referenz Identität, Mundform und Pausenruhe; daher nur nach einem gezielten A/B-Test ändern.",
   lipDubCalibrationClip:
@@ -86,7 +86,7 @@ export const fieldHelp = {
   lipForcingMouthDelay:
     "Wofür: Verschiebt nur die Sprachspur, die das LipForcing-Modell steuert; der hörbare Ton bleibt davon unberührt. Positiv bedeutet eine spätere Modellführung, negativ eine frühere. Die Wirkung auf die erzeugte Mundbewegung muss am konkreten Clip gemessen werden. Empfehlung: 0 ms als allgemeiner Standard; nur kontrolliert verändern.",
   lipForcingProgramAudioDelay:
-    "Wofür: Verschiebt nur den hörbaren Sprachinhalt im fertigen LipForcing-Video, ohne Bildframes oder Modellsteuerung erneut zu verändern. Positiv verzögert den Ton, negativ zieht ihn vor. Empfehlung: 0 ms als Standard; für den aktuellen Referenzclip korrigieren +125 ms den gemessenen Laut-/Lippen-Offset auf 0 ms.",
+    "Wofür: Verschiebt nur den hörbaren Sprachinhalt im fertigen LipForcing-Video, ohne Bildframes oder Modellsteuerung erneut zu verändern. Positiv verzögert den Ton, negativ zieht ihn vor. Empfehlung: 0 ms als allgemeiner Standard. Für den aktuellen Referenzclip ist +150 ms der Vollfenster-Kandidat mit 0 ms Rohversatz über 241 Frames; bis zur verblindeten Hör-/Sichtprüfung ist das keine allgemeine Freigabe.",
   retakeStart:
     "Wofür: Beginn des zu regenerierenden Bereichs im Quellvideo. Gute Eingabe: Zeit in Sekunden ab Videostart; für saubere Übergänge etwas vor der problematischen Stelle beginnen.",
   retakeEnd:
@@ -98,7 +98,7 @@ export const fieldHelp = {
   distilledSchedule:
     "Wofür: Nutzt den schnellen Distilled-Ablauf und den Distilled Checkpoint. Empfehlung: für schnelle Retakes einschalten; für maximale Steuerbarkeit ausschalten.",
   icLoraProfile:
-    "Wofür: Wählt einen veröffentlichten LTX-2.3-IC-LoRA-Ablauf. Union Control überträgt Tiefe, Kanten oder Pose. Ingredients kombiniert ein Referenzblatt. Motion Track folgt Bewegungsbahnen. Pixel x4 vergrößert generativ. V2V Rasur entfernt Bart. Inpainting ersetzt maskierte Bildteile, Outpainting erweitert die Leinwand, HDR erzeugt ein lineares Master.",
+    "Wofür: Wählt einen veröffentlichten IC-LoRA-Ablauf. Union Control überträgt Tiefe, Kanten oder Pose. Ingredients kombiniert ein Referenzblatt. Motion Track folgt Bewegungsbahnen. Pixel x4 vergrößert generativ. V2V Deblur bildet den aktuellen offiziellen LTX-2.5-Graphen ab; V2V Rasur bleibt der getrennte LTX-2.3-Legacy-Ablauf. Inpainting ersetzt maskierte Bildteile, Outpainting erweitert die Leinwand, HDR erzeugt ein lineares Master.",
   controlVideoPath:
     "Wofür: Absoluter DGX-Pfad zu einem IC-LoRA-Kontrollvideo, das Bewegung oder Struktur vorgibt. Gute Eingabe: ein lesbares Video mit passender Dauer und klarer Bewegung.",
   unionControlLora:
@@ -117,8 +117,12 @@ export const fieldHelp = {
     "Wofür: Offizielle generative Pixel-Spatial-Upscaler-IC-LoRA x4. Sie erhält Bewegung und Bildaufbau des Quellvideos, erzeugt Details aber neu. Ausgabe-Breite und -Höhe müssen jeweils dem Vierfachen der Quelle entsprechen.",
   pixelUpscalerStrength:
     "Wofür: Gewichtet die x4-Pixelreferenz. Empfehlung: 1,0 wie in der offiziellen Vorlage; für stärkere Quelltreue eher den Denoise-Schedule verkürzen als diesen Wert willkürlich abzusenken.",
+  deblurLora:
+    "Wofür: Gepinnte Deblur-V2V-IC-LoRA aus dem ausführbaren offiziellen LTX-2.5-Beispielgraphen. Sie reduziert Unschärfe im Quellvideo und bewahrt dessen Bewegung; verwenden Sie die SHA-256-verifizierte Datei ltx-2.3-22b-ic-lora-deblur-0.9.safetensors.",
+  deblurStrength:
+    "Wofür: Gewichtet das Deblur-Modell. Der auditierte offizielle LTX-2.5-Graph verwendet fest 1,0; das Studio lehnt für diesen Vertrag abweichende Werte ab.",
   instantShaveLora:
-    "Wofür: Offizielle V2V-Demonstrations-IC-LoRA „Instant Shave“. Sie ist ausschließlich auf das Entfernen von Bart und Stoppeln spezialisiert; das Studio setzt das benötigte Triggerwort REMOVEBEARD automatisch vor den Prompt.",
+    "Wofür: Separater LTX-2.3-Legacy-V2V-Ablauf „Instant Shave“. Er ist ausschließlich auf das Entfernen von Bart und Stoppeln spezialisiert und gehört nicht zum aktuellen LTX-2.5-V2V-Graphen; das Studio setzt das Triggerwort REMOVEBEARD automatisch vor den Prompt.",
   instantShaveStrength:
     "Wofür: Gewichtet das spezialisierte Instant-Shave-Modell. Empfehlung: 1,0 wie in der offiziellen Vorlage; ein klar sichtbares Gesicht und eine genaue Beschreibung glatter, bartloser Haut sind wichtiger als höhere Werte.",
   inOutpaintLora:
@@ -171,6 +175,16 @@ export const fieldHelp = {
     "Wofür: Modellordner des von LTX-2 benötigten Gemma-Textencoders. Für Sprach- und LipDub-Läufe verlangt das Studio den vollständig geprüften offiziellen Google-Gemma-QAT-Q4-Ordner einschließlich Tokenizer und preprocessor_config.json.",
   spatialUpscaler:
     "Wofür: Modell für die zweite Stufe, die das Video räumlich vergrößert und verfeinert. Gute Eingabe: absoluter Pfad zum zu diesem LTX-Checkpoint passenden Upscaler.",
+  dfrTransformer:
+    "Wofür: Direkter offizieller LTX-2.5-Distilled-Transformer für DFR v1.3.0. Der frühere Dev-Transformer plus Distilled-LoRA-Vertrag ist inkompatibel und wird nicht als Fallback übernommen.",
+  dfrTemporalUpscalings:
+    "Wofür: Jede Runde berechnet aus N Basisframes exakt 2(N−1)+1 Endframes und verdoppelt die Wiedergabe-FPS. Nach 0/1/2 Runden entstehen damit der Faktor 1/2/4 bei unveränderter Intervalldauer. Standard 0; 1 oder 2 erst mit verifiziertem Temporal-Upscaler und eigenem Speicher-/Laufzeitnachweis.",
+  dfrSpatialUpscalings:
+    "Wofür: 1 rendert Basisstufe plus volle Detailing-Stufe. 2 ergänzt einen weiteren räumlichen Detailing-Epilog und verlangt Breite sowie Höhe auf dem 128er-Raster; das offizielle UHD-Format ist deshalb 3840 × 2176.",
+  dfrTemporalUpscaler:
+    "Wofür: Gepinnter latenter LTX-2.5-Temporal-Upscaler x2. Er ist nur bei einer oder zwei zeitlichen DFR-Runden erforderlich; fehlt seine SHA-256-Verifikation, bleibt der Lauf HOLD.",
+  dfrDetailingLora:
+    "Wofür: Verpflichtende x2-Pixel-Spatial-Detailing-IC-LoRA für DFR v1.3.0. Upstream setzt ihre Stärke unveränderlich auf 0,5; sie darf nicht zusätzlich als normale LoRA eingetragen werden. Fehlt die exakt SHA-256-verifizierte Datei aus dem separaten gated Repository, bleibt DFR HOLD.",
   distilledLora:
     "Wofür: Pfad zur Distilled-LoRA, die den schnellen Ablauf der Zwei-Stufen-Pipeline unterstützt. Gute Eingabe: kompatible lokale .safetensors-Datei.",
   distilledLoraStrength:
@@ -192,15 +206,17 @@ export const fieldHelp = {
   frames:
     "Wofür: Bestimmt zusammen mit FPS die Dauer. Bei Video ist es die Bildanzahl; bei Text zu Audio dient derselbe Wert nur als Zeitraster. Gültige Werte folgen 8k+1, zum Beispiel 121 für etwa 5 Sekunden bei 24 FPS.",
   fps:
-    "Wofür: Wiedergabegeschwindigkeit in Frames pro Sekunde. Empfehlung: 24 für filmische Bewegung, 25 oder 30 für gängige Videoformate; beeinflusst die Dauer, nicht die Framezahl.",
+    "Wofür: Wiedergabegeschwindigkeit in Frames pro Sekunde. Empfehlung: 24 für filmische Bewegung, 25 oder 30 für gängige Videoformate; beeinflusst die Dauer, nicht die Framezahl. DFR erhält auch fractional Raten wie 24000/1001 als Float und multipliziert sie nach 0/1/2 Temporalrunden exakt mit 1/2/4, ohne Integer-Trunkierung.",
   seed:
     "Wofür: Startwert des Zufallsprozesses. Empfehlung: denselben sichtbaren Wert für reproduzierbare Ergebnisse behalten; der Würfel erzeugt einen neuen konkreten Zufalls-Seed.",
   steps:
     "Wofür: Anzahl der Entrauschungsschritte. Empfehlung: Pipeline-Vorgabe nutzen; mehr Schritte kosten Zeit und bringen nach einem gewissen Punkt kaum sichtbare Verbesserung.",
   outputName:
     "Wofür: Dateiname der fertigen Ausgabe im konfigurierten Ausgabeordner. Gute Eingabe: Buchstaben, Zahlen, Punkt, Bindestrich oder Unterstrich; Video endet auf .mp4, Text zu Audio auf .wav.",
+  audioPeakCeiling:
+    "Wofür: Dämpft T2A-Audio vor der PCM-Umwandlung nur dann, wenn Sample-Peaks die gewählte dBFS-Grenze überschreiten. Dadurch werden übersteuerte PCM-Samples verhindert, ohne leise Aufnahmen anzuheben. Das ist kein True-Peak-Limiter und repariert keine bereits im Rohsignal verzerrte Dynamik; True Peak und Lautheit müssen anschließend gemessen werden. Empfehlung: -3 dBFS; -1 dBFS bietet weniger Reserve, niedrigere Werte machen nur Spitzen leiser.",
   tiling:
-    "Wofür: Verarbeitet die VAE in Kacheln und senkt damit den Speicherbedarf. Empfehlung: auf dem DGX eingeschaltet lassen; nur bei sichtbaren Kachelnaht-Artefakten testweise ausschalten.",
+    "Wofür: Verarbeitet die VAE in Kacheln und senkt damit den Speicherbedarf. Empfehlung: auf dem DGX eingeschaltet lassen; nur bei sichtbaren Kachelnaht-Artefakten testweise ausschalten. DFR v1.3 verwaltet sein Tiling pipeline-intern und blendet diesen wirkungslosen Regler deshalb aus.",
   quantization:
     "Wofür: Reduziert Speicherbedarf und kann die Inferenz beschleunigen. Empfehlung: FP8 Cast ausschließlich mit BF16-Checkpoint; FP8 Scaled ausschließlich mit einem vorquantisierten FP8-Checkpoint, dessen Skalen bereits in der Datei liegen.",
   gemmaLora:
@@ -213,16 +229,24 @@ export const fieldHelp = {
     "Wofür: Distilled-LoRA-Gewicht in der zweiten HQ-Verfeinerungsstufe. Empfehlung: 0,5 als Ausgangspunkt; nur in kleinen Schritten ändern.",
   cfg:
     "Wofür: Verstärkt die Bindung an den Prompt. Empfehlung: Video 3,0 und Audio 7,0 als Startwerte; hohe Werte können Bewegung oder Klang unnatürlich machen.",
+  t2aCfg:
+    "Wofür: Verstärkt bei LTX-2.5 Text-zu-Audio die Bindung an den gesprochenen Text. Der offizielle 8-Schritt-Workflow verwendet 1,0; nur kontrolliert und nahe 1,0 variieren, zum Beispiel 1,1. Audio-CFG 7,0 gehört nicht zu diesem Workflow.",
   stg:
     "Wofür: Spatio-Temporal Guidance verbessert zeitliche Konsistenz mit zusätzlichen Modellberechnungen. Empfehlung: 1,0; 0 deaktiviert STG, 0,5 bis 1,5 ist der typische Bereich.",
+  t2aStg:
+    "Wofür: Zusätzliche Guidance für experimentelle T2A-Zeitkonsistenz. Der offizielle LTX-2.5-T2A-Workflow verwendet 0; nur als getrennten Versuchsarm mit explizitem Block 29 aktivieren.",
   rescale:
     "Wofür: Gleicht die Varianz nach Guidance an und reduziert Übersättigung. Empfehlung: 0,7 für Video; 0 deaktiviert den Effekt.",
+  t2aRescale:
+    "Wofür: Skaliert das T2A-Ergebnis nach aktiver Guidance. Offizieller Wert ist 0; bei CFG 1,0 und STG 0 wäre ein anderer Wert wirkungslos und wird deshalb abgelehnt.",
   modality:
     "Wofür: Verbessert die Abstimmung zwischen Bild und Ton. Empfehlung: 3,0 für audiovisuelle Szenen; 1,0 deaktiviert die zusätzliche Modalitätsführung.",
   skipStep:
     "Wofür: Überspringt Guidance regelmäßig, um Rechenzeit zu sparen. Empfehlung: 0 für beste Qualität; positive Werte nur für gezielte Geschwindigkeitstests.",
   stgBlocks:
     "Wofür: Kommagetrennte Transformer-Blocknummern, auf die STG angewendet wird. Empfehlung: 28 für LTX-2.3 beibehalten; leer lassen, wenn STG deaktiviert ist.",
+  t2aStgBlocks:
+    "Wofür: Transformer-Blöcke für einen ausdrücklich experimentellen LTX-2.5-T2A-STG-Lauf. Bei STG 0 leer lassen; bei STG > 0 mindestens Block 29 angeben.",
   resolutionPreset:
     "Wofür: Setzt Breite und Höhe gemeinsam auf geprüfte LTX-Werte. Empfehlung: Entwurf quer zum Testen, Produktion für Standardausgaben und Full HD erst für den finalen Lauf.",
   durationPreset:
@@ -330,7 +354,7 @@ export const fieldHelp = {
   objectiveAvNullP95:
     "Wofür: 95. Perzentil der besten Scheinkorrelationen nach kontrolliertem zyklischem Verschieben des Audios. Der echte Peak muss diesen Nullmodellwert klar übertreffen, sonst bleibt die Messung unzureichend.",
   objectivePvCapability:
-    "Wofür: Prüft, ob die sichtbare Lippenbewegung zu den gesprochenen Lauten passt. Besonders wichtig: Bei p, b und m müssen sich die Lippen im richtigen Moment schließen. Prüfung aktiv bedeutet, dass diese Kontrolle automatisch ausgeführt wird.",
+    "Wofür: Misst, ob die sichtbare Lippenbewegung zu den gesprochenen Lauten passt. Besonders wichtig: Bei p, b und m müssen sich die Lippen im richtigen Moment schließen. Eine Messung allein ist keine Product-GO-Freigabe; dafür müssen die getrennten Release-Gates bestanden sein.",
   objectivePvOffset:
     "Wofür: Zeitversatz des gelernten Audio-/Mundinhaltevaluators. Positiv bedeutet, dass der sichtbare Mund dem Audio folgt. Gut: Medianfehler höchstens 20 ms und p95 höchstens 40 ms auf dem unabhängigen Holdout; ein Einzelclipwert allein ist kein Release-Gate.",
   objectivePvOffsetConfidence:
@@ -382,7 +406,7 @@ export const fieldHelp = {
   objectivePvPitch:
     "Wofür: 95. Perzentil der absoluten vertikalen Kopfneigung aus der MediaPipe-Gesichtsmatrix. Große Werte können Mundöffnung und Tracking verzerren. Noch kein kalibrierter Ausschlussgrenzwert.",
   objectivePvUsableDuration:
-    "Wofür: Tatsächlich untersuchte Dauer des auf fünf Sekunden begrenzten Messclips. Für Roh-Lag und Bewegung werden mindestens eine Sekunde und 24 verwertbare Frames verlangt; längere kontrollierte Clips liefern mehr Evidenz.",
+    "Wofür: Tatsächlich untersuchte Dauer des auf 10,5 Sekunden und 300 Frames begrenzten Messfensters. Für Roh-Lag und Bewegung werden mindestens eine Sekunde und 24 verwertbare Frames verlangt; längere kontrollierte Clips liefern mehr Evidenz.",
   objectivePvSampledFrames:
     "Wofür: Anzahl der mit echten Video-PTS untersuchten Frames, höchstens 300. Gute Evidenz: mindestens 24 Frames bei konstanter 24-, 25- oder 30-FPS-Zeitbasis und hoher Trackingabdeckung.",
   objectiveDialogueCapability:

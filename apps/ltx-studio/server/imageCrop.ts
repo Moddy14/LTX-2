@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { ImageCropFit, PreparedImageCrop } from "../shared/plan.js";
-import { uploadRoot } from "./config.js";
+import { hostTcbExecutables, uploadRoot } from "./config.js";
 import { probeVideoMetadata } from "./mediaProbe.js";
 import { matchesUploadSignature } from "./uploads.js";
 import type { AssetFile } from "./assets.js";
@@ -38,6 +38,7 @@ export const DEFAULT_BOKEH_FEATHER = 90;
 
 type PreparedImageCropFile = Omit<PreparedImageCrop, "asset"> & {
   file: AssetFile;
+  command: string;
 };
 
 function shellQuote(value: string): string {
@@ -108,7 +109,7 @@ export function buildImageCropFilter(input: ImageCropPreparationInput): CropFilt
 
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(hostTcbExecutables.ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     let timedOut = false;
     const timeout = setTimeout(() => {

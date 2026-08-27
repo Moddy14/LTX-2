@@ -1,6 +1,8 @@
 import { statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
+import { hostTcbExecutables } from "./config.js";
+
 export type VideoMetadata = {
   width: number | null;
   height: number | null;
@@ -28,6 +30,7 @@ export type VideoMetadata = {
 };
 
 const metadataCache = new Map<string, { size: number; mtimeMs: number; metadata: VideoMetadata | null }>();
+const audioDurationCache = new Map<string, { size: number; mtimeMs: number; durationSeconds: number | null }>();
 
 function positiveNumber(value: unknown): number | null {
   if (typeof value !== "string" && typeof value !== "number") return null;
@@ -56,6 +59,47 @@ function parseRate(value: unknown): number | null {
   return Number.isFinite(fps) && fps > 0 ? fps : null;
 }
 
+export function probeAudioDurationSeconds(path: string): number | null {
+  if (!path) return null;
+  let stats;
+  try {
+    stats = statSync(path);
+  } catch {
+    return null;
+  }
+  if (!stats.isFile()) return null;
+  const cached = audioDurationCache.get(path);
+  if (cached && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) {
+    return cached.durationSeconds;
+  }
+  const result = spawnSync(hostTcbExecutables.ffprobe, [
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration:stream=codec_type,duration",
+    "-of",
+    "json",
+    path,
+  ], { encoding: "utf8", timeout: 5_000, maxBuffer: 1024 * 1024 });
+  if (result.error || result.status !== 0 || !result.stdout) {
+    audioDurationCache.set(path, { size: stats.size, mtimeMs: stats.mtimeMs, durationSeconds: null });
+    return null;
+  }
+  try {
+    const body = JSON.parse(result.stdout) as { streams?: unknown[]; format?: Record<string, unknown> };
+    const streams = Array.isArray(body.streams) ? body.streams as Record<string, unknown>[] : [];
+    const audioStream = streams.find((item) => item.codec_type === "audio");
+    const durationSeconds = audioStream
+      ? positiveNumber(audioStream.duration) ?? positiveNumber(body.format?.duration)
+      : null;
+    audioDurationCache.set(path, { size: stats.size, mtimeMs: stats.mtimeMs, durationSeconds });
+    return durationSeconds;
+  } catch {
+    audioDurationCache.set(path, { size: stats.size, mtimeMs: stats.mtimeMs, durationSeconds: null });
+    return null;
+  }
+}
+
 export function probeVideoMetadata(path: string): VideoMetadata | null {
   if (!path) return null;
   let stats;
@@ -67,7 +111,7 @@ export function probeVideoMetadata(path: string): VideoMetadata | null {
   if (!stats.isFile()) return null;
   const cached = metadataCache.get(path);
   if (cached && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) return cached.metadata;
-  const result = spawnSync("ffprobe", [
+  const result = spawnSync(hostTcbExecutables.ffprobe, [
     "-v",
     "error",
     "-count_frames",

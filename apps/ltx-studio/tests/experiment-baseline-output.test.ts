@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ExperimentStore } from "../server/experimentStore.js";
+import { toPublicControlledExperiment } from "../server/publicOutput.js";
+import { buildExperimentCreateInput } from "../src/experimentCreate.js";
 import { outputForArm } from "../src/experimentOutputs.js";
 import type { StudioOutput } from "../src/types.js";
 import { validRequest } from "./fixtures.js";
@@ -42,35 +44,97 @@ async function adoptedBaselineExperiment() {
       provenanceFingerprint: FINGERPRINT,
     },
   );
-  return experiment;
+  return toPublicControlledExperiment(experiment);
 }
 
 function adoptedOutput(overrides: Partial<StudioOutput> = {}): StudioOutput {
   return {
     name: "adopted-baseline.mp4",
+    url: "/api/outputs/adopted-baseline.mp4",
+    sizeBytes: 1024,
+    modifiedAt: new Date(0).toISOString(),
+    changedAt: new Date(0).toISOString(),
+    revisionToken: "eq1_initial-revision",
     jobId: BASELINE_JOB_ID,
+    jobStatus: "completed",
+    request: null,
+    settingsAvailable: true,
+    qualityReview: null,
+    analysis: null,
     experiment: null,
     project: null,
     experimentRequestVerified: false,
-    provenance: { verifiedAt: new Date(0).toISOString(), fingerprint: FINGERPRINT },
+    provenanceSummary: {
+      schemaVersion: "ltx-studio-public-output-provenance-summary.v1",
+      status: "verified",
+      capturedAt: new Date(0).toISOString(),
+      verifiedAt: new Date(0).toISOString(),
+      release: null,
+      equality: {
+        run: "eq1_initial-run",
+        inputs: null,
+        models: null,
+        code: null,
+        runtime: "eq1_initial-runtime",
+      },
+    },
     ...overrides,
   } as StudioOutput;
 }
 
 describe("adopted experiment baselines", () => {
-  it("resolves the adopted baseline through its pinned provenance fingerprint", async () => {
+  it("never sends a reusable baseline for the raw-output experiment variable", () => {
+    const request = validRequest("image-audio-to-video");
+    request.postprocess.lipForcing.enabled = true;
+
+    expect(buildExperimentCreateInput({
+      title: "Frischer Rohvideovergleich",
+      baselineRequest: request,
+      candidate: { variable: "lipforcing-raw-output-profile" },
+      reusableBaselineOutputName: "legacy-v1-baseline.mp4",
+    })).not.toHaveProperty("baselineOutputName");
+    expect(buildExperimentCreateInput({
+      title: "Andere Variable",
+      baselineRequest: request,
+      candidate: { variable: "lipforcing-mouth-delay-ms", value: 25 },
+      reusableBaselineOutputName: "reusable-baseline.mp4",
+    })).toHaveProperty("baselineOutputName", "reusable-baseline.mp4");
+  });
+
+  it("resolves the adopted baseline through the stable public server confirmation", async () => {
     const experiment = await adoptedBaselineExperiment();
 
     expect(outputForArm(experiment, 0, [adoptedOutput()])).toBeDefined();
   });
 
-  it("rejects an adopted baseline whose provenance fingerprint changed", async () => {
+  it("survives a server restart that rotates all public equality tokens", async () => {
     const experiment = await adoptedBaselineExperiment();
-    const tampered = adoptedOutput({
-      provenance: { verifiedAt: new Date(0).toISOString(), fingerprint: "d".repeat(64) },
-    } as Partial<StudioOutput>);
+    const restarted = adoptedOutput({
+      revisionToken: "eq1_after-restart",
+      provenanceSummary: {
+        ...adoptedOutput().provenanceSummary!,
+        equality: {
+          ...adoptedOutput().provenanceSummary!.equality,
+          run: "eq1_after-restart-run",
+          runtime: "eq1_after-restart-runtime",
+        },
+      },
+    });
 
-    expect(outputForArm(experiment, 0, [tampered])).toBeUndefined();
+    expect(outputForArm(experiment, 0, [restarted])).toBeDefined();
+  });
+
+  it("rejects an adopted baseline without the server's verified status", async () => {
+    const experiment = await adoptedBaselineExperiment();
+    const unverified = adoptedOutput({
+      provenanceSummary: {
+        ...adoptedOutput().provenanceSummary!,
+        status: "captured-unverified",
+        verifiedAt: null,
+      },
+    });
+
+    expect(outputForArm(experiment, 0, [unverified])).toBeUndefined();
   });
 
   it("still requires the full experiment binding for the candidate arm", async () => {

@@ -7,14 +7,97 @@ from datetime import UTC, datetime
 from statistics import NormalDist
 from typing import Any
 
-from .bundle import FIXED_D1_REPORT_SCHEMA
-from .calibration import CalibrationError, build_calibration_gate_report
-from .design import DesignError, build_power_report, document_sha256
+from .bundle import FIXED_D1_REPORT_SCHEMA, OFFSET_CONTRACT_KEYS
+from .calibration import CALIBRATION_REPORT_SCHEMA, CalibrationError, build_calibration_gate_report
+from .design import (
+    CURRENT_PLANNING_HYPOTHESIS_COUNT,
+    CURRENT_VBENCH_CLAIM_COUNT,
+    CURRENT_VBENCH_GATE_COUNT,
+    DesignError,
+    build_power_report,
+    document_sha256,
+)
+from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
+from .offset import (
+    BOOTSTRAP_RNG,
+    CALIBRATION_ABSTENTION_SEMANTICS,
+    COMPONENT_WEIGHTING,
+    GRID_REPLICATES_PER_CELL,
+    UNCERTAINTY_METHOD,
+)
 from .vbench import FAMILYWISE_ALPHA, VBENCH_MEASUREMENTS_SCHEMA
 from .vbench_environment import VBenchEnvironmentError, validate_vbench_runtime_report
 
-COMPLETE_D1_BUNDLE_SCHEMA = "ltx-av-eval-complete-d1-bundle.v1"
-COMPLETE_D1_REPORT_SCHEMA = "ltx-av-eval-complete-d1-report.v1"
+LEGACY_COMPLETE_D1_BUNDLE_SCHEMA = "ltx-av-eval-complete-d1-bundle.v1"
+LEGACY_COMPLETE_D1_REPORT_SCHEMA = "ltx-av-eval-complete-d1-report.v1"
+COMPLETE_D1_BUNDLE_SCHEMA = "ltx-av-eval-complete-d1-bundle.v2"
+COMPLETE_D1_REPORT_SCHEMA = "ltx-av-eval-complete-d1-report.v2"
+COMPLETE_D1_REPORT_KEYS = {
+    "schema_version",
+    "report_id",
+    "producer_id",
+    "generated_at",
+    "runner_digest",
+    "dataset_digest",
+    "preregistration_digest",
+    "release_digest",
+    "design_digest",
+    "design_report_digest",
+    "surface_digest",
+    "candidate_surface_binding_digest",
+    "strata_plan_digest",
+    "calibration_catalog_digest",
+    "calibration_catalog",
+    "fixed_report_digest",
+    "vbench_report_digest",
+    "vbench_runtime_report_digest",
+    "offset_contract",
+    "fixed_report",
+    "vbench_report",
+    "vbench_runtime_report",
+    "vbench_gate_catalog",
+    "verdict",
+    "metrics",
+}
+FIXED_REPORT_KEYS = {
+    "schema_version",
+    "bundle_digest",
+    "calibration_catalog_digest",
+    "dataset_digest",
+    "preregistration_digest",
+    "release_digest",
+    "design_digest",
+    "surface_digest",
+    "candidate_surface_binding_digest",
+    "strata_plan_digest",
+    "source_report_digests",
+    "offset_contract",
+    "verdict",
+    "metrics",
+}
+VBENCH_REPORT_KEYS = {
+    "schema_version",
+    "input_digest",
+    "dataset_digest",
+    "preregistration_digest",
+    "release_digest",
+    "surface_digest",
+    "candidate_surface_binding_digest",
+    "strata_plan_digest",
+    "design_digest",
+    "vbench_gate_catalog_digest",
+    "repository_commit",
+    "config_digest",
+    "runtime_digest",
+    "comparator_matrix_digest",
+    "bootstrap",
+    "multiplicity",
+    "familywise_alpha",
+    "hypotheses",
+    "verdict",
+    "metrics",
+    "design_report_digest",
+}
 
 
 class CompleteD1Error(ValueError):
@@ -76,6 +159,10 @@ def _validate_catalog_and_design(
         design_report = build_power_report(design)
     except (CalibrationError, DesignError) as error:
         raise CompleteD1Error(f"frozen D1 contract rejected: {error}") from error
+    if catalog_report["schema_version"] != CALIBRATION_REPORT_SCHEMA:
+        raise CompleteD1Error("calibration catalog uses a legacy report schema")
+    if design_report["schema_version"] != DESIGN_REPORT_SCHEMA:
+        raise CompleteD1Error("D0a design uses a legacy power-report schema")
     if catalog_report["status"] != "ready-to-freeze" or design_report["status"] != "ready-to-freeze":
         raise CompleteD1Error("calibration catalog and D0a design must be ready-to-freeze")
     if catalog["status"] != "frozen" or design["status"] != "frozen":
@@ -92,11 +179,79 @@ def _validate_catalog_and_design(
 
 
 def _validate_shared_bindings(fixed: dict[str, Any], vbench: dict[str, Any]) -> None:
-    for field in ("dataset_digest", "preregistration_digest", "release_digest", "design_digest", "strata_plan_digest"):
+    for field in (
+        "dataset_digest",
+        "preregistration_digest",
+        "release_digest",
+        "design_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
+        "strata_plan_digest",
+    ):
         _sha256(fixed.get(field), f"fixed.{field}")
         _sha256(vbench.get(field), f"vbench.{field}")
         if fixed[field] != vbench[field]:
             raise CompleteD1Error(f"fixed and VBench reports disagree on {field}")
+
+
+def _validate_offset_contract(fixed: dict[str, Any], design_report: dict[str, Any]) -> dict[str, Any]:
+    raw = fixed.get("offset_contract")
+    if not isinstance(raw, dict):
+        raise CompleteD1Error("fixed D1 report lacks the propagated offset-v2 contract")
+    _exact_keys(raw, OFFSET_CONTRACT_KEYS, "fixed offset contract")
+    for field in (
+        "abstention_policy_digest",
+        "control_deck_digest",
+        "dataset_manifest_digest",
+        "design_digest",
+        "design_report_digest",
+        "fit_split_manifest_digest",
+        "evaluation_split_manifest_digest",
+        "output_split_manifest_digest",
+        "calibration_policy_digest",
+        "operating_point_digest",
+        "offset_evaluator_digest",
+        "power_report_digest",
+        "strata_quotas_digest",
+    ):
+        _sha256(raw[field], f"fixed offset contract.{field}")
+    deterministic_report_digest = document_sha256(design_report)
+    if (
+        raw["design_digest"] != fixed["design_digest"]
+        or raw["design_digest"] != design_report["design_digest"]
+        or raw["design_report_digest"] != deterministic_report_digest
+        or raw["power_report_digest"] != deterministic_report_digest
+    ):
+        raise CompleteD1Error("fixed offset contract does not bind the supplied deterministic D0a report")
+    if (
+        raw["required_independent_units"] != design_report["required_independent_units"]
+        or raw["strata_quotas_digest"] != design_report["strata_quotas_digest"]
+        or raw["strata_quotas_digest"] != fixed["strata_plan_digest"]
+    ):
+        raise CompleteD1Error("fixed offset contract does not retain the exact D0a units and strata quotas")
+    _number(raw["raw_score_threshold"], "fixed offset contract.raw_score_threshold")
+    bootstrap = raw["bootstrap"]
+    if (
+        not isinstance(bootstrap, dict)
+        or set(bootstrap) != {"replicates", "confidence_level", "seed"}
+        or bootstrap["replicates"] != 10_000
+        or bootstrap["confidence_level"] != 0.95
+        or isinstance(bootstrap["seed"], bool)
+        or not isinstance(bootstrap["seed"], int)
+        or not 0 <= bootstrap["seed"] < 2**63
+    ):
+        raise CompleteD1Error("fixed offset contract changed its frozen bootstrap contract")
+    if (
+        raw["bootstrap_rng"] != BOOTSTRAP_RNG
+        or raw["binomial_interval"] != "component-clopper-pearson-95-bonferroni-strata.v2"
+        or raw["uncertainty_method"] != UNCERTAINTY_METHOD
+        or raw["component_weighting"] != COMPONENT_WEIGHTING
+        or raw["calibration_abstention_semantics"] != CALIBRATION_ABSTENTION_SEMANTICS
+        or raw["grid_replicates_per_cell"] != GRID_REPLICATES_PER_CELL
+        or raw["ece_bins"] != 10
+    ):
+        raise CompleteD1Error("fixed offset contract changed its uncertainty, grid, or abstention semantics")
+    return dict(raw)
 
 
 def _validate_fixed_metrics(
@@ -183,8 +338,182 @@ def _validate_fixed_metrics(
             }
         )
     if identifiers != sorted(set(identifiers)) or set(identifiers) != set(gates):
-        raise CompleteD1Error("fixed report does not exactly cover the 37 local gates")
+        raise CompleteD1Error("fixed report does not exactly cover the 44 local gates")
     return metrics
+
+
+def _validate_current_design_report(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict) or raw.get("schema_version") != DESIGN_REPORT_SCHEMA:
+        raise CompleteD1Error("D1 requires the current D0a power-report schema")
+    if raw.get("status") != "ready-to-freeze" or raw.get("blockers") != []:
+        raise CompleteD1Error("D1 requires a ready-to-freeze D0a power report")
+    if (
+        raw.get("planning_hypothesis_count") != CURRENT_PLANNING_HYPOTHESIS_COUNT
+        or raw.get("vbench_claim_count") != CURRENT_VBENCH_CLAIM_COUNT
+        or raw.get("vbench_gate_count") != CURRENT_VBENCH_GATE_COUNT
+    ):
+        raise CompleteD1Error("D1 D0a report does not cover the exact current planning family")
+    for field in (
+        "design_digest",
+        "vbench_gate_catalog_digest",
+        "strata_quotas_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
+    ):
+        _sha256(raw.get(field), f"D0a report.{field}")
+    return raw
+
+
+def _validate_embedded_vbench_catalog(raw: object, design_report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw, dict) or document_sha256(raw) != design_report["vbench_gate_catalog_digest"]:
+        raise CompleteD1Error("D1 embedded VBench gate catalog does not match D0a")
+    gates = raw.get("gates")
+    if not isinstance(gates, list) or len(gates) != CURRENT_VBENCH_GATE_COUNT:
+        raise CompleteD1Error(
+            f"D1 embedded VBench catalog must contain exactly {CURRENT_VBENCH_GATE_COUNT} gates"
+        )
+    by_metric: dict[str, dict[str, Any]] = {}
+    identities: list[str] = []
+    for index, gate in enumerate(gates):
+        if not isinstance(gate, dict):
+            raise CompleteD1Error(f"D1 embedded VBench gate {index} must be an object")
+        _exact_keys(
+            gate,
+            {"claim_id", "dimension", "direction", "absolute_minimum", "delta", "test", "basis_evidence_sha256"},
+            f"D1 embedded VBench gate {index}",
+        )
+        metric_id = f"vbench.{gate['claim_id']}.{gate['dimension']}"
+        identities.append(metric_id)
+        by_metric[metric_id] = gate
+    if len(identities) != len(set(identities)) or len(by_metric) != CURRENT_VBENCH_GATE_COUNT:
+        raise CompleteD1Error("D1 embedded VBench gates must be unique")
+    return by_metric
+
+
+def validate_complete_d1_report(  # noqa: PLR0912, PLR0915
+    raw: object,
+    *,
+    calibration_catalog: object | None = None,
+    design_report: object,
+) -> dict[str, Any]:
+    """Fully revalidate the self-contained canonical D1-v2 report consumed by F0/Q2."""
+
+    if not isinstance(raw, dict):
+        raise CompleteD1Error("complete D1 report must be an object")
+    _exact_keys(raw, COMPLETE_D1_REPORT_KEYS, "complete D1 report")
+    if raw["schema_version"] != COMPLETE_D1_REPORT_SCHEMA:
+        raise CompleteD1Error("unsupported complete D1 report schema")
+    _identifier(raw["report_id"], "complete D1 report.report_id")
+    _identifier(raw["producer_id"], "complete D1 report.producer_id")
+    _timestamp(raw["generated_at"], "complete D1 report.generated_at")
+    for field in (
+        "runner_digest",
+        "dataset_digest",
+        "preregistration_digest",
+        "release_digest",
+        "design_digest",
+        "design_report_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
+        "strata_plan_digest",
+        "calibration_catalog_digest",
+        "fixed_report_digest",
+        "vbench_report_digest",
+        "vbench_runtime_report_digest",
+    ):
+        _sha256(raw[field], f"complete D1 report.{field}")
+    embedded_catalog = raw["calibration_catalog"]
+    if calibration_catalog is None:
+        calibration_catalog = embedded_catalog
+    if not isinstance(calibration_catalog, dict) or calibration_catalog != embedded_catalog:
+        raise CompleteD1Error("complete D1 calibration catalog must be an object")
+    try:
+        catalog_report = build_calibration_gate_report(calibration_catalog)
+    except CalibrationError as error:
+        raise CompleteD1Error(f"complete D1 calibration catalog rejected: {error}") from error
+    if (
+        catalog_report["schema_version"] != CALIBRATION_REPORT_SCHEMA
+        or catalog_report["status"] != "ready-to-freeze"
+        or calibration_catalog.get("status") != "frozen"
+    ):
+        raise CompleteD1Error("complete D1 requires a frozen current calibration catalog")
+    current_design = _validate_current_design_report(design_report)
+    fixed = raw["fixed_report"]
+    vbench = raw["vbench_report"]
+    if not isinstance(fixed, dict) or not isinstance(vbench, dict):
+        raise CompleteD1Error("complete D1 embedded reports must be objects")
+    _exact_keys(fixed, FIXED_REPORT_KEYS, "complete D1 fixed report")
+    _exact_keys(vbench, VBENCH_REPORT_KEYS, "complete D1 VBench report")
+    if fixed["schema_version"] != FIXED_D1_REPORT_SCHEMA or vbench["schema_version"] != VBENCH_MEASUREMENTS_SCHEMA:
+        raise CompleteD1Error("complete D1 embedded report schema mismatch")
+    try:
+        runtime = validate_vbench_runtime_report(raw["vbench_runtime_report"])
+    except VBenchEnvironmentError as error:
+        raise CompleteD1Error(f"complete D1 VBench runtime rejected: {error}") from error
+    fixed_gates = {gate["metric_id"]: gate for gate in calibration_catalog["gates"]}
+    vbench_gates = _validate_embedded_vbench_catalog(raw["vbench_gate_catalog"], current_design)
+    if sorted(vbench_gates) != calibration_catalog["vbench_metric_ids"]:
+        raise CompleteD1Error("complete D1 VBench gates disagree with the calibration catalog")
+    _validate_shared_bindings(fixed, vbench)
+    for field in (
+        "dataset_digest",
+        "preregistration_digest",
+        "release_digest",
+        "design_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
+        "strata_plan_digest",
+    ):
+        if raw[field] != fixed[field]:
+            raise CompleteD1Error(f"complete D1 top-level {field} disagrees with embedded evidence")
+    if (
+        raw["design_digest"] != current_design["design_digest"]
+        or raw["design_report_digest"] != document_sha256(current_design)
+        or raw["surface_digest"] != current_design["surface_digest"]
+        or raw["candidate_surface_binding_digest"] != current_design["candidate_surface_binding_digest"]
+        or raw["strata_plan_digest"] != current_design["strata_quotas_digest"]
+    ):
+        raise CompleteD1Error("complete D1 does not bind the supplied current D0a report")
+    if (
+        raw["calibration_catalog_digest"] != catalog_report["catalog_digest"]
+        or fixed["calibration_catalog_digest"] != catalog_report["catalog_digest"]
+        or calibration_catalog.get("design_digest") != current_design["design_digest"]
+    ):
+        raise CompleteD1Error("complete D1 calibration/design binding mismatch")
+    if (
+        raw["fixed_report_digest"] != document_sha256(fixed)
+        or raw["vbench_report_digest"] != document_sha256(vbench)
+        or raw["vbench_runtime_report_digest"] != document_sha256(runtime)
+        or vbench["design_report_digest"] != document_sha256(current_design)
+    ):
+        raise CompleteD1Error("complete D1 embedded evidence digest mismatch")
+    offset_contract = _validate_offset_contract(fixed, current_design)
+    if raw["offset_contract"] != offset_contract:
+        raise CompleteD1Error("complete D1 top-level offset contract mismatch")
+    fingerprints = {item["evaluator_id"]: item["sha256"] for item in calibration_catalog["evaluator_fingerprints"]}
+    if (
+        offset_contract["offset_evaluator_digest"] != fingerprints["offset-evaluator"]
+        or vbench["runtime_digest"] != fingerprints["vbench-runtime"]
+        or vbench["runtime_digest"] != runtime["runtime_digest"]
+    ):
+        raise CompleteD1Error("complete D1 evaluator fingerprint mismatch")
+    fixed_metrics = _validate_fixed_metrics(fixed, fixed_gates)
+    vbench_metrics = _validate_vbench_metrics(vbench, vbench_gates)
+    metrics = sorted([*fixed_metrics, *vbench_metrics], key=lambda metric: metric["metric_id"])
+    if (
+        len(metrics) != len(catalog_report["required_metric_ids"])
+        or [metric["metric_id"] for metric in metrics] != catalog_report["required_metric_ids"]
+    ):
+        raise CompleteD1Error("complete D1 must contain exactly the current metric catalog")
+    if raw["metrics"] != metrics:
+        raise CompleteD1Error("complete D1 canonical metric projection mismatch")
+    expected_verdict = "pass" if all(metric["decision"] == "pass" for metric in metrics) else "fail"
+    expected_hypotheses = 2 * CURRENT_VBENCH_GATE_COUNT
+    if raw["verdict"] != expected_verdict or vbench.get("hypotheses") != expected_hypotheses:
+        raise CompleteD1Error(
+            f"complete D1 verdict or {expected_hypotheses}-member Holm family mismatch"
+        )
+    return dict(raw)
 
 
 def _validate_effect(
@@ -429,7 +758,16 @@ def build_complete_d1_report(
         raise CompleteD1Error("fixed report calibration catalog mismatch")
     if vbench["design_report_digest"] != document_sha256(design_report):
         raise CompleteD1Error("VBench report D0a design report mismatch")
+    if (
+        fixed["surface_digest"] != design_report["surface_digest"]
+        or fixed["candidate_surface_binding_digest"] != design_report["candidate_surface_binding_digest"]
+        or fixed["strata_plan_digest"] != design_report["strata_quotas_digest"]
+    ):
+        raise CompleteD1Error("D1 evidence does not bind the D0a release surface and strata contract")
+    offset_contract = _validate_offset_contract(fixed, design_report)
     fingerprints = {item["evaluator_id"]: item["sha256"] for item in calibration_catalog["evaluator_fingerprints"]}
+    if offset_contract["offset_evaluator_digest"] != fingerprints["offset-evaluator"]:
+        raise CompleteD1Error("fixed offset contract does not match the offset evaluator fingerprint")
     if vbench["runtime_digest"] != fingerprints["vbench-runtime"] or vbench["runtime_digest"] != vbench_runtime[
         "runtime_digest"
     ]:
@@ -439,7 +777,7 @@ def build_complete_d1_report(
     metrics = sorted([*fixed_metrics, *vbench_metrics], key=lambda metric: metric["metric_id"])
     if [metric["metric_id"] for metric in metrics] != catalog_report["required_metric_ids"]:
         raise CompleteD1Error("complete D1 report does not exactly cover the full gate catalog")
-    return {
+    report = {
         "schema_version": COMPLETE_D1_REPORT_SCHEMA,
         "report_id": raw["report_id"],
         "producer_id": raw["producer_id"],
@@ -449,11 +787,25 @@ def build_complete_d1_report(
         "preregistration_digest": fixed["preregistration_digest"],
         "release_digest": fixed["release_digest"],
         "design_digest": fixed["design_digest"],
+        "design_report_digest": document_sha256(design_report),
+        "surface_digest": fixed["surface_digest"],
+        "candidate_surface_binding_digest": fixed["candidate_surface_binding_digest"],
         "strata_plan_digest": fixed["strata_plan_digest"],
         "calibration_catalog_digest": catalog_report["catalog_digest"],
+        "calibration_catalog": calibration_catalog,
         "fixed_report_digest": document_sha256(fixed),
         "vbench_report_digest": document_sha256(vbench),
         "vbench_runtime_report_digest": document_sha256(vbench_runtime),
+        "offset_contract": offset_contract,
+        "fixed_report": fixed,
+        "vbench_report": vbench,
+        "vbench_runtime_report": vbench_runtime,
+        "vbench_gate_catalog": design["vbench_gate_catalog"],
         "verdict": "pass" if all(metric["decision"] == "pass" for metric in metrics) else "fail",
         "metrics": metrics,
     }
+    return validate_complete_d1_report(
+        report,
+        calibration_catalog=calibration_catalog,
+        design_report=design_report,
+    )

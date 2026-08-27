@@ -8,8 +8,8 @@ import pytest
 from ltx_trainer.av_eval import CrossShotResultError, build_cross_shot_decision, build_power_report, document_sha256
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
-PROTOCOL_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "cross-shot-protocol.v1.json"
+DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v2.json"
+PROTOCOL_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "cross-shot-protocol.v2.json"
 CLAIMS = ("reference-video-redubbing.native-distilled", "reference-video-redubbing.official-comfy-hq")
 ARMS = ("automatic-scene-reference", "manual-scene-reference", "no-reference")
 
@@ -123,7 +123,7 @@ def _results(protocol: dict[str, object], design: dict[str, object]) -> dict[str
         for arm_id in sorted(ARMS)
     ]
     return {
-        "schema_version": "ltx-av-eval-cross-shot-results.v1",
+        "schema_version": "ltx-av-eval-cross-shot-results.v2",
         "protocol_digest": document_sha256(protocol),
         "design_digest": document_sha256(design),
         "bootstrap": {"replicates": 10000, "confidence_level": 0.95, "seed": 11082026},

@@ -1,11 +1,14 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  allowedExperimentPaths,
   applyExperimentCandidate,
+  experimentCandidateSchema,
+  experimentCreateInputSchema,
   generationRequestDiffPaths,
   validateControlledExperimentDifference,
 } from "../shared/experiments.js";
@@ -16,6 +19,7 @@ import {
   requestSettingsSha256,
   sha256Json,
 } from "../server/experimentStore.js";
+import { JobManager } from "../server/jobs.js";
 import type { StudioOutput } from "../shared/outputs.js";
 import { validRequest } from "./fixtures.js";
 
@@ -77,6 +81,7 @@ describe("controlled experiment contract", () => {
     expect(candidate.postprocess.lipForcing).toEqual({
       enabled: true,
       decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
       mouthDelayMs: 0,
       programAudioDelayMs: 0,
     });
@@ -90,6 +95,363 @@ describe("controlled experiment contract", () => {
     expect(() => applyExperimentCandidate(baseline, {
       variable: "lipforcing-enabled",
     })).toThrow("Baseline ohne aktiven Lippenrefiner");
+  });
+
+  it("freezes only the explicitly alternate LipForcing decoder enum", async () => {
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing = {
+      enabled: true,
+      decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
+      mouthDelayMs: 125,
+      programAudioDelayMs: 175,
+    };
+    const candidateDefinition = experimentCandidateSchema.parse({
+      variable: "lipforcing-decoder",
+      value: "streaming-taehv",
+    });
+    const candidate = applyExperimentCandidate(baseline, candidateDefinition);
+
+    expect(allowedExperimentPaths(candidateDefinition)).toEqual([
+      "postprocess.lipForcing.decoder",
+    ]);
+    expect(candidate.postprocess.lipForcing).toEqual({
+      ...baseline.postprocess.lipForcing,
+      decoder: "streaming-taehv",
+    });
+    expect(validateControlledExperimentDifference(
+      baseline,
+      candidate,
+      candidateDefinition,
+    )).toEqual(["postprocess.lipForcing.decoder"]);
+    expect(experimentCandidateSchema.safeParse({
+      variable: "lipforcing-decoder",
+      value: "numeric-decoder-hack",
+    }).success).toBe(false);
+    expect(() => applyExperimentCandidate(baseline, {
+      variable: "lipforcing-decoder",
+      value: "wan-vae",
+    })).toThrow("exakt der alternative Decoder");
+
+    const inactive = structuredClone(baseline);
+    inactive.postprocess.lipForcing.enabled = false;
+    expect(() => applyExperimentCandidate(inactive, candidateDefinition))
+      .toThrow("aktivem LipForcing");
+
+    const reverseBaseline = structuredClone(baseline);
+    reverseBaseline.postprocess.lipForcing.decoder = "streaming-taehv";
+    expect(applyExperimentCandidate(reverseBaseline, {
+      variable: "lipforcing-decoder",
+      value: "wan-vae",
+    }).postprocess.lipForcing.decoder).toBe("wan-vae");
+
+    const store = new ExperimentStore(await experimentRoot());
+    const frozen = store.freeze(store.create({
+      title: "LipForcing-Decodervergleich mit offenem Ergebnis",
+      baselineRequest: baseline,
+      candidate: candidateDefinition,
+    }).id);
+    expect(frozen.changedRequestPaths).toEqual(["postprocess.lipForcing.decoder"]);
+    expect(generationRequestDiffPaths(
+      frozen.arms[0].request,
+      frozen.arms[1].request,
+    )).toEqual(["outputName", "postprocess.lipForcing.decoder"]);
+    const baselineBinding = store.bindingFor(frozen.id, "baseline");
+    expect(baselineBinding).toMatchObject({
+      variableId: "lipforcing-decoder",
+      changedRequestPaths: ["postprocess.lipForcing.decoder"],
+      requestSha256: frozen.arms[0].requestSha256,
+    });
+    const baselineJobId = "11111111-1111-4111-8111-111111111111";
+    store.attachJob(frozen.id, "baseline", baselineJobId);
+    expect(store.bindingFor(frozen.id, "candidate")).toMatchObject({
+      variableId: "lipforcing-decoder",
+      changedRequestPaths: ["postprocess.lipForcing.decoder"],
+      baselineJobId,
+      baselineRequestSha256: frozen.arms[0].requestSha256,
+      requestSha256: frozen.arms[1].requestSha256,
+    });
+  });
+
+  it("isolates mux-copy as the only LipForcing raw-output experiment variable", async () => {
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing.enabled = true;
+    baseline.postprocess.lipForcing.rawOutputProfile = "h264-crf13-mux-crf18-v1";
+    const candidateDefinition = experimentCandidateSchema.parse({
+      variable: "lipforcing-raw-output-profile",
+    });
+    const candidate = applyExperimentCandidate(baseline, candidateDefinition);
+
+    expect(allowedExperimentPaths(candidateDefinition)).toEqual([
+      "postprocess.lipForcing.rawOutputProfile",
+    ]);
+    expect(candidate.postprocess.lipForcing.rawOutputProfile)
+      .toBe("h264-crf13-mux-copy-v1");
+    expect(validateControlledExperimentDifference(
+      baseline,
+      candidate,
+      candidateDefinition,
+    )).toEqual(["postprocess.lipForcing.rawOutputProfile"]);
+    expect(experimentCandidateSchema.safeParse({
+      variable: "lipforcing-raw-output-profile",
+      value: "h264-crf13-mux-copy-v1",
+    }).success).toBe(false);
+
+    const inactive = structuredClone(baseline);
+    inactive.postprocess.lipForcing.enabled = false;
+    expect(() => applyExperimentCandidate(inactive, candidateDefinition))
+      .toThrow("aktives LipForcing");
+    const alreadyExperimental = structuredClone(baseline);
+    alreadyExperimental.postprocess.lipForcing.rawOutputProfile = "h264-crf13-mux-copy-v1";
+    expect(() => applyExperimentCandidate(alreadyExperimental, candidateDefinition))
+      .toThrow("registrierte CRF18-Baseline-Profil");
+
+    const store = new ExperimentStore(await experimentRoot());
+    const frozen = store.freeze(store.create({
+      title: "LipForcing CRF-18-Mux gegen Stream-Copy",
+      baselineRequest: baseline,
+      candidate: candidateDefinition,
+    }).id);
+    expect(frozen.claimScope).toBe("development");
+    expect(frozen.changedRequestPaths).toEqual(["postprocess.lipForcing.rawOutputProfile"]);
+    expect(generationRequestDiffPaths(
+      frozen.arms[0].request,
+      frozen.arms[1].request,
+    )).toEqual(["outputName", "postprocess.lipForcing.rawOutputProfile"]);
+  });
+
+  it("rejects raw-output baseline adoption without touching a legacy v1 sidecar", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const baseline = baselineRequest();
+    baseline.outputName = "legacy-v1-baseline.mp4";
+    baseline.postprocess.lipForcing.enabled = true;
+    const legacySidecar = join(root, "legacy-v1-baseline.mp4.settings.v1.json");
+    const legacyBytes = Buffer.from('{"schemaVersion":"ltx-studio-output-settings.v1","frozen":true}\n');
+    await writeFile(legacySidecar, legacyBytes);
+    const beforeMtimeMs = (await stat(legacySidecar)).mtimeMs;
+    const input = {
+      title: "Keine historische Rohvideo-Baseline",
+      baselineRequest: baseline,
+      baselineOutputName: baseline.outputName,
+      candidate: { variable: "lipforcing-raw-output-profile" as const },
+    };
+    const evidence = {
+      outputName: baseline.outputName,
+      jobId: "11111111-1111-4111-8111-111111111111",
+      sizeBytes: 1234,
+      changedAt: "2026-08-25T09:59:00.000Z",
+      fileId: "42",
+      provenanceFingerprint: "a".repeat(64),
+    };
+
+    expect(experimentCreateInputSchema.safeParse(input).success).toBe(false);
+    expect(() => store.create(input, "2026-08-25T10:00:00.000Z", evidence))
+      .toThrow("frischer Baseline-Arm");
+    expect(await readFile(legacySidecar)).toEqual(legacyBytes);
+    expect((await stat(legacySidecar)).mtimeMs).toBe(beforeMtimeMs);
+    expect(store.list()).toEqual([]);
+  });
+
+  it("rejects a current-schema raw draft whose persisted baseline was retroactively adopted", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing.enabled = true;
+    const draft = store.create({
+      title: "Manipulierter Raw-Draft",
+      baselineRequest: baseline,
+      candidate: { variable: "lipforcing-raw-output-profile" },
+    });
+    const path = join(root, `${draft.id}.json`);
+    const persisted = JSON.parse(await readFile(path, "utf8"));
+    const adoptedJobId = "11111111-1111-4111-8111-111111111111";
+    persisted.baselineEvidence = {
+      outputName: persisted.arms[0].request.outputName,
+      jobId: adoptedJobId,
+      sizeBytes: 1234,
+      changedAt: "2026-08-25T09:59:00.000Z",
+      fileId: "42",
+      provenanceFingerprint: "a".repeat(64),
+    };
+    persisted.arms[0].jobId = adoptedJobId;
+    persisted.arms[0].attemptJobIds = [adoptedJobId];
+    await writeFile(path, JSON.stringify(persisted));
+    const before = await readFile(path);
+
+    expect(() => store.freeze(draft.id)).toThrow("ungültig");
+    expect(await readFile(path)).toEqual(before);
+  });
+
+  it("rejects current-schema frozen raw adoption during terminal reconciliation", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing.enabled = true;
+    const frozen = store.freeze(store.create({
+      title: "Manipulierter eingefrorener Raw-Vertrag",
+      baselineRequest: baseline,
+      candidate: { variable: "lipforcing-raw-output-profile" },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const path = join(root, `${frozen.id}.json`);
+    const persisted = JSON.parse(await readFile(path, "utf8"));
+    const adoptedJobId = "11111111-1111-4111-8111-111111111111";
+    persisted.baselineEvidence = {
+      outputName: persisted.arms[0].request.outputName,
+      jobId: adoptedJobId,
+      sizeBytes: 1234,
+      changedAt: "2026-08-25T09:59:00.000Z",
+      fileId: "42",
+      provenanceFingerprint: "a".repeat(64),
+    };
+    persisted.arms[0].jobId = adoptedJobId;
+    persisted.arms[0].attemptJobIds = [adoptedJobId];
+    await writeFile(path, JSON.stringify(persisted));
+    const before = await readFile(path);
+
+    expect(() => store.reconcileJobs([{
+      id: adoptedJobId,
+      status: "completed",
+      startedAt: "2026-08-25T10:00:00.000Z",
+      dgxJobId: "dgx-job-current-schema-adoption",
+      experiment: binding,
+    }])).toThrow("ungültig");
+    expect(await readFile(path)).toEqual(before);
+  });
+
+  it("validates both LipForcing delay variables against the integer pipeline limits", () => {
+    for (const variable of [
+      "lipforcing-mouth-delay-ms",
+      "lipforcing-program-audio-delay-ms",
+    ] as const) {
+      expect(experimentCandidateSchema.parse({ variable, value: -500 })).toEqual({
+        variable,
+        value: -500,
+      });
+      expect(experimentCandidateSchema.parse({ variable, value: 500 })).toEqual({
+        variable,
+        value: 500,
+      });
+      expect(experimentCandidateSchema.safeParse({ variable, value: -501 }).success).toBe(false);
+      expect(experimentCandidateSchema.safeParse({ variable, value: 501 }).success).toBe(false);
+      expect(experimentCandidateSchema.safeParse({ variable, value: 0.5 }).success).toBe(false);
+    }
+  });
+
+  it("isolates LipForcing model control from the audible program-audio offset", () => {
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing = {
+      enabled: true,
+      decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
+      mouthDelayMs: 125,
+      programAudioDelayMs: 175,
+    };
+    const mouthCandidate = {
+      variable: "lipforcing-mouth-delay-ms" as const,
+      value: 150,
+    };
+    const adjustedMouth = applyExperimentCandidate(baseline, mouthCandidate);
+
+    expect(allowedExperimentPaths(mouthCandidate)).toEqual([
+      "postprocess.lipForcing.mouthDelayMs",
+    ]);
+    expect(adjustedMouth.postprocess.lipForcing).toEqual({
+      enabled: true,
+      decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
+      mouthDelayMs: 150,
+      programAudioDelayMs: 175,
+    });
+    expect(baseline.postprocess.lipForcing.mouthDelayMs).toBe(125);
+    expect(validateControlledExperimentDifference(
+      baseline,
+      adjustedMouth,
+      mouthCandidate,
+    )).toEqual(["postprocess.lipForcing.mouthDelayMs"]);
+
+    adjustedMouth.postprocess.lipForcing.programAudioDelayMs = 125;
+    expect(() => validateControlledExperimentDifference(
+      baseline,
+      adjustedMouth,
+      mouthCandidate,
+    )).toThrow("postprocess.lipForcing.programAudioDelayMs");
+  });
+
+  it("isolates the audible LipForcing offset and requires an active LipForcing baseline", () => {
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing = {
+      enabled: true,
+      decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
+      mouthDelayMs: 125,
+      programAudioDelayMs: 175,
+    };
+    const audioCandidate = {
+      variable: "lipforcing-program-audio-delay-ms" as const,
+      value: 125,
+    };
+    const adjustedAudio = applyExperimentCandidate(baseline, audioCandidate);
+
+    expect(allowedExperimentPaths(audioCandidate)).toEqual([
+      "postprocess.lipForcing.programAudioDelayMs",
+    ]);
+    expect(adjustedAudio.postprocess.lipForcing).toEqual({
+      enabled: true,
+      decoder: "wan-vae",
+      rawOutputProfile: "h264-crf13-mux-crf18-v1",
+      mouthDelayMs: 125,
+      programAudioDelayMs: 125,
+    });
+    expect(validateControlledExperimentDifference(
+      baseline,
+      adjustedAudio,
+      audioCandidate,
+    )).toEqual(["postprocess.lipForcing.programAudioDelayMs"]);
+
+    baseline.postprocess.lipForcing.enabled = false;
+    expect(() => applyExperimentCandidate(baseline, audioCandidate))
+      .toThrow("nur bei aktivem LipForcing");
+    expect(() => applyExperimentCandidate(baseline, {
+      variable: "lipforcing-mouth-delay-ms",
+      value: 150,
+    })).toThrow("nur bei aktivem LipForcing");
+  });
+
+  it("keeps a reused LipForcing baseline and the delay protocol hash-bound after freezing", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const request = baselineRequest();
+    request.outputName = "verified-lipforcing-baseline.mp4";
+    request.postprocess.lipForcing.enabled = true;
+    request.postprocess.lipForcing.mouthDelayMs = 125;
+    request.postprocess.lipForcing.programAudioDelayMs = 175;
+    const jobId = "11111111-1111-4111-8111-111111111111";
+    const frozen = store.freeze(store.create({
+      title: "Modell-Steuerung 150 gegen 125 ms",
+      baselineRequest: request,
+      baselineOutputName: request.outputName,
+      candidate: { variable: "lipforcing-mouth-delay-ms", value: 150 },
+    }, "2026-08-25T10:00:00.000Z", {
+      outputName: request.outputName,
+      jobId,
+      sizeBytes: 12_345,
+      changedAt: "2026-08-25T09:59:00.000Z",
+      fileId: "5678",
+      provenanceFingerprint: "a".repeat(64),
+    }).id, "2026-08-25T10:01:00.000Z");
+
+    expect(frozen.changedRequestPaths).toEqual(["postprocess.lipForcing.mouthDelayMs"]);
+    expect(frozen.arms[0]).toMatchObject({ jobId, attemptJobIds: [jobId] });
+    expect(frozen.arms[0].requestSha256).toBe(sha256Json(frozen.arms[0].request));
+    expect(frozen.arms[1].requestSha256).toBe(sha256Json(frozen.arms[1].request));
+    expect(frozen.protocolSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.bindingFor(frozen.id, "candidate")).toMatchObject({
+      baselineJobId: jobId,
+      adoptedBaseline: true,
+      variableId: "lipforcing-mouth-delay-ms",
+      changedRequestPaths: ["postprocess.lipForcing.mouthDelayMs"],
+    });
   });
 
   it("treats a seed change as a replicate rather than an ablation", async () => {
@@ -147,6 +509,42 @@ describe("controlled experiment contract", () => {
     expect(candidateBinding.changedRequestPaths).toEqual(["images[0].crf"]);
     const completed = store.attachJob(frozen.id, "candidate", candidateJobId);
     expect(completed.arms.map((arm) => arm.jobId)).toEqual([baselineJobId, candidateJobId]);
+  });
+
+  it("passes real frozen raw-output bindings from the store into both JobManager arms", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(join(root, "experiments"));
+    const manager = new JobManager(join(root, "jobs.json"), false);
+    const baseline = baselineRequest();
+    baseline.postprocess.lipForcing.enabled = true;
+    const frozen = store.freeze(store.create({
+      title: "Realer Store-zu-Job-Digestvertrag",
+      baselineRequest: baseline,
+      candidate: { variable: "lipforcing-raw-output-profile" },
+    }).id);
+
+    const baselineBinding = store.bindingFor(frozen.id, "baseline");
+    const baselineJob = manager.create(frozen.arms[0].request, {
+      experiment: baselineBinding,
+      deferStart: true,
+    });
+    store.attachJob(frozen.id, "baseline", baselineJob.id);
+    const candidateBinding = store.bindingFor(frozen.id, "candidate");
+    const candidateJob = manager.create(frozen.arms[1].request, {
+      experiment: candidateBinding,
+      deferStart: true,
+    });
+
+    expect(baselineJob.experiment).toEqual(baselineBinding);
+    expect(candidateJob.experiment).toEqual(candidateBinding);
+    expect(candidateBinding).toMatchObject({
+      arm: "candidate",
+      variableId: "lipforcing-raw-output-profile",
+      changedRequestPaths: ["postprocess.lipForcing.rawOutputProfile"],
+      baselineJobId: baselineJob.id,
+    });
+    expect(candidateBinding.adoptedBaseline).toBeUndefined();
+    expect(candidateBinding.requestSha256).toBe(sha256Json(frozen.arms[1].request));
   });
 
   it("keeps an unused frozen protocol immutable while marking its replacement", async () => {
@@ -232,6 +630,65 @@ describe("controlled experiment contract", () => {
     expect(() => store.bindingFor(frozen.id, "baseline")).toThrow("nicht mehr hashkonsistent");
   });
 
+  it("builds a retry preflight view without releasing the stored arm or audit history", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const frozen = store.freeze(store.create({
+      title: "Read-only Retry-Startprüfung",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const failedJobId = "11111111-1111-4111-8111-111111111111";
+    const attached = store.attachJob(frozen.id, "baseline", failedJobId);
+
+    const preview = store.retryPreflightView(attached.id, "baseline", failedJobId);
+
+    expect(preview.experiment.arms[0]).toMatchObject({
+      jobId: null,
+      attemptJobIds: [failedJobId],
+    });
+    expect(preview.binding).toMatchObject({
+      experimentId: attached.id,
+      arm: "baseline",
+      requestSha256: attached.arms[0].requestSha256,
+    });
+    expect(store.get(attached.id)?.arms[0]).toMatchObject({
+      jobId: failedJobId,
+      attemptJobIds: [failedJobId],
+    });
+  });
+
+  it("atomically swaps a retry arm while retaining every attempt", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const frozen = store.freeze(store.create({
+      title: "Atomarer Wiederanlauf",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const failedJobId = "11111111-1111-4111-8111-111111111111";
+    const nextJobId = "22222222-2222-4222-8222-222222222222";
+    store.attachJob(frozen.id, "baseline", failedJobId);
+
+    const replaced = store.replaceArmJobForRetry(
+      frozen.id,
+      "baseline",
+      failedJobId,
+      nextJobId,
+    );
+
+    expect(replaced.arms[0]).toMatchObject({
+      jobId: nextJobId,
+      attemptJobIds: [failedJobId, nextJobId],
+    });
+    expect(store.get(frozen.id)?.arms[0]).toEqual(replaced.arms[0]);
+    expect(() => store.replaceArmJobForRetry(
+      frozen.id,
+      "baseline",
+      failedJobId,
+      "33333333-3333-4333-8333-333333333333",
+    )).toThrow("zwischenzeitlich geändert");
+    expect(store.get(frozen.id)?.arms[0]).toEqual(replaced.arms[0]);
+  });
+
   it("reconciles a persisted experiment-bound job after a crash before arm attachment", async () => {
     const store = new ExperimentStore(await experimentRoot());
     const frozen = store.freeze(store.create({
@@ -254,6 +711,26 @@ describe("controlled experiment contract", () => {
 
     expect(store.get(frozen.id)?.arms[0].jobId).toBe(jobId);
     expect(() => store.bindingFor(frozen.id, "baseline")).toThrow("bereits gestartet");
+  });
+
+  it("revalidates an already attached job binding before the reconciliation fast path", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const frozen = store.freeze(store.create({
+      title: "Fast-Path darf Protokolldrift nicht übergehen",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const jobId = "11111111-1111-4111-8111-111111111111";
+    store.attachJob(frozen.id, "baseline", jobId);
+
+    expect(() => store.reconcileJobs([{
+      id: jobId,
+      status: "running",
+      startedAt: "2026-08-25T10:00:00.000Z",
+      dgxJobId: "dgx-job-tampered-attached-binding",
+      experiment: { ...binding, requestSha256: "0".repeat(64) },
+    }])).toThrow("passt nicht zum eingefrorenen Experimentprotokoll");
   });
 
   it("leaves a clearly never-started crash orphan unbound and preserves retry history", async () => {
@@ -283,6 +760,180 @@ describe("controlled experiment contract", () => {
       jobId: secondJobId,
       attemptJobIds: [firstJobId, secondJobId],
     });
+  });
+
+  it("durably fences prepared retry jobs across crashes before CAS and before start arming", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(join(root, "experiments"));
+    const jobsPath = join(root, "jobs.json");
+    const frozen = store.freeze(store.create({
+      title: "Crash-sicherer atomarer Wiederanlauf",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const failedJobId = "11111111-1111-4111-8111-111111111111";
+    store.attachJob(frozen.id, "baseline", failedJobId);
+
+    // Crash point 1: JobManager has durably prepared a job, but the
+    // ExperimentStore CAS still points at the previous terminal attempt.
+    const firstPreview = store.retryPreflightView(frozen.id, "baseline", failedJobId);
+    const firstManager = new JobManager(jobsPath, false);
+    const preCasOrphan = firstManager.create(firstPreview.experiment.arms[0].request, {
+      experiment: firstPreview.binding,
+      deferStart: true,
+    });
+    const firstPersisted = JSON.parse(await readFile(jobsPath, "utf8"));
+    expect(firstPersisted.find((entry: { id: string }) => entry.id === preCasOrphan.id))
+      .toMatchObject({ status: "queued", startDeferred: true });
+    expect(Object.hasOwn(preCasOrphan, "startDeferred")).toBe(false);
+
+    const afterPreCasCrash = new JobManager(jobsPath, false);
+    expect(afterPreCasCrash.get(preCasOrphan.id)).toMatchObject({
+      status: "interrupted",
+      startedAt: null,
+      dgxJobId: null,
+      error: expect.stringContaining("vor der dauerhaften Startfreigabe"),
+    });
+    expect(Reflect.get(afterPreCasCrash, "queue")).toEqual([]);
+    store.reconcileJobs(afterPreCasCrash.list());
+    expect(store.get(frozen.id)?.arms[0]).toMatchObject({
+      jobId: failedJobId,
+      attemptJobIds: [failedJobId],
+    });
+
+    // Crash point 2: the external CAS has committed, but startQueued() has not
+    // yet durably armed the prepared job. It remains bound but never executes.
+    const secondPreview = store.retryPreflightView(frozen.id, "baseline", failedJobId);
+    const postCasPrepared = afterPreCasCrash.create(secondPreview.experiment.arms[0].request, {
+      experiment: secondPreview.binding,
+      deferStart: true,
+    });
+    store.replaceArmJobForRetry(frozen.id, "baseline", failedJobId, postCasPrepared.id);
+
+    const afterPostCasCrash = new JobManager(jobsPath, false);
+    expect(afterPostCasCrash.get(postCasPrepared.id)).toMatchObject({
+      status: "interrupted",
+      startedAt: null,
+      dgxJobId: null,
+      error: expect.stringContaining("vor der dauerhaften Startfreigabe"),
+    });
+    expect(Reflect.get(afterPostCasCrash, "queue")).toEqual([]);
+    expect(afterPostCasCrash.list().map((job) => ({
+      id: job.id,
+      status: job.status,
+      startedAt: job.startedAt,
+      dgxJobId: job.dgxJobId,
+    }))).toEqual(expect.arrayContaining([
+      { id: preCasOrphan.id, status: "interrupted", startedAt: null, dgxJobId: null },
+      { id: postCasPrepared.id, status: "interrupted", startedAt: null, dgxJobId: null },
+    ]));
+    store.reconcileJobs(afterPostCasCrash.list());
+    expect(store.get(frozen.id)?.arms[0]).toMatchObject({
+      jobId: postCasPrepared.id,
+      attemptJobIds: [failedJobId, postCasPrepared.id],
+    });
+
+    // Once the next retry CAS succeeds, startQueued() removes the durable
+    // fence before queueing. A crash after that write may safely auto-resume.
+    const thirdPreview = store.retryPreflightView(frozen.id, "baseline", postCasPrepared.id);
+    const armed = afterPostCasCrash.create(thirdPreview.experiment.arms[0].request, {
+      experiment: thirdPreview.binding,
+      deferStart: true,
+    });
+    store.replaceArmJobForRetry(frozen.id, "baseline", postCasPrepared.id, armed.id);
+    expect(afterPostCasCrash.startQueued(armed.id)?.status).toBe("queued");
+    const armedPersisted = JSON.parse(await readFile(jobsPath, "utf8"));
+    expect(Object.hasOwn(
+      armedPersisted.find((entry: { id: string }) => entry.id === armed.id),
+      "startDeferred",
+    )).toBe(false);
+
+    const afterArmedCrash = new JobManager(jobsPath, false);
+    expect(afterArmedCrash.get(armed.id)?.status).toBe("queued");
+    expect(Reflect.get(afterArmedCrash, "queue")).toEqual([armed.id]);
+    store.reconcileJobs(afterArmedCrash.list());
+    expect(store.get(frozen.id)?.arms[0]).toMatchObject({
+      jobId: armed.id,
+      attemptJobIds: [failedJobId, postCasPrepared.id, armed.id],
+    });
+  });
+
+  it("does not let another job's shared pump cross a deferred experiment start fence", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(join(root, "experiments"));
+    const manager = new JobManager(join(root, "jobs.json"), false);
+    const frozen = store.freeze(store.create({
+      title: "Nebenläufiger Queue-Pump",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const prepared = manager.create(frozen.arms[0].request, {
+      experiment: store.bindingFor(frozen.id, "baseline"),
+      deferStart: true,
+    });
+    const directRequest = baselineRequest();
+    directRequest.outputName = "independent-runnable-job.mp4";
+    const runnable = manager.create(directRequest);
+    const started: string[] = [];
+    Reflect.set(manager, "run", async (job: { id: string; status: string; finishedAt: string | null }) => {
+      started.push(job.id);
+      job.status = "cancelled";
+      job.finishedAt = new Date().toISOString();
+    });
+
+    const pump = Reflect.get(manager, "pump") as () => Promise<void>;
+    await pump.call(manager);
+
+    expect(started).toEqual([runnable.id]);
+    expect(manager.get(prepared.id)).toMatchObject({ status: "queued", startedAt: null });
+    expect(Reflect.get(manager, "queue")).toEqual([prepared.id]);
+  });
+
+  it("keeps an interrupted deferred arm stable across repeated restarts", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(join(root, "experiments"));
+    const jobsPath = join(root, "jobs.json");
+    const manager = new JobManager(jobsPath, false);
+    const frozen = store.freeze(store.create({
+      title: "Dauerhaft unterbrochene Startfreigabe",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const prepared = manager.create(frozen.arms[0].request, {
+      experiment: store.bindingFor(frozen.id, "baseline"),
+      deferStart: true,
+    });
+    store.attachJob(frozen.id, "baseline", prepared.id);
+
+    const interrupted = manager.interruptDeferredStart(
+      prepared.id,
+      "Synthetischer Commit-Fehler vor der Startfreigabe.",
+    );
+    expect(interrupted).toMatchObject({
+      status: "interrupted",
+      startedAt: null,
+      dgxJobId: null,
+      error: "Synthetischer Commit-Fehler vor der Startfreigabe.",
+    });
+    expect(interrupted?.finishedAt).toBeTruthy();
+    const persisted = JSON.parse(await readFile(jobsPath, "utf8"));
+    expect(persisted.find((entry: { id: string }) => entry.id === prepared.id))
+      .toMatchObject({ status: "interrupted", startDeferred: true });
+
+    const firstRestart = new JobManager(jobsPath, false);
+    const secondRestart = new JobManager(jobsPath, false);
+    for (const restarted of [firstRestart, secondRestart]) {
+      expect(restarted.get(prepared.id)).toMatchObject({
+        status: "interrupted",
+        startedAt: null,
+        dgxJobId: null,
+      });
+      expect(Reflect.get(restarted, "queue")).toEqual([]);
+      expect(() => store.reconcileJobs(restarted.list())).not.toThrow();
+    }
+    expect(firstRestart.get(prepared.id)?.finishedAt).toBe(interrupted?.finishedAt);
+    expect(secondRestart.get(prepared.id)?.finishedAt).toBe(interrupted?.finishedAt);
+    expect(store.get(frozen.id)?.arms[0].jobId).toBe(prepared.id);
   });
 
   it("accepts a hash-verified baseline output after its job history was pruned", async () => {
@@ -452,6 +1103,290 @@ describe("controlled experiment contract", () => {
     expect(available.warnings).toEqual([
       expect.stringContaining("älteren Studio-Version"),
     ]);
+  });
+
+  it.each([
+    {
+      cohort: "pre-split stable",
+      missingPaths: [
+        "models.layout",
+        "models.generation",
+        "models.transformerPath",
+        "models.textEncoderPath",
+        "models.videoVaePath",
+        "models.audioVaePath",
+        "models.durationHeadPath",
+        "models.promptEnhancerGemmaRoot",
+        "models.gemmaLora.enabled",
+        "textToAudio",
+        "distilled",
+        "postprocess.lipForcing.rawOutputProfile",
+        "postprocess.lipForcing.mouthDelayMs",
+        "postprocess.lipForcing.programAudioDelayMs",
+      ],
+    },
+    {
+      cohort: "late pre-raw-output canary",
+      missingPaths: [
+        "textToAudio",
+        "postprocess.lipForcing.rawOutputProfile",
+      ],
+    },
+  ])("upgrades retained terminal retries from a $cohort clone as an immutable archive", async ({ missingPaths }) => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Historischer stabiler Experimentvertrag",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const baselineJobId = "11111111-1111-4111-8111-111111111111";
+    const completedCandidateJobId = "22222222-2222-4222-8222-222222222222";
+    const failedCandidateJobId = "33333333-3333-4333-8333-333333333333";
+    store.attachJob(frozen.id, "baseline", baselineJobId);
+    const candidateBinding = store.bindingFor(frozen.id, "candidate");
+    store.attachJob(frozen.id, "candidate", completedCandidateJobId);
+    const path = join(root, `${frozen.id}.json`);
+    const archived = JSON.parse(await readFile(path, "utf8")) as {
+      arms: Array<{ request: Record<string, unknown> }>;
+    };
+    const removeRequestPath = (request: Record<string, unknown>, dottedPath: string) => {
+      const parts = dottedPath.split(".");
+      const finalPart = parts.pop();
+      let parent = request;
+      for (const part of parts) parent = parent[part] as Record<string, unknown>;
+      if (finalPart) delete parent[finalPart];
+    };
+    for (const arm of archived.arms) {
+      for (const missingPath of missingPaths) removeRequestPath(arm.request, missingPath);
+    }
+    await writeFile(path, JSON.stringify(archived));
+    const before = await readFile(path);
+    const beforeMtimeMs = (await stat(path)).mtimeMs;
+
+    expect(() => store.reconcileJobs([
+      {
+        id: completedCandidateJobId,
+        status: "completed",
+        startedAt: "2026-08-04T21:09:38.365Z",
+        dgxJobId: null,
+        experiment: candidateBinding,
+      },
+      {
+        id: failedCandidateJobId,
+        status: "failed",
+        startedAt: "2026-08-04T20:43:59.041Z",
+        dgxJobId: null,
+        experiment: candidateBinding,
+      },
+    ])).not.toThrow();
+
+    expect(await readFile(path)).toEqual(before);
+    expect((await stat(path)).mtimeMs).toBe(beforeMtimeMs);
+    expect(store.listAvailable()).toEqual({
+      experiments: [],
+      warnings: [expect.stringContaining("schreibgeschützt archiviert")],
+    });
+    expect(() => store.bindingFor(frozen.id, "candidate"))
+      .toThrow("schreibgeschützt archiviert");
+  });
+
+  it("does not let a schema default silently make a pre-profile experiment executable", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Historischer IC-LoRA-Profilvertrag",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const path = join(root, `${frozen.id}.json`);
+    const archived = JSON.parse(await readFile(path, "utf8")) as {
+      arms: Array<{ request: { icLora: Record<string, unknown> } }>;
+    };
+    for (const arm of archived.arms) delete arm.request.icLora.profile;
+    await writeFile(path, JSON.stringify(archived));
+    const before = await readFile(path);
+
+    expect(() => store.reconcileJobs([{
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "completed",
+      startedAt: "2026-08-04T21:09:38.365Z",
+      dgxJobId: null,
+      experiment: binding,
+    }])).not.toThrow();
+    expect(await readFile(path)).toEqual(before);
+    expect(() => store.bindingFor(frozen.id, "baseline"))
+      .toThrow("schreibgeschützt archiviert");
+  });
+
+  it.each(["completed", "failed", "cancelled", "interrupted"])(
+    "skips an immutable pre-textToAudio archive during %s job reconciliation",
+    async (status) => {
+      const root = await experimentRoot();
+      const store = new ExperimentStore(root);
+      const frozen = store.freeze(store.create({
+        title: "Historisches Audio-Experiment",
+        baselineRequest: baselineRequest(),
+        candidate: { variable: "a2v-guidance", value: 3 },
+      }).id);
+      const binding = store.bindingFor(frozen.id, "baseline");
+      const path = join(root, `${frozen.id}.json`);
+      const archived = JSON.parse(await readFile(path, "utf8")) as {
+        arms: Array<{ request: Record<string, unknown> }>;
+      };
+      for (const arm of archived.arms) delete arm.request.textToAudio;
+      await writeFile(path, JSON.stringify(archived));
+      const before = await readFile(path);
+
+      expect(() => store.reconcileJobs([{
+        id: "11111111-1111-4111-8111-111111111111",
+        status,
+        startedAt: "2026-08-14T12:00:00.000Z",
+        dgxJobId: "dgx-job-historical-terminal",
+        experiment: binding,
+      }])).not.toThrow();
+
+      expect(await readFile(path)).toEqual(before);
+      expect(store.listAvailable()).toEqual({
+        experiments: [],
+        warnings: [expect.stringContaining("schreibgeschützt archiviert")],
+      });
+    },
+  );
+
+  it("archives a terminal pre-raw-output-profile experiment without rewriting frozen evidence", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Historischer LipForcing-Muxvertrag",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const path = join(root, `${frozen.id}.json`);
+    const archived = JSON.parse(await readFile(path, "utf8")) as {
+      arms: Array<{ request: { postprocess: { lipForcing: Record<string, unknown> } } }>;
+    };
+    for (const arm of archived.arms) delete arm.request.postprocess.lipForcing.rawOutputProfile;
+    await writeFile(path, JSON.stringify(archived));
+    const before = await readFile(path);
+    const beforeMtimeMs = (await stat(path)).mtimeMs;
+
+    expect(() => store.reconcileJobs([{
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "completed",
+      startedAt: "2026-08-25T12:00:00.000Z",
+      dgxJobId: "dgx-job-terminal-before-raw-output-profile",
+      experiment: binding,
+    }])).not.toThrow();
+
+    expect(await readFile(path)).toEqual(before);
+    expect((await stat(path)).mtimeMs).toBe(beforeMtimeMs);
+    expect(store.listAvailable()).toEqual({
+      experiments: [],
+      warnings: [expect.stringContaining("schreibgeschützt archiviert")],
+    });
+  });
+
+  it.each([
+    "attacker-controlled-invalid-profile",
+    13,
+  ])("does not classify an explicit invalid raw-output value %s as legacy", async (invalidProfile) => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Beschädigter Raw-Profilwert",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const path = join(root, `${frozen.id}.json`);
+    const corrupted = JSON.parse(await readFile(path, "utf8"));
+    corrupted.arms[0].request.postprocess.lipForcing.rawOutputProfile = invalidProfile;
+    await writeFile(path, JSON.stringify(corrupted));
+    const before = await readFile(path);
+
+    expect(() => store.reconcileJobs([{
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "completed",
+      startedAt: "2026-08-25T12:00:00.000Z",
+      dgxJobId: "dgx-job-corrupt-raw-profile",
+      experiment: binding,
+    }])).toThrow("ungültig");
+    expect(await readFile(path)).toEqual(before);
+  });
+
+  it("keeps an active pre-raw-output-profile experiment binding fail-closed", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Aktiver historischer LipForcing-Muxvertrag",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const path = join(root, `${frozen.id}.json`);
+    const archived = JSON.parse(await readFile(path, "utf8")) as {
+      arms: Array<{ request: { postprocess: { lipForcing: Record<string, unknown> } } }>;
+    };
+    for (const arm of archived.arms) delete arm.request.postprocess.lipForcing.rawOutputProfile;
+    await writeFile(path, JSON.stringify(archived));
+    const before = await readFile(path);
+
+    expect(() => store.reconcileJobs([{
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "running",
+      startedAt: "2026-08-25T12:00:00.000Z",
+      dgxJobId: "dgx-job-active-before-raw-output-profile",
+      experiment: binding,
+    }])).toThrow("schreibgeschützt archiviert");
+    expect(await readFile(path)).toEqual(before);
+  });
+
+  it("keeps active pre-textToAudio experiment bindings fail-closed", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Aktiver historischer Plan",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    const path = join(root, `${frozen.id}.json`);
+    const archived = JSON.parse(await readFile(path, "utf8")) as {
+      arms: Array<{ request: Record<string, unknown> }>;
+    };
+    for (const arm of archived.arms) delete arm.request.textToAudio;
+    await writeFile(path, JSON.stringify(archived));
+
+    expect(() => store.reconcileJobs([{
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "running",
+      startedAt: "2026-08-14T12:00:00.000Z",
+      dgxJobId: "dgx-job-still-active",
+      experiment: binding,
+    }])).toThrow("schreibgeschützt archiviert");
+  });
+
+  it("does not hide corrupt terminal experiment history during reconciliation", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Beschädigtes Archiv",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id);
+    const binding = store.bindingFor(frozen.id, "baseline");
+    await writeFile(join(root, `${frozen.id}.json`), "{ broken");
+
+    expect(() => store.reconcileJobs([{
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "completed",
+      startedAt: "2026-08-14T12:00:00.000Z",
+      dgxJobId: "dgx-job-corrupt-terminal",
+      experiment: binding,
+    }])).toThrow("beschädigt");
   });
 
   it("keeps output names out of substantive request diffs", () => {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from ltx_core.components.diffusion_steps import EulerAncestralDiffusionStep
 from ltx_core.types import LatentState
 from ltx_pipelines.utils import cooperative_checkpoint
 from ltx_pipelines.utils.samplers import (
+    euler_ancestral_denoising_loop,
     euler_ancestral_rf_denoising_loop,
     euler_denoising_loop,
 )
@@ -29,8 +31,8 @@ class AddOneStepper:
         return sample + 1
 
 
-def state(value: float = 0) -> LatentState:
-    latent = torch.tensor([value])
+def state(value: float = 0, dtype: torch.dtype = torch.float32) -> LatentState:
+    latent = torch.tensor([value], dtype=dtype)
     return LatentState(
         latent=latent,
         denoise_mask=torch.ones_like(latent),
@@ -69,6 +71,14 @@ def joint_denoiser(
 
 def reset_loop_counter() -> None:
     importlib.reload(cooperative_checkpoint)
+
+
+@pytest.fixture(autouse=True)
+def isolate_loop_counter() -> Iterator[None]:
+    """Keep loop identities deterministic regardless of test collection order."""
+    cooperative_checkpoint._loop_index = 0
+    yield
+    cooperative_checkpoint._loop_index = 0
 
 
 def boundary_decision(
@@ -326,3 +336,63 @@ def test_ancestral_rf_loop_resumes_with_identical_rng_sequence(
     assert resumed_audio is not None
     torch.testing.assert_close(resumed_video.latent, baseline_video.latent)
     torch.testing.assert_close(resumed_audio.latent, baseline_audio.latent)
+
+
+def test_fp32_ancestral_resume_never_downcasts_to_bf16_reference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sigmas = torch.tensor([1.0, 0.725, 0.421875, 0.0])
+    stepper = EulerAncestralDiffusionStep()
+
+    def run() -> tuple[LatentState | None, LatentState | None]:
+        return euler_ancestral_denoising_loop(
+            sigmas,
+            state(0.0, torch.bfloat16),
+            state(0.25, torch.bfloat16),
+            stepper,
+            object(),
+            joint_denoiser,
+            noise_seed=4321,
+            model_dtype=torch.float32,
+            model_input_dtype=torch.bfloat16,
+        )
+
+    monkeypatch.delenv("LTX_COOPERATIVE_CHECKPOINT_DIR", raising=False)
+    monkeypatch.delenv("LTX_COOPERATIVE_JOB_FINGERPRINT", raising=False)
+    reset_loop_counter()
+    baseline_video, baseline_audio = run()
+
+    monkeypatch.setenv("LTX_COOPERATIVE_CHECKPOINT_DIR", str(tmp_path))
+    monkeypatch.setenv("LTX_COOPERATIVE_JOB_FINGERPRINT", "fp32-ancestral")
+    (tmp_path / "yield-request.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "ltx-cooperative-yield-request.v1",
+                "job_fingerprint": "fp32-ancestral",
+                "request_id": "yield-fp32-ancestral",
+            }
+        ),
+        encoding="utf-8",
+    )
+    reset_loop_counter()
+    with pytest.raises(SystemExit) as yielded:
+        run()
+    assert yielded.value.code == 75
+
+    saved = torch.load(tmp_path / "state.pt", map_location="cpu", weights_only=True)
+    assert saved["video_state"]["latent"].dtype is torch.float32
+    assert saved["audio_state"]["latent"].dtype is torch.float32
+
+    (tmp_path / "yield-request.json").unlink()
+    reset_loop_counter()
+    resumed_video, resumed_audio = run()
+
+    assert baseline_video is not None
+    assert baseline_audio is not None
+    assert resumed_video is not None
+    assert resumed_audio is not None
+    assert resumed_video.latent.dtype is torch.float32
+    assert resumed_audio.latent.dtype is torch.float32
+    torch.testing.assert_close(resumed_video.latent, baseline_video.latent, rtol=0, atol=0)
+    torch.testing.assert_close(resumed_audio.latent, baseline_audio.latent, rtol=0, atol=0)

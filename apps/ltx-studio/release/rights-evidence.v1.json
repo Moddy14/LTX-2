@@ -4,7 +4,7 @@
     "conditional": "requires-current-signed-rights-attest",
     "permitted": "may-proceed-subject-to-applicable-quality-gates"
   },
-  "cutoffDate": "2026-08-11",
+  "cutoffDate": "2026-08-25",
   "evidence": [
     {
       "componentIds": [
@@ -343,6 +343,7 @@
         "model.lipdub-lora",
         "model.lipdub-spatial-upscaler",
         "model.ltx23-comfy-distilled-lora",
+        "model.ltx23-deblur-lora",
         "model.ltx23-dev-checkpoint",
         "model.ltx23-dev-fp8-checkpoint",
         "model.ltx23-distilled-fp8-checkpoint",
@@ -408,8 +409,11 @@
     {
       "componentIds": [
         "model.ltx25-audio-vae-bf16",
+        "model.ltx25-dfr-dev-transformer-bf16",
+        "model.ltx25-dfr-distilled-lora-bf16",
         "model.ltx25-duration-head-bf16",
         "model.ltx25-spatial-upscaler-bf16",
+        "model.ltx25-temporal-upscaler-bf16",
         "model.ltx25-text-encoder-bf16",
         "model.ltx25-transformer-bf16",
         "model.ltx25-video-vae-conv-bf16",
@@ -434,6 +438,32 @@
           "sha256": "048eb99db3a4d1b76905778a9ef0b9ff3b35a763f293b8b62a50c46a56de4af8",
           "sizeBytes": 27065,
           "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/6c7e5e573ac1667efc83407806fe9b0b93730e60/README.md"
+        }
+      ]
+    },
+    {
+      "componentIds": [
+        "model.ltx25-dfr-detailing-lora"
+      ],
+      "decision": "conditional",
+      "dimensions": {
+        "biometricProcessing": "conditional",
+        "code": "not-applicable",
+        "commercialUse": "conditional",
+        "trainingData": "not-distributed",
+        "weights": "conditional"
+      },
+      "evidenceId": "ltx25-dfr-detailing-lora-model-card-2026-08-25",
+      "reason": "The pinned gated adapter model card declares the LTX-2 Community License and links it to the LTX-2.5 base model; production use still requires a current signed rights attest covering license acceptance, acceptable use, consent, and commercial conditions.",
+      "sources": [
+        {
+          "authority": "upstream-model-card",
+          "path": "README.md",
+          "repository": "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler",
+          "revision": "74c4e68ee7dd99f3997d5a1bb1a3784941822222",
+          "sha256": "bd3b6edc46b2d79917c5d771b447585a1758ba8099e7935896e1758be19e256a",
+          "sizeBytes": 5200,
+          "url": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler/resolve/74c4e68ee7dd99f3997d5a1bb1a3784941822222/README.md"
         }
       ]
     },

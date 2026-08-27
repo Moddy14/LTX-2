@@ -14,17 +14,24 @@ from .authorization import (
     validate_evaluation_authorization,
     verify_detached_signature,
 )
-from .calibration import CalibrationError, build_calibration_gate_report
+from .calibration import CALIBRATION_REPORT_SCHEMA, CalibrationError, build_calibration_gate_report
 from .comparator_result import ComparatorResultError, build_holdout_comparator_decision
-from .complete import COMPLETE_D1_REPORT_SCHEMA
+from .complete import CompleteD1Error, validate_complete_d1_report
+from .design import (
+    CURRENT_PLANNING_HYPOTHESIS_COUNT,
+    CURRENT_VBENCH_CLAIM_COUNT,
+    CURRENT_VBENCH_GATE_COUNT,
+    document_sha256,
+)
 from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
-from .design import document_sha256
 from .freeze_preflight import FreezePreflightError, validate_f0_candidate
 from .governance import GovernanceError, validate_preregistration
 from .product import ProductGovernanceError, validate_measurement_report
+from .surface_contract import SurfaceContractError, build_candidate_vbench_surface_binding
 
-Q2_RESULTS_SCHEMA = "ltx-av-eval-q2-results.v1"
-Q2_REPORT_SCHEMA = "ltx-studio-qualification-report.v1"
+LEGACY_Q2_RESULTS_SCHEMA = "ltx-av-eval-q2-results.v1"
+Q2_RESULTS_SCHEMA = "ltx-av-eval-q2-results.v2"
+Q2_REPORT_SCHEMA = "ltx-studio-qualification-report.v2"
 MOS_METRIC_IDS = (
     "audio-quality-absolute",
     "identity-mouth-absolute",
@@ -107,11 +114,22 @@ def _signature_key_id(signature: object, context: str) -> str:
     return _identifier(signature.get("keyId"), f"{context}.keyId")
 
 
-def _candidate_entries(surface: object, *, surface_digest: str) -> tuple[dict[str, str], dict[str, list[str]]]:
+def _candidate_entries(
+    surface: object,
+    *,
+    surface_digest: str,
+    candidate_surface_binding_digest: str,
+) -> tuple[dict[str, str], dict[str, list[str]]]:
     if not isinstance(surface, dict) or surface.get("schemaVersion") != "candidate-release-surface.v1":
         raise HoldoutDecisionError("Q2 surface schema is unsupported")
     if studio_sha256_document(surface) != surface_digest:
         raise HoldoutDecisionError("Q2 surface digest mismatch")
+    try:
+        binding = build_candidate_vbench_surface_binding(surface)
+    except SurfaceContractError as error:
+        raise HoldoutDecisionError(f"Q2 candidate VBench surface rejected: {error}") from error
+    if binding["projection_digest"] != candidate_surface_binding_digest:
+        raise HoldoutDecisionError("Q2 candidate VBench surface projection mismatch")
     entries = surface.get("entries")
     if not isinstance(entries, list):
         raise HoldoutDecisionError("Q2 surface entries must be a list")
@@ -491,14 +509,25 @@ def build_q2_qualification_report(  # noqa: PLR0912, PLR0913, PLR0915
         _timestamp(authorization["complete_by"], "authorization complete_by"),
     ):
         raise HoldoutDecisionError("Q2 report was generated before consumption or after complete_by")
-    entry_claims, entry_gates = _candidate_entries(surface, surface_digest=candidate["surface_digest"])
+    entry_claims, entry_gates = _candidate_entries(
+        surface,
+        surface_digest=candidate["surface_digest"],
+        candidate_surface_binding_digest=candidate["candidate_surface_binding_digest"],
+    )
     candidate_claims = set(entry_claims.values())
     if not set(candidate["target_sota_claim_ids"]).issubset(candidate_claims):
         raise HoldoutDecisionError("Q2 target claim has no candidate surface entry")
-    if not isinstance(d1_report, dict) or d1_report.get("schema_version") != COMPLETE_D1_REPORT_SCHEMA:
-        raise HoldoutDecisionError("Q2 D1 report schema is unsupported")
+    if not isinstance(d1_report, dict):
+        raise HoldoutDecisionError("Q2 D1 report must be an object")
     if not isinstance(design_report, dict) or design_report.get("schema_version") != DESIGN_REPORT_SCHEMA:
         raise HoldoutDecisionError("Q2 D0a design report schema is unsupported")
+    if (
+        design_report.get("planning_hypothesis_count") != CURRENT_PLANNING_HYPOTHESIS_COUNT
+        or design_report.get("vbench_claim_count") != CURRENT_VBENCH_CLAIM_COUNT
+        or design_report.get("vbench_gate_count") != CURRENT_VBENCH_GATE_COUNT
+    ):
+        raise HoldoutDecisionError("Q2 D0a report does not cover the current candidate VBench matrix")
+    _sha256(design_report.get("candidate_surface_binding_digest"), "Q2 D0a candidate surface binding")
     expected_design = next(
         (item["sha256"] for item in candidate["detailed_reports"] if item["report_id"] == "d0a-design"),
         None,
@@ -523,8 +552,20 @@ def build_q2_qualification_report(  # noqa: PLR0912, PLR0913, PLR0915
         calibration_report = build_calibration_gate_report(calibration_catalog)
     except CalibrationError as error:
         raise HoldoutDecisionError(f"Q2 calibration catalog rejected: {error}") from error
+    if calibration_report["schema_version"] != CALIBRATION_REPORT_SCHEMA:
+        raise HoldoutDecisionError("Q2 calibration catalog uses a legacy report schema")
     if not isinstance(calibration_catalog, dict) or calibration_catalog.get("status") != "frozen":
         raise HoldoutDecisionError("Q2 calibration catalog must be frozen")
+    try:
+        validated_d1 = validate_complete_d1_report(
+            d1_report,
+            calibration_catalog=calibration_catalog,
+            design_report=design_report,
+        )
+    except CompleteD1Error as error:
+        raise HoldoutDecisionError(f"Q2 D1 report is not canonical complete v2 evidence: {error}") from error
+    if validated_d1["verdict"] != "pass":
+        raise HoldoutDecisionError("Q2 D1 report is not a complete pass")
     if d1_report.get("calibration_catalog_digest") != calibration_report["catalog_digest"]:
         raise HoldoutDecisionError("Q2 calibration catalog is not bound by D1")
     if (
@@ -533,6 +574,10 @@ def build_q2_qualification_report(  # noqa: PLR0912, PLR0913, PLR0915
         or d1_report.get("preregistration_digest") != candidate["preregistration_digest"]
         or d1_report.get("design_digest") != calibration_catalog.get("design_digest")
         or d1_report.get("design_digest") != design_report.get("design_digest")
+        or d1_report.get("surface_digest") != candidate["surface_digest"]
+        or d1_report.get("candidate_surface_binding_digest") != candidate["candidate_surface_binding_digest"]
+        or design_report.get("surface_digest") != candidate["surface_digest"]
+        or design_report.get("candidate_surface_binding_digest") != candidate["candidate_surface_binding_digest"]
     ):
         raise HoldoutDecisionError("Q2 D1/calibration bindings do not match the signed candidate")
     _validate_objective_reports(
@@ -603,6 +648,7 @@ def build_q2_qualification_report(  # noqa: PLR0912, PLR0913, PLR0915
         "releaseDigest": candidate["release_digest"],
         "preregistrationDigest": candidate["preregistration_digest"],
         "surfaceDigest": candidate["surface_digest"],
+        "candidateSurfaceBindingDigest": candidate["candidate_surface_binding_digest"],
         "producerId": producer_id,
         "producerDigest": candidate["q2_runner_digest"],
         "verdict": "pass",

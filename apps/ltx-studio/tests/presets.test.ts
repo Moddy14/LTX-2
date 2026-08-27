@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   framesForDuration,
+  matchingDfrResolutionPreset,
   matchingDurationPreset,
   matchingResolutionPreset,
   videoDurationSeconds,
@@ -29,5 +30,12 @@ describe("LTX output presets", () => {
     expect(matchingResolutionPreset(1088, 1920)?.id).toBe("full-hd-portrait");
     expect(matchingResolutionPreset(1024, 1024)?.id).toBe("square");
     expect(matchingResolutionPreset(1408, 768)).toBeNull();
+  });
+
+  it("adds official 3840 x 2176 UHD only to the DFR preset surface", () => {
+    expect(matchingDfrResolutionPreset(3840, 2176)?.id).toBe("dfr-uhd-4k");
+    expect(matchingResolutionPreset(3840, 2176)).toBeNull();
+    expect(3840 % 128).toBe(0);
+    expect(2176 % 128).toBe(0);
   });
 });

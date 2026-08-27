@@ -9,6 +9,7 @@ import {
   capturePinnedPathRevision,
   openPinnedPaths,
 } from "../server/evaluatorBindings.js";
+import { evaluatorRuntimeDirectory, evaluatorSandboxProperties } from "../server/evaluatorSandbox.js";
 
 const roots: string[] = [];
 
@@ -56,6 +57,50 @@ it("binds the already verified inode even when its parent path is replaced", asy
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("original-inode\n");
+    expect(() => pinned.verifyUnchanged()).not.toThrow();
+  } finally {
+    pinned.close();
+  }
+});
+
+it("maps a held snapshot FD into its DynamicUser RuntimeDirectory destination", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "ltx-evaluator-runtime-bind-"));
+  roots.push(parent);
+  const source = join(parent, "authority-snapshot.mp4");
+  await writeFile(source, "verified snapshot bytes\n");
+  await chmod(source, 0o444);
+  const revision = capturePinnedPathRevision(source, "file");
+  const pinned = openPinnedPaths([revision]);
+  const unit = `ltx-pv-bind-test-${process.pid}`;
+  const destination = join(evaluatorRuntimeDirectory(unit), "authority-video");
+
+  try {
+    const property = pinned.bindReadOnlyProperty(source, destination);
+    expect(property).toMatch(new RegExp(
+      `^--property=BindReadOnlyPaths=/proc/${process.pid}/fd/[0-9]+:${destination}$`,
+    ));
+    const result = spawnSync("/usr/bin/sudo", [
+      "-n",
+      "/usr/bin/systemd-run",
+      "--system",
+      "--quiet",
+      "--wait",
+      "--pipe",
+      "--collect",
+      "--service-type=exec",
+      `--unit=${unit}`,
+      ...evaluatorSandboxProperties(unit),
+      property,
+      "/usr/bin/cat",
+      destination,
+    ], {
+      encoding: "utf8",
+      timeout: 10_000,
+      env: { PATH: "/usr/bin:/bin" },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("verified snapshot bytes\n");
     expect(() => pinned.verifyUnchanged()).not.toThrow();
   } finally {
     pinned.close();

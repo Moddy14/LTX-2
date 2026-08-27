@@ -23,7 +23,7 @@ import {
   type PhonemeVisemeResult,
 } from "../shared/phonemeVisemeEvaluator.js";
 import { mouthSkinMeasurementIsSufficient } from "../shared/mouthSkinSufficiency.js";
-import type { StudioJob } from "./jobs.js";
+import type { OutputAuthorityJob } from "./jobs.js";
 import {
   readOutputAnalysis,
   recoverInterruptedOutputAnalyses,
@@ -62,7 +62,12 @@ import {
   evaluatorRuntimeDirectory,
   evaluatorSandboxProperties,
 } from "./evaluatorSandbox.js";
-import { OutputLibrary, OutputQualityError, type OutputAnalysisTarget } from "./outputs.js";
+import {
+  OutputLibrary,
+  OutputQualityError,
+  type OutputAnalysisLease,
+  type OutputAnalysisTarget,
+} from "./outputs.js";
 import { verifyProvenanceFileEvidence } from "./runProvenance.js";
 
 const MAX_STDOUT_BYTES = 256 * 1024;
@@ -72,7 +77,12 @@ const MAX_STDERR_BYTES = 32 * 1024;
 // even starts. Keep the analysis bounded, but leave enough headroom for the
 // production resolution that Studio exposes.
 const ANALYSIS_TIMEOUT_MS = 300_000;
-const PHONEME_VISEME_TIMEOUT_MS = 180_000;
+// The isolated CTC/eSpeak/MediaPipe stage is CPU-only as well. On the DGX it
+// can legitimately exceed five minutes under unified-memory/swap pressure,
+// even though the same sealed input finishes much faster at idle. Keep the
+// evaluator fail-closed with a hard seven-minute sandbox window instead of
+// turning transient contention into a false evaluator failure.
+const PHONEME_VISEME_TIMEOUT_MS = 420_000;
 const TERMINATION_GRACE_MS = 2_000;
 const SYSTEMD_STOP_DEADLINE_MS = 10_000;
 const SYSTEMD_CONTROL_TIMEOUT_MS = 1_000;
@@ -106,6 +116,7 @@ type OutputAnalysisManagerOptions = {
 
 type AnalysisTask = {
   target: OutputAnalysisTarget;
+  lease: OutputAnalysisLease;
   record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v7" }>;
   evaluatorState: PhonemeVisemeEvaluatorState;
   dialogueEvaluatorState: DialogueEvaluatorState;
@@ -739,7 +750,7 @@ export class OutputAnalysisManager {
 
   constructor(
     private readonly library: OutputLibrary,
-    private readonly jobs: () => readonly StudioJob[],
+    private readonly jobs: () => readonly OutputAuthorityJob[],
     private readonly root = outputRoot,
     private readonly options: OutputAnalysisManagerOptions = {},
   ) {
@@ -747,7 +758,7 @@ export class OutputAnalysisManager {
   }
 
   get(outputName: string): OutputAnalysisRecord | null {
-    const target = this.library.resolveAnalysisTarget(outputName);
+    const target = this.library.resolveAnalysisTarget(outputName, this.jobs());
     return readOutputAnalysis(this.root, outputName, revisionOf(target));
   }
 
@@ -756,8 +767,8 @@ export class OutputAnalysisManager {
   }
 
   start(outputName: string, force = false): OutputAnalysisRecord {
-    const target = this.library.resolveAnalysisTarget(outputName);
-    const revision = revisionOf(target);
+    const initialTarget = this.library.resolveAnalysisTarget(outputName, this.jobs());
+    const revision = revisionOf(initialTarget);
     const current = readOutputAnalysis(this.root, outputName, revision);
     const evaluatorState = this.resolveEvaluatorState();
     const dialogueEvaluatorState = this.resolveDialogueEvaluatorState();
@@ -770,8 +781,10 @@ export class OutputAnalysisManager {
       current,
       evaluatorState,
       dialogueEvaluatorState,
-      target,
+      initialTarget,
     ) && !force) return current;
+    const lease = this.library.openAnalysisTarget(outputName, this.jobs());
+    const target = lease.target;
     const createdAt = now();
     const record: Extract<OutputAnalysisRecord, { schemaVersion: "ltx-studio-output-analysis.v7" }> = {
       schemaVersion: "ltx-studio-output-analysis.v7",
@@ -795,18 +808,24 @@ export class OutputAnalysisManager {
       error: null,
       result: null,
     };
-    writeOutputAnalysis(this.root, record);
-    this.tasks.set(record.analysisId, {
-      target,
-      record,
-      evaluatorState,
-      dialogueEvaluatorState,
-      evaluatorFingerprint,
-    });
-    this.activeByOutput.set(outputName, record.analysisId);
-    this.queue.push(record.analysisId);
-    setImmediate(() => void this.pump());
-    return record;
+    try {
+      writeOutputAnalysis(this.root, record);
+      this.tasks.set(record.analysisId, {
+        target,
+        lease,
+        record,
+        evaluatorState,
+        dialogueEvaluatorState,
+        evaluatorFingerprint,
+      });
+      this.activeByOutput.set(outputName, record.analysisId);
+      this.queue.push(record.analysisId);
+      setImmediate(() => void this.pump());
+      return record;
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
   }
 
   cancel(outputName: string, expectedAnalysisId: string): OutputAnalysisRecord | null {
@@ -842,7 +861,10 @@ export class OutputAnalysisManager {
     };
     writeOutputAnalysis(this.root, task.record);
     this.activeByOutput.delete(outputName);
-    if (this.runningId !== analysisId) this.tasks.delete(analysisId);
+    if (this.runningId !== analysisId) {
+      task.lease.release();
+      this.tasks.delete(analysisId);
+    }
     return task.record;
   }
 
@@ -898,6 +920,7 @@ export class OutputAnalysisManager {
     try {
       await this.run(task);
     } finally {
+      task.lease.release();
       this.processes.delete(analysisId);
       this.tasks.delete(analysisId);
       if (this.activeByOutput.get(task.target.outputName) === analysisId) {
@@ -919,6 +942,7 @@ export class OutputAnalysisManager {
     };
     writeOutputAnalysis(this.root, task.record);
     try {
+      task.lease.verify(this.jobs());
       await this.verifyTaskIdentityEvidence(task, "vor der Analyse");
       this.verifyTaskConditioningAudio(task, "vor der Analyse");
       if (analysisWasCancelled(task)) return;
@@ -939,7 +963,8 @@ export class OutputAnalysisManager {
       ) !== task.evaluatorFingerprint) {
         throw new Error("Evaluator-Manifest oder Whisper-Laufzeit wurde während der Analyse verändert.");
       }
-      const currentTarget = this.library.resolveAnalysisTarget(task.target.outputName);
+      task.lease.verify(this.jobs());
+      const currentTarget = this.library.resolveAnalysisTarget(task.target.outputName, this.jobs());
       if (currentTarget.sizeBytes !== task.target.sizeBytes
         || Math.abs(currentTarget.modifiedAtMs - task.target.modifiedAtMs) >= 1
         || Math.abs(currentTarget.changedAtMs - task.target.changedAtMs) >= 1
@@ -1106,6 +1131,12 @@ export class OutputAnalysisManager {
     mkdirSync(analysisTempRoot, { recursive: true, mode: 0o700 });
     rmSync(analysisTempDir, { recursive: true, force: true });
     mkdirSync(analysisTempDir, { recursive: false, mode: 0o700 });
+    try {
+      task.lease.verify(this.jobs());
+    } catch (error) {
+      rmSync(analysisTempDir, { recursive: true, force: true });
+      throw error;
+    }
     return new Promise((resolvePromise, rejectPromise) => {
       const child = spawn(this.options.pythonExecutable ?? defaultPythonExecutable, workerArgs, {
         cwd: appRoot,
@@ -1198,6 +1229,9 @@ export class OutputAnalysisManager {
       ? evaluatorCredentialPath(unitName, "request.json")
       : requestPath;
     const runnerWorkDir = sandboxed ? sandboxWorkDir : measurementTempDir;
+    const runnerVideoPath = sandboxed
+      ? join(sandboxWorkDir, "authority-video")
+      : task.target.outputPath;
     const runnerArgs = [
       execution.runnerPath,
       "--request",
@@ -1244,7 +1278,7 @@ export class OutputAnalysisManager {
       schemaVersion: "ltx-studio-mfa-mediapipe-request.v1",
       manifestPath: execution.manifestPath,
       manifestSha256: execution.manifestSha256,
-      videoPath: task.target.outputPath,
+      videoPath: runnerVideoPath,
       expectedDialogue,
       expectedDialogueSha256: expectedDialogueSha256(task.target),
     }), { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -1297,7 +1331,8 @@ export class OutputAnalysisManager {
       `--working-directory=${sandboxWorkDir}`,
       ...evaluatorSandboxProperties(unitName),
       `--property=LoadCredential=request.json:${pinned.sourcePath(requestPath)}`,
-      ...evaluatorBindings.map((revision) => pinned.bindReadOnlyProperty(revision.path)),
+      ...execution.boundPathRevisions.map((revision) => pinned.bindReadOnlyProperty(revision.path)),
+      pinned.bindReadOnlyProperty(outputRevision.path, runnerVideoPath),
       "--property=MemoryMax=8G",
       "--property=TasksMax=64",
       "--property=LimitNOFILE=256",
@@ -1311,6 +1346,13 @@ export class OutputAnalysisManager {
       python,
       ...runnerArgs,
     ] : runnerArgs;
+    try {
+      task.lease.verify(this.jobs());
+    } catch (error) {
+      pinned.close();
+      rmSync(measurementTempDir, { recursive: true, force: true });
+      throw error;
+    }
     return new Promise((resolvePromise) => {
       if (sandboxed) this.phonemeVisemeUnits.set(task.record.analysisId, unitName);
       const child = spawn(command, args, {

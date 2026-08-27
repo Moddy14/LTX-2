@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   thermalPauseC,
+  thermalResumeC,
 } from "../server/config.js";
 import {
   readMaxTemperatureC,
@@ -90,7 +91,15 @@ describe("lossless thermal pause guard", () => {
     for (let index = 0; index < 8; index += 1) expect(guard.observe(null, true)).toBeNull();
   });
 
+  it("resumes after five readings exactly on the configured boundary", () => {
+    const guard = new ThermalPauseGuard(options);
+    for (let index = 0; index < 4; index += 1) expect(guard.observe(66, true)).toBeNull();
+    expect(guard.observe(66, true)).toBe("resume");
+  });
+
   it("keeps the hardware pause threshold independent of a workload start threshold", () => {
     expect(thermalPauseC).toBe(90);
+    expect(thermalResumeC).toBe(66);
+    expect(thermalResumeC).toBeLessThan(thermalPauseC);
   });
 });

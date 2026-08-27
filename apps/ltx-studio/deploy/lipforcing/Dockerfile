@@ -17,19 +17,22 @@ RUN git clone --filter=blob:none https://github.com/cvlab-kaist/LipForcing.git /
     && test "$(git -C /workspace/LipForcing rev-parse HEAD)" = "${LIPFORCING_COMMIT}" \
     && python -m pip install --no-deps -e /workspace/LipForcing
 
+COPY --chmod=0444 raw_output_mux.py /opt/ltx-studio/raw_output_mux.py
+COPY --chmod=0444 container_runner.py /opt/ltx-studio/lipforcing-runner.py
+COPY --chmod=0444 runtime-patch-provenance.v1.json /opt/ltx-studio/runtime-patch-provenance.v1.json
 COPY patch_verified_runtime.py /opt/ltx-studio/patch-verified-runtime.py
 RUN python /opt/ltx-studio/patch-verified-runtime.py \
     && rm /opt/ltx-studio/patch-verified-runtime.py
 
-COPY container_runner.py /opt/ltx-studio/lipforcing-runner.py
 COPY prepare_text_embedding.py /opt/ltx-studio/prepare-lipforcing-text-embedding.py
 
 LABEL org.opencontainers.image.source="https://github.com/cvlab-kaist/LipForcing" \
       org.opencontainers.image.revision="${LIPFORCING_COMMIT}" \
-      com.moddy.ltx-studio.component="lipforcing-14b"
+      com.moddy.ltx-studio.component="lipforcing-14b" \
+      com.moddy.ltx-studio.lipforcing.patchset="ltx-studio-lipforcing-runtime.v4"
 
 WORKDIR /workspace/LipForcing
-ENV PYTHONPATH=/workspace/LipForcing:/workspace/LipForcing/scripts/inference \
+ENV PYTHONPATH=/opt/ltx-studio:/workspace/LipForcing:/workspace/LipForcing/scripts/inference \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     TOKENIZERS_PARALLELISM=false \

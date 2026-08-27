@@ -19,8 +19,10 @@ from .cross_shot import (
 )
 from .design import DesignError, build_power_report, document_sha256
 
-CROSS_SHOT_RESULTS_SCHEMA = "ltx-av-eval-cross-shot-results.v1"
-CROSS_SHOT_DECISION_SCHEMA = "ltx-av-eval-cross-shot-decision.v1"
+LEGACY_CROSS_SHOT_RESULTS_SCHEMA = "ltx-av-eval-cross-shot-results.v1"
+LEGACY_CROSS_SHOT_DECISION_SCHEMA = "ltx-av-eval-cross-shot-decision.v1"
+CROSS_SHOT_RESULTS_SCHEMA = "ltx-av-eval-cross-shot-results.v2"
+CROSS_SHOT_DECISION_SCHEMA = "ltx-av-eval-cross-shot-decision.v2"
 BOOTSTRAP_REPLICATES = 10_000
 CONFIDENCE_LEVEL = 0.95
 FAMILYWISE_ALPHA = 0.05
@@ -465,6 +467,8 @@ def build_cross_shot_decision(raw: object, *, protocol: object, design: object) 
         "input_digest": document_sha256(raw),
         "protocol_digest": raw["protocol_digest"],
         "design_digest": raw["design_digest"],
+        "surface_digest": design_report["surface_digest"],
+        "candidate_surface_binding_digest": design_report["candidate_surface_binding_digest"],
         "release_digest": binding_index["release"],
         "preregistration_digest": binding_index["preregistration"],
         "dataset_digest": binding_index["dataset"],

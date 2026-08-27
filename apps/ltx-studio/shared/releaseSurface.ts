@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import {
+  defaultLipForcingRawOutputProfile,
+  dfrSettings,
   icLoraProfiles,
   lipDubPipelineProfiles,
   needsGemmaAbliteratedLora,
@@ -50,6 +52,7 @@ export const releaseModelProfiles = [
   "ltx23-monolith",
   "ltx25-split-bf16-single-stage",
   "ltx25-split-bf16-two-stage",
+  "ltx25-split-bf16-dfr",
 ] as const;
 export type ReleaseModelProfile = (typeof releaseModelProfiles)[number];
 
@@ -81,6 +84,8 @@ export const releaseSurfaceEntrySchema = z.object({
     retakeCheckpoint: z.enum(["dev", "distilled"]).nullable(),
     modelProfile: z.enum(releaseModelProfiles),
     unionControlType: z.enum(releaseUnionControlTypes).nullable(),
+    dfrTemporalUpscalings: z.union([z.literal(0), z.literal(1), z.literal(2)]).nullable(),
+    dfrSpatialUpscalings: z.union([z.literal(1), z.literal(2)]).nullable(),
     promptEncoderProfile: z.enum(promptEncoderProfiles),
     dialogueIntent: z.enum(["required", "optional", "not-applicable"]),
     postprocessor: z.enum(postprocessorIds),
@@ -96,6 +101,7 @@ export const releaseSurfaceEntrySchema = z.object({
     reason: z.string().min(1),
   }).strict(),
   targetStatus: z.enum(["candidate", "blocked"]),
+  targetReason: z.string().min(1).nullable(),
 }).strict().superRefine((entry, context) => {
   const applicable = new Set(entry.applicableGates);
   const notApplicable = new Set(entry.notApplicable.map(({ gate }) => gate));
@@ -112,11 +118,27 @@ export const releaseSurfaceEntrySchema = z.object({
     || notApplicable.size !== entry.notApplicable.length) {
     context.addIssue({ code: "custom", path: ["applicableGates"], message: "duplicate gate" });
   }
-  if ((entry.rights.status === "blocked") !== (entry.targetStatus === "blocked")) {
+  if (entry.rights.status === "blocked" && entry.targetStatus !== "blocked") {
     context.addIssue({
       code: "custom",
       path: ["targetStatus"],
-      message: "blocked rights and blocked target status must agree",
+      message: "blocked rights require a blocked target status",
+    });
+  }
+  if ((entry.targetStatus === "blocked") !== (entry.targetReason !== null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["targetReason"],
+      message: "blocked entries require a target reason and candidate entries forbid one",
+    });
+  }
+  const dfrSettingsPresent = entry.request.dfrTemporalUpscalings !== null
+    && entry.request.dfrSpatialUpscalings !== null;
+  if ((entry.request.mode === "dfr") !== dfrSettingsPresent) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "dfrTemporalUpscalings"],
+      message: "DFR settings must be explicit only for DFR surface entries",
     });
   }
   const supportsOptionalLora = entry.request.modelProfile === "ltx23-monolith"
@@ -186,6 +208,9 @@ type BaseVariant = {
   retakeCheckpoint: "dev" | "distilled" | null;
   modelProfile: ReleaseModelProfile;
   unionControlType: ReleaseUnionControlType | null;
+  dfrTemporalUpscalings?: 0 | 1 | 2;
+  dfrSpatialUpscalings?: 1 | 2;
+  targetBlockReason?: string;
   inputContract: string[];
   dialogueIntent: "required" | "optional" | "not-applicable";
   identityReference: boolean;
@@ -228,6 +253,9 @@ function baseVariants(): BaseVariant[] {
     identityReference: false,
   });
   for (const profile of icLoraProfiles) {
+    // Deblur is bound specifically to the audited LTX-2.5 split graph below;
+    // Instant Shave remains the explicitly separate LTX-2.3 legacy V2V arm.
+    if (profile === "v2v-deblur") continue;
     const needsImage = ["union-control", "ingredients", "motion-track"].includes(profile);
     const needsVideo = profile !== "ingredients";
     variants.push({
@@ -346,6 +374,35 @@ function ltx25Variants(): BaseVariant[] {
       });
     }
   }
+  for (const sourceMode of ["text", "image"] as const) {
+    for (const temporalUpscalings of [0, 1, 2] as const) {
+      for (const spatialUpscalings of [1, 2] as const) {
+        variants.push({
+          id: `ltx25.dfr.${sourceMode}.temporal-${temporalUpscalings}.spatial-${spatialUpscalings}`,
+          claimId: `native-generation.ltx25.dfr.${sourceMode}-to-video`,
+          mode: "dfr",
+          sourceMode,
+          icLoraProfile: null,
+          lipDubPipelineProfile: null,
+          retakeCheckpoint: null,
+          modelProfile: "ltx25-split-bf16-dfr",
+          unionControlType: null,
+          dfrTemporalUpscalings: temporalUpscalings,
+          dfrSpatialUpscalings: spatialUpscalings,
+          inputContract: [
+            "prompt",
+            ...(sourceMode === "image" ? ["one-or-more-reference-images"] : []),
+            "verified-dfr-detailing-ic-lora-fixed-0.5",
+            ...(temporalUpscalings > 0 ? ["verified-dfr-temporal-upscaler"] : []),
+          ],
+          dialogueIntent: "optional",
+          identityReference: sourceMode === "image",
+          targetBlockReason:
+            "DFR v1.3.0 is HOLD: the mandatory Detailing IC-LoRA is not locally SHA-256-verified, and peak-memory, cold-canary, durability and disjoint holdout evidence are incomplete.",
+        });
+      }
+    }
+  }
   variants.push({
     id: "ltx25.image-audio-to-video.two-stage",
     claimId: "audio-driven-video.ltx25.image-audio-to-video.two-stage",
@@ -374,6 +431,20 @@ function ltx25Variants(): BaseVariant[] {
     dialogueIntent: "optional",
     identityReference: false,
   });
+  variants.push({
+    id: "ltx25.text-to-audio.single-stage.verbatim-dialogue",
+    claimId: "native-generation.ltx25.text-to-audio.single-stage.verbatim-dialogue",
+    mode: "text-to-audio",
+    sourceMode: "not-applicable",
+    icLoraProfile: null,
+    lipDubPipelineProfile: null,
+    retakeCheckpoint: null,
+    modelProfile: "ltx25-split-bf16-single-stage",
+    unionControlType: null,
+    inputContract: ["prompt", "verbatim-dialogue"],
+    dialogueIntent: "required",
+    identityReference: false,
+  });
   for (const controlType of releaseUnionControlTypes) {
     variants.push({
       id: `ltx25.ic-lora.union-control.${controlType}`,
@@ -383,14 +454,16 @@ function ltx25Variants(): BaseVariant[] {
       icLoraProfile: "union-control",
       lipDubPipelineProfile: null,
       retakeCheckpoint: null,
-      modelProfile: "ltx25-split-bf16-single-stage",
+      modelProfile: "ltx25-split-bf16-two-stage",
       unionControlType: controlType,
       inputContract: ["prompt", "reference-image", "control-video"],
       dialogueIntent: "optional",
       identityReference: true,
+      targetBlockReason:
+        "The pinned official LTX-2.5 Union Control workflow is two-stage, but the native Stage-2/spatial-upscaler implementation and executable contract proof are not implemented yet.",
     });
   }
-  for (const profile of ["ingredients", "motion-track", "v2v-instant-shave"] as const) {
+  for (const profile of ["ingredients", "motion-track", "v2v-deblur"] as const) {
     const ingredients = profile === "ingredients";
     variants.push({
       id: `ltx25.ic-lora.${profile}`,
@@ -404,7 +477,7 @@ function ltx25Variants(): BaseVariant[] {
       unionControlType: null,
       inputContract: [
         "prompt",
-        ...(profile === "v2v-instant-shave" ? [] : ["reference-image"]),
+        ...(profile === "v2v-deblur" ? [] : ["reference-image"]),
         ...(ingredients ? [] : ["control-video"]),
       ],
       dialogueIntent: "optional",
@@ -439,6 +512,9 @@ function baseRightsFor(
   const evidenceIds = ltx25
     ? ["ltx25-community-license-model-card-2026-08-21"]
     : ["ltx2-community-license-2026-01-05"];
+  if (variant.mode === "dfr") {
+    evidenceIds.push("ltx25-dfr-detailing-lora-model-card-2026-08-25");
+  }
   if (!(variant.mode === "ic-lora" && variant.icLoraProfile === "hdr")) {
     evidenceIds.push("gemma-terms-model-card");
   }
@@ -522,16 +598,22 @@ function gatesFor(variant: BaseVariant, postprocessor: PostprocessorId): Pick<Re
     if (variant.identityReference) applicable.add("vbench-i2v");
   }
   if (speech) {
-    applicable.add("phoneme-viseme");
-    applicable.add("mouth-artifact");
     applicable.add("asr-critical-token");
+    if (video) {
+      applicable.add("phoneme-viseme");
+      applicable.add("mouth-artifact");
+    }
   }
   if (variant.identityReference) applicable.add("identity");
 
   const reasons: Partial<Record<ReleaseGateId, string>> = {
     "av-sync": "Audio-only output has no video timeline.",
-    "phoneme-viseme": "This surface entry makes no speech or lip-synchronization claim.",
-    "mouth-artifact": "This surface entry makes no mouth-rendering claim.",
+    "phoneme-viseme": video
+      ? "This surface entry makes no speech or lip-synchronization claim."
+      : "Audio-only output has no visible phoneme-to-viseme alignment.",
+    "mouth-artifact": video
+      ? "This surface entry makes no mouth-rendering claim."
+      : "Audio-only output has no rendered mouth region.",
     identity: "This surface entry has no identity-bearing visual reference.",
     sharpness: "Audio-only output has no image sharpness dimension.",
     "vbench-i2v": video
@@ -564,6 +646,8 @@ function entryFor(
       retakeCheckpoint: variant.retakeCheckpoint,
       modelProfile: variant.modelProfile,
       unionControlType: variant.unionControlType,
+      dfrTemporalUpscalings: variant.dfrTemporalUpscalings ?? null,
+      dfrSpatialUpscalings: variant.dfrSpatialUpscalings ?? null,
       promptEncoderProfile,
       dialogueIntent: postprocessor === "none" ? variant.dialogueIntent : "required",
       postprocessor,
@@ -573,6 +657,7 @@ function entryFor(
       : [...variant.inputContract, "speech-audio-or-native-dialogue-track"],
     outputMedia: variant.mode === "text-to-audio" ? "audio/wav" : "video/mp4",
     cooperativeCheckpoint: variant.mode !== "two-stage-hq"
+      && variant.mode !== "dfr"
       && variant.mode !== "text-to-audio"
       && variant.mode !== "ic-lora"
       && !postprocessor.startsWith("latentsync")
@@ -580,7 +665,10 @@ function entryFor(
       && !postprocessor.startsWith("lipforcing"),
     ...gatesFor(variant, postprocessor),
     rights,
-    targetStatus: rights.status === "blocked" ? "blocked" : "candidate",
+    targetStatus: rights.status === "blocked" || variant.targetBlockReason ? "blocked" : "candidate",
+    targetReason: rights.status === "blocked"
+      ? rights.reason
+      : variant.targetBlockReason ?? null,
   };
 }
 
@@ -610,7 +698,14 @@ export function deriveReleaseSurfaceEntries(): ReleaseSurfaceEntry[] {
 }
 
 export function releaseSurfaceEntryForRequest(request: GenerationRequest): ReleaseSurfaceEntry {
-  const sourceMode = generationModes.includes(request.mode as (typeof generationModes)[number])
+  if (request.postprocess.lipForcing.rawOutputProfile !== defaultLipForcingRawOutputProfile) {
+    throw new Error(
+      "Experimental LipForcing raw-output profiles are outside the declared release surface",
+    );
+  }
+  const sourceMode = [...generationModes, "dfr"].includes(
+    request.mode as (typeof generationModes)[number] | "dfr",
+  )
     ? request.sourceMode
     : "not-applicable";
   const icLoraProfile = request.mode === "ic-lora" ? request.icLora.profile : null;
@@ -618,9 +713,15 @@ export function releaseSurfaceEntryForRequest(request: GenerationRequest): Relea
   const retakeCheckpoint = request.mode === "retake"
     ? request.retake.distilled ? "distilled" : "dev"
     : null;
+  const splitUnionControl = request.models.layout === "split"
+    && request.mode === "ic-lora"
+    && request.icLora.profile === "union-control";
   const modelProfile: ReleaseModelProfile = request.models.layout === "monolith"
     ? "ltx23-monolith"
-    : (request.mode === "image-audio-to-video"
+    : request.mode === "dfr"
+      ? "ltx25-split-bf16-dfr"
+      : (request.mode === "image-audio-to-video"
+      || splitUnionControl
       || (request.mode === "distilled" && !request.distilled.singleStage))
       ? "ltx25-split-bf16-two-stage"
       : "ltx25-split-bf16-single-stage";
@@ -632,6 +733,10 @@ export function releaseSurfaceEntryForRequest(request: GenerationRequest): Relea
     : null;
   const promptEncoderProfile = promptEncoderProfileForRequest(request);
   const postprocessor = postprocessorForRequest(request);
+  const dfr = request.mode === "dfr" ? dfrSettings(request) : null;
+  const t2aDialogueIntent = request.mode === "text-to-audio" && request.models.layout === "split"
+    ? request.promptParts.dialogue.trim().length > 0 ? "required" : "optional"
+    : null;
   const result = deriveReleaseSurfaceEntries().find(({ request: entry }) =>
     entry.mode === request.mode
     && entry.sourceMode === sourceMode
@@ -640,7 +745,10 @@ export function releaseSurfaceEntryForRequest(request: GenerationRequest): Relea
     && entry.retakeCheckpoint === retakeCheckpoint
     && entry.modelProfile === modelProfile
     && entry.unionControlType === unionControlType
+    && entry.dfrTemporalUpscalings === (dfr?.temporalUpscalings ?? null)
+    && entry.dfrSpatialUpscalings === (dfr?.spatialUpscalings ?? null)
     && entry.promptEncoderProfile === promptEncoderProfile
+    && (t2aDialogueIntent === null || entry.dialogueIntent === t2aDialogueIntent)
     && entry.postprocessor === postprocessor);
   if (!result) throw new Error("Generation request is outside the declared release surface");
   return result;

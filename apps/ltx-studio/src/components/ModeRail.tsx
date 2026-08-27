@@ -19,6 +19,9 @@ const icons = {
   "two-stage-hq": WandSparkles,
   "one-stage": Gauge,
   distilled: Film,
+  // Reuse the already-rendered HQ icon. Keeping the rail on a proven export
+  // avoids a blank shell when older installed lucide bundles lack newer glyphs.
+  dfr: WandSparkles,
   "text-to-audio": Music2,
   "ic-lora": ScanLine,
   "id-lora": UserRoundCog,
@@ -28,6 +31,27 @@ const icons = {
   lipdub: Mic2,
   retake: Blend,
 } as const;
+
+const preferredOrder: readonly PipelineMode[] = [
+  "distilled",
+  "dfr",
+  "text-to-audio",
+  "two-stage",
+  "two-stage-hq",
+  "one-stage",
+  "image-audio-to-video",
+  "ic-lora",
+  "id-lora",
+  "keyframes",
+  "audio-to-video",
+  "lipdub",
+  "retake",
+];
+
+function preferredOrderIndex(mode: PipelineMode): number {
+  const index = preferredOrder.indexOf(mode);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
 
 export function ModeRail({ active, onChange }: { active: PipelineMode; onChange: (mode: PipelineMode) => void }) {
   const groups = [
@@ -41,23 +65,26 @@ export function ModeRail({ active, onChange }: { active: PipelineMode; onChange:
       {groups.map((group) => (
         <div className="mode-rail__group" key={group.family}>
           <div className="mode-rail__group-label">{group.label}</div>
-          {PIPELINES.filter((pipeline) => pipeline.family === group.family).map((pipeline) => {
-            const Icon = icons[pipeline.id];
-            return (
-              <button
-                type="button"
-                key={pipeline.id}
-                className={`mode-button ${active === pipeline.id ? "is-active" : ""}`}
-                onClick={() => onChange(pipeline.id)}
-                aria-current={active === pipeline.id ? "page" : undefined}
-                aria-label={`${pipeline.shortLabel} ${pipeline.quality}`}
-              >
-                <Icon size={19} strokeWidth={1.8} />
-                <span>{pipeline.shortLabel}</span>
-                <small>{pipeline.quality}</small>
-              </button>
-            );
-          })}
+          {[...PIPELINES]
+            .filter((pipeline) => pipeline.family === group.family)
+            .sort((left, right) => preferredOrderIndex(left.id) - preferredOrderIndex(right.id))
+            .map((pipeline) => {
+              const Icon = icons[pipeline.id];
+              return (
+                <button
+                  type="button"
+                  key={pipeline.id}
+                  className={`mode-button ${active === pipeline.id ? "is-active" : ""}`}
+                  onClick={() => onChange(pipeline.id)}
+                  aria-current={active === pipeline.id ? "page" : undefined}
+                  aria-label={`${pipeline.shortLabel} ${pipeline.quality}`}
+                >
+                  <Icon size={19} strokeWidth={1.8} />
+                  <span>{pipeline.shortLabel}</span>
+                  <small>{pipeline.quality}</small>
+                </button>
+              );
+            })}
         </div>
       ))}
     </nav>

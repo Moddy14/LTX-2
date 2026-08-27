@@ -1,4 +1,4 @@
-"""Fail-closed assembly of the 37 fixed D1 measurements."""
+"""Fail-closed assembly of the 44 fixed D1 measurements."""
 
 from __future__ import annotations
 
@@ -7,15 +7,24 @@ from typing import Any
 
 from .artifact import ARTIFACT_MEASUREMENTS_SCHEMA
 from .asr import ASR_MEASUREMENTS_SCHEMA
-from .calibration import GATE_SPECS, CalibrationError, build_calibration_gate_report
+from .calibration import CALIBRATION_REPORT_SCHEMA, GATE_SPECS, CalibrationError, build_calibration_gate_report
 from .content import CONTENT_MEASUREMENTS_SCHEMA
 from .design import document_sha256
 from .identity import IDENTITY_MEASUREMENTS_SCHEMA
-from .offset import OFFSET_MEASUREMENTS_SCHEMA
+from .offset import (
+    BOOTSTRAP_RNG,
+    CALIBRATION_ABSTENTION_SEMANTICS,
+    COMPONENT_WEIGHTING,
+    GRID_REPLICATES_PER_CELL,
+    OFFSET_MEASUREMENTS_SCHEMA,
+    UNCERTAINTY_METHOD,
+)
 from .sharpness import SHARPNESS_MEASUREMENTS_SCHEMA
 
-FIXED_D1_BUNDLE_SCHEMA = "ltx-av-eval-fixed-d1-bundle.v1"
-FIXED_D1_REPORT_SCHEMA = "ltx-av-eval-fixed-d1-report.v1"
+LEGACY_FIXED_D1_BUNDLE_SCHEMA = "ltx-av-eval-fixed-d1-bundle.v1"
+LEGACY_FIXED_D1_REPORT_SCHEMA = "ltx-av-eval-fixed-d1-report.v1"
+FIXED_D1_BUNDLE_SCHEMA = "ltx-av-eval-fixed-d1-bundle.v2"
+FIXED_D1_REPORT_SCHEMA = "ltx-av-eval-fixed-d1-report.v2"
 SOURCE_SCHEMAS = {
     "artifact": ARTIFACT_MEASUREMENTS_SCHEMA,
     "asr": ASR_MEASUREMENTS_SCHEMA,
@@ -53,6 +62,31 @@ COMMON_REPORT_KEYS = {
     "bootstrap",
     "metrics",
 }
+OFFSET_CONTRACT_KEYS = {
+    "abstention_policy_digest",
+    "bootstrap",
+    "control_deck_digest",
+    "dataset_manifest_digest",
+    "design_digest",
+    "design_report_digest",
+    "fit_split_manifest_digest",
+    "evaluation_split_manifest_digest",
+    "output_split_manifest_digest",
+    "calibration_policy_digest",
+    "operating_point_digest",
+    "offset_evaluator_digest",
+    "power_report_digest",
+    "strata_quotas_digest",
+    "required_independent_units",
+    "raw_score_threshold",
+    "bootstrap_rng",
+    "binomial_interval",
+    "uncertainty_method",
+    "component_weighting",
+    "calibration_abstention_semantics",
+    "grid_replicates_per_cell",
+    "ece_bins",
+}
 SOURCE_REPORT_KEYS = {
     "artifact": COMMON_REPORT_KEYS | {"evaluator_digest", "frame_warp_limit", "frames", "independent_units"},
     "asr": COMMON_REPORT_KEYS | {"asr_model_digest", "normalization_digest", "independent_units", "clips", "strata"},
@@ -71,12 +105,11 @@ SOURCE_REPORT_KEYS = {
     "offset": COMMON_REPORT_KEYS
     | {
         "offset_evaluator_digest",
-        "calibration_policy_digest",
         "abstention_policy_digest",
-        "ece_bins",
         "calibration_cases",
         "output_cases",
-    },
+    }
+    | OFFSET_CONTRACT_KEYS,
     "sharpness": COMMON_REPORT_KEYS
     | {
         "sharpness_evaluator_digest",
@@ -174,7 +207,7 @@ def _validate_metric(metric: object, *, source: str, observations: int) -> dict[
     return dict(metric)
 
 
-def _validate_source_report(
+def _validate_source_report(  # noqa: PLR0912
     report: object,
     *,
     source: str,
@@ -198,6 +231,47 @@ def _validate_source_report(
     identifiers = [metric["metric_id"] for metric in metrics]
     if identifiers != sorted(set(identifiers)) or set(identifiers) != SOURCE_METRIC_IDS[source]:
         raise D1BundleError(f"{source} metrics do not exactly cover the fixed catalog")
+    if source == "offset":
+        for field in OFFSET_CONTRACT_KEYS.intersection(
+            {
+                "abstention_policy_digest",
+                "control_deck_digest",
+                "dataset_manifest_digest",
+                "design_digest",
+                "design_report_digest",
+                "fit_split_manifest_digest",
+                "evaluation_split_manifest_digest",
+                "output_split_manifest_digest",
+                "calibration_policy_digest",
+                "operating_point_digest",
+                "offset_evaluator_digest",
+                "power_report_digest",
+                "strata_quotas_digest",
+            }
+        ):
+            _sha256(report[field], f"offset.{field}")
+        if report["design_digest"] != bindings["design_digest"]:
+            raise D1BundleError("offset report design_digest mismatch")
+        if report["strata_quotas_digest"] != report["strata_plan_digest"]:
+            raise D1BundleError("offset report strata plan does not equal its frozen D0a quota digest")
+        if report["design_report_digest"] != report["power_report_digest"]:
+            raise D1BundleError("offset report has inconsistent deterministic D0a report digests")
+        required_units = report["required_independent_units"]
+        if isinstance(required_units, bool) or not isinstance(required_units, int) or required_units < 30:
+            raise D1BundleError("offset report must retain a D0a requirement of at least 30 independent units")
+        if report["grid_replicates_per_cell"] != GRID_REPLICATES_PER_CELL:
+            raise D1BundleError("offset report changed the exact preregistered grid replicate count")
+        if report["ece_bins"] != 10:
+            raise D1BundleError("offset report changed the frozen 10-bin ECE contract")
+        if (
+            report["bootstrap_rng"] != BOOTSTRAP_RNG
+            or report["uncertainty_method"] != UNCERTAINTY_METHOD
+            or report["component_weighting"] != COMPONENT_WEIGHTING
+            or report["calibration_abstention_semantics"] != CALIBRATION_ABSTENTION_SEMANTICS
+            or report["binomial_interval"] != "component-clopper-pearson-95-bonferroni-strata.v2"
+        ):
+            raise D1BundleError("offset report changed its component uncertainty or abstention semantics")
+        _number(report["raw_score_threshold"], "offset.raw_score_threshold")
     return metrics, observations
 
 
@@ -228,6 +302,8 @@ def _validate_bundle(raw: object) -> dict[str, Any]:
             "preregistration_digest",
             "release_digest",
             "design_digest",
+            "surface_digest",
+            "candidate_surface_binding_digest",
             "strata_plan_digest",
             "bootstrap",
             "reports",
@@ -237,7 +313,15 @@ def _validate_bundle(raw: object) -> dict[str, Any]:
     if raw["schema_version"] != FIXED_D1_BUNDLE_SCHEMA:
         raise D1BundleError("unsupported fixed D1 bundle schema")
     _identifier(raw["bundle_id"], "bundle_id")
-    for field in ("dataset_digest", "preregistration_digest", "release_digest", "design_digest", "strata_plan_digest"):
+    for field in (
+        "dataset_digest",
+        "preregistration_digest",
+        "release_digest",
+        "design_digest",
+        "surface_digest",
+        "candidate_surface_binding_digest",
+        "strata_plan_digest",
+    ):
         _sha256(raw[field], field)
     bootstrap = raw["bootstrap"]
     if not isinstance(bootstrap, dict) or bootstrap != {
@@ -259,6 +343,8 @@ def _validate_catalog(catalog: object, bundle: dict[str, Any]) -> tuple[dict[str
         report = build_calibration_gate_report(catalog)
     except CalibrationError as error:
         raise D1BundleError(f"calibration catalog rejected: {error}") from error
+    if report["schema_version"] != CALIBRATION_REPORT_SCHEMA:
+        raise D1BundleError("calibration catalog uses a legacy report schema")
     if report["status"] != "ready-to-freeze":
         raise D1BundleError("calibration catalog is not ready-to-freeze")
     if catalog["design_digest"] != bundle["design_digest"]:
@@ -294,12 +380,12 @@ def _assemble_metrics(
             )
     assembled.sort(key=lambda metric: metric["metric_id"])
     if {metric["metric_id"] for metric in assembled} != set(GATE_SPECS):
-        raise D1BundleError("assembled metrics do not exactly cover all 37 fixed D1 gates")
+        raise D1BundleError("assembled metrics do not exactly cover all 44 fixed D1 gates")
     return assembled
 
 
 def build_fixed_d1_report(raw: object, *, calibration_catalog: object) -> dict[str, Any]:
-    """Assemble and decide exactly the 37 non-VBench D1 gates."""
+    """Assemble and decide exactly the 44 non-VBench D1 gates."""
 
     bundle = _validate_bundle(raw)
     catalog, catalog_report = _validate_catalog(calibration_catalog, bundle)
@@ -315,7 +401,14 @@ def build_fixed_d1_report(raw: object, *, calibration_catalog: object) -> dict[s
             raise D1BundleError(f"{source} report does not match fingerprint {evaluator_id}")
     bindings = {
         field: bundle[field]
-        for field in ("dataset_digest", "preregistration_digest", "release_digest", "strata_plan_digest", "bootstrap")
+        for field in (
+            "dataset_digest",
+            "preregistration_digest",
+            "release_digest",
+            "design_digest",
+            "strata_plan_digest",
+            "bootstrap",
+        )
     }
     source_metrics: dict[str, list[dict[str, Any]]] = {}
     source_counts: dict[str, int] = {}
@@ -334,8 +427,11 @@ def build_fixed_d1_report(raw: object, *, calibration_catalog: object) -> dict[s
         "preregistration_digest": bundle["preregistration_digest"],
         "release_digest": bundle["release_digest"],
         "design_digest": bundle["design_digest"],
+        "surface_digest": bundle["surface_digest"],
+        "candidate_surface_binding_digest": bundle["candidate_surface_binding_digest"],
         "strata_plan_digest": bundle["strata_plan_digest"],
         "source_report_digests": {source: document_sha256(reports[source]) for source in sorted(reports)},
+        "offset_contract": {field: reports["offset"][field] for field in sorted(OFFSET_CONTRACT_KEYS)},
         "verdict": "pass" if all(metric["decision"] == "pass" for metric in assembled) else "fail",
         "metrics": assembled,
     }

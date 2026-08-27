@@ -6,11 +6,10 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import math
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
-
-from av_sync_proxy import motion_series, pearson, robust_unit
 
 METHOD = "whisper-small-guided-word-motion.v1"
 MODEL_NAME = "OpenAI Whisper small"
@@ -20,6 +19,10 @@ LOW_WORD_PROBABILITY = 0.25
 USABLE_WORD_PROBABILITY = 0.15
 MAX_EXPECTED_WORDS = 200
 MAX_WORD_TOKENS = 32
+RAW_ASR_CONTENT_METHOD = "whisper-small-independent-raw-asr-token-edits.v1"
+PHONEME_VERIFICATION_REASON = (
+    "Kein unabhaengig gebundener Zweit-Recognizer oder Phonem-Scorer ist verfuegbar."
+)
 
 
 class TranscriptAlignmentLimitError(ValueError):
@@ -83,7 +86,7 @@ def blank_result(
 
 
 def normalized_words(text: str) -> list[str]:
-    from whisper.normalizers import BasicTextNormalizer
+    from whisper.normalizers import BasicTextNormalizer  # noqa: PLC0415
 
     return BasicTextNormalizer()(text).split()
 
@@ -94,50 +97,173 @@ def word_error_counts(
 ) -> tuple[int, int, int]:
     """Return substitutions, deletions and insertions for minimum edit distance."""
 
+    analysis = raw_asr_content_analysis(expected, recognized)
+    return (
+        len(analysis["substitutedWords"]),
+        len(analysis["deletedExpectedWords"]),
+        len(analysis["prefixInsertions"])
+        + len(analysis["internalInsertions"])
+        + len(analysis["suffixInsertions"]),
+    )
+
+
+def _word_edit_script(
+    expected: list[str],
+    recognized: list[str],
+) -> list[dict[str, object]]:
+    """Return a deterministic minimum-edit script with source positions."""
+
     rows = len(expected) + 1
     columns = len(recognized) + 1
-    costs = [[0] * columns for _ in range(rows)]
-    operations = [[(0, 0, 0)] * columns for _ in range(rows)]
+    scores = [[(0, 0, 0, 0)] * columns for _ in range(rows)]
+    backtrack: list[list[str | None]] = [[None] * columns for _ in range(rows)]
     for row in range(1, rows):
-        costs[row][0] = row
-        operations[row][0] = (0, row, 0)
+        scores[row][0] = (row, 0, row, 0)
+        backtrack[row][0] = "deletion"
     for column in range(1, columns):
-        costs[0][column] = column
-        operations[0][column] = (0, 0, column)
+        scores[0][column] = (column, 0, 0, column)
+        backtrack[0][column] = "insertion"
     for row in range(1, rows):
         for column in range(1, columns):
             if expected[row - 1] == recognized[column - 1]:
-                costs[row][column] = costs[row - 1][column - 1]
-                operations[row][column] = operations[row - 1][column - 1]
+                scores[row][column] = scores[row - 1][column - 1]
+                backtrack[row][column] = "match"
                 continue
-            candidates = [
-                (
-                    costs[row - 1][column - 1] + 1,
-                    tuple(
-                        left + right
-                        for left, right in zip(operations[row - 1][column - 1], (1, 0, 0))
-                    ),
-                ),
-                (
-                    costs[row - 1][column] + 1,
-                    tuple(
-                        left + right
-                        for left, right in zip(operations[row - 1][column], (0, 1, 0))
-                    ),
-                ),
-                (
-                    costs[row][column - 1] + 1,
-                    tuple(
-                        left + right
-                        for left, right in zip(operations[row][column - 1], (0, 0, 1))
-                    ),
-                ),
-            ]
-            costs[row][column], operations[row][column] = min(
+            candidates: list[tuple[tuple[int, int, int, int], str]] = []
+            for previous, delta, operation in (
+                (scores[row - 1][column - 1], (1, 1, 0, 0), "substitution"),
+                (scores[row - 1][column], (1, 0, 1, 0), "deletion"),
+                (scores[row][column - 1], (1, 0, 0, 1), "insertion"),
+            ):
+                candidates.append((
+                    tuple(left + right for left, right in zip(previous, delta, strict=True)),
+                    operation,
+                ))
+            scores[row][column], backtrack[row][column] = min(
                 candidates,
-                key=lambda item: (item[0], item[1][2], item[1][1], item[1][0]),
+                key=lambda item: (item[0][0], item[0][3], item[0][2], item[0][1]),
             )
-    return operations[-1][-1]
+
+    script: list[dict[str, object]] = []
+    row = len(expected)
+    column = len(recognized)
+    while row > 0 or column > 0:
+        operation = backtrack[row][column]
+        if operation in {"match", "substitution"}:
+            script.append({
+                "operation": operation,
+                "expectedIndex": row - 1,
+                "recognizedIndex": column - 1,
+                "expectedWord": expected[row - 1],
+                "recognizedWord": recognized[column - 1],
+            })
+            row -= 1
+            column -= 1
+        elif operation == "deletion":
+            script.append({
+                "operation": operation,
+                "expectedIndex": row - 1,
+                "expectedWord": expected[row - 1],
+            })
+            row -= 1
+        elif operation == "insertion":
+            script.append({
+                "operation": operation,
+                "expectedPosition": row,
+                "recognizedIndex": column - 1,
+                "recognizedWord": recognized[column - 1],
+            })
+            column -= 1
+        else:  # pragma: no cover - the initialized DP grid makes this unreachable
+            raise RuntimeError("Die Raw-ASR-Editfolge ist unvollstaendig.")
+    script.reverse()
+    return script
+
+
+def raw_asr_content_analysis(
+    expected: list[str],
+    recognized: list[str],
+) -> dict[str, object]:
+    """Classify literal Raw-ASR token edits without phonetic inference."""
+
+    prefix_insertions: list[dict[str, object]] = []
+    internal_insertions: list[dict[str, object]] = []
+    suffix_insertions: list[dict[str, object]] = []
+    deleted_words: list[dict[str, object]] = []
+    substituted_words: list[dict[str, object]] = []
+    repeated_insertions: list[dict[str, object]] = []
+    expected_counts = Counter(expected)
+    recognized_counts = Counter(recognized)
+    for edit in _word_edit_script(expected, recognized):
+        operation = edit["operation"]
+        if operation == "deletion":
+            deleted_words.append({
+                "expectedIndex": edit["expectedIndex"],
+                "word": edit["expectedWord"],
+            })
+        elif operation == "substitution":
+            substituted_words.append({
+                "expectedIndex": edit["expectedIndex"],
+                "recognizedIndex": edit["recognizedIndex"],
+                "expectedWord": edit["expectedWord"],
+                "recognizedWord": edit["recognizedWord"],
+            })
+        elif operation == "insertion":
+            insertion = {
+                "recognizedIndex": edit["recognizedIndex"],
+                "word": edit["recognizedWord"],
+            }
+            position = int(edit["expectedPosition"])
+            if position == 0:
+                prefix_insertions.append(insertion)
+            elif position == len(expected):
+                suffix_insertions.append(insertion)
+            else:
+                internal_insertions.append(insertion)
+            word = str(edit["recognizedWord"])
+            if recognized_counts[word] > max(1, expected_counts[word]):
+                repeated_insertions.append(insertion)
+
+    exact_match = expected == recognized
+    return {
+        "status": "passed" if exact_match else "failed",
+        "method": RAW_ASR_CONTENT_METHOD,
+        "targetConditioned": False,
+        "exactTokenMatch": exact_match,
+        "expectedNormalizedWords": expected,
+        "recognizedNormalizedWords": recognized,
+        "prefixInsertions": prefix_insertions,
+        "internalInsertions": internal_insertions,
+        "suffixInsertions": suffix_insertions,
+        "deletedExpectedWords": deleted_words,
+        "substitutedWords": substituted_words,
+        "repeatedInsertions": repeated_insertions,
+    }
+
+
+def raw_asr_content_not_measured(expected: list[str]) -> dict[str, object]:
+    return {
+        "status": "not-measured",
+        "method": RAW_ASR_CONTENT_METHOD,
+        "targetConditioned": False,
+        "exactTokenMatch": None,
+        "expectedNormalizedWords": expected,
+        "recognizedNormalizedWords": [],
+        "prefixInsertions": [],
+        "internalInsertions": [],
+        "suffixInsertions": [],
+        "deletedExpectedWords": [],
+        "substitutedWords": [],
+        "repeatedInsertions": [],
+    }
+
+
+def phoneme_verification_not_available() -> dict[str, object]:
+    return {
+        "status": "not-available",
+        "method": None,
+        "reason": PHONEME_VERIFICATION_REASON,
+    }
 
 
 def guided_word_timings(
@@ -146,11 +272,11 @@ def guided_word_timings(
     expected_transcript: str,
     language: str,
 ) -> list[dict[str, object]]:
-    import torch
-    import whisper
-    from whisper.audio import HOP_LENGTH, N_FRAMES, N_SAMPLES
-    from whisper.timing import find_alignment
-    from whisper.tokenizer import get_tokenizer
+    import torch  # noqa: PLC0415
+    import whisper  # noqa: PLC0415
+    from whisper.audio import N_FRAMES, N_SAMPLES  # noqa: PLC0415
+    from whisper.timing import find_alignment  # noqa: PLC0415
+    from whisper.tokenizer import get_tokenizer  # noqa: PLC0415
 
     tokenizer = get_tokenizer(
         model.is_multilingual,
@@ -199,7 +325,7 @@ def enforce_alignment_token_limits(
             f"Der Zieltext benötigt {len(text_tokens)} Whisper-Tokens; "
             f"höchstens {maximum_text_tokens} sind für die geführte Ausrichtung zulässig."
         )
-    _, word_tokens = tokenizer.split_to_word_tokens(text_tokens + [tokenizer.eot])
+    _, word_tokens = tokenizer.split_to_word_tokens([*text_tokens, tokenizer.eot])
     longest_word_tokens = max((len(tokens) for tokens in word_tokens[:-1]), default=0)
     if longest_word_tokens > MAX_WORD_TOKENS:
         raise TranscriptAlignmentLimitError(
@@ -213,6 +339,8 @@ def word_motion_metrics(
     word_timings: list[dict[str, object]],
     audio_start_relative_video_seconds: float | None,
 ) -> dict[str, object]:
+    from av_sync_proxy import motion_series, robust_unit  # noqa: PLC0415
+
     mouth_times, mouth_flow, mouth_appearance = motion_series(tracked_candidates)
     normalized_timings = [
         timing
@@ -284,6 +412,8 @@ def estimate_word_activity_lag(
     word_timings: list[dict[str, object]],
     audio_start_relative_video_seconds: float,
 ) -> dict[str, object]:
+    from av_sync_proxy import pearson  # noqa: PLC0415
+
     empty = {
         "estimatedWordActivityLeadMilliseconds": None,
         "lagResolutionMilliseconds": None,
@@ -297,7 +427,7 @@ def estimate_word_activity_lag(
     if periods.size < 12:
         return empty
     period = float(np.median(periods))
-    steps = max(1, int(math.floor(LAG_LIMIT_SECONDS / period)))
+    steps = max(1, math.floor(LAG_LIMIT_SECONDS / period))
     lags = np.arange(-steps, steps + 1, dtype=np.float64) * period
     support = (
         (mouth_times >= mouth_times[0] + LAG_LIMIT_SECONDS)
@@ -332,7 +462,7 @@ def estimate_word_activity_lag(
     null_peaks: list[float] = []
     rng = np.random.default_rng(0)
     if base_activity.size >= 24:
-        minimum_roll = max(2, int(math.ceil(0.65 / period)))
+        minimum_roll = max(2, math.ceil(0.65 / period))
         if base_activity.size > minimum_roll * 2:
             for roll in rng.integers(
                 minimum_roll,
@@ -353,19 +483,19 @@ def estimate_word_activity_lag(
     if null_p95 is None or peak < 0.15 or peak < null_p95 + 0.03:
         return {
             **empty,
-            "lagResolutionMilliseconds": max(10, int(math.ceil(period * 1_000))),
+            "lagResolutionMilliseconds": max(10, math.ceil(period * 1_000)),
             "correlationPeak": float(peak),
             "nullP95Correlation": null_p95,
         }
     return {
-        "estimatedWordActivityLeadMilliseconds": int(round(float(lags[best_index]) * 1_000)),
-        "lagResolutionMilliseconds": max(10, int(math.ceil(period * 1_000))),
+        "estimatedWordActivityLeadMilliseconds": round(float(lags[best_index]) * 1_000),
+        "lagResolutionMilliseconds": max(10, math.ceil(period * 1_000)),
         "correlationPeak": float(peak),
         "nullP95Correlation": null_p95,
     }
 
 
-def evaluate_dialogue(
+def evaluate_dialogue(  # noqa: PLR0911, PLR0912, PLR0913, PLR0915, PLR0917
     video_path: Path,
     expected_transcript: str,
     tracked_candidates: list[dict[str, object]],
@@ -377,8 +507,23 @@ def evaluate_dialogue(
     runtime_available: bool = True,
     runtime_error: str | None = None,
     unavailable_blocker: str = "runtime-unavailable",
+    word_motion_enabled: bool = True,
+    raw_asr_content_gate_enabled: bool = False,
 ) -> dict[str, object]:
     expected_sha256 = hashlib.sha256(expected_transcript.encode("utf-8")).hexdigest()
+    expected_words_for_gate: list[str] = []
+    raw_content_gate: dict[str, object] | None = None
+
+    def finalize(result: dict[str, object]) -> dict[str, object]:
+        if raw_asr_content_gate_enabled:
+            result["rawAsrContentGate"] = (
+                raw_content_gate
+                if raw_content_gate is not None
+                else raw_asr_content_not_measured(expected_words_for_gate)
+            )
+            result["phonemeVerification"] = phoneme_verification_not_available()
+        return result
+
     if not expected_transcript.strip():
         result = blank_result(
             "not-applicable",
@@ -386,7 +531,7 @@ def evaluate_dialogue(
             expected_transcript_sha256=expected_sha256,
         )
         result["blockerCode"] = "target-transcript-missing"
-        return result
+        return finalize(result)
     if not runtime_available:
         result = blank_result(
             "not-available",
@@ -398,8 +543,9 @@ def evaluate_dialogue(
             if unavailable_blocker in {"model-missing", "model-invalid", "runtime-unavailable"}
             else "runtime-unavailable"
         )
-        return result
+        return finalize(result)
     expected_words = normalized_words(expected_transcript)
+    expected_words_for_gate = expected_words
     base = blank_result(
         "insufficient",
         None,
@@ -413,21 +559,21 @@ def evaluate_dialogue(
             expected_transcript_sha256=expected_sha256,
         )
         result["blockerCode"] = "target-transcript-missing"
-        return result
+        return finalize(result)
     if len(expected_words) > MAX_EXPECTED_WORDS:
         base["blockerCode"] = "target-transcript-too-long"
         base["error"] = f"Der Zieltext überschreitet {MAX_EXPECTED_WORDS} normalisierte Wörter."
-        return base
+        return finalize(base)
     if has_audio is not True:
         base["blockerCode"] = "audio-missing"
         base["error"] = "Die Ausgabe enthält keine auswertbare Audiospur."
-        return base
+        return finalize(base)
     if duration_seconds is None or not 0 < duration_seconds <= MAX_DURATION_SECONDS:
         base["blockerCode"] = "duration-out-of-range"
         base["error"] = (
             f"Die Wortauswertung unterstützt derzeit höchstens {MAX_DURATION_SECONDS:.0f} Sekunden."
         )
-        return base
+        return finalize(base)
     if not model_path.is_file():
         result = blank_result(
             "not-available",
@@ -436,7 +582,7 @@ def evaluate_dialogue(
             expected_word_count=len(expected_words),
         )
         result["blockerCode"] = "model-missing"
-        return result
+        return finalize(result)
     actual_model_sha256 = file_sha256(model_path)
     if actual_model_sha256 != expected_model_sha256:
         result = blank_result(
@@ -446,13 +592,13 @@ def evaluate_dialogue(
             expected_word_count=len(expected_words),
         )
         result["blockerCode"] = "model-invalid"
-        return result
+        return finalize(result)
 
     try:
-        import whisper
+        import whisper  # noqa: PLC0415
 
         package_version = importlib.metadata.version("openai-whisper")
-        import torch
+        import torch  # noqa: PLC0415
 
         torch.set_num_threads(2)
         torch.set_num_interop_threads(1)
@@ -473,9 +619,13 @@ def evaluate_dialogue(
         )
         recognized_transcript = str(transcript.get("text", "")).strip()
         recognized_words = normalized_words(recognized_transcript)
-        substitutions, deletions, insertions = word_error_counts(
-            expected_words,
-            recognized_words,
+        raw_content_gate = raw_asr_content_analysis(expected_words, recognized_words)
+        substitutions = len(raw_content_gate["substitutedWords"])
+        deletions = len(raw_content_gate["deletedExpectedWords"])
+        insertions = (
+            len(raw_content_gate["prefixInsertions"])
+            + len(raw_content_gate["internalInsertions"])
+            + len(raw_content_gate["suffixInsertions"])
         )
         language = str(transcript.get("language") or "").strip().lower() or "en"
         base.update({
@@ -498,7 +648,7 @@ def evaluate_dialogue(
             language,
         )
         normalized_timings = []
-        for index, timing in enumerate(timings):
+        for timing in timings:
             word = str(timing["word"])
             normalized_word = str(timing["normalizedWord"])
             if not normalized_word:
@@ -530,10 +680,24 @@ def evaluate_dialogue(
             len(usable_timings) >= minimum_usable
             and usable_coverage >= 0.7
         )
-        motion = word_motion_metrics(
-            tracked_candidates,
-            normalized_timings,
-            audio_start_relative_video_seconds,
+        motion = (
+            word_motion_metrics(
+                tracked_candidates,
+                normalized_timings,
+                audio_start_relative_video_seconds,
+            )
+            if word_motion_enabled
+            else {
+                "trackedWordCount": 0,
+                "mouthTrackedWordCoverage": 0.0,
+                "wordsWithMouthMotionRatio": None,
+                "pauseMotionRatio": None,
+                "estimatedWordActivityLeadMilliseconds": None,
+                "lagResolutionMilliseconds": None,
+                "correlationPeak": None,
+                "nullP95Correlation": None,
+                "wordMotionProxyStatus": "not-applicable",
+            }
         )
         base.update({
             "status": "measured",
@@ -575,17 +739,17 @@ def evaluate_dialogue(
             base["error"] = str(base["alignmentError"])
         elif file_sha256(model_path) != expected_model_sha256:
             raise RuntimeError("Whisper-small-Checkpoint wurde während der Analyse verändert.")
-        return base
+        return finalize(base)
     except TranscriptAlignmentLimitError as error:
         base["status"] = "insufficient"
         base["blockerCode"] = "target-transcript-too-long"
         base["error"] = str(error)[:500]
         base["alignmentStatus"] = "insufficient"
         base["alignmentError"] = str(error)[:500]
-        return base
-    except Exception as error:  # noqa: BLE001
+        return finalize(base)
+    except Exception as error:
         base["status"] = "failed"
         base["blockerCode"] = "evaluator-failed"
         base["error"] = f"{type(error).__name__}: {error}"[:500]
         base["modelSha256"] = actual_model_sha256
-        return base
+        return finalize(base)

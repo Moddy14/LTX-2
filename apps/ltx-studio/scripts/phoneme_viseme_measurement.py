@@ -27,8 +27,12 @@ import numpy as np
 
 MAX_FILE_BYTES = 8 * 1024**3
 MAX_JSON_BYTES = 1024 * 1024
-MAX_SECONDS = 5.0
+# Cover the complete 10-second production preset (241 frames at 24 fps),
+# including its final fractional frame interval, while keeping the local
+# evaluator hard-bounded for longer clips.
+MAX_SECONDS = 10.5
 MAX_FRAMES = 300
+FFPROBE_READ_INTERVAL = f"%+{MAX_SECONDS:.3f}"
 HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SILENCE_PHONES = {"", "<eps>", "sil", "sp", "spn"}
 FFMPEG_PATH = Path("/usr/bin/ffmpeg")
@@ -698,7 +702,7 @@ def video_timestamps(video: Path) -> list[float]:
             "-v",
             "error",
             "-read_intervals",
-            "%+5.5",
+            FFPROBE_READ_INTERVAL,
             "-select_streams",
             "v:0",
             "-show_entries",

@@ -37,6 +37,14 @@ from .governance import (
 from .holdout import HoldoutDecisionError, build_q2_qualification_report
 from .identity import IdentityMeasurementError, build_identity_measurements
 from .offset import OffsetMeasurementError, build_offset_measurements
+from .offset_calibration import (
+    OffsetApplicationCaseError,
+    OffsetCalibrationError,
+    apply_offset_calibrator,
+    build_offset_control_deck,
+    build_offset_observations,
+    fit_speaker_disjoint_isotonic,
+)
 from .pilot import (
     PilotError,
     build_design_pilot_binding_report,
@@ -77,6 +85,8 @@ __all__ = [
     "GovernanceError",
     "HoldoutDecisionError",
     "IdentityMeasurementError",
+    "OffsetApplicationCaseError",
+    "OffsetCalibrationError",
     "OffsetMeasurementError",
     "PilotError",
     "ProductGovernanceError",
@@ -87,6 +97,7 @@ __all__ = [
     "VBenchMeasurementError",
     "VBenchRuntimeError",
     "append_signed_access_event",
+    "apply_offset_calibrator",
     "build_artifact_measurements",
     "build_asr_measurements",
     "build_calibration_gate_report",
@@ -104,7 +115,9 @@ __all__ = [
     "build_fixed_d1_report",
     "build_holdout_comparator_decision",
     "build_identity_measurements",
+    "build_offset_control_deck",
     "build_offset_measurements",
+    "build_offset_observations",
     "build_operational_readiness_evidence",
     "build_power_report",
     "build_product_readiness_report",
@@ -115,6 +128,7 @@ __all__ = [
     "build_vbench_runtime_report",
     "build_vbench_source_report",
     "document_sha256",
+    "fit_speaker_disjoint_isotonic",
     "freeze_dataset",
     "load_frozen_split",
     "load_split_seed",

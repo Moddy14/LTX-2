@@ -1,4 +1,5 @@
 import {
+  dfrSettings,
   hasDialogueIntent,
   isAudioConditionedMode,
   needsGemmaAbliteratedLoraForRequest,
@@ -7,52 +8,67 @@ import {
   usesOfficialComfyLipDub,
   type GenerationRequest,
 } from "./pipelines.js";
-import { LTX25_MODEL_COMPONENTS, LTX25_MODEL_REVISION } from "./ltx25Catalog.js";
+import {
+  LTX25_DFR_DETAILING_REVISION,
+  LTX25_MODEL_COMPONENTS,
+  LTX25_MODEL_REVISION,
+  LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT,
+} from "./ltx25Catalog.js";
 
-export type ModelKind =
-  | "checkpoint"
-  | "distilled-checkpoint"
-  | "spatial-upscaler"
-  | "lora"
-  | "amax"
-  | "gemma"
-  | "geometry"
-  | "transformer"
-  | "text-encoder"
-  | "video-vae"
-  | "audio-vae"
-  | "duration-head";
+export const modelKinds = [
+  "checkpoint",
+  "distilled-checkpoint",
+  "spatial-upscaler",
+  "temporal-upscaler",
+  "lora",
+  "amax",
+  "gemma",
+  "geometry",
+  "transformer",
+  "text-encoder",
+  "video-vae",
+  "audio-vae",
+  "duration-head",
+] as const;
+export type ModelKind = (typeof modelKinds)[number];
+
+export const recommendedModelAssetIds = [
+  "ltx23-dev-checkpoint",
+  "ltx23-dev-fp8-checkpoint",
+  "ltx23-distilled-fp8-checkpoint",
+  "ltx23-gemma",
+  "ltx23-gemma-abliterated-lora",
+  "ltx23-comfy-distilled-lora",
+  "ltx23-distilled-lora",
+  "ltx23-spatial-upscaler",
+  "ltx23-union-control-lora",
+  "ltx23-ingredients-lora",
+  "ltx23-motion-track-lora",
+  "ltx23-pixel-upscaler-x4-lora",
+  "ltx23-deblur-lora",
+  "ltx23-instant-shave-lora",
+  "ltx23-inoutpaint-lora",
+  "ltx23-hdr-lora",
+  "ltx23-hdr-scene-embeddings",
+  "ltx23-moge",
+  "ltx23-id-lora-talkvid",
+  "lipdub-lora",
+  "lipdub-distilled-checkpoint",
+  "lipdub-spatial-upscaler",
+  "ltx25-transformer-bf16",
+  "ltx25-temporal-upscaler-bf16",
+  "ltx25-dfr-detailing-lora",
+  "ltx25-text-encoder-bf16",
+  "ltx25-video-vae-diffusion-bf16",
+  "ltx25-video-vae-conv-bf16",
+  "ltx25-audio-vae-bf16",
+  "ltx25-spatial-upscaler-bf16",
+  "ltx25-duration-head-bf16",
+] as const;
+export type RecommendedModelAssetId = (typeof recommendedModelAssetIds)[number];
 
 export type RecommendedModelAsset = {
-  id:
-    | "ltx23-dev-checkpoint"
-    | "ltx23-dev-fp8-checkpoint"
-    | "ltx23-distilled-fp8-checkpoint"
-    | "ltx23-gemma"
-    | "ltx23-gemma-abliterated-lora"
-    | "ltx23-comfy-distilled-lora"
-    | "ltx23-distilled-lora"
-    | "ltx23-spatial-upscaler"
-    | "ltx23-union-control-lora"
-    | "ltx23-ingredients-lora"
-    | "ltx23-motion-track-lora"
-    | "ltx23-pixel-upscaler-x4-lora"
-    | "ltx23-instant-shave-lora"
-    | "ltx23-inoutpaint-lora"
-    | "ltx23-hdr-lora"
-    | "ltx23-hdr-scene-embeddings"
-    | "ltx23-moge"
-    | "ltx23-id-lora-talkvid"
-    | "lipdub-lora"
-    | "lipdub-distilled-checkpoint"
-    | "lipdub-spatial-upscaler"
-    | "ltx25-transformer-bf16"
-    | "ltx25-text-encoder-bf16"
-    | "ltx25-video-vae-diffusion-bf16"
-    | "ltx25-video-vae-conv-bf16"
-    | "ltx25-audio-vae-bf16"
-    | "ltx25-spatial-upscaler-bf16"
-    | "ltx25-duration-head-bf16";
+  id: RecommendedModelAssetId;
   kind: ModelKind;
   label: string;
   repoId: string;
@@ -94,6 +110,37 @@ export type ModelInventory = {
 };
 
 export const recommendedModelAssets = [
+  {
+    id: "ltx25-temporal-upscaler-bf16",
+    kind: "temporal-upscaler",
+    label: "LTX-2.5 Temporal Upscaler x2 BF16",
+    repoId: "Lightricks/LTX-2.5",
+    revision: LTX25_MODEL_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.temporalUpscaler.path,
+    filename: LTX25_MODEL_COMPONENTS.temporalUpscaler.path.split("/").at(-1)!,
+    localPath: `${LTX25_LOCAL_ROOT}/${LTX25_MODEL_COMPONENTS.temporalUpscaler.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.temporalUpscaler.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.temporalUpscaler.sha256,
+    integrity: "missing",
+  },
+  {
+    id: "ltx25-dfr-detailing-lora",
+    kind: "lora",
+    label: "LTX-2.5 DFR Detailing IC-LoRA x2",
+    repoId: "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler",
+    revision: LTX25_DFR_DETAILING_REVISION,
+    sourcePath: LTX25_MODEL_COMPONENTS.dfrDetailingLora.path,
+    filename: LTX25_MODEL_COMPONENTS.dfrDetailingLora.path,
+    localPath:
+      `/home/moddy/LTX-2.5/Lightricks__LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler/${LTX25_MODEL_COMPONENTS.dfrDetailingLora.path}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_MODEL_COMPONENTS.dfrDetailingLora.sizeBytes,
+    expectedSha256: LTX25_MODEL_COMPONENTS.dfrDetailingLora.sha256,
+    integrity: "missing",
+  },
   {
     id: "ltx25-transformer-bf16",
     kind: "transformer",
@@ -463,6 +510,21 @@ export const recommendedModelAssets = [
     integrity: "missing",
   },
   {
+    id: "ltx23-deblur-lora",
+    kind: "lora",
+    label: "LTX-2.3 Deblur V2V IC-LoRA (offizieller LTX-2.5-Graph)",
+    repoId: LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.repoId,
+    revision: LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.revision,
+    filename: LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.filename,
+    localPath:
+      `/home/moddy/LTX-2.3-max/Lightricks__LTX-2.3-22b-IC-LoRA-Deblur/${LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.filename}`,
+    present: false,
+    access: "gated",
+    expectedSizeBytes: LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.sizeBytes,
+    expectedSha256: LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.sha256,
+    integrity: "missing",
+  },
+  {
     id: "ltx23-instant-shave-lora",
     kind: "lora",
     label: "LTX-2.3 Instant-Shave V2V IC-LoRA",
@@ -637,6 +699,8 @@ export function icLoraModelAssetId(
       return "ltx23-motion-track-lora";
     case "pixel-upscaler":
       return "ltx23-pixel-upscaler-x4-lora";
+    case "v2v-deblur":
+      return "ltx23-deblur-lora";
     case "v2v-instant-shave":
       return "ltx23-instant-shave-lora";
     case "inpainting":
@@ -653,6 +717,7 @@ export function requiredOfficialSpeechAssetIds(
   request: GenerationRequest,
 ): RecommendedModelAsset["id"][] {
   if (usesSplitModelPack(request)) {
+    const dfr = dfrSettings(request);
     const selectedVideoVae = request.models.videoVaePath.endsWith(
       LTX25_MODEL_COMPONENTS.videoVaeConv.path.split("/").at(-1)!,
     )
@@ -666,7 +731,16 @@ export function requiredOfficialSpeechAssetIds(
       ...(request.models.durationHeadPath ? ["ltx25-duration-head-bf16" as const] : []),
       ...((request.mode === "distilled" && !request.distilled.singleStage)
         || request.mode === "image-audio-to-video"
+        || request.mode === "dfr"
         ? ["ltx25-spatial-upscaler-bf16" as const]
+        : []),
+      ...(request.mode === "dfr"
+        ? [
+            "ltx25-dfr-detailing-lora" as const,
+            ...(dfr.temporalUpscalings > 0
+              ? ["ltx25-temporal-upscaler-bf16" as const]
+              : []),
+          ]
         : []),
       ...(request.mode === "ic-lora"
         ? [
@@ -745,6 +819,9 @@ export function withOfficialSpeechModelPaths(request: GenerationRequest): Genera
           path: icLora
             ? recommendedModelAsset(icLoraModelAssetId(request)).localPath
             : request.icLora.lora.path,
+          strength: icLora && request.icLora.profile === "v2v-deblur"
+            ? LTX25_V2V_DEBLUR_SEMANTIC_CONTRACT.model.strength
+            : request.icLora.lora.strength,
         },
       },
     };
@@ -859,6 +936,7 @@ export function withDiscoveredModelDefaults(
     return asset?.localPath ?? "";
   };
   if (usesSplitModelPack(request)) {
+    const dfr = dfrSettings(request);
     const official = withOfficialSpeechModelPaths(request);
     return {
       ...official,
@@ -870,10 +948,21 @@ export function withDiscoveredModelDefaults(
         audioVaePath: request.models.audioVaePath || recommended("ltx25-audio-vae-bf16"),
         durationHeadPath: request.models.durationHeadPath || recommended("ltx25-duration-head-bf16"),
         spatialUpscalerPath: request.models.spatialUpscalerPath
-          || (request.mode === "distilled" && !request.distilled.singleStage
+          || ((request.mode === "distilled" && !request.distilled.singleStage)
+            || request.mode === "dfr"
+            || request.mode === "image-audio-to-video"
             ? recommended("ltx25-spatial-upscaler-bf16")
             : ""),
       },
+      ...(request.mode === "dfr" ? {
+        dfr: {
+          ...dfr,
+          temporalUpscalerPath: dfr.temporalUpscalerPath
+            || (dfr.temporalUpscalings > 0 ? recommended("ltx25-temporal-upscaler-bf16") : ""),
+          detailingLoraPath: dfr.detailingLoraPath
+            || recommended("ltx25-dfr-detailing-lora"),
+        },
+      } : {}),
     };
   }
   if (usesOfficialSpeechStack(request)) {

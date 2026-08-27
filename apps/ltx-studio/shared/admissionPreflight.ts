@@ -12,11 +12,17 @@ export type AdmissionPreflightStep = AdmissionPreflightStepPlan & {
   message: string;
 };
 
-export type AdmissionPreflightVerdict = "start-frei" | "wartet" | "nicht-pruefbar";
+export type AdmissionPreflightVerdict = "start-frei" | "wartet" | "nicht-pruefbar" | "hold";
 
 export type AdmissionPreflightReport = {
   checkedAt: string;
   verdict: AdmissionPreflightVerdict;
+  /**
+   * Additive hint for callers that can prove a non-DGX execution path. The
+   * general admission endpoint intentionally leaves it unset and keeps its
+   * existing response contract.
+   */
+  executionClass?: "cpu-only";
   notes: string[];
   steps: AdmissionPreflightStep[];
 };
@@ -45,6 +51,11 @@ export function admissionPreflightPlan(request: GenerationRequest): {
     steps.push({ label: `${name}-Refiner`, estimatedMemoryGiB: refiner });
   }
   const notes: string[] = [];
+  if (request.mode === "dfr") {
+    notes.push(
+      "DFR verwendet bis zur lokalen Peak-Messung einen konservativen 86-GiB-Bootstrap und läuft als nicht fortsetzbarer Single-Call; dies ist ein Qualification-HOLD, kein gemessenes Profil.",
+    );
+  }
   if (request.postprocess.longcatLipsync.enabled) {
     notes.push("Die LongCat-Stufe lässt der LongCat-Supervisor separat zu; sie ist hier nicht enthalten.");
   }

@@ -1,4 +1,4 @@
-import type { StudioAsset } from "../shared/assets.js";
+import type { PublicStudioAsset } from "../shared/assetPublic.js";
 import type { GenerationRequest, PipelineMode } from "../shared/pipelines.js";
 
 const sceneReferenceModes = new Set<PipelineMode>([
@@ -17,7 +17,7 @@ export function supportsSceneReference(mode: PipelineMode): boolean {
 
 export function withSceneReference(
   request: GenerationRequest,
-  asset: StudioAsset,
+  asset: Pick<PublicStudioAsset, "path" | "name">,
 ): GenerationRequest {
   return {
     ...request,

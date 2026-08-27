@@ -1,0 +1,207 @@
+{
+  "schemaVersion": "ltx-studio-lipsync-delay-calibration.v1",
+  "createdAt": "2026-08-25T11:23:50+02:00",
+  "status": "engineering-candidate-not-product-go",
+  "sourceHead": "8c66f1c1dbacb1df4c83e8600e88fc8d4fe3b79a",
+  "sourceTreeState": "uncommitted-integration-candidate",
+  "evaluatorFingerprint": "628f45b3f7ae8e2a3fee3919d23cd77e4e58986cc1dac52f8685ff6f0f397fde",
+  "runnerFingerprint": "a8f4b50243db11014fb23c6478e0b0ea802d565ed775f3681c78784a9a9861f9",
+  "expectedDialogueSha256": "3fd13a20c408719b5d418efcb896badab9e91af3a2eb525442c27fc48d3ffda0",
+  "measurementContract": {
+    "durationSeconds": 10.041747000000003,
+    "sampledFrames": 241,
+    "fps": 24,
+    "wordErrorRate": 0,
+    "phoneCoverage": 1,
+    "faceTrackCoverage": 1,
+    "mouthTrackCoverage": 1,
+    "multiFaceFrameRatio": 0,
+    "knownAudioDelayMilliseconds": [75, 100, 125, 150, 175],
+    "relativeSensitivity": {
+      "measuredLagMilliseconds": [83, 42, 42, 0, -42],
+      "linearSlope": -1.168,
+      "coefficientOfDetermination": 0.9415,
+      "estimatedZeroCrossingMilliseconds": 146.4,
+      "interpretation": "The matched remux series supports relative delay sensitivity and the 150 ms engineering candidate; it does not establish the visual stream's absolute synchronization zero point."
+    },
+    "limitations": [
+      "The raw lag confidence is not calibrated and cannot grant Product-GO.",
+      "This is one identity, one voice and one shot; independent holdouts remain required.",
+      "The 10.04 second clip is outside the preregistered 2 to 5 second claim domain and therefore cannot satisfy formal calibration evidence.",
+      "A blinded audiovisual comparison at 1x and 0.5x remains required before promotion."
+    ]
+  },
+  "visualStreams": {
+    "control125": {
+      "videoStreamSha256": "1864103d72a1497874410050fe5d5db5df88ccf11731912831a7c1e820bc02a5",
+      "mouthSkinWarpResidualP95": 0.04638714045286178,
+      "mouthSkinLuminanceDeltaP95": 0.01567095625214278,
+      "mouthSkinFlowDeformationP95": 0.4503094986081123,
+      "mouthSkinValidPixelCoverageP10": 0.664364640883978,
+      "identityCosineMedian": 0.7624293059097226,
+      "identityCosineP10": 0.7151312908137585,
+      "identityCosineMinimum": 0.6108294498266229
+    },
+    "control175": {
+      "videoStreamSha256": "4fee966008f855b7260432f3866f8c8e697fdeaab43175c1aceb024a1e0b89d7",
+      "mouthSkinWarpResidualP95": 0.04727234672755003,
+      "mouthSkinLuminanceDeltaP95": 0.01825396316125989,
+      "mouthSkinFlowDeformationP95": 0.4857492014765739,
+      "mouthSkinValidPixelCoverageP10": 0.6524401473296502,
+      "identityCosineMedian": 0.7606786222289096,
+      "identityCosineP10": 0.7081303217126127,
+      "identityCosineMinimum": 0.6113650500383407
+    }
+  },
+  "guiExperiment": {
+    "experimentId": "fe1b8bb9-20d7-47c5-91e2-c9682165deeb",
+    "experimentFileSha256": "6c0b467656f96bac2a2bb645e6c95973fe7c16b975f0f193f990be8d858d2c23",
+    "protocolSha256": "8f96e191c98d4ec82b47e208a3280b0694edbd91826e48e519766f8a29686bed",
+    "claimScope": "development",
+    "controlledPath": "postprocess.lipForcing.programAudioDelayMs",
+    "baseline": {
+      "delayMilliseconds": 125,
+      "jobId": "4e9e4935-570b-4f32-8597-a7d2dc0927e5",
+      "requestSha256": "396cecf33e04e10b5f557839ab7c43e1d05eaec3fde82ce1e9589da33a3de5d7"
+    },
+    "candidate": {
+      "delayMilliseconds": 150,
+      "jobId": "acf4694b-c618-4c6e-b666-06dd641aa466",
+      "outputName": "ltx25-a2v-traumfrau-sota-hq-1024-lipforcing14b-control125-audio125-v03-20260824-exp-fe1b8bb9-b.mp4",
+      "outputSha256": "ab32ebf0ce17710f79f701d6fbc80cb7a7ca72d9ebae0254013eaa5fa2e95807",
+      "analysisSha256": "474b50e01473862c22d5f6acbf7f5a05954f4779be8eedc01fec6a074eb60fc6",
+      "settingsSha256": "4f8764ba522af863fc2460cb63770e4be3b74d2d32d06d18408f3a39de6698d8",
+      "requestSha256": "5e19cc3b2dcf2fcdbc2b0015486f813bafd644b68bb19aba156b1a7458036c07",
+      "runProvenanceFingerprint": "ac47a281852c72d2082796443c949c3b20b00af348d242bf6c6555b7cfe008c0",
+      "videoStreamSha256": "1864103d72a1497874410050fe5d5db5df88ccf11731912831a7c1e820bc02a5",
+      "execution": "gui-frozen-protocol-cpu-only-audio-retime"
+    }
+  },
+  "runs": [
+    {
+      "controlDelayMilliseconds": 125,
+      "audioDelayMilliseconds": 75,
+      "outputName": "ltx25-lipsync-grid-control125-audio075-v04-20260825.mp4",
+      "outputSha256": "7736eb82ef671bd60a613ce6188ce78ef3243fac92520ccb17c453da5499e585",
+      "audioStreamSha256": "dd22467562858af6218054f2971ea99dc8b4b55a9f5387330f6e0a2b7fcd62bf",
+      "analysisSha256": "b1cdc39d68e7f11f2660d0ad64a6fbed7b828c0b85090f6adbe9fde203188fee",
+      "settingsSha256": "51a1c7c8ca234c00ddb3040c53512edd0832458bd1d878a3626376c71b6f03e2",
+      "globalAvLagMilliseconds": 83,
+      "lagConfidence": 0.034517744430955656,
+      "bilabialClosureF1": 0.12307692307692308,
+      "openingCorrelation": 0.18497398760625572,
+      "roundingCorrelation": 0.09761299636581947,
+      "speechMotionRecall": 0.3463414634146341,
+      "pauseLeakRatio": 0.2857142857142857
+    },
+    {
+      "controlDelayMilliseconds": 125,
+      "audioDelayMilliseconds": 100,
+      "outputName": "ltx25-lipsync-grid-control125-audio100-v04-20260825.mp4",
+      "outputSha256": "f8cd9e58f935eea1b914d3f085e070b72e858735ac4b0c7570c33e1fea0e8a66",
+      "audioStreamSha256": "7a1e2af331c6b8e8c9d813b479c18386e75884479719a1409201e5b2a26a92d3",
+      "analysisSha256": "7a87dbc8997d404091d4ba9d9c68ecb061d167cf14692d50091f3801afa5bfd4",
+      "settingsSha256": "6b4c562d8ed0967b90a913cf1705a10cb81a86584a2b424ccfdecb35a282db55",
+      "globalAvLagMilliseconds": 42,
+      "lagConfidence": 0.02794019242250975,
+      "bilabialClosureF1": 0.15384615384615385,
+      "openingCorrelation": 0.24107107070969866,
+      "roundingCorrelation": 0.17355820312222367,
+      "speechMotionRecall": 0.3627450980392157,
+      "pauseLeakRatio": 0.19444444444444445
+    },
+    {
+      "controlDelayMilliseconds": 125,
+      "audioDelayMilliseconds": 125,
+      "outputName": "ltx25-a2v-traumfrau-sota-hq-1024-lipforcing14b-control125-audio125-v03-20260824.mp4",
+      "outputSha256": "5f997a4e8a0da4b5f88160ca9c0c810d78f0652e8cddcec519ab450f8b0965d0",
+      "audioStreamSha256": "e7e79bd952c82fb8e4fa055a10c291311c0f4dddc460b29827da5ea062795f15",
+      "analysisSha256": "3994ea13f217da2a100ee19bf240c5b6a4801fd43f24ed03f04e1b085ea6519d",
+      "settingsSha256": "e21c22d9f347e2bcd228559a4fedaaba5b491c117a5cc2066f501051f7215f75",
+      "globalAvLagMilliseconds": 42,
+      "lagConfidence": 0.05487769789172496,
+      "bilabialClosureF1": 0.15625,
+      "openingCorrelation": 0.27869585082758475,
+      "roundingCorrelation": 0.1673854673436365,
+      "speechMotionRecall": 0.3564356435643564,
+      "pauseLeakRatio": 0.23684210526315788
+    },
+    {
+      "controlDelayMilliseconds": 125,
+      "audioDelayMilliseconds": 150,
+      "outputName": "ltx25-lipsync-grid-control125-audio150-v04-20260825.mp4",
+      "outputSha256": "ab32ebf0ce17710f79f701d6fbc80cb7a7ca72d9ebae0254013eaa5fa2e95807",
+      "audioStreamSha256": "2c4e78d7d128210d1696d73c52328a2bac8ce7b00879797c2670ba1676da9730",
+      "analysisSha256": "092357b729912237780aa417164d9ba27d91040a273a6c1f967360dd22e97f96",
+      "settingsSha256": "e75bb133c8148f623f993d177a7d4acb216f5232633817669644ab3a0c66f67e",
+      "globalAvLagMilliseconds": 0,
+      "lagConfidence": 0.039307915978162175,
+      "bilabialClosureF1": 0.23880597014925373,
+      "openingCorrelation": 0.3189053221273472,
+      "roundingCorrelation": 0.1122375193158067,
+      "speechMotionRecall": 0.3582089552238806,
+      "pauseLeakRatio": 0.23076923076923078
+    },
+    {
+      "controlDelayMilliseconds": 125,
+      "audioDelayMilliseconds": 175,
+      "outputName": "ltx25-lipsync-grid-control125-audio175-v04-20260825.mp4",
+      "outputSha256": "93311ceb207a045dc1d3e2edb2b2c227044a7dde568304a69e183e032f84a2f5",
+      "audioStreamSha256": "d0cb920ff56a0e64daf6919271c6174b1c155f9fee5a421fd20f32af57707823",
+      "analysisSha256": "c34368343740765d400e404558461792eae1ec954ea0fcbbf00ed98c5daa0ff4",
+      "settingsSha256": "c2080492dd011e69706db08bccb5b9dd54981c7bbc4b522feafeea0d9e0fb909",
+      "globalAvLagMilliseconds": -42,
+      "lagConfidence": 0.004311615120591307,
+      "bilabialClosureF1": 0.30303030303030304,
+      "openingCorrelation": 0.31200253897685715,
+      "roundingCorrelation": 0.10320436131479645,
+      "speechMotionRecall": 0.34328358208955223,
+      "pauseLeakRatio": 0.3076923076923077
+    },
+    {
+      "controlDelayMilliseconds": 175,
+      "audioDelayMilliseconds": 125,
+      "outputName": "ltx25-lipsync-grid-control175-audio125-v06-20260825.mp4",
+      "outputSha256": "4446f42a94718c350350d285f0156de7f84e5415f8b9248abbafa4104d807a22",
+      "audioStreamSha256": "90bb7b62eedb761d62a23ff4037ecaa68e454389e56bc8bbfbb6324219607067",
+      "analysisSha256": "c2f34bcc2ca2640879d28b25306a4b5361fdd970b0201adde4f858a0adcb4447",
+      "settingsSha256": "5dbe4c701b2f2fe18e613a5d31844715b7105b7725176f0c5f0504cf99a8cfd6",
+      "globalAvLagMilliseconds": 83,
+      "lagConfidence": 0.020363271968813858,
+      "bilabialClosureF1": 0.125,
+      "openingCorrelation": 0.056364709181505955,
+      "roundingCorrelation": 0.06882340964086221,
+      "speechMotionRecall": 0.373134328358209,
+      "pauseLeakRatio": 0.41025641025641024
+    },
+    {
+      "controlDelayMilliseconds": 175,
+      "audioDelayMilliseconds": 175,
+      "outputName": "ltx25-a2v-traumfrau-sota-hq-1024-lipforcing14b-control175-audio175-v05-20260825.mp4",
+      "outputSha256": "9f2eb9b87fd0c56a1df47d42b091fbbb9b7c64e3deab9eaa784a2da95719a27e",
+      "audioStreamSha256": "edf7ff76819c489f5c87e8282c291ef066b953bf10e37b0abe2522b99ef55857",
+      "analysisSha256": "e0e9407dba41a3be187701510829d93384eda4f9e6e6805609722d123138a27f",
+      "settingsSha256": "e7ea3194331ae42f900c867b80c323431854aab10490c20efb0f0052abbb5311",
+      "globalAvLagMilliseconds": 42,
+      "lagConfidence": 0.07278553177600904,
+      "bilabialClosureF1": 0.24615384615384617,
+      "openingCorrelation": 0.24390956553414533,
+      "roundingCorrelation": 0.11704787619882383,
+      "speechMotionRecall": 0.3910891089108911,
+      "pauseLeakRatio": 0.3157894736842105
+    }
+  ],
+  "decision": {
+    "currentVisualChampion": "control125",
+    "currentAudibleDelayCandidateMilliseconds": 150,
+    "reason": "The control125 visual stream dominates control175 on bilabial closure and opening at matched audio175, while retaining better mouth-skin integration and identity. Within control125, audio150 is the measured zero-lag compromise without the pause regression at audio175.",
+    "rejectedNextGpuRun": "control150/audio125",
+    "rejectionReason": "The matched 2x2 comparison removed the apparent control175 gain, so interpolating the inferior visual-control arm would not justify DGX time.",
+    "promotionBlockedBy": [
+      "uncalibrated lag confidence",
+      "missing blinded audiovisual preference",
+      "missing identity-, voice- and shot-disjoint holdout",
+      "no independent Product-GO attestation"
+    ]
+  }
+}

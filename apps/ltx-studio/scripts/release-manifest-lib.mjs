@@ -4,6 +4,9 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 export const MANIFEST_NAME = "release-manifest.json";
 export const DIGEST_NAME = "release-manifest.sha256";
+export const RELEASE_MANIFEST_SCHEMA = "ltx-studio-release-manifest.v4";
+export const RUNTIME_ROOT_PATH = "apps/ltx-studio/runtime/.venv";
+export const RUNTIME_SEAL_PATH = "apps/ltx-studio/runtime/runtime-install-seal.json";
 
 export function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -27,10 +30,24 @@ export function sha256File(path) {
   return sha256Bytes(readFileSync(path));
 }
 
+export function canonicalDigestFile(digest) {
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("Release digest must be an exact SHA-256 value");
+  return `${digest}  ${MANIFEST_NAME}\n`;
+}
+
+export function parseCanonicalDigestFile(value) {
+  if (typeof value !== "string") throw new Error("Release digest file must be UTF-8 text");
+  const match = /^([0-9a-f]{64})  release-manifest\.json\n$/.exec(value);
+  if (!match) throw new Error("Release digest file is not canonical");
+  return match[1];
+}
+
 function excluded(path) {
   return path === MANIFEST_NAME
     || path === DIGEST_NAME
-    || path.startsWith(`apps/ltx-studio/runtime/.venv${sep}`);
+    || path === RUNTIME_SEAL_PATH
+    || path === RUNTIME_ROOT_PATH
+    || path.startsWith(`${RUNTIME_ROOT_PATH}${sep}`);
 }
 
 export function releaseArtifacts(root) {

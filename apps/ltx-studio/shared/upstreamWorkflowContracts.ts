@@ -1,6 +1,10 @@
 import { usesSplitModelPack, type GenerationRequest, type ICLoraProfile } from "./pipelines.js";
 import type { ProvenanceUpstreamContract } from "./provenance.js";
-import { ltx25WorkflowContract, type Ltx25WorkflowId } from "./ltx25Catalog.js";
+import {
+  LTX25_DFR_PIPELINE_CONTRACT,
+  ltx25WorkflowContract,
+  type Ltx25WorkflowId,
+} from "./ltx25Catalog.js";
 
 // Two deliberately separate upstream sources: the ComfyUI documentation templates
 // (Comfy-Org, euler + CFG 1) are the binding contract for the native two-stage and
@@ -118,6 +122,15 @@ export function upstreamWorkflowContractsForRequest(
   request: Pick<GenerationRequest, "mode" | "icLora" | "lipDub" | "images" | "models" | "distilled">,
 ): ProvenanceUpstreamContract[] {
   if (usesSplitModelPack(request)) {
+    if (request.mode === "dfr") {
+      return [{
+        role: "official-native-pipeline:ltx-2.5:dfr",
+        repository: LTX25_DFR_PIPELINE_CONTRACT.repository,
+        commit: LTX25_DFR_PIPELINE_CONTRACT.commit,
+        path: LTX25_DFR_PIPELINE_CONTRACT.path,
+        sha256: LTX25_DFR_PIPELINE_CONTRACT.sha256,
+      }];
+    }
     if (request.mode === "distilled") {
       return [ltx25WorkflowContract(
         request.distilled.singleStage ? "t2v-i2v-single-stage" : "t2v-i2v-two-stage",
@@ -132,7 +145,7 @@ export function upstreamWorkflowContractsForRequest(
         "union-control": "ic-lora-union-control",
         ingredients: "ic-lora-ingredients",
         "motion-track": "ic-lora-motion-track",
-        "v2v-instant-shave": "v2v-ic-lora",
+        "v2v-deblur": "v2v-ic-lora",
       };
       const workflow = workflowByProfile[request.icLora.profile];
       return workflow ? [ltx25WorkflowContract(workflow)] : [];

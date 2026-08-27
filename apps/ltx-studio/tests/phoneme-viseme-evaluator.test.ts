@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { appRoot } from "../server/config.js";
 import { resolvePhonemeVisemeEvaluatorState } from "../server/evaluatorManifest.js";
 import {
+  mfaMediaPipeMeasurementSchema,
   phonemeVisemeEvaluatorManifestSchema,
   visemeMappingSchema,
 } from "../shared/phonemeVisemeEvaluator.js";
@@ -83,6 +84,37 @@ function releaseCandidateManifest(overrides: Record<string, unknown> = {}) {
 
 describe("phoneme/viseme evaluator manifest gate", () => {
   const privateManifestPath = join(appRoot, "evaluators", "phoneme-viseme", "manifest.v3.local.json");
+  it("accepts the complete 10-second production window and keeps the bound", () => {
+    const measurement = {
+      method: "ctc-espeak-mediapipe-de.v1",
+      runnerFingerprint: "a".repeat(64),
+      expectedDialogueSha256: "b".repeat(64),
+      globalAvLagMilliseconds: 0,
+      lagConfidence: 0.5,
+      bilabialClosureF1: 0.5,
+      openingCorrelation: 0.5,
+      roundingCorrelation: 0.5,
+      speechMotionRecall: 0.5,
+      pauseLeakRatio: 0.5,
+      phoneCoverage: 1,
+      unknownPhones: [],
+      faceTrackCoverage: 1,
+      mouthTrackCoverage: 1,
+      multiFaceFrameRatio: 0,
+      medianBlurVariance: 100,
+      yawP95Degrees: 5,
+      pitchP95Degrees: 4,
+      usableDurationSeconds: 241 / 24,
+      sampledFrames: 241,
+    };
+
+    expect(mfaMediaPipeMeasurementSchema.safeParse(measurement).success).toBe(true);
+    expect(mfaMediaPipeMeasurementSchema.safeParse({
+      ...measurement,
+      usableDurationSeconds: 10.500_001,
+    }).success).toBe(false);
+  });
+
   it("pins a complete, duplicate-free 15-class German/English viseme mapping", async () => {
     const path = join(appRoot, "evaluators", "phoneme-viseme", "viseme-mapping.v1.json");
     const body = JSON.parse(await readFile(path, "utf8"));

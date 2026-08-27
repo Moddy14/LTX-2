@@ -103,6 +103,7 @@ def _observations(surface: dict[str, object]) -> dict[str, object]:
 
 def test_technical_bundle_is_deterministic_and_covers_the_release_surface() -> None:
     surface = _surface()
+    candidate_count = sum(entry["targetStatus"] == "candidate" for entry in surface["entries"])
     observations = _observations(surface)
     first = build_technical_evidence_bundle(observations, surface=surface)
     second = build_technical_evidence_bundle(copy.deepcopy(observations), surface=copy.deepcopy(surface))
@@ -110,7 +111,7 @@ def test_technical_bundle_is_deterministic_and_covers_the_release_surface() -> N
     assert first == second
     assert first["schema_version"] == "ltx-av-eval-technical-qualification-bundle.v1"
     assert first["runner_digest"] == "3" * 64
-    assert first["detailed_reports"]["r3-canaries"]["candidate_entry_count"] == 26
+    assert first["detailed_reports"]["r3-canaries"]["candidate_entry_count"] == candidate_count
     assert first["detailed_reports"]["r3-pause-resume"]["cycles"] == 20
     assert first["detailed_reports"]["r3-soak"]["jobs"] == 50
     assert [report["kind"] for report in first["qualification_reports"]] == [

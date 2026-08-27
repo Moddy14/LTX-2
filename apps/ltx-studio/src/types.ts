@@ -1,44 +1,24 @@
 import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines.js";
-import type { StudioAsset } from "../shared/assets.js";
-import type { RunProvenance } from "../shared/provenance.js";
-import type { ExperimentRunBinding } from "../shared/experiments.js";
-import type { ProjectRunBinding } from "../shared/projects.js";
-export type { StudioOutput } from "../shared/outputs.js";
+import type { PublicStudioAsset } from "../shared/assetPublic.js";
+import type { PublicHealth } from "../shared/healthPublic.js";
+import type { JobExecutionClass } from "../shared/jobExecution.js";
+import type {
+  PublicExecutionDecisionSummary,
+  PublicRunProvenanceSummary,
+} from "../shared/jobPublic.js";
+import type {
+  PublicExperimentRunSummary,
+  PublicProjectRunSummary,
+} from "../shared/outputPublic.js";
+export type { PublicStudioOutput as StudioOutput } from "../shared/outputPublic.js";
 export type { ResourceEstimate } from "../shared/estimates.js";
-export type { ModelInventory, ModelInventoryItem, ModelKind } from "../shared/models.js";
+export type {
+  PublicModelInventory as ModelInventory,
+  PublicModelInventoryItem as ModelInventoryItem,
+} from "../shared/modelPublic.js";
+export type { ModelKind } from "../shared/models.js";
 
-export type Health = {
-  state: "ready" | "blocked";
-  resources: {
-    availableMemoryGiB: number | null;
-    totalMemoryGiB: number | null;
-    swapFreeGiB: number | null;
-    swapTotalGiB: number | null;
-    outputFreeGiB: number | null;
-  };
-  engine: "available" | "missing";
-  orchestrator: "available" | "missing" | "disabled";
-  qwen: "ready" | "busy" | "offline";
-  runtimeOverall: string;
-  workloads: Array<{
-    id: "qwen" | "avatar" | "comfyui";
-    label: string;
-    state: string;
-    protected: boolean;
-    estimatedMemoryGiB: number | null;
-  }>;
-  evaluators: {
-    phonemeViseme: {
-      status: "measured" | "measurement-only" | "insufficient" | "not-available" | "failed" | "not-applicable";
-      blockerCode: string;
-      message: string | null;
-      productGo: "passed" | "blocked";
-      measurementReady: boolean;
-      method: "mfa-mediapipe-de.v1" | null;
-    };
-  };
-  queueDepth: number;
-};
+export type Health = PublicHealth;
 
 export type JobStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -59,10 +39,12 @@ export type StudioJob = {
   request: GenerationRequest;
   favorite: boolean;
   variantOf: string | null;
-  experiment: ExperimentRunBinding | null;
-  project: ProjectRunBinding | null;
+  experiment: PublicExperimentRunSummary | null;
+  project: PublicProjectRunSummary | null;
   runtimeMs: number | null;
   cancelledBy: "studio" | null;
+  /** Backend-proven cancellation settlement; missing only for legacy/stub data. */
+  cancellationState?: "requested" | "settling" | "settled" | null;
   dgxJobId: string | null;
   thermalProfile: {
     baselineC: number;
@@ -73,7 +55,12 @@ export type StudioJob = {
     resumeBelowC: number;
     updatedAt: string;
   } | null;
-  runProvenance?: RunProvenance | null;
+  runProvenanceSummary: PublicRunProvenanceSummary | null;
+  /** Missing means legacy history and must remain visibly unclassified. */
+  executionClass?: JobExecutionClass;
+  executionDecisionSummary: PublicExecutionDecisionSummary | null;
+  historyStatus?: "legacy-unattested";
+  historicalDgxJobId?: string | null;
 };
 
 export type StudioConfig = {
@@ -91,8 +78,9 @@ export type StudioConfig = {
   };
 };
 
-export type UploadedFile = StudioAsset;
-export type { AssetKind, StudioAsset } from "../shared/assets.js";
+export type UploadedFile = PublicStudioAsset;
+export type { AssetKind } from "../shared/assets.js";
+export type StudioAsset = PublicStudioAsset;
 
 export type ApiIssue = { path: string; message: string };
 

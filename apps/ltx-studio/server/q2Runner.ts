@@ -3,6 +3,8 @@ import { posix } from "node:path";
 
 import { z } from "zod";
 
+import { runtimeTrustBindingSchema } from "../shared/runtimeTrust.js";
+
 import { canonicalJson } from "../shared/canonicalJson.js";
 import type { EvaluationAuthorization } from "../shared/evaluationAuthorization.js";
 
@@ -17,10 +19,15 @@ const sealedRootSchema = z.string().min(2).max(512).refine((value) =>
 "sealed roots must be normalized absolute POSIX paths");
 
 export const q2RunnerContractSchema = z.object({
-  schemaVersion: z.literal("q2-runner.v1"),
+  schemaVersion: z.literal("q2-runner.v3"),
   runnerDigest: sha256Schema,
   releaseDigest: sha256Schema,
   surfaceDigest: sha256Schema,
+  runtimeInstallSealSha256: sha256Schema,
+  runtimeTreeSha256: sha256Schema,
+  runtimePolicySha256: sha256Schema,
+  nodeExecutableSha256: sha256Schema,
+  runtimeTrust: runtimeTrustBindingSchema,
   runtimeSandboxDigest: sha256Schema,
   orchestratorContractDigest: sha256Schema,
   uid: z.number().int().positive(),
@@ -49,7 +56,7 @@ export function q2RunnerContractDigest(contract: Q2RunnerContract): string {
 }
 
 export const q2AdmissionGrantSchema = z.object({
-  schemaVersion: z.literal("q2-orchestrator-admission-grant.v1"),
+  schemaVersion: z.literal("q2-orchestrator-admission-grant.v3"),
   grantId: z.uuid(),
   jobId: identifierSchema,
   consumerId: identifierSchema,
@@ -57,6 +64,11 @@ export const q2AdmissionGrantSchema = z.object({
   orchestratorContractDigest: sha256Schema,
   runnerDigest: sha256Schema,
   releaseDigest: sha256Schema,
+  runtimeInstallSealSha256: sha256Schema,
+  runtimeTreeSha256: sha256Schema,
+  runtimePolicySha256: sha256Schema,
+  nodeExecutableSha256: sha256Schema,
+  runtimeTrust: runtimeTrustBindingSchema,
   issuedAt: timestampSchema,
   notBefore: timestampSchema,
   expiresAt: timestampSchema,
@@ -117,6 +129,11 @@ export function validateQ2RunnerLaunch(options: {
     || q2RunnerContractDigest(contract) !== options.authorization.q2RunnerContractDigest
     || contract.releaseDigest !== options.authorization.releaseDigest
     || contract.surfaceDigest !== options.authorization.surfaceDigest
+    || contract.runtimeInstallSealSha256 !== options.authorization.runtimeInstallSealSha256
+    || contract.runtimeTreeSha256 !== options.authorization.runtimeTreeSha256
+    || contract.runtimePolicySha256 !== options.authorization.runtimePolicySha256
+    || contract.nodeExecutableSha256 !== options.authorization.nodeExecutableSha256
+    || canonicalJson(contract.runtimeTrust) !== canonicalJson(options.authorization.runtimeTrust)
     || contract.runtimeSandboxDigest !== options.authorization.q2RuntimeSandboxDigest
     || contract.orchestratorContractDigest !== options.authorization.orchestratorContractDigest
     || contract.inputRootManifestDigest !== options.authorization.holdoutInputManifestDigest
@@ -135,6 +152,11 @@ export function validateQ2RunnerLaunch(options: {
     || grant.orchestratorContractDigest !== contract.orchestratorContractDigest
     || grant.runnerDigest !== contract.runnerDigest
     || grant.releaseDigest !== contract.releaseDigest
+    || grant.runtimeInstallSealSha256 !== contract.runtimeInstallSealSha256
+    || grant.runtimeTreeSha256 !== contract.runtimeTreeSha256
+    || grant.runtimePolicySha256 !== contract.runtimePolicySha256
+    || grant.nodeExecutableSha256 !== contract.nodeExecutableSha256
+    || canonicalJson(grant.runtimeTrust) !== canonicalJson(contract.runtimeTrust)
     || grant.cgroupId !== observation.processCgroupId) {
     throw new Error("Q2 orchestrator grant binding mismatch");
   }

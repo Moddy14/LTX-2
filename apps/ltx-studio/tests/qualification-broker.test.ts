@@ -14,10 +14,15 @@ import {
   type QualificationBrokerRequest,
   type QualificationBrokerTransport,
 } from "../server/qualificationBroker.js";
+import { runtimeTrustFixture } from "./runtime-trust-fixture.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const releaseDigest = sha("release");
 const surfaceDigest = sha("surface");
+const runtimeInstallSealSha256 = sha("runtime-seal");
+const runtimeTreeSha256 = sha("runtime-tree");
+const runtimePolicySha256 = sha("runtime-policy");
+const nodeExecutableSha256 = sha("node-executable");
 const previousHead = sha("previous-head");
 const requestId = "00000000-0000-4000-8000-000000000100";
 const claim = {
@@ -36,7 +41,7 @@ const claim = {
 
 function request(action: QualificationBrokerRequest["action"] = "accept"): QualificationBrokerRequest {
   return {
-    schemaVersion: "ltx-studio-qualification-broker-request.v1",
+    schemaVersion: "ltx-studio-qualification-broker-request.v3",
     requestId,
     action,
     requestedAt: "2026-08-15T00:05:00Z",
@@ -44,6 +49,11 @@ function request(action: QualificationBrokerRequest["action"] = "accept"): Quali
     expectedHeadSha256: previousHead,
     expectedReleaseDigest: releaseDigest,
     expectedSurfaceDigest: surfaceDigest,
+    expectedRuntimeInstallSealSha256: runtimeInstallSealSha256,
+    expectedRuntimeTreeSha256: runtimeTreeSha256,
+    expectedRuntimePolicySha256: runtimePolicySha256,
+    expectedNodeExecutableSha256: nodeExecutableSha256,
+    expectedRuntimeTrust: runtimeTrustFixture,
     claim,
     terminal: action === "terminalize"
       ? { outcome: "cancelled", outputDigest: null, reason: "operator cancelled" }
@@ -62,7 +72,7 @@ function committedEnvelope(
   } as const;
   const ticketState = { accept: "accepted", arm: "armed", start: "started", terminalize: "terminal" } as const;
   const record = {
-    schemaVersion: "ltx-studio-activation-journal-record.v1" as const,
+    schemaVersion: "ltx-studio-activation-journal-record.v3" as const,
     recordId: requestId,
     sequence: 4,
     generation: 1,
@@ -73,6 +83,11 @@ function committedEnvelope(
     release: {
       releaseDigest,
       surfaceDigest,
+      runtimeInstallSealSha256,
+      runtimeTreeSha256,
+      runtimePolicySha256,
+      nodeExecutableSha256,
+      runtimeTrust: runtimeTrustFixture,
       rights: {
         policyEvidenceDigest: sha("rights"),
         attestationSeriesId: "rights-series-001",
@@ -112,6 +127,11 @@ function snapshot(head = previousHead): RuntimeActivationSnapshot {
     activationHeadSha256: head,
     releaseDigest,
     surfaceDigest,
+    runtimeInstallSealSha256,
+    runtimeTreeSha256,
+    runtimePolicySha256,
+    nodeExecutableSha256,
+    runtimeTrust: runtimeTrustFixture,
     rightsCurrent: true,
     releasedSurfaceEntryIds: [],
   };

@@ -6,7 +6,7 @@ import {
 } from "../shared/estimates.js";
 import { estimateRequest } from "../server/estimates.js";
 import * as mediaProbe from "../server/mediaProbe.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 describe("resource and runtime estimates", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -14,6 +14,71 @@ describe("resource and runtime estimates", () => {
   it("keeps the standard two-stage memory contract conservative", () => {
     const request = validRequest();
     expect(estimateResources(request).memoryGiB).toBe(60);
+  });
+
+  it("keeps mandatory-detailing DFR v1.3 on an explicit unmeasured qualification HOLD", () => {
+    const request = validRequest("dfr");
+    const base = estimateResources(request);
+    expect(base).toMatchObject({
+      memoryGiB: 86,
+      memoryBasis: "unmeasured-bootstrap:official-dfr-v1.3.0-single-call.v2",
+      qualificationHold: true,
+    });
+
+    request.dfr!.temporalUpscalings = 1;
+    expect(estimateResources(request).memoryGiB).toBeGreaterThanOrEqual(98);
+    request.dfr!.temporalUpscalings = 2;
+    expect(estimateResources(request).memoryGiB).toBeGreaterThanOrEqual(110);
+    request.dfr!.spatialUpscalings = 2;
+    expect(estimateResources(request).memoryGiB).toBeGreaterThanOrEqual(118);
+  });
+
+  it("estimates DFR output bytes from final temporal frames/FPS, not the basis canvas", () => {
+    const request = validRequest("dfr");
+    request.width = 3840;
+    request.height = 2176;
+    request.numFrames = 481;
+    request.frameRate = 24;
+    request.longClipAcknowledged = true;
+
+    const base = estimateResources(request).outputGiB;
+    request.dfr!.temporalUpscalings = 1;
+    const x2 = estimateResources(request).outputGiB;
+    request.dfr!.temporalUpscalings = 2;
+    const x4 = estimateResources(request).outputGiB;
+    expect(x2).toBeGreaterThan(base);
+    expect(x4).toBeGreaterThan(x2);
+
+    request.dfr!.spatialUpscalings = 2;
+    expect(estimateResources(request).outputGiB).toBe(x4);
+  });
+
+  it("reserves 72 GiB so the DGX headroom gates split-BF16 T2A at 84 GiB", () => {
+    const request = validLtx25SplitRequest("text-to-audio");
+    request.numFrames = 481;
+    request.longClipAcknowledged = true;
+    const estimate = estimateResources(request);
+
+    expect(estimate).toMatchObject({
+      memoryGiB: 72,
+      memoryBasis: "measured-cold-start:ltx-2.5-split-bf16-t2a.v1",
+    });
+    // The orchestrator owns this canonical 12-GiB non-Qwen headroom.
+    expect(estimate.memoryGiB + 12).toBe(84);
+    // Studio's visible planning warning intentionally keeps its stricter
+    // non-blocking 24-GiB residual allowance.
+    expect(requiredStartMemoryForRequests(
+      [request],
+      { minAvailableGiB: 48, minResidualMemoryGiB: 24 },
+    )).toBe(96);
+  });
+
+  it("does not raise legacy T2A or another LTX-2.5 split mode", () => {
+    const request = validRequest("text-to-audio");
+
+    expect(estimateResources(request)).toMatchObject({ memoryGiB: 34 });
+    expect(estimateResources(request).memoryBasis).toBeUndefined();
+    expect(estimateResources(validLtx25SplitRequest("distilled")).memoryGiB).toBe(58);
   });
 
   it("does not discount a BF16 checkpoint that is cast to FP8 at runtime", () => {
@@ -101,6 +166,29 @@ describe("resource and runtime estimates", () => {
 
     expect(serverEstimate.memoryGiB).toBeGreaterThan(sharedEstimate.memoryGiB);
     expect(serverEstimate.outputGiB).toBeGreaterThan(sharedEstimate.outputGiB);
+  });
+
+  it("reports the exact A2V EOF timeline while keeping the cap-based RAM reservation", () => {
+    const request = validRequest("image-audio-to-video");
+    request.audio.startTime = 8.2;
+    request.audio.maxDuration = 5;
+    vi.spyOn(mediaProbe, "probeAudioDurationSeconds").mockReturnValue(10);
+
+    const sharedEstimate = estimateResources(request);
+    const serverEstimate = estimateRequest(request, []);
+
+    expect(sharedEstimate.a2vTimeline).toMatchObject({
+      frameCount: 113,
+      exact: false,
+      basis: "audio-cap-upper-bound",
+    });
+    expect(serverEstimate.a2vTimeline).toMatchObject({
+      frameCount: 41,
+      upperBoundFrameCount: 113,
+      exact: true,
+      basis: "audio-eof",
+    });
+    expect(serverEstimate.memoryGiB).toBe(sharedEstimate.memoryGiB);
   });
 
   it("shows no ETA until two successful comparable runs exist", () => {

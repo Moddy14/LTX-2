@@ -27,8 +27,15 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useRef, useState } from "react";
 
-import { PIPELINES, type GenerationRequest } from "../../shared/pipelines";
+import {
+  dfrOutputGeometry,
+  isLegacyDfrRequest,
+  PIPELINES,
+  type GenerationRequest,
+} from "../../shared/pipelines";
+import { effectiveA2vTimeline } from "../../shared/a2vDuration";
 import type { PlanSuggestion } from "../../shared/plan";
+import { qualificationHoldForRequest } from "../../shared/qualificationHold";
 import { videoDurationSeconds } from "../../shared/presets";
 import { isVideoPreviewUrl } from "../../shared/media";
 import type {
@@ -38,13 +45,13 @@ import type {
   StudioOutput,
 } from "../types";
 import { qualityReviewAverage, type QualityReviewInput } from "../../shared/quality";
-import type {
-  ControlledExperiment,
-  ExperimentCreateInput,
-} from "../../shared/experiments";
-import { isSpeechQualityCandidate } from "../qualityCandidates";
+import type { ExperimentCreateInput } from "../../shared/experiments";
+import type { PublicControlledExperiment } from "../../shared/outputPublic";
+import { isSpeechQualityCandidate, isT2aAudioQualityCandidate } from "../qualityCandidates";
 import { supportsSceneReference } from "../sceneReference";
 import { importWithSingleReload } from "../lazyImport";
+import { phonemeVisemeMeasurementWindow } from "../objectiveAnalysisCoverage";
+import { executionClassLabel } from "../jobExecutionPresentation";
 import { InfoTooltip } from "./Controls";
 import { LazyPanelBoundary, LazyPanelLoading } from "./LazyPanelBoundary";
 
@@ -57,6 +64,10 @@ const ProjectPanel = lazy(async () => ({
 const ObjectiveAnalysisPanel = lazy(async () => ({
   default: (await importWithSingleReload("objective-analysis", () => import("./ObjectiveAnalysisPanel")))
     .ObjectiveAnalysisPanel,
+}));
+const AudioQualityPanel = lazy(async () => ({
+  default: (await importWithSingleReload("audio-quality", () => import("./AudioQualityPanel")))
+    .AudioQualityPanel,
 }));
 const ObjectiveComparisonPanel = lazy(async () => ({
   default: (await importWithSingleReload("objective-comparison", () => import("./ObjectiveComparisonPanel")))
@@ -80,6 +91,14 @@ const statusLabels: Record<StudioJob["status"], string> = {
   interrupted: "Unterbrochen",
 };
 
+function cancellationIsSettling(job: StudioJob): boolean {
+  return job.cancellationState === "requested" || job.cancellationState === "settling";
+}
+
+function visibleJobStatus(job: StudioJob): string {
+  return cancellationIsSettling(job) ? "Abbruch läuft" : statusLabels[job.status];
+}
+
 function StatusIcon({ status }: { status: StudioJob["status"] }) {
   if (status === "completed") return <Check size={14} />;
   if (status === "running") return <LoaderCircle className="spin" size={14} />;
@@ -91,6 +110,7 @@ function StatusIcon({ status }: { status: StudioJob["status"] }) {
 
 function formatRuntime(milliseconds: number | null): string {
   if (milliseconds === null) return "Noch nicht verfügbar";
+  if (milliseconds < 1_000) return `${Math.max(0, Math.round(milliseconds))} ms`;
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -100,15 +120,63 @@ function formatRuntime(milliseconds: number | null): string {
     : `${minutes} min ${String(remainder).padStart(2, "0")} s`;
 }
 
+function jobLaneLabel(job: StudioJob): string {
+  return job.executionClass === "dgx"
+    ? PIPELINES.find((item) => item.id === job.mode)?.shortLabel ?? job.mode
+    : executionClassLabel(job);
+}
+
+function dgxJobLabel(job: StudioJob): string {
+  if (job.executionClass === "cpu-only") return "Nicht erforderlich";
+  if (job.executionClass === "pending") return "Klassifizierung ausstehend";
+  if (job.executionClass === undefined) return "Nicht klassifiziert (Legacy)";
+  return job.dgxJobId ?? "Noch nicht eingereicht";
+}
+
 function formatFileSize(bytes: number): string {
   return bytes >= 1024 ** 3
     ? `${(bytes / 1024 ** 3).toFixed(2)} GiB`
     : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
 }
 
-function hasLipSyncMeasurement(output: StudioOutput): boolean {
+function lipSyncOutputStatusLabel(output: StudioOutput): string {
   const result = output.analysis?.status === "completed" ? output.analysis.result : null;
-  return Boolean(result && "phonemeViseme" in result && result.phonemeViseme?.measurement);
+  const measurementWindow = phonemeVisemeMeasurementWindow(result);
+  const phonemeViseme = result?.schemaVersion === "ltx-studio-objective-quality.v4"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v5"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v6"
+    || result?.schemaVersion === "ltx-studio-objective-quality.v7"
+    ? result.phonemeViseme
+    : null;
+  if (phonemeViseme?.status === "measured" && phonemeViseme.productGo.status === "passed") {
+    return "Lip-Sync Product-GO freigegeben";
+  }
+  if (phonemeViseme?.status === "measurement-only") {
+    return measurementWindow.status === "partial"
+      ? "Lip-Sync gemessen (Teilfenster) · keine Product-GO-Freigabe"
+      : "Lip-Sync gemessen · keine Product-GO-Freigabe";
+  }
+  return "Video gemessen, Lip-Sync nicht freigegeben";
+}
+
+function audioQualityStatus(output: StudioOutput): string | null {
+  const analysis = output.audioAnalysis;
+  if (!analysis) return null;
+  if (analysis.claimScope === "development") {
+    if (analysis.status === "queued") return "Entwicklungsmessung wartet · nicht attestiert";
+    if (analysis.status === "running") return "Entwicklungsmessung läuft · nicht attestiert";
+    if (analysis.status === "cancelled") return "Entwicklungsmessung abgebrochen · nicht attestiert";
+    if (analysis.status === "failed") return "Entwicklungsmessung fehlgeschlagen · nicht attestiert";
+    return "Entwicklungsmessung · nicht attestiert · keine Freigabe";
+  }
+  if (analysis.status === "queued") return "Audioanalyse wartet";
+  if (analysis.status === "running") return "Audioanalyse läuft";
+  if (analysis.status === "cancelled") return "Audioanalyse abgebrochen";
+  if (analysis.status === "failed") return "Audioanalyse fehlgeschlagen";
+  if (analysis.result?.analysisStatus !== "measured") return "Audioanalyse ohne Messwerte";
+  return analysis.result.ia2vEligibility.status === "eligible"
+    ? "Audio-Vorfilter bestanden"
+    : "Audio-Vorfilter gesperrt";
 }
 
 function isAudioOutputName(name: string): boolean {
@@ -136,6 +204,7 @@ type RunPanelProps = {
   onSelectOutput: (output: StudioOutput) => void;
   onRun: () => void;
   onCancel: (id: string) => void;
+  cancellingJobIds: ReadonlySet<string>;
   onDeleteJob: (job: StudioJob) => Promise<void>;
   deletingJobId: string | null;
   submitting: boolean;
@@ -154,6 +223,8 @@ type RunPanelProps = {
   onSaveQualityReview: (output: StudioOutput, input: QualityReviewInput) => Promise<void>;
   onStartAnalysis: (output: StudioOutput, force?: boolean) => Promise<void>;
   onCancelAnalysis: (output: StudioOutput) => Promise<void>;
+  onStartT2aAnalysis: (output: StudioOutput, force?: boolean) => Promise<void>;
+  onCancelT2aAnalysis: (output: StudioOutput, analysisId: string) => Promise<void>;
   onPrepareLipSyncRetry: (output: StudioOutput, referenceStrength: number) => void;
   onDeleteOutput: (output: StudioOutput) => Promise<void>;
   deletingOutputName: string | null;
@@ -163,7 +234,7 @@ type RunPanelProps = {
   onUseBestFrameAsReference: (output: StudioOutput) => Promise<number | null>;
   qualityGuidedSceneReferenceAvailable: boolean;
   extractingReferenceFrom: string | null;
-  experiments: ControlledExperiment[];
+  experiments: PublicControlledExperiment[];
   onCreateExperiment: (input: ExperimentCreateInput) => Promise<void>;
   onFreezeExperiment: (id: string) => Promise<void>;
   onLaunchExperiment: (id: string, arm: "baseline" | "candidate") => Promise<void>;
@@ -185,6 +256,7 @@ export function RunPanel({
   onSelectOutput,
   onRun,
   onCancel,
+  cancellingJobIds,
   onDeleteJob,
   deletingJobId,
   submitting,
@@ -203,6 +275,8 @@ export function RunPanel({
   onSaveQualityReview,
   onStartAnalysis,
   onCancelAnalysis,
+  onStartT2aAnalysis,
+  onCancelT2aAnalysis,
   onPrepareLipSyncRetry,
   onDeleteOutput,
   deletingOutputName,
@@ -226,9 +300,6 @@ export function RunPanel({
   const [experimentsExpanded, setExperimentsExpanded] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(false);
   const pipeline = PIPELINES.find((item) => item.id === request.mode) ?? PIPELINES[0];
-  const duration = request.mode === "retake"
-    ? request.retake.endTime - request.retake.startTime
-    : videoDurationSeconds(request.numFrames, request.frameRate);
   const sourcePath =
     request.mode === "retake"
       ? request.retake.videoPath
@@ -238,8 +309,16 @@ export function RunPanel({
         ? request.images[0]?.path || request.idLora.referenceAudio.path
       : request.images[0]?.path || request.icLora.videoConditioning[0]?.path || request.audio.path;
   const sourcePreview = sourcePath ? previews[sourcePath] : null;
-  const runBlocked = submitting;
-  const runLabel = health?.orchestrator === "missing"
+  const qualificationHold = qualificationHoldForRequest(request);
+  const selectedJobQualificationHold = selectedJob
+    ? qualificationHoldForRequest(selectedJob.request)
+    : null;
+  // Invalid editor input stays clickable so the normal run handler can expose
+  // its field-specific validation messages. Only non-actionable states are disabled.
+  const runBlocked = submitting || isLegacyDfrRequest(request) || Boolean(qualificationHold);
+  const runLabel = qualificationHold
+    ? "DFR Qualification-HOLD"
+    : health?.orchestrator === "missing"
     ? "DGX-Admission fehlt"
     : "Generieren";
   const memoryShortfall = health?.resources.availableMemoryGiB !== null
@@ -255,17 +334,81 @@ export function RunPanel({
   const monitorRuntime = monitorJob?.startedAt
     ? monitorJob.runtimeMs ?? Date.now() - Date.parse(monitorJob.startedAt)
     : null;
+  const showDgxForecast = monitorJob === null
+    || (monitorJob.executionClass === "dgx" && ["queued", "running", "paused"].includes(monitorJob.status));
   const outputRequest = selectedOutput?.request ?? null;
-  const canUseSceneReference = selectedOutput !== null
-    && !isAudioOutputName(selectedOutput.name)
-    && supportsSceneReference(request.mode);
+  const outputDfrGeometry = outputRequest?.mode === "dfr" && !isLegacyDfrRequest(outputRequest)
+    ? dfrOutputGeometry(outputRequest)
+    : null;
+  const outputA2vTimeline = outputRequest ? effectiveA2vTimeline(outputRequest) : null;
+  const outputMeasuredTiming = selectedOutput?.analysis?.status === "completed"
+    ? selectedOutput.analysis.result?.technical ?? null
+    : null;
+  const outputHasMeasuredFrameTiming = Boolean(
+    outputMeasuredTiming?.frames
+      && outputMeasuredTiming.frames > 0
+      && outputMeasuredTiming.fps
+      && outputMeasuredTiming.fps > 0,
+  );
+  const outputMeasuredDurationSeconds = outputMeasuredTiming?.durationSeconds !== null
+    && outputMeasuredTiming?.durationSeconds !== undefined
+    && outputMeasuredTiming.durationSeconds > 0
+    ? outputMeasuredTiming.durationSeconds
+    : null;
+  const outputEffectiveFrames = (outputHasMeasuredFrameTiming ? outputMeasuredTiming?.frames : null)
+    ?? outputA2vTimeline?.frameCount
+    ?? outputRequest?.numFrames
+    ?? null;
+  const outputEffectiveFrameRate = (outputHasMeasuredFrameTiming ? outputMeasuredTiming?.fps : null)
+    ?? outputRequest?.frameRate
+    ?? null;
+  const outputEffectiveDurationSeconds = outputMeasuredDurationSeconds
+    ?? outputA2vTimeline?.durationSeconds
+    ?? null;
+  const outputA2vFrameBasis = outputHasMeasuredFrameTiming
+    ? "Medium gemessen"
+    : outputA2vTimeline?.derivesFramesFromAudio
+      ? outputA2vTimeline.exact ? "aus Audio" : "Obergrenze aus Audio-Maximaldauer"
+      : null;
   const outputForJob = (job: StudioJob) =>
     outputs.find((output) => output.jobId === job.id || output.name === job.outputName);
+  const selectedOutputReadOnly = selectedOutput?.trustStatus === "legacy-unattested";
+  const selectedJobReadOnly = selectedJob?.historyStatus === "legacy-unattested"
+    || Boolean(selectedJob && outputForJob(selectedJob)?.trustStatus === "legacy-unattested");
+  const previewRequest = outputRequest ?? request;
+  const previewIsAudio = selectedOutput
+    ? isAudioOutputName(selectedOutput.name)
+    : previewRequest.mode === "text-to-audio";
+  const previewFormat = selectedOutput && !outputRequest
+    ? previewIsAudio ? "WAV · Audio" : "Video"
+    : previewIsAudio
+      ? "WAV · PCM 16 Bit"
+      : previewRequest.mode === "retake"
+        ? "Quelle"
+        : `${previewRequest.width} x ${previewRequest.height}`;
+  const previewTiming = selectedOutput && outputEffectiveDurationSeconds !== null
+    ? `${outputA2vTimeline?.derivesFramesFromAudio
+        && !outputA2vTimeline.exact
+        && outputMeasuredDurationSeconds === null ? "Bis zu " : ""}${outputEffectiveDurationSeconds.toFixed(1)} s`
+    : selectedOutput && !outputRequest
+      ? "Dauer aus Medium"
+    : previewRequest.mode === "lipdub"
+      ? "Referenzdauer"
+      : `${(previewRequest.mode === "retake"
+        ? previewRequest.retake.endTime - previewRequest.retake.startTime
+        : videoDurationSeconds(previewRequest.numFrames, previewRequest.frameRate)).toFixed(1)} s`;
+  const canUseSceneReference = selectedOutput !== null
+    && !selectedOutputReadOnly
+    && !isAudioOutputName(selectedOutput.name)
+    && supportsSceneReference(request.mode);
   const qualityAverageForJob = (job: StudioJob): number | null => {
-    const review = outputForJob(job)?.qualityReview;
+    const output = outputForJob(job);
+    if (!output || output.trustStatus === "legacy-unattested" || isAudioOutputName(output.name)) return null;
+    const review = output.qualityReview;
     return review ? qualityReviewAverage(review) : null;
   };
   const qualityAverageForOutput = (output: StudioOutput): number | null => {
+    if (output.trustStatus === "legacy-unattested" || isAudioOutputName(output.name)) return null;
     const review = output.qualityReview;
     return review ? qualityReviewAverage(review) : null;
   };
@@ -328,14 +471,8 @@ export function RunPanel({
             </div>
           )}
           <div className="preview-stage__meta">
-            <span>
-              {request.mode === "retake"
-                ? "Quelle"
-                : request.mode === "text-to-audio"
-                  ? "WAV · PCM 16 Bit"
-                  : `${request.width} x ${request.height}`}
-            </span>
-            <span>{request.mode === "lipdub" ? "Referenzdauer" : `${duration.toFixed(1)} s`}</span>
+            <span>{previewFormat}</span>
+            <span>{previewTiming}</span>
           </div>
         </div>
       </section>
@@ -367,7 +504,11 @@ export function RunPanel({
               >
                 {outputs.map((output) => (
                   <option key={output.name} value={output.name}>
-                    {output.name}{output.qualityReview ? ` · ${qualityReviewAverage(output.qualityReview).toFixed(1)}/10` : ""}
+                    {output.name}{output.qualityReview
+                      && output.trustStatus !== "legacy-unattested"
+                      && !isAudioOutputName(output.name)
+                      ? ` · ${qualityReviewAverage(output.qualityReview).toFixed(1)}/10`
+                      : ""}
                   </option>
                 ))}
               </select>
@@ -376,20 +517,33 @@ export function RunPanel({
               <div className="output-library__details">
                 <span>{formatFileSize(selectedOutput.sizeBytes)}</span>
                 <span>{new Date(selectedOutput.modifiedAt).toLocaleString("de-AT")}</span>
-                <span>{selectedOutput.settingsAvailable ? "Studio-Einstellungen vorhanden" : "Keine verlässlichen Einstellungen"}</span>
-                {selectedOutput.qualityReview ? (
+                <span>{selectedOutputReadOnly
+                  ? "Historischer Altbestand · ungeprüft · nur lesbar"
+                  : selectedOutput.settingsAvailable
+                    ? "Studio-Einstellungen vorhanden"
+                    : "Keine verlässlichen Einstellungen"}</span>
+                {outputRequest && isLegacyDfrRequest(outputRequest) ? (
+                  <span>DFR Legacy · nur lesbar · nicht ausführbar</span>
+                ) : null}
+                {selectedOutput.qualityReview
+                  && !selectedOutputReadOnly
+                  && !isAudioOutputName(selectedOutput.name) ? (
                   <span>Bewertung {qualityReviewAverage(selectedOutput.qualityReview).toFixed(1)} / 10</span>
                 ) : null}
-                {selectedOutput.analysis?.status === "completed" ? (
-                  <span>{hasLipSyncMeasurement(selectedOutput)
-                    ? "Lip-Sync geprüft"
-                    : "Video geprüft, Lip-Sync nicht eindeutig"}</span>
-                ) : null}
+                {!selectedOutputReadOnly
+                  ? isAudioOutputName(selectedOutput.name)
+                    ? audioQualityStatus(selectedOutput) ? <span>{audioQualityStatus(selectedOutput)}</span> : null
+                    : selectedOutput.analysis?.status === "completed"
+                      ? <span>{lipSyncOutputStatusLabel(selectedOutput)}</span>
+                      : null
+                  : null}
               </div>
             ) : null}
             {outputRequest ? (
-              <div className="output-settings-summary" aria-label="Gespeicherte Videoeinstellungen">
+              <div className="output-settings-summary" aria-label="Gespeicherte Einstellungen">
                 <span>Pipeline <strong>{PIPELINES.find((item) => item.id === outputRequest.mode)?.shortLabel}</strong></span>
+                {isLegacyDfrRequest(outputRequest) ? <span>Status <strong>Legacy · nicht ausführbar</strong></span> : null}
+                <span>Modell <strong>LTX-{outputRequest.models.generation} · {outputRequest.models.layout === "split" ? "Split" : "Monolith Legacy"}</strong></span>
                 <span>Seed <strong>{outputRequest.seed}</strong></span>
                 <span>Format <strong>{outputRequest.mode === "text-to-audio"
                   ? "WAV · PCM 16 Bit"
@@ -397,8 +551,15 @@ export function RunPanel({
                 <span>{outputRequest.mode === "text-to-audio" ? "Dauerbasis" : "Frames"} <strong>{
                   outputRequest.mode === "lipdub"
                     ? "aus Referenzvideo"
-                    : `${outputRequest.numFrames} @ ${outputRequest.frameRate} fps`
+                    : outputDfrGeometry
+                      ? `${outputDfrGeometry.numFrames} @ ${outputDfrGeometry.frameRate} fps (Endausgabe)`
+                      : outputEffectiveFrames !== null && outputEffectiveFrameRate !== null
+                        ? `${outputEffectiveFrames} @ ${outputEffectiveFrameRate} fps${outputA2vFrameBasis ? ` (${outputA2vFrameBasis})` : ""}`
+                        : `${outputRequest.numFrames} @ ${outputRequest.frameRate} fps`
                 }</strong></span>
+                {outputA2vTimeline?.derivesFramesFromAudio ? (
+                    <span>Expliziter Framewert <strong>{outputRequest.numFrames} ungenutzt · Audio-Maximaldauer steuert</strong></span>
+                  ) : null}
                 <span>Schritte <strong>{
                   outputRequest.mode === "lipdub"
                     ? "fest (8 + 3)"
@@ -413,11 +574,20 @@ export function RunPanel({
                 <span>Quantisierung <strong>{outputRequest.quantization.mode}</strong></span>
               </div>
             ) : null}
+            {outputRequest?.promptParts.dialogue.trim() ? (
+              <div className="output-dialogue-summary" role="note" aria-label="Gesprochener Text der Ausgabe">
+                <strong>Gesprochener Text</strong>
+                <p>{outputRequest.promptParts.dialogue}</p>
+              </div>
+            ) : null}
             <div className="output-library__actions">
               <button
                 type="button"
                 className="button output-library__load"
-                disabled={!selectedOutput?.settingsAvailable}
+                disabled={!selectedOutput?.settingsAvailable || selectedOutputReadOnly}
+                title={selectedOutputReadOnly
+                  ? "Historischer Altbestand ist ungeprüft und darf nicht in den Editor übernommen werden."
+                  : undefined}
                 onClick={() => {
                   if (selectedOutput) onLoadOutputSettings(selectedOutput);
                 }}
@@ -429,7 +599,7 @@ export function RunPanel({
                 className={`icon-button ${selectedOutput && comparisonNames.includes(selectedOutput.name) ? "is-active" : ""}`}
                 title="Ausgabe zum Vergleich hinzufügen"
                 aria-pressed={Boolean(selectedOutput && comparisonNames.includes(selectedOutput.name))}
-                disabled={!selectedOutput || isAudioOutputName(selectedOutput.name)}
+                disabled={!selectedOutput || selectedOutputReadOnly || isAudioOutputName(selectedOutput.name)}
                 onClick={() => {
                   if (selectedOutput) onToggleCompare(selectedOutput);
                 }}
@@ -439,8 +609,10 @@ export function RunPanel({
               <button
                 type="button"
                 className="icon-button icon-button--danger"
-                title="Ausgabe und zugehörige Daten löschen"
-                disabled={!selectedOutput || deletingOutputName === selectedOutput.name}
+                title={selectedOutputReadOnly
+                  ? "Historischer Altbestand ist nur lesbar und kann hier nicht gelöscht werden."
+                  : "Ausgabe und zugehörige Daten löschen"}
+                disabled={!selectedOutput || selectedOutputReadOnly || deletingOutputName === selectedOutput.name}
                 onClick={() => {
                   if (selectedOutput) void onDeleteOutput(selectedOutput);
                 }}
@@ -524,7 +696,7 @@ export function RunPanel({
               request={request}
               requestValid={requestValid}
               jobs={jobs}
-              selectedOutput={selectedOutput}
+              selectedOutput={selectedOutputReadOnly ? null : selectedOutput}
               onJobLaunched={onProjectJobLaunched}
               onLoadRequest={onLoadProjectRequest}
             />
@@ -550,7 +722,7 @@ export function RunPanel({
                 requestValid={requestValid}
                 experiments={experiments}
                 jobs={jobs}
-                outputs={outputs}
+                outputs={outputs.filter((output) => output.trustStatus !== "legacy-unattested")}
                 health={health}
                 onCreate={onCreateExperiment}
                 onFreeze={onFreezeExperiment}
@@ -575,7 +747,7 @@ export function RunPanel({
       <section className={`run-monitor ${activeJob ? "is-live" : ""}`} aria-label="Laufmonitor">
         <div className="run-panel__heading">
           <h2>{activeJob ? <LoaderCircle className="spin" size={16} /> : <ScrollText size={16} />} Laufmonitor</h2>
-          <span>{monitorJob ? statusLabels[monitorJob.status] : "Leer"}</span>
+          <span>{monitorJob ? visibleJobStatus(monitorJob) : "Leer"}</span>
         </div>
         {monitorJob ? (
           <>
@@ -584,9 +756,13 @@ export function RunPanel({
               <span>{formatRuntime(monitorRuntime)}</span>
             </div>
             <div className="run-monitor__metrics">
-              <span>Status <strong>{statusLabels[monitorJob.status]}</strong></span>
+              <span>Status <strong>{visibleJobStatus(monitorJob)}</strong></span>
               <span>Fortschritt <strong>{monitorJob.progress === null ? "Nicht gemeldet" : `${Math.round(monitorJob.progress)}%`}</strong></span>
-              <span>Pipeline <strong>{PIPELINES.find((item) => item.id === monitorJob.mode)?.shortLabel}</strong></span>
+              {monitorJob.executionClass === "dgx" ? (
+                <span>Pipeline <strong>{jobLaneLabel(monitorJob)}</strong></span>
+              ) : (
+                <span>Ausführung <strong>{executionClassLabel(monitorJob)}</strong></span>
+              )}
               <span>Seed <strong>{monitorJob.request.seed}</strong></span>
             </div>
             {monitorJob.thermalProfile ? (
@@ -596,10 +772,13 @@ export function RunPanel({
                 <span>Aktuell {monitorJob.thermalProfile.currentC === null ? "beendet" : `${monitorJob.thermalProfile.currentC.toFixed(1)} °C`}</span>
                 <span>Peak {monitorJob.thermalProfile.peakC.toFixed(1)} °C</span>
                 <span>Pause ab {monitorJob.thermalProfile.pauseAtC.toFixed(0)} °C</span>
+                <span>Fortsetzen bei/unter {monitorJob.thermalProfile.resumeBelowC.toFixed(0)} °C</span>
               </div>
             ) : null}
             {monitorJob.cancelledBy === "studio" ? (
-              <p className="run-monitor__notice">Dieser Lauf wurde manuell über die Studio-Abbruchfunktion beendet.</p>
+              <p className="run-monitor__notice">{cancellationIsSettling(monitorJob)
+                ? "Abbruch läuft: Prozess, Container und DGX-Zustand werden noch bestätigt."
+                : "Dieser Lauf wurde manuell über die Studio-Abbruchfunktion beendet."}</p>
             ) : null}
             <p className="run-monitor__latest">{monitorJob.logs.at(-1) ?? "Noch keine Logausgabe"}</p>
           </>
@@ -609,33 +788,48 @@ export function RunPanel({
       </section>
 
       <section className="run-summary">
+        {monitorJob ? (
+          <div className="run-summary__line">
+            <span>Ausführung</span>
+            <strong>{executionClassLabel(monitorJob)}</strong>
+          </div>
+        ) : null}
         <div className="run-summary__line">
-          <span>Pipeline</span>
-          <strong>{pipeline.shortLabel}</strong>
+          <span>{monitorJob && !showDgxForecast ? "Request-Typ" : "Pipeline"}</span>
+          <strong>{monitorJob ? PIPELINES.find((item) => item.id === monitorJob.mode)?.shortLabel : pipeline.shortLabel}</strong>
         </div>
-        <div className="run-summary__line">
-          <span>Gemma-Verbesserung</span>
-          <strong>{request.enhancePrompt ? "Aktiv" : "Aus"}</strong>
-        </div>
-        <div className="run-summary__line">
-          <span>Queue</span>
-          <strong>{health?.queueDepth ?? 0}</strong>
-        </div>
-        <div className="run-summary__line">
-          <span>RAM-Prognose</span>
-          <strong>{estimate.memoryGiB} GiB</strong>
-        </div>
-        <div className="run-summary__line">
-          <span>Ausgabedatei</span>
-          <strong>ca. {estimate.outputGiB.toFixed(2)} GiB</strong>
-        </div>
-        <div className="run-summary__line">
-          <span>ETA</span>
-          <strong>{etaLabel}</strong>
-        </div>
+        {showDgxForecast ? (
+          <>
+            <div className="run-summary__line">
+              <span>Gemma-Verbesserung</span>
+              <strong>{(monitorJob?.request ?? request).enhancePrompt ? "Aktiv" : "Aus"}</strong>
+            </div>
+            <div className="run-summary__line">
+              <span>Queue</span>
+              <strong>{health?.queueDepth ?? 0}</strong>
+            </div>
+            <div className="run-summary__line">
+              <span>RAM-Prognose</span>
+              <strong>{estimate.memoryGiB} GiB</strong>
+            </div>
+            <div className="run-summary__line">
+              <span>Ausgabedatei</span>
+              <strong>ca. {estimate.outputGiB.toFixed(2)} GiB</strong>
+            </div>
+            <div className="run-summary__line">
+              <span>ETA</span>
+              <strong>{etaLabel}</strong>
+            </div>
+          </>
+        ) : (
+          <div className="run-summary__line">
+            <span>Laufzeit</span>
+            <strong>{formatRuntime(monitorRuntime)}</strong>
+          </div>
+        )}
       </section>
 
-      {memoryShortfall ? (
+      {showDgxForecast && memoryShortfall ? (
         <p className="resource-warning">
           Der aktuelle RAM liegt unter dem konservativen Planwert von {requiredStartMemoryGiB} GiB.
           Der Auftrag wird trotzdem eingereiht; der DGX-Orchestrator entscheidet den tatsächlichen Start.
@@ -666,8 +860,11 @@ export function RunPanel({
           <button
             type="button"
             className={`icon-button ${selectedJob.favorite ? "is-active" : ""}`}
-            title={selectedJob.favorite ? "Aus Favoriten entfernen" : "Als Favorit markieren"}
+            title={selectedJobReadOnly
+              ? "Historischer Altbestand ist nur lesbar."
+              : selectedJob.favorite ? "Aus Favoriten entfernen" : "Als Favorit markieren"}
             aria-pressed={selectedJob.favorite}
+            disabled={selectedJobReadOnly}
             onClick={() => onFavorite(selectedJob)}
           >
             <Star size={17} fill={selectedJob.favorite ? "currentColor" : "none"} />
@@ -675,7 +872,10 @@ export function RunPanel({
           <button
             type="button"
             className="button job-action-primary"
-            title="Alle Einstellungen dieses Jobs in den Editor laden"
+            title={selectedJobReadOnly
+              ? "Historischer Altbestand ist ungeprüft und darf nicht in den Editor übernommen werden."
+              : "Alle Einstellungen dieses Jobs in den Editor laden"}
+            disabled={selectedJobReadOnly}
             onClick={() => onLoadSettings(selectedJob)}
           >
             <SlidersHorizontal size={16} /> Einstellungen übernehmen
@@ -683,8 +883,11 @@ export function RunPanel({
           <button
             type="button"
             className="icon-button"
-            title="Mit denselben Einstellungen und demselben Seed neu starten"
-            disabled={["queued", "running", "paused"].includes(selectedJob.status)}
+            title={selectedJobReadOnly ? "Historischer Altbestand ist nur lesbar."
+              : selectedJobQualificationHold?.reason
+              ?? "Mit denselben Einstellungen und demselben Seed neu starten"}
+            disabled={selectedJobReadOnly || Boolean(selectedJobQualificationHold)
+              || ["queued", "running", "paused"].includes(selectedJob.status)}
             onClick={() => onRerun(selectedJob, "exact")}
           >
             <Repeat2 size={17} />
@@ -692,8 +895,11 @@ export function RunPanel({
           <button
             type="button"
             className="icon-button"
-            title="Variante mit neuem konkreten Seed starten"
-            disabled={["queued", "running", "paused"].includes(selectedJob.status)}
+            title={selectedJobReadOnly ? "Historischer Altbestand ist nur lesbar."
+              : selectedJobQualificationHold?.reason
+              ?? "Variante mit neuem konkreten Seed starten"}
+            disabled={selectedJobReadOnly || Boolean(selectedJobQualificationHold)
+              || ["queued", "running", "paused"].includes(selectedJob.status)}
             onClick={() => onRerun(selectedJob, "random-seed")}
           >
             <Dices size={17} />
@@ -702,7 +908,29 @@ export function RunPanel({
         </div>
       ) : null}
 
-      {comparisonOutputs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
+      {comparisonOutputs.length !== 2 && selectedOutput && isT2aAudioQualityCandidate(selectedOutput) ? (
+        <LazyPanelBoundary label="Audio-Qualitätsanalyse">
+          <Suspense fallback={<LazyPanelLoading label="Audio-Qualitätsanalyse" />}>
+            <AudioQualityPanel
+              key={`audio-${selectedOutput.name}-${selectedOutput.revisionToken}-${selectedOutput.audioAnalysis?.analysisId ?? "none"}-${selectedOutput.audioAnalysis?.status ?? "idle"}`}
+              outputName={selectedOutput.name}
+              analysis={selectedOutput.audioAnalysis}
+              capability={health?.evaluators.t2aAudio ?? null}
+              onStart={(force) => onStartT2aAnalysis(selectedOutput, force)}
+              onCancel={(analysisId) => onCancelT2aAnalysis(selectedOutput, analysisId)}
+            />
+          </Suspense>
+        </LazyPanelBoundary>
+      ) : comparisonOutputs.length !== 2 && selectedOutput && isAudioOutputName(selectedOutput.name) ? (
+        <section className="objective-analysis" role="note" aria-label="Audio-QA nicht verfügbar">
+          <div className="objective-analysis__heading">
+            <div>
+              <h2>Audio-Qualitätsanalyse</h2>
+              <p>Nur für neue, autorisierte Text-zu-Audio-Läufe verfügbar.</p>
+            </div>
+          </div>
+        </section>
+      ) : comparisonOutputs.length !== 2 && selectedOutput && isSpeechQualityCandidate(selectedOutput) ? (
         <LazyPanelBoundary label="Qualitätsanalyse">
           <Suspense fallback={<LazyPanelLoading label="Qualitätsanalyse" />}>
             <QualityScorecard
@@ -712,7 +940,7 @@ export function RunPanel({
               onSave={onSaveQualityReview}
             />
             <ObjectiveAnalysisPanel
-              key={`objective-${selectedOutput.name}-${selectedOutput.fileId}-${selectedOutput.changedAt}`}
+              key={`objective-${selectedOutput.name}-${selectedOutput.revisionToken}`}
               output={selectedOutput}
               onStart={onStartAnalysis}
               onCancel={onCancelAnalysis}
@@ -720,6 +948,13 @@ export function RunPanel({
             />
           </Suspense>
         </LazyPanelBoundary>
+      ) : null}
+
+      {qualificationHold ? (
+        <div className="run-errors" role="alert">
+          <ShieldCheck size={17} />
+          <div><span><strong>DFR Qualification-HOLD:</strong> {qualificationHold.reason}</span></div>
+        </div>
       ) : null}
 
       {errors.length > 0 ? (
@@ -752,7 +987,13 @@ export function RunPanel({
         </div>
       ) : null}
 
-      <button type="button" className="run-button" onClick={onRun} disabled={runBlocked}>
+      <button
+        type="button"
+        className="run-button"
+        onClick={onRun}
+        disabled={runBlocked}
+        title={qualificationHold?.reason}
+      >
         {submitting ? <LoaderCircle className="spin" size={19} /> : <Play size={19} fill="currentColor" />}
         {runLabel}
       </button>
@@ -770,7 +1011,10 @@ export function RunPanel({
                 <span className={`job-status job-status--${job.status}`}><StatusIcon status={job.status} /></span>
                   <span className="job-row__main">
                     <strong>{job.outputName}</strong>
-                    <small>{statusLabels[job.status]} · {PIPELINES.find((item) => item.id === job.mode)?.shortLabel} · Seed {job.request.seed}</small>
+                    <small>{visibleJobStatus(job)} · {jobLaneLabel(job)} · Seed {job.request.seed}
+                      {isLegacyDfrRequest(job.request)
+                        ? " · DFR Legacy · nicht ausführbar"
+                        : qualificationHoldForRequest(job.request) ? " · DFR Qualification-HOLD" : ""}</small>
                 </span>
                 <span className="job-row__meta">
                   {job.favorite ? <Star className="job-row__favorite" size={13} fill="currentColor" /> : null}
@@ -780,21 +1024,36 @@ export function RunPanel({
                   {job.progress !== null ? <span className="job-row__progress">{Math.round(job.progress)}%</span> : null}
                 </span>
               </button>
-              {["queued", "running", "paused"].includes(job.status) ? (
+              {["queued", "running", "paused"].includes(job.status)
+                || cancellingJobIds.has(job.id)
+                || cancellationIsSettling(job) ? (
                 <button
                   type="button"
                   className="job-row__cancel"
-                  title="Job abbrechen"
+                  title={cancellingJobIds.has(job.id)
+                    || cancellationIsSettling(job)
+                    ? "Job wird abgebrochen"
+                    : "Job abbrechen"}
+                  disabled={cancellingJobIds.has(job.id)
+                    || cancellationIsSettling(job)}
                   onClick={() => onCancel(job.id)}
                 >
-                  <CircleStop size={15} />
+                  {cancellingJobIds.has(job.id)
+                    || cancellationIsSettling(job)
+                    ? <LoaderCircle className="spin" size={15} />
+                    : <CircleStop size={15} />}
                 </button>
               ) : (
                 <button
                   type="button"
                   className="job-row__delete"
-                  title="Job aus Verlauf löschen"
-                  disabled={deletingJobId === job.id}
+                  title={job.historyStatus === "legacy-unattested"
+                    || outputForJob(job)?.trustStatus === "legacy-unattested"
+                    ? "Historischer Altbestand ist nur lesbar."
+                    : "Job aus Verlauf löschen"}
+                  disabled={deletingJobId === job.id
+                    || job.historyStatus === "legacy-unattested"
+                    || outputForJob(job)?.trustStatus === "legacy-unattested"}
                   onClick={() => void onDeleteJob(job)}
                 >
                   {deletingJobId === job.id
@@ -811,22 +1070,66 @@ export function RunPanel({
         <details className="run-details" open>
           <summary><ScrollText size={16} /> Jobdetails</summary>
           {selectedJob.error ? <p className="job-error">{selectedJob.error}</p> : null}
+          {isLegacyDfrRequest(selectedJob.request) ? (
+            <p className="job-cancelled">Historischer DFR-Altbestand · nur lesbar · semantische Neuausführung gesperrt.</p>
+          ) : null}
+          {selectedJobReadOnly && !isLegacyDfrRequest(selectedJob.request) ? (
+            <p className="job-cancelled">Historischer Altbestand · ungeprüft · nur lesbar.</p>
+          ) : null}
+          {selectedJobQualificationHold && !isLegacyDfrRequest(selectedJob.request) ? (
+            <p className="job-cancelled">DFR Qualification-HOLD · erneute Ausführung gesperrt. {selectedJobQualificationHold.reason}</p>
+          ) : null}
           {selectedJob.status === "completed" && !outputForJob(selectedJob) ? (
             <p className="job-cancelled">Die Ausgabedatei wurde gelöscht; der Jobverlauf bleibt erhalten.</p>
           ) : null}
           {selectedJob.cancelledBy === "studio" ? (
-            <p className="job-cancelled">Manuell über die Studio-Abbruchfunktion beendet.</p>
+            <p className="job-cancelled">{cancellationIsSettling(selectedJob)
+              ? "Abbruch läuft: Prozess, Container und DGX-Zustand werden noch bestätigt."
+              : "Manuell über die Studio-Abbruchfunktion beendet."}</p>
           ) : null}
           {selectedJob.variantOf ? <p className="job-lineage">Variante von {selectedJob.variantOf.slice(0, 8)}</p> : null}
           <dl className="job-facts">
-            <div><dt>Status</dt><dd>{statusLabels[selectedJob.status]}</dd></div>
+            <div><dt>Status</dt><dd>{visibleJobStatus(selectedJob)}</dd></div>
             <div><dt>Erstellt</dt><dd>{new Date(selectedJob.createdAt).toLocaleString("de-AT")}</dd></div>
             <div><dt>Laufzeit</dt><dd>{formatRuntime(selectedJob.runtimeMs)}</dd></div>
-            <div><dt>DGX-Job</dt><dd>{selectedJob.dgxJobId ?? "Noch nicht eingereicht"}</dd></div>
+            <div><dt>Ausführung</dt><dd>{executionClassLabel(selectedJob)}</dd></div>
+            <div><dt>Entschieden</dt><dd>{selectedJob.executionDecisionSummary
+              ? new Date(selectedJob.executionDecisionSummary.decidedAt).toLocaleString("de-AT")
+              : "Legacy – keine öffentliche Decision-Zusammenfassung"}</dd></div>
+            <div><dt>DGX-Job</dt><dd>{dgxJobLabel(selectedJob)}</dd></div>
             <div><dt>Logs</dt><dd>{selectedJob.logs.length} Zeilen</dd></div>
           </dl>
+          {selectedJob.executionDecisionSummary ? (
+            <details className="job-command">
+              <summary><ShieldCheck size={14} /> Ausführungsentscheidung</summary>
+              <p>{selectedJob.executionDecisionSummary.reason}</p>
+              <pre>{selectedJob.executionDecisionSummary.executionClass === "cpu-only"
+                ? selectedJob.executionDecisionSummary.cpuReuse!.operationKind === "ffmpeg-audio-retime"
+                  ? [
+                      `Quelle: ${selectedJob.executionDecisionSummary.cpuReuse!.baselineLabel}`,
+                      `Quelltonversatz: ${selectedJob.executionDecisionSummary.cpuReuse!.sourceProgramAudioDelayMs} ms`,
+                      `Angewendete Korrektur: ${selectedJob.executionDecisionSummary.cpuReuse!.appliedDeltaMs} ms`,
+                      `Operationsstatus: ${selectedJob.executionDecisionSummary.cpuReuse!.operationState}`,
+                      `Verifikation: ${selectedJob.executionDecisionSummary.verificationStatus}`,
+                    ].join("\n")
+                  : [
+                      `Quelle: ${selectedJob.executionDecisionSummary.cpuReuse!.baselineLabel}`,
+                      "Operation: gepaarten privaten Raw-Mux-Kandidaten atomar publizieren",
+                      `Operationsstatus: ${selectedJob.executionDecisionSummary.cpuReuse!.operationState}`,
+                      `Verifikation: ${selectedJob.executionDecisionSummary.verificationStatus}`,
+                    ].join("\n")
+                : [
+                    `Ausführungsklasse: ${selectedJob.executionDecisionSummary.executionClass}`,
+                    `Verifikation: ${selectedJob.executionDecisionSummary.verificationStatus}`,
+                  ].join("\n")}</pre>
+            </details>
+          ) : null}
           <details className="job-command">
-            <summary><Terminal size={14} /> Vollständiges Kommando</summary>
+            <summary><Terminal size={14} /> {selectedJob.executionClass === "cpu-only"
+              ? selectedJob.executionDecisionSummary?.cpuReuse?.operationKind === "paired-artifact-promotion"
+                ? "Renderplan (bei Paar-Promotion nicht ausgeführt)"
+                : "Renderplan (bei Audio-Retime nicht ausgeführt)"
+              : "Vollständiges Kommando"}</summary>
             <pre>{selectedJob.command}</pre>
           </details>
           <pre>{selectedJob.logs.join("\n") || "Keine Logausgabe"}</pre>

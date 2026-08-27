@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -12,9 +13,12 @@ import pytest
 from ltx_trainer.av_eval import CalibrationError, build_calibration_gate_report
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-CATALOG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v1.json"
-DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v1.json"
-SURFACE_PATH = REPOSITORY_ROOT / "apps" / "ltx-studio" / "release" / "candidate-release-surface.v1.json"
+CATALOG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v2.json"
+LEGACY_CATALOG_PATH = (
+    REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v1.json"
+)
+DESIGN_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "design-pilot.v2.json"
+LEGACY_CATALOG_FILE_SHA256 = "0be11f33290355134944dd502887a893a8e16a9b94424e7df1ab487e7b2a99d8"
 
 
 def _draft() -> dict[str, object]:
@@ -41,13 +45,42 @@ def _ready() -> dict[str, object]:
 
 
 def test_checked_in_calibration_catalog_is_an_explicit_hold() -> None:
-    report = build_calibration_gate_report(_draft())
+    catalog = _draft()
+    report = build_calibration_gate_report(catalog)
 
     assert report["status"] == "hold"
-    assert len(report["required_metric_ids"]) == 127
+    assert len(catalog["gates"]) == 44
+    assert len(report["required_metric_ids"]) == 170
+    assert "threshold-missing:av-brier-score-worst-stratum" in report["blockers"]
+    assert "threshold-missing:av-calibration-ece-worst-stratum" in report["blockers"]
     assert "threshold-missing:sharpness-relative-face-ci-lower" in report["blockers"]
     assert "fingerprint-missing:asr-model" in report["blockers"]
     assert "design-digest-missing" in report["blockers"]
+
+
+def test_legacy_catalog_is_byte_stable_and_keeps_its_127_metric_scope() -> None:
+    legacy = json.loads(LEGACY_CATALOG_PATH.read_text(encoding="utf-8"))
+    report = build_calibration_gate_report(legacy)
+
+    assert hashlib.sha256(LEGACY_CATALOG_PATH.read_bytes()).hexdigest() == LEGACY_CATALOG_FILE_SHA256
+    assert legacy["schema_version"] == "ltx-av-eval-calibration-gates.v1"
+    assert len(legacy["gates"]) == 37
+    assert len(legacy["vbench_metric_ids"]) == 90
+    assert report["schema_version"] == "ltx-av-eval-calibration-gate-report.v1"
+    assert len(report["required_metric_ids"]) == 127
+
+
+def test_legacy_catalog_rejects_a_v2_only_gate_injection() -> None:
+    legacy = json.loads(LEGACY_CATALOG_PATH.read_text(encoding="utf-8"))
+    current = _draft()
+    v2_only_gate = next(
+        gate for gate in current["gates"] if gate["metric_id"] == "av-correspondence-far-ci-upper"
+    )
+    legacy["gates"].append(copy.deepcopy(v2_only_gate))
+    legacy["gates"].sort(key=lambda gate: gate["metric_id"])
+
+    with pytest.raises(CalibrationError, match="unknown D1 metric"):
+        build_calibration_gate_report(legacy)
 
 
 def test_complete_catalog_freezes_all_required_metrics_deterministically() -> None:
@@ -64,22 +97,14 @@ def test_complete_catalog_freezes_all_required_metrics_deterministically() -> No
     assert first["vbench_decision_digest"] == second["vbench_decision_digest"]
 
 
-def test_vbench_catalog_exactly_covers_every_visual_candidate_claim() -> None:
+def test_vbench_calibration_metric_ids_exactly_match_the_frozen_design_catalog() -> None:
     design = json.loads(DESIGN_PATH.read_text(encoding="utf-8"))
-    surface = json.loads(SURFACE_PATH.read_text(encoding="utf-8"))
-    expected_claims = {
-        entry["claimId"]
-        for entry in surface["entries"]
-        if entry["targetStatus"] == "candidate" and "vbench-i2v" in entry["applicableGates"]
-    }
     gates = design["vbench_gate_catalog"]["gates"]
-    actual_claims = {gate["claim_id"] for gate in gates}
     actual_metric_ids = {
         f"vbench.{gate['claim_id']}.{gate['dimension']}"
         for gate in gates
     }
 
-    assert actual_claims == expected_claims
     assert actual_metric_ids == set(_draft()["vbench_metric_ids"])
 
 

@@ -12,14 +12,14 @@ import pytest
 from ltx_trainer.av_eval import D1BundleError, build_fixed_d1_report
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-CATALOG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v1.json"
+CATALOG_PATH = REPOSITORY_ROOT / "packages" / "ltx-trainer" / "configs" / "av_eval" / "calibration-gates.v2.json"
 BOOTSTRAP = {"replicates": 10000, "confidence_level": 0.95, "seed": 11082026}
 SCHEMAS = {
     "artifact": "ltx-av-eval-artifact-measurements.v1",
     "asr": "ltx-av-eval-asr-measurements.v1",
     "content": "ltx-av-eval-content-measurements.v1",
     "identity": "ltx-av-eval-identity-measurements.v1",
-    "offset": "ltx-av-eval-offset-measurements.v1",
+    "offset": "ltx-av-eval-offset-measurements.v2",
     "sharpness": "ltx-av-eval-sharpness-measurements.v1",
 }
 PREFIXES = {
@@ -115,8 +115,28 @@ def _reports(catalog: dict[str, object]) -> dict[str, dict[str, object]]:
     offset = {
         **_common(catalog, "offset"),
         "offset_evaluator_digest": "d" * 64,
+        "control_deck_digest": "0" * 64,
+        "dataset_manifest_digest": "5" * 64,
+        "design_digest": "a" * 64,
+        "design_report_digest": "6" * 64,
+        "fit_split_manifest_digest": "7" * 64,
+        "evaluation_split_manifest_digest": "8" * 64,
+        "output_split_manifest_digest": "9" * 64,
         "calibration_policy_digest": "8" * 64,
+        "operating_point_digest": "7" * 64,
+        "power_report_digest": "6" * 64,
+        "strata_quotas_digest": "3" * 64,
+        "required_independent_units": 40,
+        "raw_score_threshold": 0.5,
         "abstention_policy_digest": "9" * 64,
+        "bootstrap_rng": "numpy-pcg64-derived-sha256-seeds.v1",
+        "binomial_interval": "component-clopper-pearson-95-bonferroni-strata.v2",
+        "uncertainty_method": "component-clopper-pearson-plus-cluster-bootstrap-simultaneous-strata.v2",
+        "component_weighting": "equal-total-weight-per-transitive-component.v1",
+        "calibration_abstention_semantics": (
+            "conditional-on-non-abstained-with-separate-abstention-gates.v1"
+        ),
+        "grid_replicates_per_cell": 1,
         "ece_bins": 10,
         "calibration_cases": 120,
         "output_cases": 120,
@@ -146,19 +166,21 @@ def _reports(catalog: dict[str, object]) -> dict[str, dict[str, object]]:
 
 def _bundle(catalog: dict[str, object]) -> dict[str, object]:
     return {
-        "schema_version": "ltx-av-eval-fixed-d1-bundle.v1",
+        "schema_version": "ltx-av-eval-fixed-d1-bundle.v2",
         "bundle_id": "fixed-d1-candidate-01",
         "dataset_digest": "1" * 64,
         "preregistration_digest": "b" * 64,
         "release_digest": "2" * 64,
         "design_digest": "a" * 64,
+        "surface_digest": "4" * 64,
+        "candidate_surface_binding_digest": "5" * 64,
         "strata_plan_digest": "3" * 64,
         "bootstrap": BOOTSTRAP,
         "reports": _reports(catalog),
     }
 
 
-def test_fixed_d1_bundle_is_deterministic_and_covers_all_37_gates() -> None:
+def test_fixed_d1_bundle_is_deterministic_and_covers_all_44_gates() -> None:
     catalog = _catalog()
     bundle = _bundle(catalog)
     first = build_fixed_d1_report(bundle, calibration_catalog=catalog)
@@ -166,8 +188,12 @@ def test_fixed_d1_bundle_is_deterministic_and_covers_all_37_gates() -> None:
 
     assert first == second
     assert first["verdict"] == "pass"
-    assert len(first["metrics"]) == 37
+    assert len(first["metrics"]) == 44
     assert list(first["source_report_digests"]) == sorted(SCHEMAS)
+    assert first["offset_contract"]["design_digest"] == bundle["design_digest"]
+    assert first["offset_contract"]["output_split_manifest_digest"] == "9" * 64
+    assert first["offset_contract"]["abstention_policy_digest"] == "9" * 64
+    assert first["offset_contract"]["bootstrap"] == BOOTSTRAP
     assert all(metric["basis_evidence_sha256"] == "e" * 64 for metric in first["metrics"])
 
 
@@ -215,6 +241,19 @@ def test_fixed_d1_bundle_rejects_missing_metrics_and_bootstrap_drift() -> None:
         build_fixed_d1_report(drift, calibration_catalog=catalog)
 
 
+def test_fixed_d1_bundle_rejects_offset_v2_contract_drift() -> None:
+    catalog = _catalog()
+    design_drift = _bundle(catalog)
+    design_drift["reports"]["offset"]["design_digest"] = "f" * 64
+    with pytest.raises(D1BundleError, match="offset report design_digest mismatch"):
+        build_fixed_d1_report(design_drift, calibration_catalog=catalog)
+
+    semantics_drift = _bundle(catalog)
+    semantics_drift["reports"]["offset"]["calibration_abstention_semantics"] = "implicit-zero.v0"
+    with pytest.raises(D1BundleError, match="uncertainty or abstention semantics"):
+        build_fixed_d1_report(semantics_drift, calibration_catalog=catalog)
+
+
 def test_fixed_d1_cli_emits_the_decided_bundle(tmp_path: Path) -> None:
     catalog = _catalog()
     bundle_path = tmp_path / "bundle.json"
@@ -242,5 +281,5 @@ def test_fixed_d1_cli_emits_the_decided_bundle(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     report = json.loads(result.stdout)
-    assert report["schema_version"] == "ltx-av-eval-fixed-d1-report.v1"
+    assert report["schema_version"] == "ltx-av-eval-fixed-d1-report.v2"
     assert report["verdict"] == "pass"

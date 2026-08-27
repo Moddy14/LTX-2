@@ -1,25 +1,26 @@
-import type { OutputAnalysisRecord } from "../shared/objectiveQuality.js";
-import type { StudioOutput } from "../shared/outputs.js";
+import type {
+  PublicOutputAnalysisRecord as OutputAnalysisRecord,
+  PublicStudioOutput as StudioOutput,
+} from "../shared/outputPublic.js";
+import type { T2aAudioPublicAnalysisRecord } from "../shared/t2aAudioPublic.js";
+
+type BrowserAnalysisRecord = OutputAnalysisRecord | T2aAudioPublicAnalysisRecord;
 
 function sameOutputRevision(left: StudioOutput, right: StudioOutput): boolean {
   return left.name === right.name
-    && left.sizeBytes === right.sizeBytes
-    && left.modifiedAt === right.modifiedAt
-    && left.changedAt === right.changedAt
-    && left.fileId === right.fileId
-    && left.jobId === right.jobId
+    && left.revisionToken === right.revisionToken
     && left.settingsAvailable === right.settingsAvailable;
 }
 
-function analysisStatusRank(status: OutputAnalysisRecord["status"]): number {
+function analysisStatusRank(status: BrowserAnalysisRecord["status"]): number {
   if (status === "queued") return 0;
   if (status === "running") return 1;
   return 2;
 }
 
 function isNewerAnalysis(
-  current: OutputAnalysisRecord,
-  incoming: OutputAnalysisRecord,
+  current: BrowserAnalysisRecord,
+  incoming: BrowserAnalysisRecord,
 ): boolean {
   if (incoming.attempt !== current.attempt) return incoming.attempt > current.attempt;
   if (incoming.analysisId !== current.analysisId) {
@@ -46,8 +47,13 @@ export function mergeOutputRefresh(
       if (previousUpdatedAt > nextUpdatedAt) merged = { ...merged, qualityReview: previous.qualityReview };
     }
     if (previous.analysis) {
-      if (!next.analysis || !isNewerAnalysis(previous.analysis, next.analysis)) {
+      if (next.analysis && !isNewerAnalysis(previous.analysis, next.analysis)) {
         merged = { ...merged, analysis: previous.analysis };
+      }
+    }
+    if (previous.audioAnalysis) {
+      if (next.audioAnalysis && !isNewerAnalysis(previous.audioAnalysis, next.audioAnalysis)) {
+        merged = { ...merged, audioAnalysis: previous.audioAnalysis };
       }
     }
     return merged;
@@ -59,11 +65,19 @@ export function mergeOutputAnalysis(
   analysis: OutputAnalysisRecord,
 ): StudioOutput {
   if (output.name !== analysis.outputName
-    || output.sizeBytes !== analysis.sizeBytes
     || output.jobId !== analysis.jobId
-    || Math.abs(Date.parse(output.modifiedAt) - analysis.modifiedAtMs) >= 1
-    || Math.abs(Date.parse(output.changedAt) - analysis.changedAtMs) >= 1
-    || output.fileId !== analysis.fileId) return output;
+    || output.revisionToken !== analysis.outputRevisionToken) return output;
   if (output.analysis && !isNewerAnalysis(output.analysis, analysis)) return output;
   return { ...output, analysis };
+}
+
+export function mergeT2aAudioAnalysis(
+  output: StudioOutput,
+  analysis: T2aAudioPublicAnalysisRecord,
+): StudioOutput {
+  if (output.name !== analysis.outputName
+    || output.jobId !== analysis.jobId
+    || output.revisionToken !== analysis.outputRevisionToken) return output;
+  if (output.audioAnalysis && !isNewerAnalysis(output.audioAnalysis, analysis)) return output;
+  return { ...output, audioAnalysis: analysis };
 }

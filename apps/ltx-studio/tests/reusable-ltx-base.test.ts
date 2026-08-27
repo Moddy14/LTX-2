@@ -1,5 +1,7 @@
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { appendFile, lstat, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { closeSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -8,14 +10,19 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   reusableLtxBaseFromSidecars,
+  exactBoundLipForcingOutputFromSidecars,
+  openVerifiedExecutionDescriptor,
+  pinExactLipForcingReuse,
   runProvenanceSharesLtxBase,
   type ReusableLtxBaseCandidate,
   type StudioJob,
 } from "../server/jobs.js";
+import { sha256Json } from "../server/experimentStore.js";
 import type { IdentityInputEvidence } from "../server/inputEvidence.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import { OutputLibrary } from "../server/outputs.js";
 import { validRequest } from "./fixtures.js";
+import { publishCompletedOutputFixture } from "./output-publication-fixture.js";
 
 const roots: string[] = [];
 
@@ -123,6 +130,10 @@ function completedBaseJob(outputName: string): StudioJob {
   };
 }
 
+function publishBaseJob(root: string, job: StudioJob): void {
+  publishCompletedOutputFixture(root, job);
+}
+
 function sidecarCandidate(): ReusableLtxBaseCandidate {
   const request = validRequest();
   request.outputName = "base.mp4";
@@ -156,6 +167,7 @@ describe("OutputLibrary.reusableLtxBaseCandidates", () => {
     const library = new OutputLibrary(root);
     const job = completedBaseJob(outputName);
 
+    publishBaseJob(root, job);
     library.recordCompleted([job]);
     const candidates = library.reusableLtxBaseCandidates();
 
@@ -175,7 +187,9 @@ describe("OutputLibrary.reusableLtxBaseCandidates", () => {
     const outputName = "base.mp4";
     await writeFile(join(root, outputName), "video");
     const library = new OutputLibrary(root);
-    library.recordCompleted([completedBaseJob(outputName)]);
+    const job = completedBaseJob(outputName);
+    publishBaseJob(root, job);
+    library.recordCompleted([job]);
 
     await appendFile(join(root, outputName), "tampered");
 
@@ -188,6 +202,7 @@ describe("OutputLibrary.reusableLtxBaseCandidates", () => {
     await writeFile(join(root, outputName), "video");
     const library = new OutputLibrary(root);
     const job = completedBaseJob(outputName);
+    publishBaseJob(root, job);
     job.identityEvidence = null;
     job.runProvenance = null;
 
@@ -253,6 +268,206 @@ describe("reusableLtxBaseFromSidecars", () => {
 
   it("rejects candidates whose file is not ready on disk", () => {
     expect(reusableLtxBaseFromSidecars([sidecarCandidate()], refinerTarget(), () => false)).toBeUndefined();
+  });
+});
+
+describe("exact protocol-bound LipForcing CPU reuse", () => {
+  function boundFixture() {
+    const exact = sidecarCandidate();
+    exact.request = validRequest("image-audio-to-video");
+    exact.request.outputName = exact.outputName;
+    exact.request.postprocess.lipForcing.enabled = true;
+    exact.request.postprocess.lipForcing.programAudioDelayMs = 0;
+    exact.analysisSidecarVerified = true;
+    const request = structuredClone(exact.request);
+    request.outputName = "candidate.mp4";
+    request.postprocess.lipForcing.programAudioDelayMs = 80;
+    const requestHash = (value: unknown) => sha256Json(value);
+    const target = {
+      id: REFINER_JOB_ID,
+      request,
+      identityEvidence: { ...verifiedIdentityEvidence(), status: "captured" as const, verifiedAt: null },
+      experiment: {
+        schemaVersion: "ltx-studio-experiment-run.v1" as const,
+        experimentId: "11111111-1111-4111-8111-111111111111",
+        protocolSha256: "1".repeat(64),
+        arm: "candidate" as const,
+        kind: "ablation" as const,
+        variableId: "lipforcing-program-audio-delay-ms",
+        changedRequestPaths: ["postprocess.lipForcing.programAudioDelayMs"],
+        baselineRequestSha256: requestHash(exact.request),
+        requestSha256: requestHash(request),
+        baselineJobId: exact.jobId,
+        baselineOutputName: exact.outputName,
+      },
+    };
+    return { exact, target };
+  }
+
+  it("selects only the exact frozen baseline and never a compatible foreign source", () => {
+    const { exact, target } = boundFixture();
+    const foreign = structuredClone(exact);
+    foreign.jobId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    foreign.outputName = "foreign.mp4";
+    foreign.outputPath = "/outputs/foreign.mp4";
+    foreign.request.outputName = foreign.outputName;
+
+    const selected = exactBoundLipForcingOutputFromSidecars([foreign, exact], target, () => true);
+
+    expect(selected).toMatchObject({ id: exact.jobId, outputName: exact.outputName });
+    expect(exactBoundLipForcingOutputFromSidecars([foreign], target, () => true)).toBeUndefined();
+    expect(exactBoundLipForcingOutputFromSidecars([exact, structuredClone(exact)], target, () => true))
+      .toBeUndefined();
+  });
+
+  it("rejects a source mutation after the private snapshot", async () => {
+    const root = await outputRoot();
+    const outputPath = join(root, "baseline.mp4");
+    const settingsSidecarPath = `${outputPath}.ltx-settings.json`;
+    const analysisSidecarPath = `${outputPath}.ltx-analysis.json`;
+    const stageRoot = join(root, "private-snapshot");
+    const { exact } = boundFixture();
+    exact.outputName = "baseline.mp4";
+    exact.outputPath = outputPath;
+    exact.request.outputName = exact.outputName;
+    const baselineRequestSha256 = sha256Json(exact.request);
+    await writeFile(outputPath, "immutable-video-with-audio");
+    await writeFile(settingsSidecarPath, JSON.stringify({
+      schemaVersion: "ltx-studio-output.v7",
+      outputName: exact.outputName,
+      jobId: exact.jobId,
+      request: exact.request,
+      runProvenance: exact.runProvenance,
+    }));
+    const storedSettings = JSON.parse(await readFile(settingsSidecarPath, "utf8"));
+    expect(sha256Json(storedSettings.request))
+      .toBe(baselineRequestSha256);
+    const outputStats = await lstat(outputPath);
+    await writeFile(analysisSidecarPath, JSON.stringify({
+      schemaVersion: "ltx-studio-output-analysis.v1",
+      outputName: exact.outputName,
+      sizeBytes: outputStats.size,
+      modifiedAtMs: outputStats.mtimeMs,
+      changedAtMs: outputStats.ctimeMs,
+      fileId: String(outputStats.ino),
+      jobId: exact.jobId,
+      analysisId: "22222222-2222-4222-8222-222222222222",
+      attempt: 1,
+      status: "completed",
+      progress: 100,
+      createdAt: "2026-08-25T10:00:00.000Z",
+      startedAt: "2026-08-25T10:00:01.000Z",
+      finishedAt: "2026-08-25T10:00:02.000Z",
+      updatedAt: "2026-08-25T10:00:02.000Z",
+      error: null,
+      result: null,
+    }));
+
+    await expect(pinExactLipForcingReuse({
+      id: exact.jobId,
+      outputName: exact.outputName,
+      outputPath,
+      description: "test baseline",
+      baselineRequestSha256,
+      sourceProvenanceFingerprint: exact.runProvenance.fingerprint,
+      settingsSidecarPath,
+      analysisSidecarPath,
+      programAudioDelayMs: 0,
+    }, stageRoot, async () => {
+      await appendFile(outputPath, "mutation");
+    })).rejects.toThrow("änderten sich während");
+  });
+
+  it("rejects private snapshot path replacement in the post-snapshot race window", async () => {
+    const root = await outputRoot();
+    const outputPath = join(root, "baseline.mp4");
+    const settingsSidecarPath = `${outputPath}.ltx-settings.json`;
+    const analysisSidecarPath = `${outputPath}.ltx-analysis.json`;
+    const stageRoot = join(root, "private-snapshot");
+    const { exact } = boundFixture();
+    exact.outputName = "baseline.mp4";
+    exact.outputPath = outputPath;
+    exact.request.outputName = exact.outputName;
+    const baselineRequestSha256 = sha256Json(exact.request);
+    await writeFile(outputPath, "immutable-video-with-audio");
+    await writeFile(settingsSidecarPath, JSON.stringify({
+      schemaVersion: "ltx-studio-output.v7",
+      outputName: exact.outputName,
+      jobId: exact.jobId,
+      request: exact.request,
+      runProvenance: exact.runProvenance,
+    }));
+    const outputStats = await lstat(outputPath);
+    await writeFile(analysisSidecarPath, JSON.stringify({
+      schemaVersion: "ltx-studio-output-analysis.v1",
+      outputName: exact.outputName,
+      sizeBytes: outputStats.size,
+      modifiedAtMs: outputStats.mtimeMs,
+      changedAtMs: outputStats.ctimeMs,
+      fileId: String(outputStats.ino),
+      jobId: exact.jobId,
+      analysisId: "22222222-2222-4222-8222-222222222222",
+      attempt: 1,
+      status: "completed",
+      progress: 100,
+      createdAt: "2026-08-25T10:00:00.000Z",
+      startedAt: "2026-08-25T10:00:01.000Z",
+      finishedAt: "2026-08-25T10:00:02.000Z",
+      updatedAt: "2026-08-25T10:00:02.000Z",
+      error: null,
+      result: null,
+    }));
+
+    await expect(pinExactLipForcingReuse({
+      id: exact.jobId,
+      outputName: exact.outputName,
+      outputPath,
+      description: "test baseline",
+      baselineRequestSha256,
+      sourceProvenanceFingerprint: exact.runProvenance.fingerprint,
+      settingsSidecarPath,
+      analysisSidecarPath,
+      programAudioDelayMs: 0,
+    }, stageRoot, async () => {
+      const snapshotPath = join(stageRoot, "reused-lipforcing-output.mp4");
+      await unlink(snapshotPath);
+      await writeFile(snapshotPath, "attacker-snapshot-replacement", { mode: 0o400 });
+    })).rejects.toThrow("Snapshot oder seine Sidecars änderten sich");
+  });
+
+  it("pins verified snapshot bytes across path replacement for the spawned child descriptor", async () => {
+    const root = await outputRoot();
+    const path = join(root, "spawn-input.mp4");
+    const original = "verified-original-snapshot";
+    await writeFile(path, original, { mode: 0o400 });
+    const stats = await lstat(path);
+    const revision = {
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      changedAtMs: stats.ctimeMs,
+      fileId: String(stats.ino),
+      deviceId: String(stats.dev),
+      mode: stats.mode,
+      uid: stats.uid,
+      gid: stats.gid,
+      nlink: 1 as const,
+    };
+    const sha256 = createHash("sha256").update(original).digest("hex");
+    const pinned = openVerifiedExecutionDescriptor(path, sha256, revision);
+    try {
+      await unlink(path);
+      await writeFile(path, "attacker-path-replacement", { mode: 0o400 });
+      expect(() => openVerifiedExecutionDescriptor(path, sha256, revision)).toThrow("andere Revision");
+      const child = spawnSync(
+        process.execPath,
+        ["-e", "process.stdout.write(require('fs').readFileSync('/proc/self/fd/3'))"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe", pinned.fd] },
+      );
+      expect(child.status).toBe(0);
+      expect(child.stdout).toBe(original);
+    } finally {
+      closeSync(pinned.fd);
+    }
   });
 });
 

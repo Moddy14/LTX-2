@@ -39,6 +39,8 @@ FFPROBE_SHA256 = "b98cabc72a01bf522a3eb85cae3cf7a8843817bfb0315ff14d8699cef5413f
 # This digest is updated only by reviewed code changes after the preregistration is
 # externally approved. The corresponding split seed is intentionally absent here.
 TRUSTED_PREREGISTRATION_SHA256 = "9e54bf253621576ecc3caf6617183e2d4ff89d521c04d6078e15374f79f80c6e"
+LEGACY_CALIBRATION_METHOD = "speaker-disjoint-isotonic.v1"
+OFFSET_CALIBRATION_METHOD = "speaker-disjoint-component-weighted-isotonic.v2"
 SPLITS = ("train", "tune", "design-pilot", "calibration", "test")
 OOD_KINDS = (
     "silence",
@@ -1347,7 +1349,12 @@ def _validate_comparator_arms(raw: object, status: str) -> None:
             raise GovernanceError("Comparator-Ausführungsstatus verletzt die vorab registrierte HOLD-Policy.")
 
 
-def _validate_holdout_commitments(raw: object, status: str) -> None:
+def _validate_holdout_commitments(
+    raw: object,
+    status: str,
+    *,
+    expected_calibration_method: str = LEGACY_CALIBRATION_METHOD,
+) -> None:
     if not isinstance(raw, dict):
         raise GovernanceError("holdout_commitments muss ein Objekt sein.")
     _expect_exact_keys(
@@ -1370,7 +1377,7 @@ def _validate_holdout_commitments(raw: object, status: str) -> None:
     _validate_generation_seeds(raw["generation_seeds"])
     if raw["selection_metric"] != "speaker-bootstrap-worst-stratum-product-gates.v1":
         raise GovernanceError("Unbekannte Auswahlmetrik.")
-    if raw["calibration_method"] != "speaker-disjoint-isotonic.v1":
+    if raw["calibration_method"] != expected_calibration_method:
         raise GovernanceError("Unbekanntes Kalibrationsverfahren.")
     if raw["operating_point"] != "far-0.01-frr-0.05.v1":
         raise GovernanceError("Unbekannter FAR/FRR-Arbeitspunkt.")
@@ -1409,7 +1416,12 @@ def _validate_target_sota_claims(raw: object, status: str) -> None:
         raise GovernanceError("Frozen-Preregistration benötigt mindestens einen SOTA-Zielclaim.")
 
 
-def _validate_preregistration(preregistration: object, mapping_sha256: str) -> dict[str, Any]:
+def _validate_preregistration(
+    preregistration: object,
+    mapping_sha256: str,
+    *,
+    expected_calibration_method: str = LEGACY_CALIBRATION_METHOD,
+) -> dict[str, Any]:
     if not isinstance(preregistration, dict):
         raise GovernanceError("Preregistration muss ein JSON-Objekt sein.")
     required = {
@@ -1443,7 +1455,11 @@ def _validate_preregistration(preregistration: object, mapping_sha256: str) -> d
         raise GovernanceError("Release-Preregistration verlangt genau 10.000 Bootstrap-Replikate.")
     if preregistration["bootstrap_unit"] != "voice-speaker-and-leakage-component":
         raise GovernanceError("Bootstrap-Einheit muss unabhängige Sprecher/Leakage-Komponenten verwenden.")
-    _validate_holdout_commitments(preregistration["holdout_commitments"], preregistration["status"])
+    _validate_holdout_commitments(
+        preregistration["holdout_commitments"],
+        preregistration["status"],
+        expected_calibration_method=expected_calibration_method,
+    )
     _validate_authorization_contract(preregistration["authorization_contract"])
     _validate_target_sota_claims(preregistration["target_sota_claim_ids"], preregistration["status"])
     if preregistration["claim_domain"] != CLAIM_DOMAIN:
@@ -1458,6 +1474,26 @@ def validate_preregistration(preregistration: object, *, mapping_sha256: str) ->
 
     _expect_sha256(mapping_sha256, "mapping_sha256")
     return _validate_preregistration(preregistration, mapping_sha256)
+
+
+def validate_offset_preregistration(
+    preregistration: object,
+    *,
+    mapping_sha256: str,
+    trusted_preregistration_sha256: str,
+) -> dict[str, Any]:
+    """Validate the full offset-v2 preregistration against an external review anchor."""
+
+    _expect_sha256(mapping_sha256, "mapping_sha256")
+    trusted = _expect_sha256(trusted_preregistration_sha256, "trusted_preregistration_sha256")
+    validated = _validate_preregistration(
+        preregistration,
+        mapping_sha256,
+        expected_calibration_method=OFFSET_CALIBRATION_METHOD,
+    )
+    if _sha256_bytes(_canonical_json(validated)) != trusted:
+        raise GovernanceError("Offset-Preregistration stimmt nicht mit dem externen Review-Digest überein.")
+    return validated
 
 
 def _union_shared_value(
@@ -1531,6 +1567,34 @@ def _build_components(samples: list[dict[str, Any]]) -> dict[str, list[str]]:
     for sample_id in sorted(sample_ids):
         components[union_find.find(sample_id)].append(sample_id)
     return dict(sorted(components.items()))
+
+
+def build_transitive_components(samples: object) -> list[list[str]]:
+    """Recompute canonical leakage components from frozen sample metadata."""
+
+    if not isinstance(samples, list) or not samples or not all(isinstance(sample, dict) for sample in samples):
+        raise GovernanceError("Frozenes Manifest benötigt eine nichtleere Sample-Liste.")
+    expected_fields = {
+        "sample_id",
+        *GROUP_FIELDS,
+        *HASH_GROUP_FIELDS,
+        "perceptual_duplicate_id",
+        "parent_sample_id",
+    }
+    for index, sample in enumerate(samples):
+        missing = sorted(expected_fields - sample.keys())
+        if missing:
+            raise GovernanceError(f"Frozenes Sample {index} lässt Transitivfelder aus: {missing}")
+        _expect_identifier(sample["sample_id"], f"samples[{index}].sample_id")
+        for field in GROUP_FIELDS:
+            _expect_identifier(sample[field], f"samples[{index}].{field}")
+        for field in HASH_GROUP_FIELDS:
+            _expect_sha256(sample[field], f"samples[{index}].{field}")
+        for field in ("perceptual_duplicate_id", "parent_sample_id"):
+            value = sample[field]
+            if value is not None:
+                _expect_identifier(value, f"samples[{index}].{field}")
+    return list(_build_components(samples).values())
 
 
 def _assign_components(

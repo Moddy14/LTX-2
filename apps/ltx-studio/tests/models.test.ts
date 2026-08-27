@@ -128,6 +128,73 @@ describe("model discovery", () => {
       "ltx25-duration-head-bf16",
       "ltx25-spatial-upscaler-bf16",
     ]);
+
+    const dfr = validLtx25SplitRequest("dfr");
+    expect(requiredOfficialSpeechAssetIds(dfr)).toEqual([
+      "ltx25-transformer-bf16",
+      "ltx25-text-encoder-bf16",
+      "ltx25-video-vae-diffusion-bf16",
+      "ltx25-audio-vae-bf16",
+      "ltx25-duration-head-bf16",
+      "ltx25-spatial-upscaler-bf16",
+      "ltx25-dfr-detailing-lora",
+    ]);
+    dfr.dfr!.temporalUpscalings = 1;
+    expect(requiredOfficialSpeechAssetIds(dfr).slice(-2)).toEqual([
+      "ltx25-dfr-detailing-lora",
+      "ltx25-temporal-upscaler-bf16",
+    ]);
+  });
+
+  it("pins and auto-selects the exact official v1.3 DFR core including mandatory detailing", () => {
+    const request = validLtx25SplitRequest("dfr");
+    request.models.transformerPath = "";
+    request.models.spatialUpscalerPath = "";
+    request.dfr!.temporalUpscalerPath = "";
+    request.dfr!.detailingLoraPath = "";
+    const inventory = {
+      roots: ["/home/moddy/LTX-2.5"],
+      scannedAt: new Date(0).toISOString(),
+      truncated: false,
+      errors: [],
+      items: [],
+      recommendations: recommendedModelAssets.map((asset) => ({
+        ...asset,
+        present: true,
+        integrity: "verified" as const,
+        actualSha256: "expectedSha256" in asset ? asset.expectedSha256 : null,
+      })),
+    };
+
+    const resolved = withDiscoveredModelDefaults(request, inventory);
+    expect(resolved.models.transformerPath).toBe(
+      recommendedModelAsset("ltx25-transformer-bf16").localPath,
+    );
+    expect(resolved.models.spatialUpscalerPath).toBe(
+      recommendedModelAsset("ltx25-spatial-upscaler-bf16").localPath,
+    );
+    expect(resolved.dfr).toMatchObject({
+      temporalUpscalings: 0,
+      spatialUpscalings: 1,
+      temporalUpscalerPath: "",
+      detailingLoraPath: recommendedModelAsset("ltx25-dfr-detailing-lora").localPath,
+    });
+    expect(recommendedModelAsset("ltx25-transformer-bf16")).toMatchObject({
+      revision: "6c7e5e573ac1667efc83407806fe9b0b93730e60",
+      expectedSizeBytes: 42_018_190_584,
+      expectedSha256: "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
+    });
+    expect(recommendedModelAsset("ltx25-dfr-detailing-lora")).toMatchObject({
+      revision: "74c4e68ee7dd99f3997d5a1bb1a3784941822222",
+      access: "gated",
+      present: false,
+      integrity: "missing",
+      expectedSha256: "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d",
+    });
+    expect(recommendedModelAssets.map(({ id }) => id)).not.toEqual(expect.arrayContaining([
+      "ltx25-dfr-dev-transformer-bf16",
+      "ltx25-dfr-distilled-lora-bf16",
+    ]));
   });
 
   it("classifies only supported LTX artifacts", () => {
@@ -138,6 +205,8 @@ describe("model discovery", () => {
     expect(classifyModelFile("/models/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors")).toBe("lora");
     expect(classifyModelFile("/models/ltx-2.5-22b-distilled-transformer-bf16.safetensors"))
       .toBe("transformer");
+    expect(classifyModelFile("/models/ltx-2.5-22b-dev-transformer-bf16.safetensors"))
+      .toBe("transformer");
     expect(classifyModelFile("/models/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"))
       .toBe("text-encoder");
     expect(classifyModelFile("/models/ltx-2.5-video-vae-conv-bf16.safetensors")).toBe("video-vae");
@@ -145,6 +214,10 @@ describe("model discovery", () => {
     expect(classifyModelFile("/models/ltx-2.5-duration-head-bf16.safetensors")).toBe("duration-head");
     expect(classifyModelFile("/models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"))
       .toBe("spatial-upscaler");
+    expect(classifyModelFile("/models/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors"))
+      .toBe("temporal-upscaler");
+    expect(classifyModelFile("/models/ltx-2.5-22b-distilled-lora-450-bf16.safetensors"))
+      .toBe("lora");
     expect(classifyModelFile("/models/ltx-2.5-22b-distilled-transformer-comfy-int8.safetensors"))
       .toBeNull();
     expect(classifyModelFile("/models/ltx-2.5-22b-distilled-transformer-nvfp4.safetensors"))
@@ -396,6 +469,11 @@ describe("model discovery", () => {
       "5b6370c3cc3a9a773f3655a411fd8ea4b47f4237bd2288a35b3291e2a33840f5",
     ],
     [
+      "v2v-deblur",
+      "ltx23-deblur-lora",
+      "dcdd73b57c2c4d5f5bc6535e825f4758b654a583bc991caa50c6809b6990b4ab",
+    ],
+    [
       "v2v-instant-shave",
       "ltx23-instant-shave-lora",
       "04231f1befeda653ab98081dd0f58114b9bc71782cdc687239a1610a39a9b0a2",
@@ -432,6 +510,23 @@ describe("model discovery", () => {
 
     expect(resolved.icLora.lora.path).toBe(asset?.localPath);
     expect(asset && "expectedSha256" in asset ? asset.expectedSha256 : null).toBe(expectedSha256);
+  });
+
+  it("normalizes official LTX-2.5 V2V to the pinned Deblur asset at strength 1", () => {
+    const request = validLtx25SplitRequest("ic-lora");
+    request.icLora.profile = "v2v-deblur";
+    request.icLora.lora = { path: "/legacy/wrong-v2v.safetensors", strength: 0.25 };
+
+    const resolved = withOfficialSpeechModelPaths(request);
+    const asset = recommendedModelAsset("ltx23-deblur-lora");
+
+    expect(resolved.icLora.lora).toEqual({ path: asset.localPath, strength: 1 });
+    expect(asset).toMatchObject({
+      repoId: "Lightricks/LTX-2.3-22b-IC-LoRA-Deblur",
+      revision: "a71618270729530aa7968d232965bdbc99fb6577",
+      expectedSizeBytes: 906_071_437,
+      expectedSha256: "dcdd73b57c2c4d5f5bc6535e825f4758b654a583bc991caa50c6809b6990b4ab",
+    });
   });
 
   it("pins HDR to its checkpoint, upscaler, LoRA and scene embeddings", () => {

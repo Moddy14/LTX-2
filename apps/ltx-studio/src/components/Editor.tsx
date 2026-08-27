@@ -18,9 +18,15 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { a2vTimelineMatchesInput, effectiveA2vTimeline } from "../../shared/a2vDuration";
+import type { ResourceEstimate } from "../../shared/estimates";
 import {
+  dfrOutputGeometry,
+  dfrSettings,
+  hasDuplicateDfrDetailingLora,
   hasDialogueIntent,
   isAudioConditionedMode,
+  isLegacyDfrRequest,
   needsGemmaAbliteratedLoraForRequest,
   PIPELINES,
   supportsGemmaAbliteratedLoraForRequest,
@@ -30,14 +36,17 @@ import {
 import {
   documentedLtx23DistilledLoraAssetId,
   requiredOfficialSpeechAssetIds,
+  withDiscoveredModelDefaults,
   withOfficialSpeechModelPaths,
 } from "../../shared/models";
 import type { LipDubReferenceDiagnostics, PreparedLipDubReference } from "../../shared/plan";
 import {
+  DFR_RESOLUTION_PRESETS,
   DURATION_PRESETS,
   formatDuration,
   framesForDuration,
   matchingDurationPreset,
+  matchingDfrResolutionPreset,
   matchingResolutionPreset,
   RESOLUTION_PRESETS,
   videoDurationSeconds,
@@ -55,6 +64,7 @@ import { Field, NumberField, PathPicker, SectionHeader, Segmented, SelectField, 
 
 type EditorProps = {
   request: GenerationRequest;
+  resourceEstimate: ResourceEstimate;
   onChange: (request: GenerationRequest) => void;
   errors: Record<string, string>;
   previews: Record<string, string>;
@@ -370,6 +380,7 @@ function LipForcingControls({
 
 export function Editor({
   request,
+  resourceEstimate,
   onChange,
   errors,
   previews,
@@ -392,6 +403,10 @@ export function Editor({
   const [lipDubTrimDuration, setLipDubTrimDuration] = useState(4.2);
   const definition = PIPELINES.find((pipeline) => pipeline.id === request.mode) ?? PIPELINES[0];
   const isLipDub = request.mode === "lipdub";
+  const isDfr = request.mode === "dfr";
+  const isLegacyDfr = isLegacyDfrRequest(request);
+  const dfr = dfrSettings(request);
+  const dfrOutput = isDfr ? dfrOutputGeometry(request) : null;
   const officialComfyLipDub = usesOfficialComfyLipDub(request);
   const isIdLora = request.mode === "id-lora";
   const isAudioToVideo = isAudioConditionedMode(request.mode);
@@ -408,6 +423,7 @@ export function Editor({
   const supportsSteps = ![
     "two-stage",
     "distilled",
+    "dfr",
     "ic-lora",
     "id-lora",
     "keyframes",
@@ -416,31 +432,74 @@ export function Editor({
     "text-to-audio",
   ].includes(request.mode)
     && !(request.mode === "retake" && request.retake.distilled);
-  const sourceSelectable = ["two-stage", "two-stage-hq", "one-stage", "distilled"].includes(request.mode);
+  const sourceSelectable = ["two-stage", "two-stage-hq", "one-stage", "distilled", "dfr"].includes(request.mode);
   const imageEnabled = request.mode !== "retake"
     && !isLipDub
     && !isTextToAudio
     && !(request.mode === "ic-lora"
-      && ["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(request.icLora.profile))
+      && ["pixel-upscaler", "v2v-deblur", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(
+        request.icLora.profile,
+      ))
     && (!sourceSelectable || request.sourceMode === "image");
   const visibleTextIntent = /\b(text|schrift|logo|label|etikett|titel|wort|zeichen)\b/i.test(request.prompt);
   const dialogueIntent = hasDialogueIntent(request);
-  const resolutionPreset = matchingResolutionPreset(request.width, request.height);
-  const durationPreset = matchingDurationPreset(request.numFrames, request.frameRate);
-  const duration = videoDurationSeconds(request.numFrames, request.frameRate);
+  const resolutionPreset = isDfr
+    ? matchingDfrResolutionPreset(request.width, request.height)
+    : matchingResolutionPreset(request.width, request.height);
+  const resolutionPresets = isDfr
+    ? [...RESOLUTION_PRESETS, ...DFR_RESOLUTION_PRESETS]
+    : RESOLUTION_PRESETS;
+  const localA2vTimeline = effectiveA2vTimeline(request);
+  const a2vTimeline = resourceEstimate.a2vTimeline
+    && a2vTimelineMatchesInput(resourceEstimate.a2vTimeline, request)
+    ? resourceEstimate.a2vTimeline
+    : localA2vTimeline;
+  const audioDerivesFrames = a2vTimeline?.derivesFramesFromAudio ?? false;
+  const durationPreset = audioDerivesFrames
+    ? null
+    : matchingDurationPreset(request.numFrames, request.frameRate);
+  const duration = a2vTimeline?.durationSeconds
+    ?? videoDurationSeconds(request.numFrames, request.frameRate);
+  const conservativeDuration = localA2vTimeline?.upperBoundDurationSeconds
+    ?? videoDurationSeconds(request.numFrames, request.frameRate);
+  const displayedFrames = a2vTimeline?.frameCount ?? request.numFrames;
+  const a2vSummaryBasis = a2vTimeline?.basis === "audio-eof"
+    ? "durch EOF nach dem Audio-Start gekürzt"
+    : a2vTimeline?.basis === "audio-cap"
+      ? "aus der gesetzten Maximaldauer"
+      : a2vTimeline?.basis === "audio-cap-upper-bound"
+        ? "Obergrenze aus Maximaldauer; EOF nach Audio-Start wird serverseitig geprüft"
+        : "aus der expliziten Framezahl";
   const discoveredModels = modelInventory?.items ?? [];
   const checkpointOptions = modelOptions(discoveredModels, "checkpoint");
   const distilledCheckpointOptions = modelOptions(discoveredModels, "distilled-checkpoint");
   const gemmaOptions = modelOptions(discoveredModels, "gemma");
   const upscalerOptions = modelOptions(discoveredModels, "spatial-upscaler");
+  const temporalUpscalerOptions = modelOptions(discoveredModels, "temporal-upscaler");
   const transformerOptions = modelOptions(discoveredModels, "transformer");
   const textEncoderOptions = modelOptions(discoveredModels, "text-encoder");
   const videoVaeOptions = modelOptions(discoveredModels, "video-vae");
   const audioVaeOptions = modelOptions(discoveredModels, "audio-vae");
   const durationHeadOptions = modelOptions(discoveredModels, "duration-head");
+  const dfrTransformerRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx25-transformer-bf16",
+  );
+  const dfrTemporalUpscalerRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx25-temporal-upscaler-bf16",
+  );
+  const dfrDetailingLoraRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx25-dfr-detailing-lora",
+  );
   const ltx25UpscalerOptions = upscalerOptions.filter((option) =>
     option.path.endsWith("ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"));
   const loraOptions = modelOptions(discoveredModels, "lora");
+  const userLoraOptions = isDfr
+    ? loraOptions.filter((option) => {
+        const filename = option.path.replaceAll("\\", "/").split("/").at(-1);
+        return filename !== "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+          && filename !== "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors";
+      })
+    : loraOptions;
   const geometryOptions = modelOptions(discoveredModels, "geometry");
   const lipDubRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-lora");
   const lipDubDistilledRecommendation = modelInventory?.recommendations.find((item) => item.id === "lipdub-distilled-checkpoint");
@@ -466,6 +525,9 @@ export function Editor({
   );
   const instantShaveRecommendation = modelInventory?.recommendations.find(
     (item) => item.id === "ltx23-instant-shave-lora",
+  );
+  const deblurRecommendation = modelInventory?.recommendations.find(
+    (item) => item.id === "ltx23-deblur-lora",
   );
   const inOutpaintRecommendation = modelInventory?.recommendations.find(
     (item) => item.id === "ltx23-inoutpaint-lora",
@@ -512,6 +574,15 @@ export function Editor({
             recommendation: pixelUpscalerRecommendation,
             placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x4-0.9.safetensors",
           }
+        : request.icLora.profile === "v2v-deblur"
+          ? {
+              label: "Deblur V2V IC-LoRA (LTX-2.5)",
+              strengthLabel: "Deblur-Stärke",
+              hint: fieldHelp.deblurLora,
+              strengthHint: fieldHelp.deblurStrength,
+              recommendation: deblurRecommendation,
+              placeholder: "/absoluter/pfad/ltx-2.3-22b-ic-lora-deblur-0.9.safetensors",
+            }
         : request.icLora.profile === "v2v-instant-shave"
           ? {
               label: "Instant-Shave V2V IC-LoRA",
@@ -765,7 +836,15 @@ export function Editor({
           <span className="eyebrow">{definition.family === "edit" ? "Bearbeiten" : "Produktion"}</span>
           <h1>{definition.label}</h1>
         </div>
-        <span className="quality-mark">{definition.quality}</span>
+        <div className="editor__title-marks">
+          <span className="quality-mark">{definition.quality}</span>
+          <span
+            className={`model-generation-mark ${request.models.generation === "2.5" ? "is-current" : "is-legacy"}`}
+            aria-label="Aktive Modellgeneration"
+          >
+            LTX-{request.models.generation} · {request.models.layout === "split" ? "Split BF16" : "Monolith Legacy"}
+          </span>
+        </div>
       </section>
 
       <section className="editor-section prompt-section">
@@ -784,7 +863,9 @@ export function Editor({
                 ...request,
                 sourceMode,
                 images: sourceMode === "text" ? [] : request.images,
-                enhancePrompt: sourceMode === "text" && !hasDialogueIntent(request),
+                enhancePrompt: sourceMode === "text"
+                  && request.models.layout === "monolith"
+                  && !hasDialogueIntent(request),
               })}
             />
             <p className="source-mode-note">
@@ -889,6 +970,13 @@ export function Editor({
           <p className="advisory advisory--warning">
             Dialog erkannt: LTX erzeugt eine neue Stimme. Eine exakte Sprecheridentität oder Stimmklon-Treue ist nicht garantiert;
             verwende nur freigegebene Stimmen und prüfe den Wortlaut im Ergebnis. Für eine feste vorhandene Tonspur nutze Audio zu Video.
+          </p>
+        ) : null}
+        {isDfr ? (
+          <p className="advisory advisory--warning">
+            DFR erzeugt seine Audiospur ausschließlich in Stufe 1. Es nimmt keine vorhandene Audiodatei an;
+            Text im Dialogfeld wird nur als Prompt-Absicht übergeben. Exakter Wortlaut, Sprecheridentität und
+            Lippen-Synchronität sind damit nicht garantiert und müssen am Ergebnis separat geprüft werden.
           </p>
         ) : null}
         <details className="inline-details continuity-block">
@@ -1594,11 +1682,13 @@ export function Editor({
             hint={fieldHelp.icLoraProfile}
             value={request.icLora.profile}
             options={[
-              { value: "union-control", label: "Union Control" },
+              { value: "union-control", label: "Union Control · HOLD" },
               { value: "ingredients", label: "Ingredients" },
               { value: "motion-track", label: "Motion Track" },
               { value: "pixel-upscaler", label: "Pixel x4" },
-              { value: "v2v-instant-shave", label: "V2V Rasur" },
+              ...(request.models.layout === "split"
+                ? [{ value: "v2v-deblur" as const, label: "V2V Deblur · 2.5" }]
+                : [{ value: "v2v-instant-shave" as const, label: "V2V Rasur · 2.3 Legacy" }]),
               { value: "inpainting", label: "Inpainting" },
               { value: "outpainting", label: "Outpainting" },
               { value: "hdr", label: "HDR" },
@@ -1626,7 +1716,7 @@ export function Editor({
                   frameRate,
                 ),
                 frameRate,
-                images: ["pixel-upscaler", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(profile)
+                images: ["pixel-upscaler", "v2v-deblur", "v2v-instant-shave", "inpainting", "outpainting", "hdr"].includes(profile)
                   ? []
                   : request.images,
                 quantization: { ...request.quantization, mode: "none" },
@@ -1837,6 +1927,114 @@ export function Editor({
         </section>
       ) : null}
 
+      {isDfr ? (
+        <section className="editor-section" aria-label="DFR Max-Detail Einstellungen">
+          <SectionHeader title="DFR Max-Detail" action={<Sparkles size={18} />} />
+          {isLegacyDfr ? (
+            <p className="advisory advisory--warning" role="alert">
+              Historischer DFR-Altbestand vor v1.3.0: Einstellungen bleiben zur Nachvollziehbarkeit sichtbar,
+              sind aber unveränderlich nicht ausführbar. Für einen neuen Lauf DFR in der linken Modusleiste
+              ausdrücklich neu auswählen; ein alter Dev-/Distilled-LoRA-Vertrag wird niemals umgedeutet.
+            </p>
+          ) : (
+            <p className="advisory">
+              Offizieller LTX-2 v1.3.0-DFR-Pfad: Der direkte Distilled-Transformer erzeugt Keyframe-Slots;
+              die verpflichtende Detailing IC-LoRA wird upstream fest mit Stärke 0,5 angewendet. Es gibt weder
+              einen Dev-Transformer- noch einen Distilled-LoRA-Fallback. Der nicht fortsetzbare Single-Call
+              bleibt bis zur lokalen Peak-Messung mit 86 GiB konservativ auf HOLD.
+            </p>
+          )}
+          <div className="field-grid field-grid--2">
+            <SelectField
+              label="Zeitliche Upscalings"
+              hint={fieldHelp.dfrTemporalUpscalings}
+              value={String(dfr.temporalUpscalings) as "0" | "1" | "2"}
+              options={[
+                { value: "0", label: "0 · Basis-FPS (Standard)" },
+                { value: "1", label: "1 · zeitlich x2" },
+                { value: "2", label: "2 · zeitlich x4 · sehr teuer" },
+              ]}
+              onChange={(value) => onChange({
+                ...request,
+                dfr: { ...dfr, temporalUpscalings: Number(value) as 0 | 1 | 2 },
+              })}
+            />
+            <SelectField
+              label="Räumliche Upscalings"
+              hint={fieldHelp.dfrSpatialUpscalings}
+              value={String(dfr.spatialUpscalings) as "1" | "2"}
+              options={[
+                { value: "1", label: "1 · Basis → volle Auflösung" },
+                { value: "2", label: "2 · zusätzlicher Detailing-Epilog" },
+              ]}
+              onChange={(value) => onChange({
+                ...request,
+                dfr: { ...dfr, spatialUpscalings: Number(value) as 1 | 2 },
+              })}
+            />
+            {dfr.temporalUpscalings > 0 ? (
+              <PathPicker
+                label="DFR Temporal Upscaler x2"
+                hint={fieldHelp.dfrTemporalUpscaler}
+                value={dfr.temporalUpscalerPath}
+                options={temporalUpscalerOptions.filter((option) =>
+                  option.path === dfrTemporalUpscalerRecommendation?.localPath)}
+                error={errors["dfr.temporalUpscalerPath"]}
+                placeholder="/absoluter/pfad/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors"
+                onChange={(temporalUpscalerPath) => onChange({
+                  ...request,
+                  dfr: { ...dfr, temporalUpscalerPath },
+                })}
+              />
+            ) : null}
+          </div>
+          {dfrOutput ? (
+            <p className="advisory" data-dfr-output-geometry="verified-v1.3">
+              Endausgabe: {dfrOutput.width} × {dfrOutput.height} · {dfrOutput.numFrames} Frames ·{" "}
+              {dfrOutput.frameRate.toLocaleString("de-AT", { maximumFractionDigits: 6 })} FPS. Jede zeitliche
+              Runde verwendet exakt N → 2(N−1)+1 und verdoppelt die Wiedergabe-FPS; die Dauer bleibt{" "}
+              {formatDuration(dfrOutput.durationSeconds)}.
+            </p>
+          ) : null}
+          <p className="advisory">
+            VAE-Tiling wird von DFR v1.3 pipeline-intern fest verwaltet. Studio sendet dafür keinen
+            wirkungslosen <code>--disable-tiling</code>-Schalter.
+          </p>
+          {dfr.spatialUpscalings === 2 && (request.width % 128 !== 0 || request.height % 128 !== 0) ? (
+            <p className="advisory advisory--warning">
+              Räumliches Upscaling 2 ist HOLD: Breite und Höhe müssen auf dem offiziellen 128er-Raster liegen.
+            </p>
+          ) : null}
+          {dfr.temporalUpscalings > 0
+            && dfrTemporalUpscalerRecommendation?.integrity !== "verified" ? (
+            <p className="advisory advisory--warning">
+              Zeitliche Verfeinerung ist HOLD: Der gepinnte Temporal Upscaler ist lokal nicht vollständig
+              SHA-256-verifiziert. Runde 0 bleibt der ehrliche ausführbare Standard.
+            </p>
+          ) : null}
+          <PathPicker
+            label="DFR Detailing IC-LoRA · verpflichtend · Stärke 0,5"
+            hint={fieldHelp.dfrDetailingLora}
+            value={dfr.detailingLoraPath}
+            options={loraOptions.filter((option) =>
+              option.path === dfrDetailingLoraRecommendation?.localPath)}
+            error={errors["dfr.detailingLoraPath"]}
+            placeholder="/absoluter/pfad/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors"
+            onChange={(detailingLoraPath) => onChange({
+              ...request,
+              dfr: { ...dfr, detailingLoraPath },
+            })}
+          />
+          {dfrDetailingLoraRecommendation?.integrity !== "verified" ? (
+            <p className="advisory advisory--warning">
+              DFR bleibt HOLD: Die verpflichtende Detailing IC-LoRA aus dem separaten gated
+              Lightricks-Repository fehlt lokal oder ist nicht vollständig SHA-256-verifiziert.
+              Ohne diese Datei ist v1.3.0 nicht startfähig; es gibt keinen Ersatz-Fallback.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="editor-section">
         <SectionHeader title="Modelle" action={<Cpu size={18} />} />
         <div className="field-grid field-grid--2">
@@ -1844,31 +2042,56 @@ export function Editor({
             label="Modellpaket"
             hint="Monolith erhält bestehende LTX-2.3-Projekte. Split-Pack bindet die offiziellen LTX-2.5-Komponenten einzeln und reproduzierbar."
             value={request.models.layout}
-            options={[
-              { value: "monolith", label: "LTX-2.3 Monolith" },
-              { value: "split", label: "LTX-2.5 Split-Pack" },
-            ]}
-            onChange={(layout) => onChange({
-              ...request,
-              models: {
-                ...request.models,
-                layout,
-                generation: layout === "split" ? "2.5" : "2.3",
-                gemmaLora: layout === "split"
-                  ? { ...request.models.gemmaLora, enabled: false }
-                  : request.models.gemmaLora,
-              },
-            })}
+            options={isDfr
+              ? [{ value: "split", label: "LTX-2.5 DFR Split-Pack · verpflichtend" }]
+              : [
+                  { value: "monolith", label: "LTX-2.3 Monolith" },
+                  { value: "split", label: "LTX-2.5 Split-Pack" },
+                ]}
+            onChange={(layout) => {
+              const nextProfile = request.mode === "ic-lora"
+                && request.icLora.profile === "v2v-instant-shave"
+                && layout === "split"
+                ? "v2v-deblur"
+                : request.mode === "ic-lora"
+                  && request.icLora.profile === "v2v-deblur"
+                  && layout === "monolith"
+                  ? "v2v-instant-shave"
+                  : request.icLora.profile;
+              const changed = withOfficialSpeechModelPaths({
+                ...request,
+                enhancePrompt: layout === "split" ? false : request.enhancePrompt,
+                icLora: { ...request.icLora, profile: nextProfile },
+                models: {
+                  ...request.models,
+                  layout,
+                  generation: layout === "split" ? "2.5" : "2.3",
+                  gemmaLora: layout === "split"
+                    ? { ...request.models.gemmaLora, enabled: false }
+                    : request.models.gemmaLora,
+                },
+              });
+              onChange(modelInventory
+                ? withDiscoveredModelDefaults(changed, modelInventory)
+                : changed);
+            }}
           />
           {request.models.layout === "split" ? (
             <>
               <PathPicker
-                label="LTX-2.5 Transformer"
-                hint="Native BF16-Transformerdatei des offiziellen LTX-2.5-Split-Packs. Comfy-INT8 und NVFP4 sind erst nach einem getrennten Runtime-Nachweis zulässig."
+                label={isDfr ? "LTX-2.5 DFR Direct Distilled Transformer" : "LTX-2.5 Transformer"}
+                hint={isDfr
+                  ? fieldHelp.dfrTransformer
+                  : "Native BF16-Transformerdatei des offiziellen LTX-2.5-Split-Packs. Comfy-INT8 und NVFP4 sind erst nach einem getrennten Runtime-Nachweis zulässig."}
                 value={request.models.transformerPath}
-                options={transformerOptions}
+                options={isDfr
+                  ? transformerOptions.filter((option) =>
+                      option.path === dfrTransformerRecommendation?.localPath)
+                  : transformerOptions}
                 error={errors["models.transformerPath"]}
-                placeholder="/absoluter/pfad/ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+                placeholder={isDfr
+                  ? "/absoluter/pfad/ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+                  : "/absoluter/pfad/ltx-2.5-22b-distilled-transformer-bf16.safetensors"}
                 onChange={(transformerPath) => onChange({
                   ...request,
                   models: { ...request.models, transformerPath },
@@ -2169,10 +2392,15 @@ export function Editor({
             <summary>Weitere LoRAs <ChevronDown size={15} /></summary>
             <LoraRows
               loras={request.models.loras}
-              options={loraOptions}
+              options={userLoraOptions}
               onChange={(loras) => onChange({ ...request, models: { ...request.models, loras } })}
             />
-            {errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
+            {hasDuplicateDfrDetailingLora(request) ? (
+              <p className="section-error">
+                Die verpflichtende DFR Detailing IC-LoRA ist bereits fest mit Stärke 0,5 gebunden und darf
+                nicht nochmals unter den normalen LoRAs stehen.
+              </p>
+            ) : errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
           </details>
         ) : errors["models.loras"] ? <p className="section-error">{errors["models.loras"]}</p> : null}
       </section>
@@ -2187,11 +2415,11 @@ export function Editor({
                 hint={fieldHelp.resolutionPreset}
                 value={resolutionPreset?.id ?? "custom"}
                 options={[
-                  ...RESOLUTION_PRESETS.map((preset) => ({ value: preset.id, label: `${preset.label} · ${preset.width} × ${preset.height}` })),
+                  ...resolutionPresets.map((preset) => ({ value: preset.id, label: `${preset.label} · ${preset.width} × ${preset.height}` })),
                   { value: "custom", label: "Benutzerdefiniert" },
                 ]}
                 onChange={(id) => {
-                  const preset = RESOLUTION_PRESETS.find((item) => item.id === id);
+                  const preset = resolutionPresets.find((item) => item.id === id);
                   if (preset) onChange({ ...request, width: preset.width, height: preset.height });
                 }}
               />
@@ -2200,6 +2428,7 @@ export function Editor({
               <SelectField
                 label="Dauer-Preset"
                 hint={fieldHelp.durationPreset}
+                disabled={audioDerivesFrames}
                 value={durationPreset === null ? "custom" : String(durationPreset)}
                 options={[
                   ...DURATION_PRESETS.map((seconds) => ({ value: String(seconds), label: `${seconds} Sekunden · ${framesForDuration(seconds, request.frameRate)} Frames` })),
@@ -2226,7 +2455,18 @@ export function Editor({
             ) : null}
             {!isLipDub ? (
               <>
-                <NumberField label="Frames" hint={fieldHelp.frames} min={1} max={2049} step={8} value={request.numFrames} error={errors.numFrames} onChange={(numFrames) => {
+                <NumberField
+                  label={audioDerivesFrames ? "Effektive Frames" : isDfr ? "Basis-Frames" : "Frames"}
+                  hint={audioDerivesFrames
+                    ? "LTX v1.3 leitet diese Framezahl aus Maximaldauer, Audio-Start und EOF ab; sie ist nicht separat editierbar."
+                    : fieldHelp.frames}
+                  disabled={audioDerivesFrames}
+                  min={1}
+                  max={2049}
+                  step={8}
+                  value={audioDerivesFrames ? displayedFrames : request.numFrames}
+                  error={errors.numFrames}
+                  onChange={(numFrames) => {
                   const nextFrames = numFrames ?? 1;
                   onChange({
                     ...request,
@@ -2235,8 +2475,9 @@ export function Editor({
                       ? request.longClipAcknowledged
                       : false,
                   });
-                }} />
-                <NumberField label="FPS" hint={fieldHelp.fps} min={1} max={120} step={1} value={request.frameRate} onChange={(frameRate) => {
+                  }}
+                />
+                <NumberField label={isDfr ? "Basis-FPS" : "FPS"} hint={fieldHelp.fps} min={1} max={120} step={isDfr ? 0.001 : 1} value={request.frameRate} error={errors.frameRate} onChange={(frameRate) => {
                   const nextFrameRate = frameRate ?? 24;
                   onChange({
                     ...request,
@@ -2249,17 +2490,48 @@ export function Editor({
               </>
             ) : null}
           </div>
-          <div className={`output-summary ${duration > 20 ? "output-summary--warn" : ""}`}>
-            <strong>{isLipDub ? "Referenzclip" : isTextToAudio ? `Audio · ${formatDuration(duration)}` : formatDuration(duration)}</strong>
+          <div className={`output-summary ${conservativeDuration > 20 ? "output-summary--warn" : ""}`}>
+            <strong>
+              {isLipDub
+                ? "Referenzclip"
+                : isTextToAudio
+                  ? `Audio · ${formatDuration(duration)}`
+                  : isAudioToVideo && audioDerivesFrames && !a2vTimeline?.exact
+                    ? `Bis zu ${formatDuration(duration)}`
+                    : formatDuration(duration)}
+            </strong>
             <span>
               {isLipDub
                 ? `${request.width} × ${request.height} · Dauer und FPS aus dem Referenzvideo`
                 : isTextToAudio
-                  ? "WAV · PCM 16 Bit"
-                : `${request.width} × ${request.height} · ${request.numFrames} Frames · ${request.frameRate} FPS`}
+                  ? `WAV · PCM 16 Bit · Sample-Peak ≤ ${request.textToAudio.peakCeilingDbfs} dBFS`
+                  : isAudioToVideo
+                    ? `${request.width} × ${request.height} · ${displayedFrames} Frames · ${request.frameRate} FPS · ${a2vSummaryBasis}`
+                    : dfrOutput
+                      ? `${dfrOutput.width} × ${dfrOutput.height} · ${dfrOutput.numFrames} Frames · ${dfrOutput.frameRate.toLocaleString("de-AT", { maximumFractionDigits: 6 })} FPS`
+                      : `${request.width} × ${request.height} · ${request.numFrames} Frames · ${request.frameRate} FPS`}
             </span>
           </div>
-          {!isLipDub && duration > 10 ? (
+          {isTextToAudio ? (
+            <div className="field-grid field-grid--2">
+              <NumberField
+                label="Audio-Sample-Peak-Grenze (dBFS)"
+                hint={fieldHelp.audioPeakCeiling}
+                min={-20}
+                max={-1}
+                step={0.5}
+                value={request.textToAudio.peakCeilingDbfs}
+                error={errors["textToAudio.peakCeilingDbfs"]}
+                onChange={(peakCeilingDbfs) => onChange({
+                  ...request,
+                  textToAudio: {
+                    peakCeilingDbfs: peakCeilingDbfs ?? -3,
+                  },
+                })}
+              />
+            </div>
+          ) : null}
+          {!isLipDub && conservativeDuration > 10 ? (
             <Toggle
               label="Langclip bestätigt"
               hint={fieldHelp.longClip}
@@ -2268,7 +2540,7 @@ export function Editor({
             />
           ) : null}
           {errors.longClipAcknowledged ? <p className="section-error">{errors.longClipAcknowledged}</p> : null}
-          {!isLipDub && duration > 20 ? <p className="advisory advisory--warning">Mehr als 20 Sekunden sind ein experimenteller Lauf. Zuerst einen 5-Sekunden-Ausschnitt prüfen.</p> : null}
+          {!isLipDub && conservativeDuration > 20 ? <p className="advisory advisory--warning">Mehr als 20 Sekunden sind ein experimenteller Lauf. Zuerst einen 5-Sekunden-Ausschnitt prüfen.</p> : null}
         </section>
       ) : null}
 
@@ -2294,20 +2566,24 @@ export function Editor({
           ) : null}
           <TextField label="Ausgabedatei" hint={fieldHelp.outputName} value={request.outputName} error={errors.outputName} onChange={(outputName) => onChange({ ...request, outputName })} />
         </div>
-        {request.mode !== "one-stage" && !isLipDub && !isTextToAudio ? (
+        {request.mode !== "one-stage" && !isDfr && !isLipDub && !isTextToAudio ? (
           <div className="toggle-grid">
             <Toggle label="VAE Tiling" hint={fieldHelp.tiling} checked={request.tiling} onChange={(tiling) => onChange({ ...request, tiling })} />
           </div>
         ) : null}
         <Segmented
           label="Quantisierung"
-          hint={fieldHelp.quantization}
+          hint={isDfr
+            ? "Der gepinnte DFR-Qualifikationsarm verwendet ausschließlich BF16 ohne zusätzliche Runtime-Quantisierung."
+            : fieldHelp.quantization}
           value={request.quantization.mode}
-          options={[
-            { value: "none", label: "Aus" },
-            { value: "fp8-cast", label: "FP8 Cast" },
-            { value: "fp8-scaled-mm", label: "FP8 Scaled" },
-          ]}
+          options={isDfr
+            ? [{ value: "none", label: "Aus · DFR BF16-Vertrag" }]
+            : [
+                { value: "none", label: "Aus" },
+                { value: "fp8-cast", label: "FP8 Cast" },
+                { value: "fp8-scaled-mm", label: "FP8 Scaled" },
+              ]}
           onChange={(mode) => onChange({ ...request, quantization: { ...request.quantization, mode } })}
         />
         {request.mode === "two-stage-hq" ? (
@@ -2325,14 +2601,16 @@ export function Editor({
             <details className="advanced-block" key={key} open={key === "videoGuidance"}>
               <summary>{key === "videoGuidance" ? "Video" : "Audio"}<ChevronDown size={15} /></summary>
               <div className="field-grid field-grid--3">
-                <NumberField label="CFG" hint={fieldHelp.cfg} min={0} max={30} step={0.1} value={request[key].cfgScale} onChange={(value) => onChange(updateGuidance(request, key, "cfgScale", value ?? 0))} />
-                <NumberField label="STG" hint={fieldHelp.stg} min={0} max={10} step={0.1} value={request[key].stgScale} onChange={(value) => onChange(updateGuidance(request, key, "stgScale", value ?? 0))} />
-                <NumberField label="Rescale" hint={fieldHelp.rescale} min={0} max={2} step={0.05} value={request[key].rescaleScale} onChange={(value) => onChange(updateGuidance(request, key, "rescaleScale", value ?? 0))} />
-                <NumberField label="Modalität" hint={fieldHelp.modality} min={0} max={20} step={0.1} value={request[key].modalityScale} onChange={(value) => onChange(updateGuidance(request, key, "modalityScale", value ?? 0))} />
+                <NumberField label="CFG" hint={isTextToAudio ? fieldHelp.t2aCfg : fieldHelp.cfg} min={0} max={30} step={0.1} value={request[key].cfgScale} onChange={(value) => onChange(updateGuidance(request, key, "cfgScale", value ?? 0))} />
+                <NumberField label="STG" hint={isTextToAudio ? fieldHelp.t2aStg : fieldHelp.stg} min={0} max={10} step={0.1} value={request[key].stgScale} onChange={(value) => onChange(updateGuidance(request, key, "stgScale", value ?? 0))} />
+                <NumberField label="Rescale" hint={isTextToAudio ? fieldHelp.t2aRescale : fieldHelp.rescale} min={0} max={2} step={0.05} value={request[key].rescaleScale} onChange={(value) => onChange(updateGuidance(request, key, "rescaleScale", value ?? 0))} />
+                {isTextToAudio ? null : (
+                  <NumberField label="Modalität" hint={fieldHelp.modality} min={0} max={20} step={0.1} value={request[key].modalityScale} onChange={(value) => onChange(updateGuidance(request, key, "modalityScale", value ?? 0))} />
+                )}
                 <NumberField label="Skip Step" hint={fieldHelp.skipStep} min={0} max={20} step={1} value={request[key].skipStep} onChange={(value) => onChange(updateGuidance(request, key, "skipStep", value ?? 0))} />
                 <TextField
                   label="STG Blocks"
-                  hint={fieldHelp.stgBlocks}
+                  hint={isTextToAudio ? fieldHelp.t2aStgBlocks : fieldHelp.stgBlocks}
                   value={request[key].stgBlocks.join(", ")}
                   onChange={(value) => onChange(updateGuidance(request, key, "stgBlocks", value.split(",").map((item) => Number.parseInt(item.trim(), 10)).filter(Number.isFinite)))}
                 />

@@ -9,6 +9,7 @@ dependencies = [
     "kornia==0.8.2",
     "ltx-core",
     "ltx-pipelines",
+    "natten @ https://github.com/SHI-Labs/NATTEN/releases/download/v0.21.7/natten-0.21.7%2Btorch2130cu132-cp312-cp312-linux_aarch64.whl#sha256=f2745ee3ad50f58b8aa3c4496b67461afcbdb088051eb929b090b88d241bcef1 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
     "opencv-python-headless==4.13.0.92",
     "openai-whisper==20250625",
     "openimageio==3.1.15.0",
@@ -23,11 +24,12 @@ dependencies = [
 [tool.uv]
 package = false
 environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
-no-sources-package = ["torch", "torchaudio", "torchvision"]
+no-sources-package = ["natten", "torch", "torchaudio", "torchvision"]
 # Torch 2.13's cu132 metadata pins cuDNN 9.20, whose AArch64 wheel omits the
-# tensor-IR sublibrary required by the DGX Spark host stack. Keep the release
-# runtime self-contained instead of inheriting this override from the repo root.
-override-dependencies = ["nvidia-cudnn-cu13==9.21.1.3"]
+# tensor-IR sublibrary. Official LTX v1.3 requires the matching 9.24 series;
+# older overrides can abort when torch selects its cuDNN SDPA backend. Keep the
+# release runtime self-contained and bind the exact non-yanked 9.24 wheel.
+override-dependencies = ["nvidia-cudnn-cu13==9.24.0.43"]
 
 [tool.uv.workspace]
 members = []

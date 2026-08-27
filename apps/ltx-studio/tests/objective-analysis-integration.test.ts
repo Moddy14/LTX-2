@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -10,7 +10,7 @@ import { afterEach, expect, it } from "vitest";
 import { analysisPythonExecutable as pythonExecutable, analysisTempRoot, appRoot } from "../server/config.js";
 import { capturePinnedPathRevision } from "../server/evaluatorBindings.js";
 import type { PhonemeVisemeEvaluatorState } from "../server/evaluatorManifest.js";
-import { writeOutputAnalysis } from "../server/analysisStore.js";
+import { outputAnalysisPath, writeOutputAnalysis } from "../server/analysisStore.js";
 import type { StudioJob } from "../server/jobs.js";
 import {
   buildObjectiveQualityAnalysis,
@@ -21,7 +21,8 @@ import {
   stopSystemdUnit,
 } from "../server/outputAnalysis.js";
 import type { DialogueEvaluatorState } from "../server/dialogueEvaluator.js";
-import { OutputLibrary } from "../server/outputs.js";
+import { outputPublicationPath } from "../server/outputPublication.js";
+import { OutputLibrary as ProductionOutputLibrary } from "../server/outputs.js";
 import {
   faceTrackingMetricsSchema,
   type ObjectiveWorkerResult,
@@ -29,6 +30,7 @@ import {
 import { unavailablePhonemeVisemeResult } from "../shared/phonemeVisemeEvaluator.js";
 import { notApplicableDialogueEvaluation } from "../shared/dialogueEvaluator.js";
 import { validRequest } from "./fixtures.js";
+import { publishCompletedOutputFixture } from "./output-publication-fixture.js";
 
 const faceModel = join(appRoot, "models", "face_detection_yunet_2023mar.onnx");
 const identityModel = join(appRoot, "models", "face_recognition_sface_2021dec.onnx");
@@ -43,6 +45,22 @@ const systemSandboxIt = spawnSync(
   { stdio: "ignore" },
 ).status === 0 ? it : it.skip;
 const roots: string[] = [];
+
+class OutputLibrary extends ProductionOutputLibrary {
+  constructor(private readonly fixtureRoot: string) {
+    super(fixtureRoot);
+  }
+
+  override recordCompleted(jobs: readonly StudioJob[]): void {
+    for (const completed of jobs) {
+      const outputPath = join(this.fixtureRoot, completed.outputName);
+      if (existsSync(outputPath) && !existsSync(outputPublicationPath(outputPath))) {
+        publishCompletedOutputFixture(this.fixtureRoot, completed);
+      }
+    }
+    super.recordCompleted(jobs);
+  }
+}
 const dialogueEvaluatorState: DialogueEvaluatorState = {
   status: "ready",
   blockerCode: "none",
@@ -187,6 +205,23 @@ async function writePythonScript(path: string, lines: string[]): Promise<string>
   const source = lines.join("\n");
   await writeFile(path, source);
   return createHash("sha256").update(source).digest("hex");
+}
+
+async function terminalAnalysisRecord(root: string, outputName: string) {
+  const path = outputAnalysisPath(root, outputName);
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const record = JSON.parse(await readFile(path, "utf8"));
+    if (!["queued", "running"].includes(record.status)) return record;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Analysis ${outputName} did not reach a terminal state.`);
+}
+
+function unavailableEvaluatorState(fingerprint: string): PhonemeVisemeEvaluatorState {
+  return {
+    fingerprint,
+    result: unavailablePhonemeVisemeResult("Evaluator is unavailable in this authority test."),
+  };
 }
 
 async function writePhonemeVisemeResultRunner(
@@ -361,6 +396,121 @@ integrationIt("runs the bounded CPU worker through the persisted analysis queue"
     },
   });
 }, 20_000);
+
+it.each(["same-inode-write", "pathname-replacement"] as const)(
+  "never spawns an analysis worker after %s of the authoritative source",
+  async (attack) => {
+    const root = await mkdtemp(join(tmpdir(), `ltx-objective-source-${attack}-`));
+    roots.push(root);
+    const outputName = `${attack}.mp4`;
+    const outputPath = join(root, outputName);
+    const replacedPath = join(root, `${outputName}.original`);
+    const spawnMarker = join(root, `${outputName}.worker-spawned`);
+    await writeFile(outputPath, "synthetic-output");
+    const workerScript = join(root, "must-not-spawn.js");
+    await writeFile(workerScript, [
+      `require('node:fs').writeFileSync(${JSON.stringify(spawnMarker)}, 'spawned')`,
+      `console.log(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})`,
+    ].join("\n"));
+    const completedJob = job(outputName);
+    completedJob.identityEvidence = {
+      schemaVersion: "ltx-studio-identity-evidence.v1",
+      status: "verified",
+      source: "image-conditioning",
+      capturedAt: "2026-07-24T18:00:00.000Z",
+      verifiedAt: "2026-07-24T18:00:01.000Z",
+      reason: null,
+      references: [{
+        assetId: "6d6d624b-12c3-4a97-9e4e-152a69423b6c",
+        kind: "image",
+        sizeBytes: 100,
+        modifiedAtMs: 1,
+        changedAtMs: 2,
+        fileId: "123",
+        sha256: "a".repeat(64),
+      }],
+    };
+    const library = new OutputLibrary(root);
+    library.recordCompleted([completedJob]);
+    let attacked = false;
+    const manager = new OutputAnalysisManager(library, () => [completedJob], root, {
+      pythonExecutable: process.execPath,
+      workerScript,
+      identityEvidenceVerifier: async () => {
+        if (!attacked) {
+          attacked = true;
+          if (attack === "same-inode-write") {
+            await writeFile(outputPath, "malicious-output");
+          } else {
+            await rename(outputPath, replacedPath);
+            await writeFile(outputPath, "malicious-output");
+          }
+        }
+        return null;
+      },
+      phonemeVisemeEvaluatorStateResolver: () => unavailableEvaluatorState(`source-${attack}`),
+      dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+    });
+    manager.start(outputName);
+    const task = [...(Reflect.get(manager, "tasks") as Map<string, {
+      target: { outputPath: string };
+    }>).values()][0];
+    const snapshotRoot = dirname(task.target.outputPath);
+
+    const terminal = await terminalAnalysisRecord(root, outputName);
+    expect(attacked).toBe(true);
+    expect(terminal).toMatchObject({
+      status: "failed",
+      error: { message: expect.stringMatching(/Autorität|Publikationsautorität|verändert/) },
+    });
+    expect(existsSync(spawnMarker)).toBe(false);
+    expect(existsSync(snapshotRoot)).toBe(false);
+  },
+);
+
+it("releases task-lifetime snapshots after success, queued cancellation and shutdown", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ltx-objective-lease-cleanup-"));
+  roots.push(root);
+  const workerScript = join(root, "worker.js");
+  await writeFile(workerScript, `console.log(${JSON.stringify(JSON.stringify(syntheticBaseWorkerResult))})\n`);
+  const evaluatorState = unavailableEvaluatorState("lease-cleanup");
+  const snapshotRootFor = (manager: OutputAnalysisManager) => {
+    const task = [...(Reflect.get(manager, "tasks") as Map<string, {
+      target: { outputPath: string };
+    }>).values()][0];
+    return dirname(task.target.outputPath);
+  };
+  const createManager = async (outputName: string) => {
+    await writeFile(join(root, outputName), "synthetic-output");
+    const completedJob = job(outputName, randomUUID());
+    const library = new OutputLibrary(root);
+    library.recordCompleted([completedJob]);
+    return new OutputAnalysisManager(library, () => [completedJob], root, {
+      pythonExecutable: process.execPath,
+      workerScript,
+      phonemeVisemeEvaluatorStateResolver: () => evaluatorState,
+      dialogueEvaluatorStateResolver: () => dialogueEvaluatorState,
+    });
+  };
+
+  const successful = await createManager("lease-success.mp4");
+  successful.start("lease-success.mp4");
+  const successRoot = snapshotRootFor(successful);
+  expect((await terminalAnalysisRecord(root, "lease-success.mp4")).status).toBe("completed");
+  expect(existsSync(successRoot)).toBe(false);
+
+  const cancelled = await createManager("lease-cancel.mp4");
+  const cancellation = cancelled.start("lease-cancel.mp4");
+  const cancelRoot = snapshotRootFor(cancelled);
+  expect(cancelled.cancel("lease-cancel.mp4", cancellation.analysisId)?.status).toBe("cancelled");
+  expect(existsSync(cancelRoot)).toBe(false);
+
+  const stopped = await createManager("lease-shutdown.mp4");
+  stopped.start("lease-shutdown.mp4");
+  const shutdownRoot = snapshotRootFor(stopped);
+  await stopped.shutdown();
+  expect(existsSync(shutdownRoot)).toBe(false);
+});
 
 it("executes and persists a measurement-only phoneme/viseme result without granting quality GO", async () => {
   const root = await mkdtemp(join(tmpdir(), "ltx-objective-pv-runner-"));
@@ -1138,6 +1288,8 @@ integrationIt("waits for a timed-out worker to close before starting the next qu
 
   const workerScript = join(root, "slow-worker.py");
   const startsPath = join(root, "starts.log");
+  const faceModelPath = join(root, "face-model.onnx");
+  await writeFile(faceModelPath, "stable synthetic face model");
   await writeFile(workerScript, [
     "import argparse, signal, sys, time",
     "parser = argparse.ArgumentParser()",
@@ -1153,7 +1305,7 @@ integrationIt("waits for a timed-out worker to close before starting the next qu
     "parser.add_argument('--dialogue-evaluator-error')",
     "parser.add_argument('--max-frames')",
     "args = parser.parse_args()",
-    "with open(args.face_model, 'a', encoding='utf-8') as handle:",
+    `with open(${JSON.stringify(startsPath)}, 'a', encoding='utf-8') as handle:`,
     "    handle.write(f'{time.monotonic()} {args.video}\\n')",
     "    handle.flush()",
     "def stop(_signal, _frame):",
@@ -1170,9 +1322,13 @@ integrationIt("waits for a timed-out worker to close before starting the next qu
   library.recordCompleted([firstJob, secondJob]);
   const manager = new OutputAnalysisManager(library, () => [firstJob, secondJob], root, {
     workerScript,
-    faceModel: startsPath,
+    faceModel: faceModelPath,
     analysisTempRoot: join(root, "analysis-tmp"),
-    timeoutMs: 50,
+    // Leave enough startup headroom under the fully parallel Vitest suite so
+    // the worker can install its SIGTERM handler before the intentional
+    // timeout. The assertion is about serialized close, not Python startup
+    // scheduler latency.
+    timeoutMs: 500,
     terminationGraceMs: 1_000,
   });
   manager.start(firstName);
@@ -1180,7 +1336,7 @@ integrationIt("waits for a timed-out worker to close before starting the next qu
 
   let first = manager.get(firstName);
   let second = manager.get(secondName);
-  for (let attempt = 0; attempt < 200
+  for (let attempt = 0; attempt < 600
     && [first?.status, second?.status].some((status) => status === "queued" || status === "running");
     attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));

@@ -16,5 +16,11 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "shared"]
+  "include": [
+    "src",
+    "shared",
+    "tests/audio-quality-panel.test.ts",
+    "tests/mode-rail.test.ts",
+    "tests/run-panel.test.ts"
+  ]
 }

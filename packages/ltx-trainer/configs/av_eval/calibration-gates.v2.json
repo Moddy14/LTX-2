@@ -1,0 +1,538 @@
+{
+  "schema_version": "ltx-av-eval-calibration-gates.v2",
+  "status": "draft",
+  "catalog_id": "ltx-lipdub-de-en-calibration-02",
+  "design_digest": null,
+  "preregistration_digest": null,
+  "vbench_gate_catalog_digest": null,
+  "vbench_decision": {
+    "direction": "lower",
+    "decision_value": "estimate",
+    "threshold": 0.05,
+    "multiplicity": "holm",
+    "subtests": [
+      "absolute",
+      "relative"
+    ]
+  },
+  "vbench_metric_ids": [
+    "vbench.audio-driven-video.image-audio-to-video.aesthetic-quality",
+    "vbench.audio-driven-video.image-audio-to-video.background-consistency",
+    "vbench.audio-driven-video.image-audio-to-video.dynamic-degree",
+    "vbench.audio-driven-video.image-audio-to-video.imaging-quality",
+    "vbench.audio-driven-video.image-audio-to-video.motion-smoothness",
+    "vbench.audio-driven-video.image-audio-to-video.refined.longcat-lipsync.aesthetic-quality",
+    "vbench.audio-driven-video.image-audio-to-video.refined.longcat-lipsync.background-consistency",
+    "vbench.audio-driven-video.image-audio-to-video.refined.longcat-lipsync.dynamic-degree",
+    "vbench.audio-driven-video.image-audio-to-video.refined.longcat-lipsync.imaging-quality",
+    "vbench.audio-driven-video.image-audio-to-video.refined.longcat-lipsync.motion-smoothness",
+    "vbench.audio-driven-video.image-audio-to-video.refined.longcat-lipsync.subject-consistency",
+    "vbench.audio-driven-video.image-audio-to-video.subject-consistency",
+    "vbench.audio-driven-video.ltx25.image-audio-to-video.two-stage.aesthetic-quality",
+    "vbench.audio-driven-video.ltx25.image-audio-to-video.two-stage.background-consistency",
+    "vbench.audio-driven-video.ltx25.image-audio-to-video.two-stage.dynamic-degree",
+    "vbench.audio-driven-video.ltx25.image-audio-to-video.two-stage.imaging-quality",
+    "vbench.audio-driven-video.ltx25.image-audio-to-video.two-stage.motion-smoothness",
+    "vbench.audio-driven-video.ltx25.image-audio-to-video.two-stage.subject-consistency",
+    "vbench.controlled-video.first-last-frame.aesthetic-quality",
+    "vbench.controlled-video.first-last-frame.background-consistency",
+    "vbench.controlled-video.first-last-frame.dynamic-degree",
+    "vbench.controlled-video.first-last-frame.imaging-quality",
+    "vbench.controlled-video.first-last-frame.motion-smoothness",
+    "vbench.controlled-video.first-last-frame.subject-consistency",
+    "vbench.controlled-video.ic-lora.hdr.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.hdr.background-consistency",
+    "vbench.controlled-video.ic-lora.hdr.dynamic-degree",
+    "vbench.controlled-video.ic-lora.hdr.imaging-quality",
+    "vbench.controlled-video.ic-lora.hdr.motion-smoothness",
+    "vbench.controlled-video.ic-lora.hdr.subject-consistency",
+    "vbench.controlled-video.ic-lora.ingredients.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.ingredients.background-consistency",
+    "vbench.controlled-video.ic-lora.ingredients.dynamic-degree",
+    "vbench.controlled-video.ic-lora.ingredients.imaging-quality",
+    "vbench.controlled-video.ic-lora.ingredients.motion-smoothness",
+    "vbench.controlled-video.ic-lora.ingredients.subject-consistency",
+    "vbench.controlled-video.ic-lora.inpainting.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.inpainting.background-consistency",
+    "vbench.controlled-video.ic-lora.inpainting.dynamic-degree",
+    "vbench.controlled-video.ic-lora.inpainting.imaging-quality",
+    "vbench.controlled-video.ic-lora.inpainting.motion-smoothness",
+    "vbench.controlled-video.ic-lora.inpainting.subject-consistency",
+    "vbench.controlled-video.ic-lora.motion-track.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.motion-track.background-consistency",
+    "vbench.controlled-video.ic-lora.motion-track.dynamic-degree",
+    "vbench.controlled-video.ic-lora.motion-track.imaging-quality",
+    "vbench.controlled-video.ic-lora.motion-track.motion-smoothness",
+    "vbench.controlled-video.ic-lora.motion-track.subject-consistency",
+    "vbench.controlled-video.ic-lora.outpainting.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.outpainting.background-consistency",
+    "vbench.controlled-video.ic-lora.outpainting.dynamic-degree",
+    "vbench.controlled-video.ic-lora.outpainting.imaging-quality",
+    "vbench.controlled-video.ic-lora.outpainting.motion-smoothness",
+    "vbench.controlled-video.ic-lora.outpainting.subject-consistency",
+    "vbench.controlled-video.ic-lora.pixel-upscaler.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.pixel-upscaler.background-consistency",
+    "vbench.controlled-video.ic-lora.pixel-upscaler.dynamic-degree",
+    "vbench.controlled-video.ic-lora.pixel-upscaler.imaging-quality",
+    "vbench.controlled-video.ic-lora.pixel-upscaler.motion-smoothness",
+    "vbench.controlled-video.ic-lora.pixel-upscaler.subject-consistency",
+    "vbench.controlled-video.ic-lora.union-control.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.union-control.background-consistency",
+    "vbench.controlled-video.ic-lora.union-control.dynamic-degree",
+    "vbench.controlled-video.ic-lora.union-control.imaging-quality",
+    "vbench.controlled-video.ic-lora.union-control.motion-smoothness",
+    "vbench.controlled-video.ic-lora.union-control.subject-consistency",
+    "vbench.controlled-video.ic-lora.v2v-instant-shave.aesthetic-quality",
+    "vbench.controlled-video.ic-lora.v2v-instant-shave.background-consistency",
+    "vbench.controlled-video.ic-lora.v2v-instant-shave.dynamic-degree",
+    "vbench.controlled-video.ic-lora.v2v-instant-shave.imaging-quality",
+    "vbench.controlled-video.ic-lora.v2v-instant-shave.motion-smoothness",
+    "vbench.controlled-video.ic-lora.v2v-instant-shave.subject-consistency",
+    "vbench.controlled-video.ltx25.ic-lora.ingredients.aesthetic-quality",
+    "vbench.controlled-video.ltx25.ic-lora.ingredients.background-consistency",
+    "vbench.controlled-video.ltx25.ic-lora.ingredients.dynamic-degree",
+    "vbench.controlled-video.ltx25.ic-lora.ingredients.imaging-quality",
+    "vbench.controlled-video.ltx25.ic-lora.ingredients.motion-smoothness",
+    "vbench.controlled-video.ltx25.ic-lora.ingredients.subject-consistency",
+    "vbench.controlled-video.ltx25.ic-lora.motion-track.aesthetic-quality",
+    "vbench.controlled-video.ltx25.ic-lora.motion-track.background-consistency",
+    "vbench.controlled-video.ltx25.ic-lora.motion-track.dynamic-degree",
+    "vbench.controlled-video.ltx25.ic-lora.motion-track.imaging-quality",
+    "vbench.controlled-video.ltx25.ic-lora.motion-track.motion-smoothness",
+    "vbench.controlled-video.ltx25.ic-lora.motion-track.subject-consistency",
+    "vbench.controlled-video.ltx25.ic-lora.v2v-deblur.aesthetic-quality",
+    "vbench.controlled-video.ltx25.ic-lora.v2v-deblur.background-consistency",
+    "vbench.controlled-video.ltx25.ic-lora.v2v-deblur.dynamic-degree",
+    "vbench.controlled-video.ltx25.ic-lora.v2v-deblur.imaging-quality",
+    "vbench.controlled-video.ltx25.ic-lora.v2v-deblur.motion-smoothness",
+    "vbench.controlled-video.ltx25.ic-lora.v2v-deblur.subject-consistency",
+    "vbench.native-generation.image-to-video.aesthetic-quality",
+    "vbench.native-generation.image-to-video.background-consistency",
+    "vbench.native-generation.image-to-video.dynamic-degree",
+    "vbench.native-generation.image-to-video.imaging-quality",
+    "vbench.native-generation.image-to-video.motion-smoothness",
+    "vbench.native-generation.image-to-video.subject-consistency",
+    "vbench.native-generation.ltx25.image-to-video.single-stage.aesthetic-quality",
+    "vbench.native-generation.ltx25.image-to-video.single-stage.background-consistency",
+    "vbench.native-generation.ltx25.image-to-video.single-stage.dynamic-degree",
+    "vbench.native-generation.ltx25.image-to-video.single-stage.imaging-quality",
+    "vbench.native-generation.ltx25.image-to-video.single-stage.motion-smoothness",
+    "vbench.native-generation.ltx25.image-to-video.single-stage.subject-consistency",
+    "vbench.native-generation.ltx25.image-to-video.two-stage.aesthetic-quality",
+    "vbench.native-generation.ltx25.image-to-video.two-stage.background-consistency",
+    "vbench.native-generation.ltx25.image-to-video.two-stage.dynamic-degree",
+    "vbench.native-generation.ltx25.image-to-video.two-stage.imaging-quality",
+    "vbench.native-generation.ltx25.image-to-video.two-stage.motion-smoothness",
+    "vbench.native-generation.ltx25.image-to-video.two-stage.subject-consistency",
+    "vbench.reference-video-redubbing.native-distilled.aesthetic-quality",
+    "vbench.reference-video-redubbing.native-distilled.background-consistency",
+    "vbench.reference-video-redubbing.native-distilled.dynamic-degree",
+    "vbench.reference-video-redubbing.native-distilled.imaging-quality",
+    "vbench.reference-video-redubbing.native-distilled.motion-smoothness",
+    "vbench.reference-video-redubbing.native-distilled.subject-consistency",
+    "vbench.reference-video-redubbing.official-comfy-hq.aesthetic-quality",
+    "vbench.reference-video-redubbing.official-comfy-hq.background-consistency",
+    "vbench.reference-video-redubbing.official-comfy-hq.dynamic-degree",
+    "vbench.reference-video-redubbing.official-comfy-hq.imaging-quality",
+    "vbench.reference-video-redubbing.official-comfy-hq.motion-smoothness",
+    "vbench.reference-video-redubbing.official-comfy-hq.subject-consistency",
+    "vbench.video-edit.retake.aesthetic-quality",
+    "vbench.video-edit.retake.background-consistency",
+    "vbench.video-edit.retake.dynamic-degree",
+    "vbench.video-edit.retake.imaging-quality",
+    "vbench.video-edit.retake.motion-smoothness",
+    "vbench.video-edit.retake.subject-consistency"
+  ],
+  "evaluator_fingerprints": [
+    {
+      "evaluator_id": "artifact-evaluator",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "asr-model",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "asr-normalization",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "content-evaluator",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "offset-evaluator",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "sface-model",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "sface-preprocessing",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "sharpness-evaluator",
+      "sha256": null
+    },
+    {
+      "evaluator_id": "vbench-runtime",
+      "sha256": null
+    }
+  ],
+  "gates": [
+    {
+      "metric_id": "artifact-event-far-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.01,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "artifact-event-far-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.01,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "artifact-event-frr-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.05,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "artifact-event-frr-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.05,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "artifact-frames-within-warp-limit-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.99,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "artifact-warp-residual-p95",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 0.04,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "artifact-warp-residual-p95-worst-stratum",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 0.06,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-critical-name-accuracy-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.99,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-critical-negation-accuracy-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.99,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-critical-number-accuracy-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.99,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-wer-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.06,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-wer-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.12,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-wer-estimate",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 0.05,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "asr-wer-estimate-worst-stratum",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 0.1,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-brier-score",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 0.1,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-brier-score-worst-stratum",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": null,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-calibration-ece",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 0.05,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-calibration-ece-worst-stratum",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": null,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-correspondence-far-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.01,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-correspondence-far-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.03,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-correspondence-frr-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.05,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-correspondence-frr-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.1,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-evaluator-bootstrap95-upper-ms",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 40.0,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-evaluator-median-absolute-error-ms",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 20.0,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-evaluator-p95-absolute-error-ms",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 40.0,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-evaluator-within-one-frame-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.95,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-evaluator-within-one-frame-ci-lower-worst-stratum",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.9,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-in-domain-false-abstention-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.05,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-ood-abstention-recall-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.95,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "av-output-offset-p95-ms",
+      "direction": "lower",
+      "decision_value": "estimate",
+      "threshold": 80.0,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-frame-macro-f1-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.82,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-frame-macro-f1-ci-lower-worst-stratum",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.72,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-frame-macro-f1-estimate",
+      "direction": "higher",
+      "decision_value": "estimate",
+      "threshold": 0.85,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-frame-macro-f1-estimate-worst-stratum",
+      "direction": "higher",
+      "decision_value": "estimate",
+      "threshold": 0.75,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-transition-f1-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.87,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-transition-f1-ci-lower-worst-stratum",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.77,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-transition-f1-estimate",
+      "direction": "higher",
+      "decision_value": "estimate",
+      "threshold": 0.9,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "content-transition-f1-estimate-worst-stratum",
+      "direction": "higher",
+      "decision_value": "estimate",
+      "threshold": 0.8,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "identity-far-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.01,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "identity-far-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.03,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "identity-frr-ci-upper",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.05,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "identity-frr-ci-upper-worst-stratum",
+      "direction": "lower",
+      "decision_value": "ci-upper",
+      "threshold": 0.1,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "identity-tar-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": 0.95,
+      "scope": "overall",
+      "basis_evidence_sha256": null
+    },
+    {
+      "metric_id": "sharpness-relative-face-ci-lower",
+      "direction": "higher",
+      "decision_value": "ci-lower",
+      "threshold": null,
+      "scope": "worst-registered-stratum",
+      "basis_evidence_sha256": null
+    }
+  ]
+}

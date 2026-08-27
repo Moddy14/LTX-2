@@ -90,11 +90,34 @@ export function validRequest(mode: PipelineMode = "two-stage"): GenerationReques
     request.retake.videoPath = "/inputs/source.mp4";
     request.retake.videoName = "source.mp4";
   }
+  if (mode === "dfr") {
+    request.models = {
+      ...request.models,
+      layout: "split",
+      generation: "2.5",
+      transformerPath: "/models/ltx-2.5/ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+      textEncoderPath: "/models/ltx-2.5/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
+      videoVaePath: "/models/ltx-2.5/ltx-2.5-video-vae-bf16.safetensors",
+      audioVaePath: "/models/ltx-2.5/ltx-2.5-audio-vae-bf16.safetensors",
+      durationHeadPath: "/models/ltx-2.5/ltx-2.5-duration-head-bf16.safetensors",
+      promptEnhancerGemmaRoot: "/models/gemma-4-enhancer",
+      spatialUpscalerPath: "/models/ltx-2.5/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      gemmaLora: { ...request.models.gemmaLora, enabled: false },
+    };
+    request.dfr = {
+      temporalUpscalings: 0,
+      spatialUpscalings: 1,
+      temporalUpscalerPath: "",
+      detailingLoraPath:
+        "/models/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+    };
+    request.quantization = { mode: "none", amaxPath: "" };
+  }
   return request;
 }
 
 export function validLtx25SplitRequest(
-  mode: "distilled" | "text-to-audio" | "ic-lora" | "image-audio-to-video" = "distilled",
+  mode: "distilled" | "dfr" | "text-to-audio" | "ic-lora" | "image-audio-to-video" = "distilled",
 ): GenerationRequest {
   const request = validRequest(mode);
   request.models = {

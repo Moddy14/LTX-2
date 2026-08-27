@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { usesAudioDerivedA2vFrames } from "../shared/a2vDuration.js";
 import {
   documentedLtx23CheckpointAssetId,
   documentedLtx23DistilledLoraAssetId,
@@ -12,7 +13,10 @@ import {
   type RecommendedModelAsset,
 } from "../shared/models.js";
 import {
+  dfrSettings,
+  hasDuplicateDfrDetailingLora,
   isAudioConditionedMode,
+  isLegacyDfrRequest,
   isNativeDialogueRequest,
   needsGemmaAbliteratedLoraForRequest,
   usesSplitModelPack,
@@ -21,6 +25,7 @@ import {
   type PipelineMode,
 } from "../shared/pipelines.js";
 import type { PlanSuggestion } from "../shared/plan.js";
+import { qualificationHoldForRequest } from "../shared/qualificationHold.js";
 import { LTX25_MODEL_COMPONENTS } from "../shared/ltx25Catalog.js";
 import { outputRoot, rendererPythonExecutable } from "./config.js";
 import {
@@ -38,6 +43,7 @@ const MODULES: Record<PipelineMode, string> = {
   "two-stage-hq": "ltx_pipelines.ti2vid_two_stages_hq",
   "one-stage": "ltx_pipelines.ti2vid_one_stage",
   distilled: "ltx_pipelines.distilled",
+  dfr: "ltx_pipelines.dfr_pipeline",
   "text-to-audio": "ltx_pipelines.t2a_one_stage",
   "ic-lora": "ltx_pipelines.ic_lora",
   "id-lora": "ltx_pipelines.id_lora",
@@ -121,13 +127,14 @@ function modelPackRequirements(
     ? LTX25_MODEL_COMPONENTS.videoVaeConv
     : LTX25_MODEL_COMPONENTS.videoVaeDiffusion;
 
+  const selectedTransformer = LTX25_MODEL_COMPONENTS.transformer;
   return [
     {
       path: request.models.transformerPath,
       label: "LTX-2.5 Transformer",
       kind: "file",
-      expectedSizeBytes: LTX25_MODEL_COMPONENTS.transformer.sizeBytes,
-      expectedSha256: LTX25_MODEL_COMPONENTS.transformer.sha256,
+      expectedSizeBytes: selectedTransformer.sizeBytes,
+      expectedSha256: selectedTransformer.sha256,
     },
     {
       path: request.models.textEncoderPath,
@@ -212,13 +219,15 @@ function appendCommonGenerationArgs(request: GenerationRequest, args: string[]):
   appendFlag(args, "--seed", request.seed);
   appendFlag(args, "--height", request.height);
   appendFlag(args, "--width", request.width);
-  appendFlag(args, "--num-frames", request.numFrames);
+  if (!usesAudioDerivedA2vFrames(request)) appendFlag(args, "--num-frames", request.numFrames);
   appendFlag(args, "--frame-rate", request.frameRate);
-  if (!["two-stage", "distilled", "ic-lora", "keyframes", "image-audio-to-video"].includes(request.mode)) {
+  if (!["two-stage", "distilled", "dfr", "ic-lora", "keyframes", "image-audio-to-video"].includes(request.mode)) {
     appendFlag(args, "--num-inference-steps", request.numInferenceSteps);
   }
   appendBoolean(args, request.enhancePrompt, "--enhance-prompt");
-  appendBoolean(args, request.mode !== "one-stage" && !request.tiling, "--disable-tiling");
+  // DFR owns its VAE tiling internally and exposes no effective tiling CLI
+  // switch. Never synthesize the unrelated common --disable-tiling flag.
+  appendBoolean(args, !["one-stage", "dfr"].includes(request.mode) && !request.tiling, "--disable-tiling");
 
   // The official Ingredients graph bypasses the I2V branch: its image enters
   // only as the repeated IC reference, never as a frame-0 latent replacement.
@@ -236,7 +245,13 @@ function appendCommonGenerationArgs(request: GenerationRequest, args: string[]):
         request.icLora.lora,
         ...request.models.loras,
       ]
-    : request.models.loras;
+    : request.mode === "dfr"
+      // Invalid direct callers still must never apply the mandatory detailer
+      // twice. Schema/plan validation separately rejects the request.
+      ? request.models.loras.filter(({ path }) =>
+          path.replaceAll("\\", "/").split("/").at(-1)
+            !== LTX25_MODEL_COMPONENTS.dfrDetailingLora.path)
+      : request.models.loras;
   const seenLoras = new Set<string>();
   for (const lora of loras) {
     const path = resolve(lora.path);
@@ -354,6 +369,31 @@ function validateOfficialSpeechAssets(request: GenerationRequest): string[] {
       requireAsset("ltx23-moge", request.icLora.mogeModelPath, "MoGe-Geometriemodell");
     }
   }
+  if (request.mode === "dfr") {
+    const dfr = dfrSettings(request);
+    requireAsset("ltx25-transformer-bf16", request.models.transformerPath, "DFR Distilled Transformer");
+    requireAsset("ltx25-text-encoder-bf16", request.models.textEncoderPath, "DFR Textencoder");
+    requireAsset(
+      request.models.videoVaePath.endsWith(LTX25_MODEL_COMPONENTS.videoVaeConv.path.split("/").at(-1)!)
+        ? "ltx25-video-vae-conv-bf16"
+        : "ltx25-video-vae-diffusion-bf16",
+      request.models.videoVaePath,
+      "DFR Video-VAE",
+    );
+    requireAsset("ltx25-audio-vae-bf16", request.models.audioVaePath, "DFR Audio-VAE");
+    if (request.models.durationHeadPath) {
+      requireAsset("ltx25-duration-head-bf16", request.models.durationHeadPath, "DFR Duration-Head");
+    }
+    requireAsset("ltx25-spatial-upscaler-bf16", request.models.spatialUpscalerPath, "DFR Spatial Upscaler");
+    requireAsset("ltx25-dfr-detailing-lora", dfr.detailingLoraPath, "DFR Detailing IC-LoRA");
+    if (dfr.temporalUpscalings > 0) {
+      requireAsset(
+        "ltx25-temporal-upscaler-bf16",
+        dfr.temporalUpscalerPath,
+        "DFR Temporal Upscaler",
+      );
+    }
+  }
   if (request.mode === "id-lora") {
     requireAsset("ltx23-id-lora-talkvid", request.idLora.lora.path, "ID-LoRA TalkVid");
   }
@@ -439,6 +479,7 @@ function warnLipDubReference(request: GenerationRequest): string[] {
 
 export function buildCommand(request: GenerationRequest): CommandPlan {
   const outputPath = resolve(outputRoot, request.outputName);
+  const dfr = dfrSettings(request);
   const hdrICLora = request.mode === "ic-lora" && request.icLora.profile === "hdr";
   const inOutpaintICLora = request.mode === "ic-lora"
     && ["inpainting", "outpainting"].includes(request.icLora.profile);
@@ -546,6 +587,48 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
         kind: "file",
       });
     }
+  } else if (request.mode === "dfr") {
+    appendModelPackArgs(request, args, "--checkpoint-path", request.models.checkpointPath);
+    appendCommonGenerationArgs(request, args);
+    args.push(
+      "--spatial-upsampler-path",
+      request.models.spatialUpscalerPath,
+      "--detailing-lora",
+      dfr.detailingLoraPath,
+      "--temporal-upscalings",
+      String(dfr.temporalUpscalings),
+      "--spatial-upscalings",
+      String(dfr.spatialUpscalings),
+    );
+    if (dfr.temporalUpscalings > 0) {
+      args.push("--temporal-upsampler-path", dfr.temporalUpscalerPath);
+    }
+    requiredPaths.push(
+      ...modelPackRequirements(request, request.models.checkpointPath, "DFR Distilled Transformer"),
+      {
+        path: request.models.spatialUpscalerPath,
+        label: "DFR Spatial Upscaler",
+        kind: "file",
+        expectedSizeBytes: LTX25_MODEL_COMPONENTS.spatialUpscaler.sizeBytes,
+        expectedSha256: LTX25_MODEL_COMPONENTS.spatialUpscaler.sha256,
+      },
+      {
+        path: dfr.detailingLoraPath,
+        label: "DFR Detailing IC-LoRA",
+        kind: "file",
+        expectedSizeBytes: LTX25_MODEL_COMPONENTS.dfrDetailingLora.sizeBytes,
+        expectedSha256: LTX25_MODEL_COMPONENTS.dfrDetailingLora.sha256,
+      },
+    );
+    if (dfr.temporalUpscalings > 0) {
+      requiredPaths.push({
+        path: dfr.temporalUpscalerPath,
+        label: "DFR Temporal Upscaler",
+        kind: "file",
+        expectedSizeBytes: LTX25_MODEL_COMPONENTS.temporalUpscaler.sizeBytes,
+        expectedSha256: LTX25_MODEL_COMPONENTS.temporalUpscaler.sha256,
+      });
+    }
   } else if (request.mode === "text-to-audio") {
     args.push(
       "--prompt",
@@ -563,6 +646,8 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       "--num-inference-steps",
       "8",
       "--official-comfy-workflow",
+      "--official-comfy-sampler",
+      usesSplitModelPack(request) ? "euler-ancestral" : "euler-ancestral-cfg-pp",
       "--audio-cfg-guidance-scale",
       String(request.audioGuidance.cfgScale),
       "--audio-stg-guidance-scale",
@@ -571,6 +656,8 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       String(request.audioGuidance.rescaleScale),
       "--audio-skip-step",
       String(request.audioGuidance.skipStep),
+      "--audio-peak-ceiling-dbfs",
+      String(request.textToAudio.peakCeilingDbfs),
     );
     appendModelPackArgs(request, args, "--checkpoint-path", request.models.checkpointPath, { video: false });
     if (!usesSplitModelPack(request)) {
@@ -704,7 +791,16 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
     if (["two-stage", "ic-lora", "image-audio-to-video"].includes(request.mode)) {
       args.push("--official-comfy-workflow");
     }
+    if (request.mode === "two-stage") {
+      args.push(
+        "--official-comfy-sampler",
+        usesSplitModelPack(request) ? "euler-ancestral" : "deterministic",
+      );
+    }
     if (request.mode === "distilled") {
+      if (usesSplitModelPack(request)) {
+        args.push("--sampler-profile", "official-comfy");
+      }
       appendBoolean(args, request.distilled.singleStage, "--skip-stage-2");
     }
     requiredPaths.push(...modelPackRequirements(
@@ -748,7 +844,11 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       const ingredients = request.icLora.profile === "ingredients";
       const unionControl = request.icLora.profile === "union-control";
       const pixelUpscaler = request.icLora.profile === "pixel-upscaler";
-      const freezeControlAudio = ["pixel-upscaler", "v2v-instant-shave"].includes(request.icLora.profile);
+      const splitPlainAncestral = usesSplitModelPack(request)
+        && ["motion-track", "v2v-deblur"].includes(request.icLora.profile);
+      const freezeControlAudio = ["pixel-upscaler", "v2v-deblur", "v2v-instant-shave"].includes(
+        request.icLora.profile,
+      );
       const controlAsset: RecommendedModelAsset = recommendedModelAsset(icLoraModelAssetId(request));
       requiredPaths.push({
         path: request.icLora.lora.path,
@@ -767,7 +867,7 @@ export function buildCommand(request: GenerationRequest): CommandPlan {
       appendFlag(
         args,
         "--official-comfy-sampler",
-        unionControl
+        unionControl || splitPlainAncestral
           ? "euler-ancestral-rf"
           : pixelUpscaler ? "euler-cfg-pp" : "euler-ancestral-cfg-pp",
       );
@@ -896,8 +996,16 @@ export function validateRequestPlan(
   inventory?: ModelInventory,
   options: { enforceOfficialAssets?: boolean } = {},
 ): string[] {
+  if (isLegacyDfrRequest(request)) {
+    return [
+      "Historischer DFR-Altbestand vor v1.3.0 ist nur lesbar und darf nicht semantisch neu ausgeführt werden. "
+      + "Für einen neuen Lauf DFR ausdrücklich neu auswählen und den aktuellen Modellvertrag konfigurieren.",
+    ];
+  }
   const enforceOfficialAssets = options.enforceOfficialAssets !== false;
+  const qualificationHold = qualificationHoldForRequest(request);
   const errors = [
+    ...(qualificationHold ? [qualificationHold.reason] : []),
     ...validatePlanPaths(plan),
     ...(enforceOfficialAssets ? validateOfficialSpeechAssets(request) : []),
   ];
@@ -905,6 +1013,19 @@ export function validateRequestPlan(
     errors.push(
       "Für wortgetreuen nativen Dialog muss die Gemma-Promptverbesserung ausgeschaltet bleiben; "
       + "sie kann den gesprochenen Wortlaut umformulieren.",
+    );
+  }
+  if (hasDuplicateDfrDetailingLora(request)) {
+    errors.push(
+      "Die verpflichtende DFR Detailing IC-LoRA ist bereits fest mit Stärke 0,5 gebunden und darf nicht zusätzlich als normale LoRA erscheinen.",
+    );
+  }
+  if (request.mode === "ic-lora"
+    && request.icLora.profile === "union-control"
+    && usesSplitModelPack(request)) {
+    errors.push(
+      "LTX-2.5 Union Control ist im gepinnten offiziellen Workflow zweistufig; "
+      + "die native Stage-2-/Upscaler-Implementierung fehlt noch. Der Start bleibt bis zum Vertragsnachweis gesperrt.",
     );
   }
   if (inventory && enforceOfficialAssets) {

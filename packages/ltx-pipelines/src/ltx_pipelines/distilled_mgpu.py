@@ -160,7 +160,7 @@ class DistilledRunner(MGPURunner):
         # catches that and turns it into a recoverable RunnerError. Anything else is fatal.
         hdr = resolve_hdr_color_space(images=images or [], hdr=hdr)
         vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
-        video, audio, num_frames, tiling_config = self._pipeline(
+        result = self._pipeline(
             prompt=prompt,
             seed=seed,
             height=height,
@@ -179,11 +179,11 @@ class DistilledRunner(MGPURunner):
             yield None  # workers: nothing to encode
             return
         encode_video(
-            video=video,
+            video=result.video,
             fps=frame_rate,
-            audio=audio,
+            audio=result.audio,
             output_path=output_path,
-            video_chunks_number=get_video_chunks_number(num_frames, tiling_config),
+            video_chunks_number=get_video_chunks_number(result.num_frames, result.tiling_config),
             color_space=hdr,
         )
         yield output_path

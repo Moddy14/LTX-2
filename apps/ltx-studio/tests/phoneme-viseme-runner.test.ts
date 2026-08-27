@@ -139,6 +139,36 @@ runnerIt("normalizes negative or non-zero source PTS without dropping decoded fr
   expect(result.positiveLast).toBeCloseTo(49.5 / 25);
 });
 
+runnerIt("asks ffprobe for the complete 241-frame production window", () => {
+  const root = mkdtempSync(join(tmpdir(), "ltx-pv-full-window-"));
+  try {
+    const video = join(root, "241-frames.mp4");
+    const generated = spawnSync("ffmpeg", [
+      "-v", "error",
+      "-f", "lavfi", "-i", "color=c=black:s=64x64:r=24",
+      "-frames:v", "241",
+      "-c:v", "mpeg4",
+      "-y",
+      video,
+    ], { encoding: "utf8", timeout: 15_000 });
+    expect(generated.status, generated.stderr).toBe(0);
+
+    const result = runProbe([
+      `video=pathlib.Path(${JSON.stringify(video)})`,
+      "timestamps=module.video_timestamps(video)",
+      "print(json.dumps({'readInterval':module.FFPROBE_READ_INTERVAL,'count':len(timestamps),'first':timestamps[0],'last':timestamps[-1]}))",
+    ]);
+
+    expect(result.readInterval).toBe("%+10.500");
+    expect(result.count).toBe(241);
+    expect(result.first as number).toBeCloseTo(1 / 48);
+    expect(result.last as number).toBeCloseTo(240.5 / 24);
+    expect(result.last as number).toBeGreaterThan(10);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 runnerIt("moves MFA intervals onto the signed audio/video stream timeline", () => {
   const root = mkdtempSync(join(tmpdir(), "ltx-pv-pts-"));
   try {
@@ -207,6 +237,28 @@ runnerIt("emits bounded raw measurement evidence without granting Product-GO", (
     transitionF1: null,
   });
   expect(result.sufficient).toBe(true);
+});
+
+runnerIt("covers the complete 10-second production preset", () => {
+  const result = runProbe([
+    "count=241",
+    "times=(np.arange(count,dtype=np.float64)+0.5)/24.0",
+    "target=np.tile(np.asarray([0.0,0.25,0.55,1.0,0.45,0.25],dtype=np.float64),41)[:count]",
+    "bilabial=target==0.0",
+    "rounded=target==0.45",
+    "speech=np.ones(count,dtype=np.bool_)",
+    "opening=0.05+target*0.1",
+    "closure=np.where(bilabial,0.9,0.1)",
+    "tracks={'times':times,'opening':opening,'rounding':rounded.astype(np.float64),'closure':closure,'blur':np.full(count,100.0),'yaw':np.full(count,4.0),'pitch':np.full(count,3.0),'tracked':np.ones(count,dtype=np.bool_),'mouthTracked':np.ones(count,dtype=np.bool_),'multi':np.zeros(count,dtype=np.bool_)}",
+    "targets={'opening':target,'bilabial':bilabial,'rounded':rounded.astype(np.float64),'speech':speech,'known':np.ones(count,dtype=np.bool_),'coverage':1.0,'unknown':[]}",
+    "policy={'minimumSampledFrames':24,'minimumUsableDurationSeconds':1.0,'minimumFaceTrackCoverage':0.8,'minimumMouthTrackCoverage':0.8,'maximumMultiFaceFrameRatio':0.05,'minimumPhoneCoverage':0.9,'requireNoUnknownPhones':True,'minimumMedianBlurVariance':20.0,'maximumYawP95Degrees':35.0,'maximumPitchP95Degrees':25.0}",
+    "raw=module.measurement(tracks,targets,'a'*64,'b'*64,policy)[0]",
+    "print(json.dumps({'usableDurationSeconds':raw['usableDurationSeconds'],'sampledFrames':raw['sampledFrames']}))",
+  ]);
+
+  expect(result.sampledFrames).toBe(241);
+  expect(result.usableDurationSeconds).toBeCloseTo(241 / 24);
+  expect(result.usableDurationSeconds as number).toBeGreaterThan(10);
 });
 
 runnerIt("derives fallback closure thresholds only from known tracked phones", () => {

@@ -1,11 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -24,6 +27,7 @@ import {
 } from "../shared/experiments.js";
 import type { GenerationRequest } from "../shared/pipelines.js";
 import type { StudioOutput } from "../shared/outputs.js";
+import { experimentJsonSha256V1 } from "./experimentDigest.js";
 
 type ExperimentBoundJob = {
   id: string;
@@ -33,20 +37,60 @@ type ExperimentBoundJob = {
   experiment: ExperimentRunBinding | null;
 };
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+const TERMINAL_ARCHIVE_RECONCILIATION_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
 
-export function sha256Json(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
-}
+/**
+ * Request fields that were added after the first persisted experiment.v1
+ * files had already been written by released/stable Studio builds.
+ *
+ * This is deliberately an exact allow-list, not a generic "missing field"
+ * migration. A historical omission may make the whole frozen protocol an
+ * immutable archive, while an absent/invalid value anywhere else remains a
+ * startup-blocking integrity error. Never add a path here merely to make an
+ * invalid experiment load.
+ */
+const LEGACY_REQUIRED_REQUEST_FIELDS = new Set([
+  "models.layout",
+  "models.generation",
+  "models.transformerPath",
+  "models.textEncoderPath",
+  "models.videoVaePath",
+  "models.audioVaePath",
+  "models.durationHeadPath",
+  "models.promptEnhancerGemmaRoot",
+  "models.gemmaLora",
+  "models.gemmaLora.enabled",
+  "textToAudio",
+  "distilled",
+  "icLora.controlType",
+  "icLora.lora",
+  "icLora.mogeModelPath",
+  "icLora.hdrTextEmbeddingsPath",
+  "icLora.hdrHighQuality",
+  "idLora",
+  "lipDub.pipelineProfile",
+  "postprocess.latentSync",
+  "postprocess.museTalk",
+  "postprocess.lipForcing",
+  "postprocess.lipForcing.rawOutputProfile",
+  "postprocess.lipForcing.mouthDelayMs",
+  "postprocess.lipForcing.programAudioDelayMs",
+]);
+
+// Zod supplies this historical default before returning parsed data, so its
+// omission cannot appear in parse issues. It still changes the frozen request
+// bytes/hash and must therefore archive the protocol instead of silently
+// upgrading it into an executable request.
+const LEGACY_DEFAULTED_REQUEST_FIELDS = ["icLora.profile"] as const;
+
+// Kept as the public store helper for existing callers/tests; its algorithm is
+// explicitly frozen by experiment.v1 and implemented in one shared server module.
+export const sha256Json = experimentJsonSha256V1;
 
 export function requestSettingsSha256(request: GenerationRequest): string {
   const settings = structuredClone(request) as Partial<GenerationRequest>;
@@ -144,6 +188,15 @@ export class ExperimentConflictError extends Error {
   }
 }
 
+class ArchivedExperimentConflictError extends ExperimentConflictError {
+  constructor(id: string) {
+    super(
+      `Experiment ${id} stammt aus einer älteren Studio-Version und bleibt unverändert schreibgeschützt archiviert.`,
+    );
+    this.name = "ArchivedExperimentConflictError";
+  }
+}
+
 export class ExperimentStore {
   constructor(private readonly root: string) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -180,11 +233,28 @@ export class ExperimentStore {
     return this.read(id);
   }
 
+  verifyFrozenIntegrity(id: string): ControlledExperiment {
+    const current = this.require(id);
+    if (current.status !== "frozen" || !current.protocolSha256) {
+      throw new ExperimentConflictError("Das Experiment ist nicht vollständig eingefroren.");
+    }
+    this.assertFrozenIntegrity(current);
+    return current;
+  }
+
   create(
     input: ExperimentCreateInput,
     createdAt = new Date().toISOString(),
     baselineEvidence: ExperimentBaselineEvidence | null = null,
   ): ControlledExperiment {
+    if (
+      input.candidate.variable === "lipforcing-raw-output-profile"
+      && (input.baselineOutputName !== undefined || baselineEvidence !== null)
+    ) {
+      throw new ExperimentConflictError(
+        "Das LipForcing-Rohvideo-Experiment darf keine vorhandene Baseline übernehmen; ein frischer Baseline-Arm ist verpflichtend.",
+      );
+    }
     const parsed = experimentCreateInputSchema.parse(input);
     const id = randomUUID();
     const baseline = structuredClone(parsed.baselineRequest);
@@ -323,6 +393,43 @@ export class ExperimentStore {
     const armIndex = arm === "baseline" ? 0 : 1;
     const selected = current.arms[armIndex];
     if (selected.jobId) throw new ExperimentConflictError(`Der ${arm === "baseline" ? "Baseline" : "Kandidaten"}arm wurde bereits gestartet.`);
+    return this.buildBinding(current, arm);
+  }
+
+  /**
+   * Builds a non-persisted retry view after the caller has proven that the
+   * bound terminal job no longer owns an active DGX queue record.
+   *
+   * The stored arm remains bound and its attempt history is untouched.  This
+   * method exists so read-only preflight and launch can recompute the frozen
+   * protocol binding before launch performs one atomic compare-and-swap.
+   */
+  retryPreflightView(
+    id: string,
+    arm: "baseline" | "candidate",
+    failedJobId: string,
+  ): { experiment: ControlledExperiment; binding: ExperimentRunBinding } {
+    const current = this.require(id);
+    if (current.status !== "frozen" || !current.protocolSha256) {
+      throw new ExperimentConflictError("Das Experiment muss vor der Startprüfung eingefroren werden.");
+    }
+    this.assertFrozenIntegrity(current);
+    const armIndex = arm === "baseline" ? 0 : 1;
+    if (current.arms[armIndex].jobId !== failedJobId) {
+      throw new ExperimentConflictError("Der retryfähige Experimentarm hat sich zwischenzeitlich geändert.");
+    }
+    const arms = structuredClone(current.arms);
+    arms[armIndex].jobId = null;
+    const experiment = controlledExperimentSchema.parse({ ...current, arms });
+    return { experiment, binding: this.buildBinding(experiment, arm) };
+  }
+
+  private buildBinding(
+    current: ControlledExperiment,
+    arm: "baseline" | "candidate",
+  ): ExperimentRunBinding {
+    const armIndex = arm === "baseline" ? 0 : 1;
+    const selected = current.arms[armIndex];
     const baselineJobId = current.arms[0].jobId;
     if (arm === "candidate" && !baselineJobId) {
       throw new ExperimentConflictError("Der Baseline-Arm muss vor dem Kandidatenarm gestartet werden.");
@@ -350,8 +457,30 @@ export class ExperimentStore {
     for (const job of jobs) {
       const binding = job.experiment;
       if (!binding) continue;
-      const current = this.require(binding.experimentId);
+      let current: ControlledExperiment;
+      try {
+        current = this.require(binding.experimentId);
+      } catch (error) {
+        // Historical terminal records are immutable audit history. A newly
+        // required request field must neither rewrite their request/hash bytes
+        // nor prevent the current store from starting. Active jobs remain
+        // fail-closed, and corruption/unknown schema drift is never swallowed.
+        if (
+          error instanceof ArchivedExperimentConflictError
+          && TERMINAL_ARCHIVE_RECONCILIATION_STATUSES.has(job.status)
+        ) {
+          continue;
+        }
+        throw error;
+      }
       const armIndex = binding.arm === "baseline" ? 0 : 1;
+      this.assertFrozenIntegrity(current);
+      const expected = this.buildBinding(current, binding.arm);
+      if (JSON.stringify(binding) !== JSON.stringify(expected)) {
+        throw new ExperimentConflictError(
+          `Job ${job.id} passt nicht zum eingefrorenen Experimentprotokoll.`,
+        );
+      }
       const boundJobId = current.arms[armIndex].jobId;
       if (boundJobId === job.id) continue;
       if (current.arms[armIndex].attemptJobIds.includes(job.id)) continue;
@@ -365,12 +494,6 @@ export class ExperimentStore {
       if (boundJobId) {
         throw new ExperimentConflictError(
           `Experiment ${current.id} enthält widersprüchliche Jobs für den ${binding.arm}-Arm.`,
-        );
-      }
-      const expected = this.bindingFor(current.id, binding.arm);
-      if (JSON.stringify(binding) !== JSON.stringify(expected)) {
-        throw new ExperimentConflictError(
-          `Job ${job.id} passt nicht zum eingefrorenen Experimentprotokoll.`,
         );
       }
       this.attachJob(current.id, binding.arm, job.id);
@@ -407,6 +530,36 @@ export class ExperimentStore {
     }
     const arms = structuredClone(current.arms);
     arms[armIndex].jobId = null;
+    const experiment = controlledExperimentSchema.parse({ ...current, arms });
+    this.write(experiment);
+    return experiment;
+  }
+
+  /**
+   * Atomically replaces one proven retryable arm binding without ever
+   * persisting an unbound intermediate state.  The failed job remains in the
+   * append-only attempt history.
+   */
+  replaceArmJobForRetry(
+    id: string,
+    arm: "baseline" | "candidate",
+    failedJobId: string,
+    nextJobId: string,
+  ): ControlledExperiment {
+    const current = this.require(id);
+    if (current.status !== "frozen" || !current.protocolSha256) {
+      throw new ExperimentConflictError("Das Experiment muss für einen Wiederanlauf eingefroren bleiben.");
+    }
+    this.assertFrozenIntegrity(current);
+    const armIndex = arm === "baseline" ? 0 : 1;
+    if (current.arms[armIndex].jobId !== failedJobId) {
+      throw new ExperimentConflictError("Der fehlgeschlagene Experimentarm hat sich zwischenzeitlich geändert.");
+    }
+    const arms = structuredClone(current.arms);
+    arms[armIndex].jobId = nextJobId;
+    if (!arms[armIndex].attemptJobIds.includes(nextJobId)) {
+      arms[armIndex].attemptJobIds.push(nextJobId);
+    }
     const experiment = controlledExperimentSchema.parse({ ...current, arms });
     this.write(experiment);
     return experiment;
@@ -455,32 +608,39 @@ export class ExperimentStore {
     } catch {
       throw new ExperimentConflictError(`Experimentdatei ${id} ist beschädigt und wird nicht verwendet.`);
     }
+    const pathIsExactlyMissing = (path: readonly PropertyKey[]): boolean => {
+      let current: unknown = decoded;
+      for (const [index, key] of path.entries()) {
+        if (!current || typeof current !== "object") return false;
+        if (!Object.hasOwn(current, key)) return index === path.length - 1;
+        current = (current as Record<PropertyKey, unknown>)[key];
+      }
+      return false;
+    };
     const parsed = controlledExperimentSchema.safeParse(decoded);
-    if (parsed.success) return parsed.data;
-    const legacyRequestFields = new Set([
-      "models.gemmaLora",
-      "icLora.controlType",
-      "icLora.lora",
-      "icLora.mogeModelPath",
-      "icLora.hdrTextEmbeddingsPath",
-      "icLora.hdrHighQuality",
-      "idLora",
-      "lipDub.pipelineProfile",
-      "postprocess.latentSync",
-      "postprocess.museTalk",
-      "postprocess.lipForcing",
-    ]);
+    const hasDefaultedLegacyRequestOmission = (
+      Array.isArray((decoded as { arms?: unknown } | null)?.arms)
+      && (decoded as { arms: unknown[] }).arms.some((_arm, armIndex) =>
+        LEGACY_DEFAULTED_REQUEST_FIELDS.some((field) =>
+          pathIsExactlyMissing(["arms", armIndex, "request", ...field.split(".")]),
+        ),
+      )
+    );
+    if (parsed.success) {
+      if (hasDefaultedLegacyRequestOmission) throw new ArchivedExperimentConflictError(id);
+      return parsed.data;
+    }
     const usesLegacyRequestSchema = parsed.error.issues.length > 0
       && parsed.error.issues.every((issue) => {
         if (issue.path[0] !== "arms" || typeof issue.path[1] !== "number" || issue.path[2] !== "request") {
           return false;
         }
-        return legacyRequestFields.has(issue.path.slice(3).join("."));
+        return (issue.code === "invalid_type" || issue.code === "invalid_value")
+          && LEGACY_REQUIRED_REQUEST_FIELDS.has(issue.path.slice(3).join("."))
+          && pathIsExactlyMissing(issue.path);
       });
     if (usesLegacyRequestSchema) {
-      throw new ExperimentConflictError(
-        `Experiment ${id} stammt aus einer älteren Studio-Version und bleibt unverändert schreibgeschützt archiviert.`,
-      );
+      throw new ArchivedExperimentConflictError(id);
     }
     throw new ExperimentConflictError(`Experimentdatei ${id} ist ungültig und wird nicht verwendet.`);
   }
@@ -488,9 +648,47 @@ export class ExperimentStore {
   private write(experiment: ControlledExperiment): void {
     const parsed = controlledExperimentSchema.parse(experiment);
     const path = join(this.root, `${parsed.id}.json`);
-    const temporaryPath = `${path}.tmp`;
-    writeFileSync(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, path);
+    const temporaryPath = join(this.root, `.${parsed.id}.${randomUUID()}.tmp`);
+    let descriptor: number | null = null;
+    let directoryDescriptor: number | null = null;
+    try {
+      descriptor = openSync(temporaryPath, "wx", 0o600);
+      writeFileSync(descriptor, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = null;
+      renameSync(temporaryPath, path);
+      // The arm CAS is allowed to release JobManager's durable start fence
+      // only after both file contents and the directory rename are stable
+      // across a kernel/power loss.
+      directoryDescriptor = openSync(this.root, "r");
+      fsyncSync(directoryDescriptor);
+      closeSync(directoryDescriptor);
+      directoryDescriptor = null;
+    } catch (error) {
+      // Cleanup must never mask the persistence/fsync error that determines
+      // whether the surrounding CAS commit is certain or ambiguous.
+      if (descriptor !== null) {
+        try {
+          closeSync(descriptor);
+        } catch {
+          // Preserve the original write/fsync/rename failure.
+        }
+      }
+      if (directoryDescriptor !== null) {
+        try {
+          closeSync(directoryDescriptor);
+        } catch {
+          // Preserve the original durability failure.
+        }
+      }
+      try {
+        rmSync(temporaryPath, { force: true });
+      } catch {
+        // The UUID temporary path is never authoritative; retain the original
+        // failure so the route can reconcile the possibly committed arm.
+      }
+      throw error;
+    }
   }
 }
