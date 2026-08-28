@@ -4150,9 +4150,7 @@ describe("job persistence and reservations", () => {
     const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
       .get(created.id)!;
     const provenance = runProvenance();
-    const ffmpegVersion = `${spawnSync("/usr/bin/ffmpeg", ["-version"], { encoding: "utf8" }).stdout}`
-      .split(/\r?\n/u)[0]!.trim();
-    provenance.runtime.ffmpegVersion = ffmpegVersion;
+    provenance.runtime.ffmpegVersion = "historical ffmpeg before a security update";
     active.runProvenance = provenance;
     active.identityEvidence = notApplicableIdentityEvidence();
     active.status = "running";
@@ -4238,6 +4236,9 @@ describe("job persistence and reservations", () => {
         },
       },
     });
+    expect((active.logs as string[]).join(" ")).toContain(
+      "Executable-FD, Version, Bytes und Revision",
+    );
     expect(active.dgxSubmitPending).toBeFalsy();
     const receipt = JSON.parse(await readFile(join(stageRoot, "audio-retime-receipt.v1.json"), "utf8"));
     expect(receipt.checks).toMatchObject({

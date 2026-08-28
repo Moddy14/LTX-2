@@ -9824,10 +9824,17 @@ export class JobManager extends EventEmitter {
         );
         return;
       }
-      if (!job.runProvenance
-        || job.runProvenance.runtime.ffmpegVersion !== ffmpeg.version) {
-        this.failJob(job, "FFmpeg-Version des gebundenen Tools widerspricht der übernommenen Baseline-Provenienz.");
+      if (!job.runProvenance) {
+        this.failJob(job, "Die historische Baseline-Provenienz fehlt vor dem gebundenen Audio-Retime.");
         return;
+      }
+      if (job.runProvenance.runtime.ffmpegVersion !== ffmpeg.version) {
+        this.appendLog(
+          job,
+          "Das aktuelle FFmpeg unterscheidet sich von der historischen Baseline-Laufzeit; "
+            + "Executable-FD, Version, Bytes und Revision werden deshalb ausschließlich in der neuen "
+            + "CPU-Operation und ihrem unabhängig verifizierten Receipt gebunden.",
+        );
       }
       try {
         pinnedOutput = openVerifiedExecutionDescriptor(
