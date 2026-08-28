@@ -76,6 +76,7 @@ const LEGACY_REQUIRED_REQUEST_FIELDS = new Set([
   "icLora.hdrTextEmbeddingsPath",
   "icLora.hdrHighQuality",
   "idLora",
+  "audio.outputDelayMs",
   "lipDub.pipelineProfile",
   "postprocess.latentSync",
   "postprocess.museTalk",

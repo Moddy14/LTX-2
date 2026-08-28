@@ -33,7 +33,11 @@ export const publicExecutionDecisionSummarySchema = z.object({
   verificationStatus: z.enum(["pending", "verified", "unverified"]),
   cpuReuse: z.object({
     baselineLabel: z.string().min(1).max(120),
-    operationKind: z.enum(["ffmpeg-audio-retime", "paired-artifact-promotion"]),
+    operationKind: z.enum([
+      "ffmpeg-audio-retime",
+      "ffmpeg-audio-retime-v2",
+      "paired-artifact-promotion",
+    ]),
     sourceProgramAudioDelayMs: z.number().int().min(-1_000).max(1_000).nullable(),
     appliedDeltaMs: z.number().int().min(-1_000).max(1_000).nullable(),
     operationState: z.enum(cpuOperationStates),

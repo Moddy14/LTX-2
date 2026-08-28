@@ -14,8 +14,10 @@ import {
 } from "../shared/experiments.js";
 import type { StudioOutput } from "../shared/outputs.js";
 import {
-  publishedOutputIsReusableLipForcingVisual,
-  reusableLipForcingOutputFromSidecars,
+  programAudioDelayPath,
+  programAudioDelayValue,
+  publishedOutputIsReusableProgramAudioVisual,
+  reusableProgramAudioOutputFromSidecars,
   type ReusableLtxBaseCandidate,
 } from "./jobs.js";
 import {
@@ -111,10 +113,12 @@ export function unverifiableExperimentAdmissionPreflight(
 }
 
 export function isProgramAudioOnlyCandidate(experiment: ControlledExperiment, arm: ExperimentArm): boolean {
+  const variableId = experiment.candidate.variable;
   return arm === "candidate"
-    && experiment.candidate.variable === "lipforcing-program-audio-delay-ms"
+    && (variableId === "lipforcing-program-audio-delay-ms"
+      || variableId === "program-audio-delay-ms")
     && experiment.changedRequestPaths.length === 1
-    && experiment.changedRequestPaths[0] === "postprocess.lipForcing.programAudioDelayMs";
+    && experiment.changedRequestPaths[0] === programAudioDelayPath(variableId);
 }
 
 export function isRawMuxPairCandidate(experiment: ControlledExperiment, arm: ExperimentArm): boolean {
@@ -133,6 +137,12 @@ function verifyBoundAudioOnlyReuse(
   }
   const baseline = experiment.arms[0];
   const candidate = experiment.arms[1];
+  const variableId = experiment.candidate.variable;
+  if (variableId !== "lipforcing-program-audio-delay-ms"
+    && variableId !== "program-audio-delay-ms") {
+    return { error: "Das Experiment besitzt keinen zulässigen Audio-only-Zeitversatz." };
+  }
+  const expectedPath = programAudioDelayPath(variableId);
   const binding = context.binding;
   if (
     binding.experimentId !== experiment.id
@@ -140,7 +150,7 @@ function verifyBoundAudioOnlyReuse(
     || binding.arm !== "candidate"
     || binding.variableId !== experiment.candidate.variable
     || binding.changedRequestPaths.length !== 1
-    || binding.changedRequestPaths[0] !== "postprocess.lipForcing.programAudioDelayMs"
+    || binding.changedRequestPaths[0] !== expectedPath
     || binding.baselineRequestSha256 !== baseline.requestSha256
     || binding.requestSha256 !== candidate.requestSha256
     || binding.baselineJobId !== baseline.jobId
@@ -154,8 +164,12 @@ function verifyBoundAudioOnlyReuse(
   ) {
     return { error: "Die eingefrorenen Arm-Requests stimmen nicht mehr mit ihren Hashes überein." };
   }
-  if (!publishedOutputIsReusableLipForcingVisual(baseline.request, candidate.request)) {
-    return { error: "Baseline und Kandidat unterscheiden sich nicht ausschließlich im hörbaren LipForcing-Tonversatz." };
+  if (!publishedOutputIsReusableProgramAudioVisual(
+    baseline.request,
+    candidate.request,
+    variableId,
+  )) {
+    return { error: "Baseline und Kandidat unterscheiden sich nicht ausschließlich im hörbaren Ausgabetonversatz." };
   }
   const baselineOutput = context.outputs.find((output) =>
     outputVerifiesExperimentBaseline(output, experiment));
@@ -170,7 +184,7 @@ function verifyBoundAudioOnlyReuse(
   if (!sidecar) {
     return { error: "Der aktuelle Baseline-Sidecar bindet Request, Datei, Identität und Laufprovenienz nicht vollständig." };
   }
-  const reusable = reusableLipForcingOutputFromSidecars(
+  const reusable = reusableProgramAudioOutputFromSidecars(
     [sidecar],
     {
       id: experiment.id,
@@ -182,13 +196,23 @@ function verifyBoundAudioOnlyReuse(
       identityEvidence: sidecar.identityEvidence,
     },
     context.fileReady ?? localFileReady,
+    variableId,
   );
   if (!reusable || reusable.id !== baseline.jobId) {
     return { error: "Die gebundene Baseline erfüllt den fail-closed Reuse-Prädikat des JobRunners nicht." };
   }
-  const deltaMs = candidate.request.postprocess.lipForcing.programAudioDelayMs
+  const deltaMs = programAudioDelayValue(candidate.request, variableId)
     - reusable.programAudioDelayMs;
-  if (!Number.isInteger(deltaMs) || deltaMs === 0 || deltaMs < -1_000 || deltaMs > 1_000) {
+  const validDelta = variableId === "program-audio-delay-ms"
+    ? reusable.programAudioDelayMs === 0
+      && Number.isInteger(deltaMs)
+      && deltaMs >= 1
+      && deltaMs <= 500
+    : Number.isInteger(deltaMs)
+      && deltaMs !== 0
+      && deltaMs >= -1_000
+      && deltaMs <= 1_000;
+  if (!validDelta) {
     return { error: "Die gebundene Tonversatzdifferenz ist für den Audio-only-Retime nicht gültig." };
   }
   return { description: reusable.description, deltaMs };

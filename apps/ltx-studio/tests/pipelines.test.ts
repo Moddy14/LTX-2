@@ -949,6 +949,26 @@ describe("generationRequestSchema", () => {
     expect(generationRequestSchema.safeParse(request).success).toBe(false);
   });
 
+  it("defines a neutral bounded output-audio delay and migrates legacy requests to zero", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    expect(request.audio.outputDelayMs).toBe(0);
+    request.audio.outputDelayMs = 500;
+    expect(generationRequestSchema.safeParse(request).success).toBe(true);
+    request.audio.outputDelayMs = -1;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.audio.outputDelayMs = 501;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+    request.audio.outputDelayMs = 0.5;
+    expect(generationRequestSchema.safeParse(request).success).toBe(false);
+
+    const legacy = structuredClone(validLtx25SplitRequest("image-audio-to-video")) as unknown as {
+      audio: Record<string, unknown>;
+    };
+    delete legacy.audio.outputDelayMs;
+    expect(generationRequestSchema.safeParse(legacy).success).toBe(false);
+    expect(migrateGenerationRequest(legacy)?.audio.outputDelayMs).toBe(0);
+  });
+
   it("migrates a stored pre-profile request only to the command-compatible LipForcing default", () => {
     const legacy = structuredClone(validRequest("lipdub")) as unknown as {
       postprocess: { lipForcing: Record<string, unknown> };

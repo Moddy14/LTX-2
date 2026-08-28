@@ -1387,6 +1387,8 @@ export class OutputLibrary {
           outputPath,
           jobId: record.jobId,
           request: record.request,
+          authorityBoundRequest: record.authorityBoundRequest,
+          authorityRequestSha256: record.authorityRequestSha256,
           identityEvidence: record.identityEvidence,
           runProvenance: record.runProvenance,
           settingsSidecarPath: settingsPath(this.root, record.outputName),

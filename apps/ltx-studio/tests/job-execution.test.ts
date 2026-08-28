@@ -149,6 +149,57 @@ function pairedDecision(
   };
 }
 
+function packetCopyDecision(
+  state: "prepared" | "running" | "succeeded" = "prepared",
+): JobExecutionDecision {
+  const legacy = cpuDecision(state);
+  if (legacy.executionClass !== "cpu-only"
+    || legacy.operation.kind !== "ffmpeg-audio-retime"
+    || "reuseKind" in legacy.cpuReuse) throw new Error("fixture");
+  const succeeded = state === "succeeded";
+  return {
+    ...legacy,
+    schemaVersion: "ltx-studio-execution-decision.v6",
+    cpuReuse: legacy.cpuReuse,
+    operation: {
+      kind: "ffmpeg-audio-retime-v2",
+      profileId: "positive-delay-packet-copy.v1",
+      state,
+      descriptorThreatModel: executionDescriptorThreatModel,
+      ffmpeg: legacy.operation.executable,
+      ffmpegVersion: legacy.operation.ffmpegVersion,
+      ffprobe: {
+        ...legacy.operation.executable,
+        path: "/usr/bin/ffprobe",
+        sha256: "c".repeat(64),
+        revision: { ...legacy.operation.executable.revision, fileId: "102" },
+      },
+      ffprobeVersion: "ffprobe version 7.1",
+      ffmpegArgsSha256: legacy.operation.argsSha256,
+      ffprobeArgsSha256: "d".repeat(64),
+      deltaMs: 83,
+      preparedAt: legacy.operation.preparedAt,
+      startedAt: legacy.operation.startedAt,
+      completedAt: legacy.operation.completedAt,
+      exitCode: legacy.operation.exitCode,
+      signal: legacy.operation.signal,
+      errorSha256: legacy.operation.errorSha256,
+      output: legacy.operation.output,
+      receipt: succeeded
+        ? {
+            path: "/private/job/audio-retime-receipt.json",
+            sha256: "e".repeat(64),
+            revision: {
+              ...legacy.operation.executable.revision,
+              fileId: "103",
+              mode: 0o100400,
+            },
+          }
+        : null,
+    },
+  };
+}
+
 describe("ExecutionDecision.v5", () => {
   it("accepts prepared -> running -> succeeded and freezes every terminal operation", () => {
     const prepared = cpuDecision("prepared");
@@ -253,5 +304,29 @@ describe("ExecutionDecision.v6 paired artifact authority", () => {
       || wrongAuthority.operation.kind !== "paired-artifact-promotion") throw new Error("fixture");
     wrongAuthority.operation.authoritySha256 = "f".repeat(64);
     expect(normalizeJobExecutionDecision(wrongAuthority)).toBeNull();
+  });
+});
+
+describe("ExecutionDecision.v6 packet-copy audio-retime authority", () => {
+  it("requires a separate FFprobe binding and receipt before success", () => {
+    const prepared = packetCopyDecision("prepared");
+    const running = packetCopyDecision("running");
+    const succeeded = packetCopyDecision("succeeded");
+
+    expect(normalizeJobExecutionDecision(prepared)).toEqual(prepared);
+    expect(normalizeJobExecutionDecision(running)).toEqual(running);
+    expect(normalizeJobExecutionDecision(succeeded)).toEqual(succeeded);
+    expect(jobExecutionDecisionIsMonotone(prepared, running)).toBe(true);
+    expect(jobExecutionDecisionIsMonotone(running, succeeded)).toBe(true);
+
+    const missingReceipt = structuredClone(succeeded);
+    if (missingReceipt.executionClass !== "cpu-only"
+      || missingReceipt.operation.kind !== "ffmpeg-audio-retime-v2") throw new Error("fixture");
+    missingReceipt.operation.receipt = null;
+    expect(normalizeJobExecutionDecision(missingReceipt)).toBeNull();
+
+    const v5 = structuredClone(prepared) as unknown as Record<string, unknown>;
+    v5.schemaVersion = "ltx-studio-execution-decision.v5";
+    expect(normalizeJobExecutionDecision(v5)).toBeNull();
   });
 });

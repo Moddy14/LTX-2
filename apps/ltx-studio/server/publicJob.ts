@@ -95,11 +95,13 @@ function summarizeExecutionDecision(
       ? {
           baselineLabel: decision.cpuReuse.baselineOutputName,
           operationKind: decision.operation.kind,
-          sourceProgramAudioDelayMs: decision.operation.kind === "ffmpeg-audio-retime"
+          sourceProgramAudioDelayMs: (decision.operation.kind === "ffmpeg-audio-retime"
+            || decision.operation.kind === "ffmpeg-audio-retime-v2")
             && !("reuseKind" in decision.cpuReuse)
             ? decision.cpuReuse.sourceProgramAudioDelayMs
             : null,
           appliedDeltaMs: decision.operation.kind === "ffmpeg-audio-retime"
+            || decision.operation.kind === "ffmpeg-audio-retime-v2"
             ? decision.operation.deltaMs
             : null,
           operationState: decision.operation.state,

@@ -10,7 +10,7 @@ import type {
 } from "../shared/experiments.js";
 import type { StudioOutput } from "../shared/outputs.js";
 import type { RunProvenance } from "../shared/provenance.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 const BASELINE_JOB_ID = "11111111-1111-4111-8111-111111111111";
 const EXPERIMENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -155,10 +155,57 @@ function fixture(): {
       outputPath: `/outputs/${output.name}`,
       jobId: BASELINE_JOB_ID,
       request: baseline,
+      authorityBoundRequest: structuredClone(baseline),
+      authorityRequestSha256: sha256Json(baseline),
       identityEvidence: evidence,
       runProvenance: provenance,
+      settingsSidecarPath: `/outputs/${baseline.outputName}.ltx-settings.json`,
+      analysisSidecarPath: `/outputs/${baseline.outputName}.ltx-analysis.json`,
+      analysisSidecarVerified: true,
     },
   };
+}
+
+function nativeProgramAudioFixture(): ReturnType<typeof fixture> {
+  const value = fixture();
+  const baseline = validLtx25SplitRequest("image-audio-to-video");
+  baseline.outputName = "verified-native-ia2v-baseline.mp4";
+  baseline.audio.outputDelayMs = 0;
+  baseline.postprocess.lipForcing.enabled = false;
+  const candidate = structuredClone(baseline);
+  candidate.outputName = "verified-native-ia2v-candidate.mp4";
+  candidate.audio.outputDelayMs = 83;
+
+  value.output.name = baseline.outputName;
+  value.output.url = `/api/outputs/${baseline.outputName}`;
+  value.output.request = baseline;
+  value.sidecar.outputName = baseline.outputName;
+  value.sidecar.outputPath = `/outputs/${baseline.outputName}`;
+  value.sidecar.settingsSidecarPath = `/outputs/${baseline.outputName}.ltx-settings.json`;
+  value.sidecar.analysisSidecarPath = `/outputs/${baseline.outputName}.ltx-analysis.json`;
+  value.sidecar.request = baseline;
+  const legacyAuthorityRequest = structuredClone(baseline) as unknown as {
+    audio: Record<string, unknown>;
+  };
+  delete legacyAuthorityRequest.audio.outputDelayMs;
+  value.sidecar.authorityBoundRequest = legacyAuthorityRequest;
+  value.sidecar.authorityRequestSha256 = sha256Json(legacyAuthorityRequest);
+  value.experiment.title = "Nativer IA2V-Ausgabeton 0 gegen +83 ms";
+  value.experiment.candidate = { variable: "program-audio-delay-ms", value: 83 };
+  value.experiment.changedRequestPaths = ["audio.outputDelayMs"];
+  value.experiment.baselineEvidence!.outputName = baseline.outputName;
+  value.experiment.arms[0].request = baseline;
+  value.experiment.arms[0].requestSha256 = sha256Json(baseline);
+  value.experiment.arms[0].settingsSha256 = requestSettingsSha256(baseline);
+  value.experiment.arms[1].request = candidate;
+  value.experiment.arms[1].requestSha256 = sha256Json(candidate);
+  value.experiment.arms[1].settingsSha256 = requestSettingsSha256(candidate);
+  value.binding.variableId = "program-audio-delay-ms";
+  value.binding.changedRequestPaths = ["audio.outputDelayMs"];
+  value.binding.baselineRequestSha256 = value.experiment.arms[0].requestSha256;
+  value.binding.requestSha256 = value.experiment.arms[1].requestSha256;
+  value.binding.baselineOutputName = baseline.outputName;
+  return value;
 }
 
 describe("experimentAdmissionPreflight", () => {
@@ -279,6 +326,28 @@ describe("experimentAdmissionPreflight", () => {
     });
     expect(report.steps[0].message).toContain("+25 ms");
     expect(report.notes.join(" ")).toContain("eingefrorene Experiment");
+  });
+
+  it("admits native split-2.5 IA2V output timing as exact CPU-only reuse", async () => {
+    const { experiment, binding, output, sidecar } = nativeProgramAudioFixture();
+    const regular = vi.fn();
+
+    const report = await experimentAdmissionPreflight(
+      experiment,
+      "candidate",
+      { binding, outputs: [output], reusableCandidates: [sidecar], fileReady: () => true },
+      regular,
+      CHECKED_AT,
+    );
+
+    expect(regular).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      verdict: "start-frei",
+      executionClass: "cpu-only",
+      steps: [{ decision: "cpu-only-provenance-reuse", accepted: true }],
+    });
+    expect(report.steps[0].message).toContain("+83 ms");
+    expect(experiment.changedRequestPaths).toEqual(["audio.outputDelayMs"]);
   });
 
   it("reports a verified raw-mux candidate only as zero-GiB paired artifact promotion", async () => {

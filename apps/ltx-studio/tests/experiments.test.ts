@@ -481,7 +481,7 @@ describe("controlled experiment contract", () => {
     expect(await readFile(path)).toEqual(before);
   });
 
-  it("validates both LipForcing delay variables against the integer pipeline limits", () => {
+  it("validates all timing variables against the integer pipeline limits", () => {
     for (const variable of [
       "lipforcing-mouth-delay-ms",
       "lipforcing-program-audio-delay-ms",
@@ -498,6 +498,52 @@ describe("controlled experiment contract", () => {
       expect(experimentCandidateSchema.safeParse({ variable, value: 501 }).success).toBe(false);
       expect(experimentCandidateSchema.safeParse({ variable, value: 0.5 }).success).toBe(false);
     }
+    expect(experimentCandidateSchema.parse({
+      variable: "program-audio-delay-ms",
+      value: 1,
+    })).toEqual({ variable: "program-audio-delay-ms", value: 1 });
+    expect(experimentCandidateSchema.parse({
+      variable: "program-audio-delay-ms",
+      value: 500,
+    })).toEqual({ variable: "program-audio-delay-ms", value: 500 });
+    expect(experimentCandidateSchema.safeParse({
+      variable: "program-audio-delay-ms",
+      value: 0,
+    }).success).toBe(false);
+    expect(experimentCandidateSchema.safeParse({
+      variable: "program-audio-delay-ms",
+      value: -1,
+    }).success).toBe(false);
+    expect(experimentCandidateSchema.safeParse({
+      variable: "program-audio-delay-ms",
+      value: 501,
+    }).success).toBe(false);
+    expect(experimentCandidateSchema.safeParse({
+      variable: "program-audio-delay-ms",
+      value: 83.5,
+    }).success).toBe(false);
+  });
+
+  it("isolates native split-2.5 IA2V output timing from conditioning and visuals", () => {
+    const baseline = validLtx25SplitRequest("image-audio-to-video");
+    baseline.audio.outputDelayMs = 0;
+    const candidate = {
+      variable: "program-audio-delay-ms" as const,
+      value: 83,
+    };
+    const adjusted = applyExperimentCandidate(baseline, candidate);
+
+    expect(allowedExperimentPaths(candidate)).toEqual(["audio.outputDelayMs"]);
+    expect(adjusted.audio.outputDelayMs).toBe(83);
+    expect(adjusted.audio.startTime).toBe(baseline.audio.startTime);
+    expect(adjusted.audio.path).toBe(baseline.audio.path);
+    expect(adjusted.postprocess).toEqual(baseline.postprocess);
+    expect(validateControlledExperimentDifference(baseline, adjusted, candidate))
+      .toEqual(["audio.outputDelayMs"]);
+
+    const monolith = validRequest("image-audio-to-video");
+    expect(() => applyExperimentCandidate(monolith, candidate))
+      .toThrow("sprachführenden Videoarm");
   });
 
   it("isolates LipForcing model control from the audible program-audio offset", () => {

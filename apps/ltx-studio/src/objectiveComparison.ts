@@ -86,6 +86,7 @@ const settingLabels: Record<string, string> = {
   "postprocess.lipForcing.rawOutputProfile": "LipForcing-Rohvideo-Mux",
   "postprocess.lipForcing.mouthDelayMs": "LipForcing-Modellsteuerung",
   "postprocess.lipForcing.programAudioDelayMs": "LipForcing-Tonversatz",
+  "audio.outputDelayMs": "Ausgabetonversatz",
 };
 
 type FlatSetting = {

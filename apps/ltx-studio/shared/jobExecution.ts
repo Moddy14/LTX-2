@@ -114,6 +114,33 @@ export type CpuFfmpegOperation = {
   output: ExecutionFileBinding | null;
 };
 
+/**
+ * Versioned packet-copy authority for the native LTX-2.5 timing experiment.
+ * Unlike the historical v5 operation, success is impossible without an
+ * independently bound media-causality receipt.
+ */
+export type CpuPacketCopyAudioRetimeOperation = {
+  kind: "ffmpeg-audio-retime-v2";
+  profileId: "positive-delay-packet-copy.v1";
+  state: CpuOperationState;
+  descriptorThreatModel: typeof executionDescriptorThreatModel;
+  ffmpeg: ExecutionFileBinding;
+  ffmpegVersion: string;
+  ffprobe: ExecutionFileBinding;
+  ffprobeVersion: string;
+  ffmpegArgsSha256: string;
+  ffprobeArgsSha256: string;
+  deltaMs: number;
+  preparedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  errorSha256: string | null;
+  output: ExecutionFileBinding | null;
+  receipt: ExecutionFileBinding | null;
+};
+
 export type CpuPairedArtifactPromotionOperation = {
   kind: "paired-artifact-promotion";
   state: CpuOperationState;
@@ -128,7 +155,10 @@ export type CpuPairedArtifactPromotionOperation = {
   output: ExecutionFileBinding | null;
 };
 
-export type CpuOperation = CpuFfmpegOperation | CpuPairedArtifactPromotionOperation;
+export type CpuOperation =
+  | CpuFfmpegOperation
+  | CpuPacketCopyAudioRetimeOperation
+  | CpuPairedArtifactPromotionOperation;
 
 type ExecutionDecisionCommon = {
   decidedAt: string;
@@ -149,6 +179,12 @@ type AudioRetimeDecision = {
       operation: CpuFfmpegOperation;
     };
 
+type PacketCopyAudioRetimeDecision = {
+  executionClass: "cpu-only";
+  cpuReuse: CpuAudioRetimeReuseSourceBinding;
+  operation: CpuPacketCopyAudioRetimeOperation;
+};
+
 type PairedArtifactDecision = {
   executionClass: "cpu-only";
   cpuReuse: CpuPairedArtifactReuseSourceBinding;
@@ -161,7 +197,12 @@ export type JobExecutionDecision =
     } & (NonCpuDecision | AudioRetimeDecision))
   | (ExecutionDecisionCommon & {
       schemaVersion: "ltx-studio-execution-decision.v6";
-    } & (NonCpuDecision | AudioRetimeDecision | PairedArtifactDecision));
+    } & (
+      NonCpuDecision
+      | AudioRetimeDecision
+      | PacketCopyAudioRetimeDecision
+      | PairedArtifactDecision
+    ));
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -394,6 +435,88 @@ function isCpuFfmpegOperation(value: unknown): value is CpuFfmpegOperation {
   return true;
 }
 
+function isCpuPacketCopyAudioRetimeOperation(
+  value: unknown,
+): value is CpuPacketCopyAudioRetimeOperation {
+  if (!isRecord(value) || !exactKeys(value, [
+    "kind", "profileId", "state", "descriptorThreatModel", "ffmpeg", "ffmpegVersion",
+    "ffprobe", "ffprobeVersion", "ffmpegArgsSha256", "ffprobeArgsSha256", "deltaMs",
+    "preparedAt", "startedAt", "completedAt", "exitCode", "signal", "errorSha256",
+    "output", "receipt",
+  ])) return false;
+  if (value.kind !== "ffmpeg-audio-retime-v2"
+    || value.profileId !== "positive-delay-packet-copy.v1"
+    || typeof value.state !== "string"
+    || !cpuOperationStates.includes(value.state as CpuOperationState)
+    || value.descriptorThreatModel !== executionDescriptorThreatModel
+    || !isExecutionFileBinding(value.ffmpeg)
+    || (value.ffmpeg.revision.mode & 0o170000) !== 0o100000
+    || (value.ffmpeg.revision.mode & 0o111) === 0
+    || typeof value.ffmpegVersion !== "string"
+    || value.ffmpegVersion.length < 1
+    || value.ffmpegVersion.length > 1000
+    || !isExecutionFileBinding(value.ffprobe)
+    || (value.ffprobe.revision.mode & 0o170000) !== 0o100000
+    || (value.ffprobe.revision.mode & 0o111) === 0
+    || typeof value.ffprobeVersion !== "string"
+    || value.ffprobeVersion.length < 1
+    || value.ffprobeVersion.length > 1000
+    || !isSha256(value.ffmpegArgsSha256)
+    || !isSha256(value.ffprobeArgsSha256)
+    || typeof value.deltaMs !== "number"
+    || !Number.isInteger(value.deltaMs)
+    || value.deltaMs < 1
+    || value.deltaMs > 500
+    || !isTimestamp(value.preparedAt)
+    || !(value.startedAt === null || isTimestamp(value.startedAt))
+    || !(value.completedAt === null || isTimestamp(value.completedAt))
+    || !(value.exitCode === null
+      || (typeof value.exitCode === "number" && Number.isSafeInteger(value.exitCode)))
+    || !(value.signal === null
+      || (typeof value.signal === "string" && value.signal.length > 0 && value.signal.length <= 64))
+    || !(value.errorSha256 === null || isSha256(value.errorSha256))
+    || !(value.output === null || isExecutionFileBinding(value.output))
+    || !(value.receipt === null || isExecutionFileBinding(value.receipt))) return false;
+
+  const state = value.state as CpuOperationState;
+  if (state === "prepared") {
+    return value.startedAt === null
+      && value.completedAt === null
+      && value.exitCode === null
+      && value.signal === null
+      && value.errorSha256 === null
+      && value.output === null
+      && value.receipt === null;
+  }
+  if (state === "running") {
+    return isTimestamp(value.startedAt)
+      && timestampAtOrAfter(value.startedAt, value.preparedAt)
+      && value.completedAt === null
+      && value.exitCode === null
+      && value.signal === null
+      && value.errorSha256 === null
+      && value.output === null
+      && value.receipt === null;
+  }
+  if (!TERMINAL_CPU_OPERATION_STATES.has(state)
+    || !isTimestamp(value.completedAt)
+    || !timestampAtOrAfter(value.completedAt, value.startedAt ?? value.preparedAt)
+    || (value.startedAt !== null && !timestampAtOrAfter(value.startedAt, value.preparedAt))) return false;
+  if (state === "succeeded") {
+    return isTimestamp(value.startedAt)
+      && value.exitCode === 0
+      && value.signal === null
+      && value.errorSha256 === null
+      && isExecutionFileBinding(value.output)
+      && isExecutionFileBinding(value.receipt);
+  }
+  if (value.output !== null || value.receipt !== null) return false;
+  if (state === "failed") {
+    return value.exitCode !== null || value.signal !== null || value.errorSha256 !== null;
+  }
+  return true;
+}
+
 function isCpuPairedArtifactPromotionOperation(
   value: unknown,
 ): value is CpuPairedArtifactPromotionOperation {
@@ -453,7 +576,9 @@ function isCpuPairedArtifactPromotionOperation(
 }
 
 function isCpuOperation(value: unknown): value is CpuOperation {
-  return isCpuFfmpegOperation(value) || isCpuPairedArtifactPromotionOperation(value);
+  return isCpuFfmpegOperation(value)
+    || isCpuPacketCopyAudioRetimeOperation(value)
+    || isCpuPairedArtifactPromotionOperation(value);
 }
 
 export function isJobExecutionClass(value: unknown): value is JobExecutionClass {
@@ -477,8 +602,11 @@ export function normalizeJobExecutionDecision(value: unknown): JobExecutionDecis
     || !isJobExecutionClass(value.executionClass)) return null;
   if (value.executionClass === "cpu-only") {
     if (!isCpuReuseSourceBinding(value.cpuReuse) || !isCpuOperation(value.operation)) return null;
-    if ((value.operation.kind === "ffmpeg-audio-retime")
-      !== !("reuseKind" in value.cpuReuse)) return null;
+    const audioRetimeOperation = value.operation.kind === "ffmpeg-audio-retime"
+      || value.operation.kind === "ffmpeg-audio-retime-v2";
+    if (audioRetimeOperation !== !("reuseKind" in value.cpuReuse)) return null;
+    if (value.operation.kind === "ffmpeg-audio-retime-v2"
+      && value.schemaVersion !== "ltx-studio-execution-decision.v6") return null;
     if (value.operation.kind === "paired-artifact-promotion"
       && "reuseKind" in value.cpuReuse
       && value.operation.authoritySha256 !== value.cpuReuse.authority.sha256) return null;
@@ -507,6 +635,33 @@ function cpuOperationImmutableFieldsMatch(left: CpuOperation, right: CpuOperatio
       executable: right.executable,
       ffmpegVersion: right.ffmpegVersion,
       argsSha256: right.argsSha256,
+      deltaMs: right.deltaMs,
+      preparedAt: right.preparedAt,
+    });
+  }
+  if (left.kind === "ffmpeg-audio-retime-v2" && right.kind === "ffmpeg-audio-retime-v2") {
+    return JSON.stringify({
+      kind: left.kind,
+      profileId: left.profileId,
+      descriptorThreatModel: left.descriptorThreatModel,
+      ffmpeg: left.ffmpeg,
+      ffmpegVersion: left.ffmpegVersion,
+      ffprobe: left.ffprobe,
+      ffprobeVersion: left.ffprobeVersion,
+      ffmpegArgsSha256: left.ffmpegArgsSha256,
+      ffprobeArgsSha256: left.ffprobeArgsSha256,
+      deltaMs: left.deltaMs,
+      preparedAt: left.preparedAt,
+    }) === JSON.stringify({
+      kind: right.kind,
+      profileId: right.profileId,
+      descriptorThreatModel: right.descriptorThreatModel,
+      ffmpeg: right.ffmpeg,
+      ffmpegVersion: right.ffmpegVersion,
+      ffprobe: right.ffprobe,
+      ffprobeVersion: right.ffprobeVersion,
+      ffmpegArgsSha256: right.ffmpegArgsSha256,
+      ffprobeArgsSha256: right.ffprobeArgsSha256,
       deltaMs: right.deltaMs,
       preparedAt: right.preparedAt,
     });

@@ -84,6 +84,20 @@ export type ProvenanceContainerImageEvidence = {
   fingerprint: string;
 };
 
+/**
+ * A CPU-only promotion may reuse an artifact produced by an older, already
+ * verified release.  This record makes that historical authority explicit
+ * without pretending that its Python/model/container environment is the
+ * environment executing the current promotion.
+ */
+export type ProvenancePromotionSource = {
+  kind: "verified-historical-run";
+  provenanceFingerprint: string;
+  verifiedAt: string;
+  historicalEnvironmentFingerprint: string;
+  historicalFileCount: number;
+};
+
 export type RunProvenance = {
   schemaVersion: "ltx-studio-run-provenance.v1" | "ltx-studio-run-provenance.v2";
   capturedAt: string;
@@ -99,5 +113,7 @@ export type RunProvenance = {
   containerImages?: ProvenanceContainerImageEvidence[];
   /** Exact persisted execution decision; absent only on pre-v2-decision evidence. */
   executionDecision?: JobExecutionDecision;
+  /** Present only on CPU-only artifact promotions forked from verified history. */
+  promotionSource?: ProvenancePromotionSource;
   fingerprint: string;
 };

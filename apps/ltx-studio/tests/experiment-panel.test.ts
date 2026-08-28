@@ -8,6 +8,18 @@ describe("ExperimentPanel treatment availability", () => {
     const variables = availableExperimentVariables(validLtx25SplitRequest("image-audio-to-video"));
     expect(variables).not.toContain("a2v-guidance");
     expect(variables).toContain("positive-prompt");
+    expect(variables).toContain("program-audio-delay-ms");
+  });
+
+  it("offers neutral output timing only on the exact native split-2.5 IA2V baseline", () => {
+    const native = validLtx25SplitRequest("image-audio-to-video");
+    expect(availableExperimentVariables(native)).toContain("program-audio-delay-ms");
+    expect(availableExperimentVariables(validRequest("image-audio-to-video")))
+      .not.toContain("program-audio-delay-ms");
+
+    native.postprocess.lipForcing.enabled = true;
+    expect(availableExperimentVariables(native)).not.toContain("program-audio-delay-ms");
+    expect(availableExperimentVariables(native)).toContain("lipforcing-program-audio-delay-ms");
   });
 
   it("retains A2V guidance for the guided audio-to-video workflow that consumes it", () => {

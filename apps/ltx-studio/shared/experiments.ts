@@ -54,6 +54,10 @@ export const experimentCandidateSchema = z.discriminatedUnion("variable", [
     value: z.number().int().min(-500).max(500),
   }).strict(),
   z.object({
+    variable: z.literal("program-audio-delay-ms"),
+    value: z.number().int().min(1).max(500),
+  }).strict(),
+  z.object({
     variable: z.literal("replicate-seed"),
     value: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   }).strict(),
@@ -94,6 +98,25 @@ export function supportsPositivePromptExperiment(
     && request.models.layout === "split";
 }
 
+/**
+ * This arm changes only the audible output timeline. It is deliberately
+ * separate from audio.startTime (conditioning) and from LipForcing timing.
+ * Runtime execution is allowed only by an exact frozen-baseline CPU-reuse
+ * proof; this capability predicate merely controls the authoring surface.
+ */
+export function supportsProgramAudioDelayExperiment(request: GenerationRequest): boolean {
+  return request.mode === "image-audio-to-video"
+    && request.models.generation === "2.5"
+    && request.models.layout === "split"
+    && request.audio.path.trim().length > 0
+    && !request.audio.finalMix.path
+    && !request.postprocess.longcatLipsync.enabled
+    && !request.postprocess.latentSync.enabled
+    && !request.postprocess.museTalk.enabled
+    && !request.postprocess.lipForcing.enabled
+    && request.audio.outputDelayMs === 0;
+}
+
 export function availableExperimentVariables(request: GenerationRequest): ExperimentVariableId[] {
   const variables: ExperimentVariableId[] = ["replicate-seed", "resolution"];
   if (supportsPositivePromptExperiment(request)) variables.push("positive-prompt");
@@ -125,6 +148,8 @@ export function availableExperimentVariables(request: GenerationRequest): Experi
     ) {
       variables.push("lipforcing-raw-output-profile");
     }
+  } else if (supportsProgramAudioDelayExperiment(request)) {
+    variables.push("program-audio-delay-ms");
   }
   return variables;
 }
@@ -310,6 +335,7 @@ export const experimentVariableLabels: Record<ExperimentVariableId, string> = {
   "lipforcing-raw-output-profile": "LipForcing: Rohvideo-Mux",
   "lipforcing-mouth-delay-ms": "LipForcing: Modell-Steuerung (ms)",
   "lipforcing-program-audio-delay-ms": "LipForcing: hörbarer Tonversatz (ms)",
+  "program-audio-delay-ms": "Hörbarer Ausgabetonversatz (ms)",
   "replicate-seed": "Seed-Replikat",
   resolution: "Auflösung",
 };
@@ -340,6 +366,8 @@ export function allowedExperimentPaths(candidate: ExperimentCandidate): string[]
       return ["postprocess.lipForcing.mouthDelayMs"];
     case "lipforcing-program-audio-delay-ms":
       return ["postprocess.lipForcing.programAudioDelayMs"];
+    case "program-audio-delay-ms":
+      return ["audio.outputDelayMs"];
     case "replicate-seed":
       return ["seed"];
     case "resolution":
@@ -420,6 +448,14 @@ export function applyExperimentCandidate(
         throw new Error("Der hörbare LipForcing-Tonversatz ist nur bei aktivem LipForcing zulässig.");
       }
       request.postprocess.lipForcing.programAudioDelayMs = candidate.value;
+      break;
+    case "program-audio-delay-ms":
+      if (!supportsProgramAudioDelayExperiment(request)) {
+        throw new Error(
+          "Der hörbare Ausgabetonversatz benötigt einen sprachführenden Videoarm ohne aktives LipForcing.",
+        );
+      }
+      request.audio.outputDelayMs = candidate.value;
       break;
     case "replicate-seed":
       request.seed = candidate.value;

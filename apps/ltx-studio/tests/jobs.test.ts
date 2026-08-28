@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildLipForcingAudioRetimeArgs,
+  buildPositivePacketCopyAudioRetimeArgs,
   buildRefinerAudioArgs,
   describeLipForcingFailure,
   isActiveJobStatus,
@@ -73,6 +74,7 @@ import {
   executionDescriptorThreatModel,
   type CpuAudioRetimeReuseSourceBinding,
   type CpuFfmpegOperation,
+  type CpuPacketCopyAudioRetimeOperation,
   type CpuPairedArtifactPromotionOperation,
   type CpuPairedArtifactReuseSourceBinding,
   type CpuReuseSourceBinding,
@@ -999,6 +1001,38 @@ function preparedCpuOperation(): CpuFfmpegOperation {
   };
 }
 
+function preparedPacketCopyOperation(): CpuPacketCopyAudioRetimeOperation {
+  return {
+    kind: "ffmpeg-audio-retime-v2",
+    profileId: "positive-delay-packet-copy.v1",
+    state: "prepared",
+    descriptorThreatModel: executionDescriptorThreatModel,
+    ffmpeg: {
+      path: "/usr/bin/ffmpeg",
+      sha256: "5".repeat(64),
+      revision: executionRevision(0o100755),
+    },
+    ffmpegVersion: "ffmpeg test",
+    ffprobe: {
+      path: "/usr/bin/ffprobe",
+      sha256: "6".repeat(64),
+      revision: { ...executionRevision(0o100755), fileId: "2" },
+    },
+    ffprobeVersion: "ffprobe test",
+    ffmpegArgsSha256: "7".repeat(64),
+    ffprobeArgsSha256: "8".repeat(64),
+    deltaMs: 83,
+    preparedAt: "2026-08-28T10:00:00.000Z",
+    startedAt: null,
+    completedAt: null,
+    exitCode: null,
+    signal: null,
+    errorSha256: null,
+    output: null,
+    receipt: null,
+  };
+}
+
 function pairedReuseFixture(
   baselineJobId: string,
   baselineOutputName: string,
@@ -1152,8 +1186,9 @@ async function persistCpuRestoreCase(
   state: "prepared" | "running" | "succeeded",
 ): Promise<{ path: string; id: string }> {
   const path = await statePath();
-  const request = validRequest();
+  const request = validRequest("image-audio-to-video");
   request.outputName = `cpu-restore-${state}.mp4`;
+  request.postprocess.lipForcing.enabled = true;
   request.postprocess.lipForcing.programAudioDelayMs = 80;
   const requestSha256 = experimentRequestSha256V1(request);
   const baselineJobId = "11111111-1111-4111-8111-111111111111";
@@ -1249,6 +1284,117 @@ async function persistCpuRestoreCase(
   runtimeJob.startDeferred = false;
   const changed = Reflect.get(manager, "changed") as () => void;
   changed.call(manager);
+  return { path, id: created.id };
+}
+
+async function persistPacketCopyRestoreCase(
+  state: "prepared" | "running" | "succeeded",
+): Promise<{ path: string; id: string }> {
+  const path = await statePath();
+  const request = validLtx25SplitRequest("image-audio-to-video");
+  request.outputName = `packet-copy-restore-${state}.mp4`;
+  request.audio.outputDelayMs = 83;
+  const requestSha256 = experimentRequestSha256V1(request);
+  const baselineJobId = "11111111-1111-4111-8111-111111111111";
+  const binding = {
+    schemaVersion: "ltx-studio-experiment-run.v1" as const,
+    experimentId: "22222222-2222-4222-8222-222222222222",
+    protocolSha256: "a".repeat(64),
+    arm: "candidate" as const,
+    kind: "ablation" as const,
+    variableId: "program-audio-delay-ms" as const,
+    changedRequestPaths: ["audio.outputDelayMs"],
+    baselineRequestSha256: "b".repeat(64),
+    requestSha256,
+    baselineJobId,
+    baselineOutputName: "baseline.mp4",
+  };
+  const manager = new JobManager(path, false);
+  const created = manager.create(request, { experiment: binding, deferStart: true });
+  const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+    .get(created.id)!;
+  runtimeJob.runProvenance = runProvenance();
+  const classify = Reflect.get(manager, "classifyExecution") as (
+    job: Record<string, unknown>,
+    executionClass: "cpu-only",
+    cpuReuse: CpuAudioRetimeReuseSourceBinding,
+    operation: CpuPacketCopyAudioRetimeOperation,
+  ) => boolean;
+  const reuse = cpuReuseFixture(
+    baselineJobId,
+    binding.baselineOutputName,
+    binding.baselineRequestSha256,
+  );
+  if ("reuseKind" in reuse) throw new Error("packet-copy fixture");
+  expect(classify.call(
+    manager,
+    runtimeJob,
+    "cpu-only",
+    reuse,
+    preparedPacketCopyOperation(),
+  )).toBe(true);
+  const commit = Reflect.get(manager, "commitExecutionDecision") as (
+    job: Record<string, unknown>,
+    decision: JobExecutionDecision,
+  ) => boolean;
+  const prepared = runtimeJob.executionDecision as JobExecutionDecision;
+  if (prepared.executionClass !== "cpu-only"
+    || prepared.operation.kind !== "ffmpeg-audio-retime-v2") throw new Error("packet-copy fixture");
+  const preparedPacket = prepared as JobExecutionDecision & {
+    schemaVersion: "ltx-studio-execution-decision.v6";
+    cpuReuse: CpuAudioRetimeReuseSourceBinding;
+    operation: CpuPacketCopyAudioRetimeOperation;
+  };
+  const running: JobExecutionDecision = {
+    ...preparedPacket,
+    operation: {
+      ...preparedPacket.operation,
+      state: "running",
+      startedAt: "2026-08-28T10:00:01.000Z",
+    },
+  };
+  if (state !== "prepared") expect(commit.call(manager, runtimeJob, running)).toBe(true);
+  if (state === "succeeded") {
+    if (running.executionClass !== "cpu-only"
+      || running.operation.kind !== "ffmpeg-audio-retime-v2") throw new Error("packet-copy fixture");
+    const runningPacket = running as JobExecutionDecision & {
+      schemaVersion: "ltx-studio-execution-decision.v6";
+      cpuReuse: CpuAudioRetimeReuseSourceBinding;
+      operation: CpuPacketCopyAudioRetimeOperation;
+    };
+    const succeeded: JobExecutionDecision = {
+      ...runningPacket,
+      operation: {
+        ...runningPacket.operation,
+        state: "succeeded",
+        completedAt: "2026-08-28T10:00:02.000Z",
+        exitCode: 0,
+        output: {
+          path: "/private/candidate/retimed.tmp.mp4",
+          sha256: "9".repeat(64),
+          revision: { ...executionRevision(0o100400), fileId: "3" },
+        },
+        receipt: {
+          path: "/private/candidate/retime-receipt.json",
+          sha256: "a".repeat(64),
+          revision: { ...executionRevision(0o100400), fileId: "4" },
+        },
+      },
+    };
+    expect(commit.call(manager, runtimeJob, succeeded)).toBe(true);
+    runtimeJob.status = "failed";
+    runtimeJob.finishedAt = "2026-08-28T10:00:03.000Z";
+    runtimeJob.error = "Late publication gate denied packet-copy output.";
+  } else {
+    runtimeJob.status = "running";
+    runtimeJob.startedAt = "2026-08-28T10:00:01.000Z";
+  }
+  runtimeJob.runProvenance = bindRunExecutionDecision(
+    runtimeJob.runProvenance as RunProvenance,
+    runtimeJob.executionDecision as JobExecutionDecision,
+  );
+  runtimeJob.startDeferred = false;
+  (Reflect.get(manager, "changed") as () => void).call(manager);
   return { path, id: created.id };
 }
 
@@ -2951,6 +3097,32 @@ describe("job persistence and reservations", () => {
     expect(() => buildLipForcingAudioRetimeArgs("source.mp4", "target.mp4", 1_001)).toThrow();
   });
 
+  it("builds the native positive-delay arm as packet copy without AAC re-encoding or truncation", () => {
+    const args = buildPositivePacketCopyAudioRetimeArgs(
+      "/proc/self/fd/4",
+      "/tmp/target.mp4",
+      83,
+    );
+
+    expect(args).toEqual([
+      "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+      "-i", "/proc/self/fd/4",
+      "-itsoffset", "0.083", "-i", "/proc/self/fd/4",
+      "-map", "0:v:0", "-map", "1:a:0",
+      "-map_metadata", "-1", "-map_chapters", "-1",
+      "-c:v", "copy", "-c:a", "copy",
+      "-avoid_negative_ts", "disabled",
+      "-movflags", "+faststart",
+      "/tmp/target.mp4",
+    ]);
+    expect(args).not.toContain("-af");
+    expect(args).not.toContain("-shortest");
+    expect(() => buildPositivePacketCopyAudioRetimeArgs("/proc/self/fd/4", "/tmp/target.mp4", 0))
+      .toThrow();
+    expect(() => buildPositivePacketCopyAudioRetimeArgs("/proc/self/fd/4", "/tmp/target.mp4", -83))
+      .toThrow();
+  });
+
   it("reuses a rendered LTX base with matching verified model and runtime provenance", () => {
     const baseline = runProvenance();
     expect(runProvenanceSharesLtxBase(
@@ -3862,6 +4034,221 @@ describe("job persistence and reservations", () => {
       expect(Reflect.get(restored, "queue")).toEqual([]);
     },
   );
+
+  it.each([
+    ["prepared", "failed", "prepared", false],
+    ["running", "interrupted", "interrupted", false],
+    ["succeeded", "failed", "succeeded", true],
+  ] as const)(
+    "restores a v6 receipt-bound packet-copy %s operation fail-closed as %s/%s",
+    async (storedState, expectedJobStatus, expectedOperationState, hasReceipt) => {
+      const { path, id } = await persistPacketCopyRestoreCase(storedState);
+
+      const restored = new JobManager(path, false);
+      const job = restored.get(id)!;
+
+      expect(job).toMatchObject({
+        status: expectedJobStatus,
+        executionClass: "cpu-only",
+        executionDecision: {
+          schemaVersion: "ltx-studio-execution-decision.v6",
+          operation: {
+            kind: "ffmpeg-audio-retime-v2",
+            state: expectedOperationState,
+            receipt: hasReceipt
+              ? { sha256: "a".repeat(64) }
+              : null,
+          },
+        },
+      });
+      expect(job.runProvenance?.executionDecision).toEqual(job.executionDecision);
+      expect(Reflect.get(restored, "queue")).toEqual([]);
+    },
+  );
+
+  it("runs the receipt-bound packet-copy operation end to end without DGX and quarantines on a late release denial", async () => {
+    const path = await statePath();
+    const root = join(path, "..");
+    const stageRoot = join(root, "packet-copy-stage");
+    const sourcePath = join(root, "native-ltx25-source.mp4");
+    const settingsPath = join(root, "native-ltx25-source.ltx-settings.json");
+    const analysisPath = join(root, "native-ltx25-source.ltx-analysis.json");
+    const temporaryOutput = join(stageRoot, "retimed-program-audio-output.tmp.mp4");
+    await mkdir(stageRoot, { mode: 0o700 });
+    const generated = spawnSync("/usr/bin/ffmpeg", [
+      "-v", "error", "-nostdin", "-n",
+      "-f", "lavfi", "-i", "color=c=blue:s=96x64:r=25:d=0.6",
+      "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.6",
+      "-map", "0:v:0", "-map", "1:a:0",
+      "-frames:v", "15", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+      "-ac", "2", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", sourcePath,
+    ], { encoding: "utf8" });
+    expect(generated.status, `${generated.stdout}\n${generated.stderr}`).toBe(0);
+    await writeFile(settingsPath, "{}\n");
+    await writeFile(analysisPath, "{}\n");
+
+    const bind = async (filePath: string): Promise<ExecutionFileBinding> => {
+      const stats = await stat(filePath);
+      if (stats.nlink !== 1) throw new Error("packet-copy E2E fixture has hardlinks");
+      return {
+        path: filePath,
+        sha256: createHash("sha256").update(await readFile(filePath)).digest("hex"),
+        revision: {
+          sizeBytes: stats.size,
+          modifiedAtMs: stats.mtimeMs,
+          changedAtMs: stats.ctimeMs,
+          fileId: String(stats.ino),
+          deviceId: String(stats.dev),
+          mode: stats.mode,
+          uid: stats.uid,
+          gid: stats.gid,
+          nlink: 1,
+        },
+      };
+    };
+    const output = await bind(sourcePath);
+    const settings = await bind(settingsPath);
+    const analysis = await bind(analysisPath);
+    const baselineJobId = "11111111-1111-4111-8111-111111111111";
+    const baselineOutputName = "native-ltx25-baseline.mp4";
+    const baselineRequestSha256 = "b".repeat(64);
+    const sourceProvenanceFingerprint = "4".repeat(64);
+    const sourceAuthorityRequestSha256 = "c".repeat(64);
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.outputName = `packet-copy-e2e-${Date.now()}.mp4`;
+    request.audio.outputDelayMs = 83;
+    const requestSha256 = experimentRequestSha256V1(request);
+    const manager = new JobManager(
+      path,
+      false,
+      null,
+      {
+        capture: async () => notApplicableIdentityEvidence(),
+        verify: async (evidence) => ({ evidence, error: null }),
+      },
+      undefined,
+      null,
+      undefined,
+      testRunProvenanceOperations,
+    );
+    const created = manager.create(request, {
+      experiment: {
+        schemaVersion: "ltx-studio-experiment-run.v1",
+        experimentId: "22222222-2222-4222-8222-222222222222",
+        protocolSha256: "a".repeat(64),
+        arm: "candidate",
+        kind: "ablation",
+        variableId: "program-audio-delay-ms",
+        changedRequestPaths: ["audio.outputDelayMs"],
+        baselineRequestSha256,
+        requestSha256,
+        baselineJobId,
+        baselineOutputName,
+      },
+      deferStart: true,
+    });
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const provenance = runProvenance();
+    const ffmpegVersion = `${spawnSync("/usr/bin/ffmpeg", ["-version"], { encoding: "utf8" }).stdout}`
+      .split(/\r?\n/u)[0]!.trim();
+    provenance.runtime.ffmpegVersion = ffmpegVersion;
+    active.runProvenance = provenance;
+    active.identityEvidence = notApplicableIdentityEvidence();
+    active.status = "running";
+    active.startedAt = new Date().toISOString();
+    (Reflect.get(manager, "queue") as string[]).splice(0);
+
+    let releaseChecks = 0;
+    Reflect.set(manager, "jobStartDecision", () => {
+      releaseChecks += 1;
+      return releaseChecks === 1
+        ? { allowed: true, reason: "synthetic process-start authority" }
+        : { allowed: false, reason: "synthetic late publication denial" };
+    });
+    const source = {
+      baselineJobId,
+      baselineOutputName,
+      baselineRequestSha256,
+      sourceOutputPath: sourcePath,
+      outputSha256: output.sha256,
+      outputRevision: output.revision,
+      settingsSidecarPath: settingsPath,
+      settingsSidecarSha256: settings.sha256,
+      settingsSidecarRevision: settings.revision,
+      analysisSidecarPath: analysisPath,
+      analysisSidecarSha256: analysis.sha256,
+      analysisSidecarRevision: analysis.revision,
+      sourceProvenanceFingerprint,
+      sourceProgramAudioDelayMs: 0,
+      snapshotOutputPath: sourcePath,
+      snapshotOutputSha256: output.sha256,
+      snapshotOutputRevision: output.revision,
+      snapshotSettingsSidecarPath: settingsPath,
+      snapshotSettingsSidecarSha256: settings.sha256,
+      snapshotSettingsSidecarRevision: settings.revision,
+      snapshotAnalysisSidecarPath: analysisPath,
+      snapshotAnalysisSidecarSha256: analysis.sha256,
+      snapshotAnalysisSidecarRevision: analysis.revision,
+    } satisfies CpuAudioRetimeReuseSourceBinding;
+    const reusable = {
+      id: baselineJobId,
+      outputPath: sourcePath,
+      description: "real packet-copy E2E baseline",
+      outputName: baselineOutputName,
+      baselineRequestSha256,
+      sourceAuthorityRequestSha256,
+      sourceRunProvenance: provenance,
+      sourceProvenanceFingerprint,
+      settingsSidecarPath: settingsPath,
+      analysisSidecarPath: analysisPath,
+      programAudioDelayMs: 0,
+    };
+
+    await (Reflect.get(manager, "runPositivePacketCopyAudioRetime") as (
+      job: Record<string, unknown>,
+      reusableOutput: typeof reusable,
+      pinned: { inputPath: string; source: CpuAudioRetimeReuseSourceBinding },
+      privateStageRoot: string,
+      privateOutput: string,
+      deltaMs: number,
+    ) => Promise<void>).call(
+      manager,
+      active,
+      reusable,
+      { inputPath: sourcePath, source },
+      stageRoot,
+      temporaryOutput,
+      83,
+    );
+
+    expect(active).toMatchObject({
+      status: "failed",
+      executionClass: "cpu-only",
+      dgxJobId: null,
+      error: expect.stringContaining("synthetic late publication denial"),
+      executionDecision: {
+        schemaVersion: "ltx-studio-execution-decision.v6",
+        operation: {
+          kind: "ffmpeg-audio-retime-v2",
+          state: "succeeded",
+          exitCode: 0,
+          output: { sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) },
+          receipt: { sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) },
+        },
+      },
+    });
+    expect(active.dgxSubmitPending).toBeFalsy();
+    const receipt = JSON.parse(await readFile(join(stageRoot, "audio-retime-receipt.v1.json"), "utf8"));
+    expect(receipt.checks).toMatchObject({
+      boundTransformReplayByteIdentical: true,
+      videoPacketSequenceIdentical: true,
+      audioPayloadPacketSequenceIdentical: true,
+    });
+    await expect(access(join(stageRoot, "unreleased-output.mp4"))).resolves.toBeUndefined();
+    await expect(access(temporaryOutput)).rejects.toThrow();
+    expect(releaseChecks).toBe(2);
+  }, 20_000);
 
   it("lets durable decision persistence win immediately before process spawn", async () => {
     const path = await statePath();
@@ -5486,8 +5873,23 @@ describe("job persistence and reservations", () => {
     const executable = openBoundExecutable(process.execPath, ["--version"]);
     const mediaFd = openSync(mediaPath, "r");
     try {
-      const request = validRequest();
+      const mediaStats = fstatSync(mediaFd);
+      const mediaRevision = {
+        sizeBytes: mediaStats.size,
+        modifiedAtMs: mediaStats.mtimeMs,
+        changedAtMs: mediaStats.ctimeMs,
+        fileId: String(mediaStats.ino),
+        deviceId: String(mediaStats.dev),
+        mode: mediaStats.mode,
+        uid: mediaStats.uid,
+        gid: mediaStats.gid,
+        nlink: 1 as const,
+      };
+      const mediaSha256 = createHash("sha256").update(readFileSync(mediaPath)).digest("hex");
+      const mediaDescriptor = { fd: mediaFd, revision: mediaRevision, sha256: mediaSha256 };
+      const request = validRequest("image-audio-to-video");
       request.outputName = `fd-remap-${roots.length}.mp4`;
+      request.postprocess.lipForcing.enabled = true;
       request.postprocess.lipForcing.programAudioDelayMs = 80;
       const requestSha256 = experimentRequestSha256V1(request);
       const baselineJobId = "11111111-1111-4111-8111-111111111111";
@@ -5527,11 +5929,26 @@ describe("job persistence and reservations", () => {
         cpuReuse: CpuReuseSourceBinding,
         operation: CpuFfmpegOperation,
       ) => boolean;
+      const reuse = {
+        ...cpuReuseFixture(baselineJobId, baselineOutputName, baselineRequestSha256),
+        outputSha256: mediaSha256,
+        outputRevision: mediaRevision,
+        settingsSidecarSha256: mediaSha256,
+        settingsSidecarRevision: mediaRevision,
+        analysisSidecarSha256: mediaSha256,
+        analysisSidecarRevision: mediaRevision,
+        snapshotOutputSha256: mediaSha256,
+        snapshotOutputRevision: mediaRevision,
+        snapshotSettingsSidecarSha256: mediaSha256,
+        snapshotSettingsSidecarRevision: mediaRevision,
+        snapshotAnalysisSidecarSha256: mediaSha256,
+        snapshotAnalysisSidecarRevision: mediaRevision,
+      };
       expect(classify.call(
         manager,
         active,
         "cpu-only",
-        cpuReuseFixture(baselineJobId, baselineOutputName, baselineRequestSha256),
+        reuse,
         operation,
       )).toBe(true);
       active.status = "running";
@@ -5552,6 +5969,7 @@ describe("job persistence and reservations", () => {
           env: NodeJS.ProcessEnv;
           inheritedFds: readonly number[];
           boundExecutable: ReturnType<typeof openBoundExecutable>;
+          recheckDescriptors: readonly typeof mediaDescriptor[];
         },
         beforeRelease: (process: ReturnType<typeof spawn>) => void,
       ) => Promise<ReturnType<typeof spawn>>).call(
@@ -5564,6 +5982,7 @@ describe("job persistence and reservations", () => {
           env: { ...process.env, LC_ALL: "C" },
           inheritedFds: [mediaFd],
           boundExecutable: executable,
+          recheckDescriptors: [mediaDescriptor, mediaDescriptor, mediaDescriptor],
         },
         (gatedChild) => {
           completion = waitForProcess.call(manager, gatedChild);
@@ -5654,8 +6073,9 @@ describe("job persistence and reservations", () => {
           startEnforcer,
           runtimeTrustRevalidation,
         );
-        const request = validRequest();
+        const request = validRequest("image-audio-to-video");
         request.outputName = `late-fd3-${fault}-${Date.now()}-${roots.length}.mp4`;
+        request.postprocess.lipForcing.enabled = true;
         request.postprocess.lipForcing.programAudioDelayMs = 80;
         const requestSha256 = experimentRequestSha256V1(request);
         const baselineJobId = "11111111-1111-4111-8111-111111111111";
@@ -5695,11 +6115,26 @@ describe("job persistence and reservations", () => {
           cpuReuse: CpuReuseSourceBinding,
           cpuOperation: CpuFfmpegOperation,
         ) => boolean;
+        const reuse = {
+          ...cpuReuseFixture(baselineJobId, baselineOutputName, baselineRequestSha256),
+          outputSha256: recheckDescriptor.sha256,
+          outputRevision: recheckDescriptor.revision,
+          settingsSidecarSha256: recheckDescriptor.sha256,
+          settingsSidecarRevision: recheckDescriptor.revision,
+          analysisSidecarSha256: recheckDescriptor.sha256,
+          analysisSidecarRevision: recheckDescriptor.revision,
+          snapshotOutputSha256: recheckDescriptor.sha256,
+          snapshotOutputRevision: recheckDescriptor.revision,
+          snapshotSettingsSidecarSha256: recheckDescriptor.sha256,
+          snapshotSettingsSidecarRevision: recheckDescriptor.revision,
+          snapshotAnalysisSidecarSha256: recheckDescriptor.sha256,
+          snapshotAnalysisSidecarRevision: recheckDescriptor.revision,
+        };
         expect(classify.call(
           manager,
           active,
           "cpu-only",
-          cpuReuseFixture(baselineJobId, baselineOutputName, baselineRequestSha256),
+          reuse,
           operation,
         )).toBe(true);
         active.status = "running";
@@ -5715,7 +6150,12 @@ describe("job persistence and reservations", () => {
             cwd: string;
             env: NodeJS.ProcessEnv;
             boundExecutable: typeof executable;
-            recheckDescriptors: readonly [typeof recheckDescriptor] | readonly [];
+            inheritedFds: readonly [number];
+            recheckDescriptors: readonly [
+              typeof recheckDescriptor,
+              typeof recheckDescriptor,
+              typeof recheckDescriptor,
+            ];
           },
           beforeRelease: (child: ReturnType<typeof spawn>) => void,
         ) => Promise<ReturnType<typeof spawn>>;
@@ -5728,7 +6168,8 @@ describe("job persistence and reservations", () => {
             cwd: root,
             env: { ...process.env, LC_ALL: "C" },
             boundExecutable: executable,
-            recheckDescriptors: fault === "recheck-descriptor" ? [recheckDescriptor] : [],
+            inheritedFds: [snapshotFd],
+            recheckDescriptors: [recheckDescriptor, recheckDescriptor, recheckDescriptor],
           },
           (gatedChild) => {
             const gate = gatedChild.stdio[3] as PassThrough;
@@ -9045,13 +9486,13 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     await expect(readFile(second.markerPath, "utf8")).resolves.toContain(second.runtimeJob.id as string);
   });
 
-  it("routes all three publication paths through one no-compensation prepared-commit helper", async () => {
+  it("routes all four publication paths through one no-compensation prepared-commit helper", async () => {
     const source = await readFile(
       join(repoRoot, "apps", "ltx-studio", "server", "jobs.ts"),
       "utf8",
     );
     const helperCalls = source.match(/this\.commitPreparedPublication\(/gu) ?? [];
-    expect(helperCalls).toHaveLength(3);
+    expect(helperCalls).toHaveLength(4);
     const helperStart = source.indexOf("private commitPreparedPublication(");
     const helperEnd = source.indexOf("private async verifyJobIdentityEvidence", helperStart);
     const helper = source.slice(helperStart, helperEnd);

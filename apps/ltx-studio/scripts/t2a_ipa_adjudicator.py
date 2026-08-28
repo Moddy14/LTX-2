@@ -30,10 +30,10 @@ MAX_TOKENS = 1_049
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 SHA256_CHARS = frozenset("0123456789abcdef")
 IPA_VOCABULARY_SHA256 = "d732ab2456c0c017930001dc9af0b41b3b93d25b2eb9740bf9d925508d7d87d0"
-G2P_RUNNER_SHA256 = "a2f7259094b210c41a5ced987ed66ebfc7994736c3edb2141489ed782df831b8"
+G2P_RUNNER_SHA256 = "b8eaf1b5e93da772bf2d765773af25d5ddbb69a12d5dac00f5c7c97dd6b31d36"
 ESPEAK_BINARY_SHA256 = "89402b6a13d29ab2edb0570c809796751b22a5d031828897cfb1b370dafa9c29"
 ESPEAK_DATA_MANIFEST_SHA256 = "a886ef7d07601c45d2982d91a546808f2cb1a99194ed07a443cb9d3839798658"
-ESPEAK_RUNTIME_MANIFEST_SHA256 = "a29161e2a8d9ddc48735151319de1fcff03783262bbe63849ba2308bf0715939"
+ESPEAK_RUNTIME_MANIFEST_SHA256 = "12370d2c3caea2c54afa50a4f95ab94eafdcaf71d46607d9bf0d7722225f3717"
 NORMALIZATION_POLICY_SHA256 = "c8ed3c0cb746212a9858bc028da8899ff411c1023c88b5b329e55e1e50c34563"
 IPA_VOCABULARY_PATH = Path(
     "/var/lib/ltx-studio/models/facebook--wav2vec2-xlsr-53-espeak-cv-ft/"
@@ -190,7 +190,7 @@ def _validate_normalization(value: object) -> dict[str, object]:
     )
     _expect_literal(
         normalization["ffmpegSha256"],
-        "9f126bd755615d8c5d9aa2e67c568626be05389feb795478e0f14d41217270f4",
+        "de3099d88e092174168b4d436187b970eab6578c5987a4f09b0fee543794f31e",
         "ffmpeg digest",
     )
     _expect_sha256(normalization["normalizedAudioSha256"], "normalized audio")

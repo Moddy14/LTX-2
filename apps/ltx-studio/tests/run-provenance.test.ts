@@ -303,10 +303,74 @@ describe("run provenance", () => {
     expect(fork.verifiedAt).toBeNull();
     expect(fork.executionDecision).toBeUndefined();
     expect(fork.runtime).toEqual(baseline.runtime);
+    expect(fork.promotionSource).toMatchObject({
+      kind: "verified-historical-run",
+      provenanceFingerprint: baseline.fingerprint,
+      verifiedAt: "2026-08-26T10:00:02.000Z",
+      historicalFileCount: 0,
+    });
+    expect(normalizeRunProvenance(fork)).not.toBeNull();
     expect(() => forkVerifiedRunProvenanceForArtifactPromotion({
       ...baseline,
       verifiedAt: null,
     })).toThrow(/nicht verifiziert/u);
+    expect(() => forkVerifiedRunProvenanceForArtifactPromotion({
+      ...baseline,
+      promotionSource: fork.promotionSource,
+    })).toThrow(/nicht erneut/u);
+  });
+
+  it("verifies a promotion fork across release changes without touching historical Python or models", async () => {
+    const historicalRelease = {
+      ...releaseIdentity,
+      releaseDigest: "1".repeat(64),
+      manifestSha256: "2".repeat(64),
+      surfaceDigest: "3".repeat(64),
+      sourceCommit: "4".repeat(40),
+    };
+    const historical: RunProvenance = {
+      schemaVersion: "ltx-studio-run-provenance.v2",
+      capturedAt: "2026-08-20T10:00:00.000Z",
+      verifiedAt: null,
+      files: [],
+      code: [],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "historical-kernel",
+        nodeVersion: "historical-node",
+        pythonExecutable: "/historical/python/that/no/longer/exists",
+        pythonVersion: "historical-python",
+        packages: {},
+        ffmpegVersion: "historical-ffmpeg",
+        fingerprint: "5".repeat(64),
+      },
+      upstreamContracts: [],
+      release: historicalRelease,
+      fingerprint: "6".repeat(64),
+    };
+    const baselineDecision = {
+      schemaVersion: "ltx-studio-execution-decision.v5" as const,
+      executionClass: "dgx" as const,
+      decidedAt: "2026-08-20T10:00:01.000Z",
+      reason: "Historical DGX baseline.",
+      requestSha256: "7".repeat(64),
+      protocolSha256: null,
+      cpuReuse: null,
+      operation: null,
+    };
+    const baseline = {
+      ...bindRunExecutionDecision(historical, baselineDecision),
+      verifiedAt: "2026-08-20T10:00:02.000Z",
+    };
+    const promotion = forkVerifiedRunProvenanceForArtifactPromotion(baseline);
+
+    const result = await verifyRunProvenance(promotion, createDefaultRequest("distilled"));
+
+    expect(result.error).toBeNull();
+    expect(result.evidence.verifiedAt).not.toBeNull();
+    expect(result.evidence.release).toEqual(historicalRelease);
+    expect(result.evidence.release).not.toEqual(releaseIdentity);
   });
 
   it("matches prompt experiments only across the complete immutable execution-input surface", () => {

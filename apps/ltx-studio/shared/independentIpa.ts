@@ -5,7 +5,7 @@ export const INDEPENDENT_IPA_OBSERVATION_SCHEMA_VERSION = "ltx-studio-independen
 export const INDEPENDENT_IPA_METHOD = "xlsr53-espeak-cv-free-ctc-greedy.v1" as const;
 export const INDEPENDENT_IPA_DECODER_POLICY = "ctc-collapse-runs-then-remove-blank.v1" as const;
 export const INDEPENDENT_IPA_NORMALIZATION_METHOD = "ffmpeg-pcm-s16le-mono-16khz-bitexact.v1" as const;
-export const INDEPENDENT_IPA_FFMPEG_SHA256 = "9f126bd755615d8c5d9aa2e67c568626be05389feb795478e0f14d41217270f4" as const;
+export const INDEPENDENT_IPA_FFMPEG_SHA256 = "de3099d88e092174168b4d436187b970eab6578c5987a4f09b0fee543794f31e" as const;
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const sha256Schema = z.string().regex(SHA256_PATTERN);

@@ -505,6 +505,11 @@ export const generationRequestSchema = z
       name: z.string().trim().max(255),
       startTime: z.number().finite().min(0).max(86_400),
       maxDuration: z.number().finite().positive().max(86_400).nullable(),
+      // Positive values delay the audible output. Negative packet-copy timing
+      // is intentionally unsupported until browser/player edit-list behavior
+      // has a dedicated compatibility canary. This is output timing, not
+      // conditioning startTime and not LipForcing model-control timing.
+      outputDelayMs: z.number().int().min(0).max(500),
       finalMix: z.object({
         path: pathValue,
         name: z.string().trim().max(255),
@@ -1374,6 +1379,7 @@ export function createDefaultRequest(mode: PipelineMode = "two-stage"): Generati
       name: "",
       startTime: 0,
       maxDuration: null,
+      outputDelayMs: 0,
       finalMix: { path: "", name: "" },
     },
     lipDub: {

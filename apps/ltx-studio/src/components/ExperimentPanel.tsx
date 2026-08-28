@@ -89,6 +89,8 @@ function initialValue(request: GenerationRequest, variable: ExperimentVariableId
       return adjacentLipForcingDelay(request.postprocess.lipForcing.mouthDelayMs);
     case "lipforcing-program-audio-delay-ms":
       return adjacentLipForcingDelay(request.postprocess.lipForcing.programAudioDelayMs);
+    case "program-audio-delay-ms":
+      return 83;
     case "replicate-seed":
       return request.seed === 23_072_026 ? 23_072_027 : 23_072_026;
     case "resolution":
@@ -114,7 +116,8 @@ function candidateFromState(
     case "reference-image-crf":
     case "replicate-seed":
     case "lipforcing-mouth-delay-ms":
-    case "lipforcing-program-audio-delay-ms": {
+    case "lipforcing-program-audio-delay-ms":
+    case "program-audio-delay-ms": {
       if (value === null) throw new Error("Der Kandidatenwert fehlt.");
       return { variable, value: Math.round(value) };
     }
@@ -189,6 +192,8 @@ function experimentValue(
       return `${request.postprocess.lipForcing.mouthDelayMs} ms`;
     case "lipforcing-program-audio-delay-ms":
       return `${request.postprocess.lipForcing.programAudioDelayMs} ms`;
+    case "program-audio-delay-ms":
+      return `${request.audio.outputDelayMs} ms`;
     case "replicate-seed":
       return String(request.seed);
     case "resolution":
@@ -415,19 +420,25 @@ export function ExperimentPanel({
             andere Decoder. Welcher am konkreten Clip besser abschneidet, bleibt offen.
           </p>
         ) : (
-          <NumberField
+          <>
+            <NumberField
             label={variable === "lipforcing-mouth-delay-ms"
               ? "Modell-Steuerung des Kandidaten (ms)"
               : variable === "lipforcing-program-audio-delay-ms"
                 ? "Hörbarer Tonversatz des Kandidaten (ms)"
+                : variable === "program-audio-delay-ms"
+                  ? "Hörbarer Ausgabetonversatz des Kandidaten (ms)"
                 : "Kandidatenwert"}
             hint={fieldHelp.experimentCandidate}
             min={variable === "lipforcing-mouth-delay-ms"
               || variable === "lipforcing-program-audio-delay-ms"
               ? -500
+              : variable === "program-audio-delay-ms"
+                ? 1
               : 0}
             max={variable === "lipforcing-mouth-delay-ms"
               || variable === "lipforcing-program-audio-delay-ms"
+              || variable === "program-audio-delay-ms"
               ? 500
               : variable === "reference-image-crf"
               ? 51
@@ -442,11 +453,20 @@ export function ExperimentPanel({
               || variable === "replicate-seed"
               || variable === "lipforcing-mouth-delay-ms"
               || variable === "lipforcing-program-audio-delay-ms"
+              || variable === "program-audio-delay-ms"
               ? 1
               : 0.05}
             value={value}
-            onChange={(next) => setValue(next ?? initialValue(request, variable))}
-          />
+              onChange={(next) => setValue(next ?? initialValue(request, variable))}
+            />
+            {variable === "program-audio-delay-ms" ? (
+              <p className="experiment-fixed-value">
+                Positiv bedeutet: Der hörbare Ton kommt später. Dieser Kandidatenarm kopiert
+                die Video- und Audio-Pakete verlustfrei, läuft CPU-only und muss seine
+                Medien-Kausalität vor der Veröffentlichung per Receipt beweisen.
+              </p>
+            ) : null}
+          </>
         )}
         <button
           type="button"

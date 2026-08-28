@@ -6,6 +6,7 @@ import {
   copyFileSync,
   createReadStream,
   existsSync,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -33,6 +34,7 @@ import {
   rawMuxPairV1CandidateError,
   experimentRunBindingSchema,
   isAdoptedLipForcingCandidate,
+  supportsProgramAudioDelayExperiment,
   supportsPositivePromptExperiment,
   type ExperimentRunBinding,
 } from "../shared/experiments.js";
@@ -56,6 +58,7 @@ import {
   executionDescriptorThreatModel,
   type CpuAudioRetimeReuseSourceBinding,
   type CpuFfmpegOperation,
+  type CpuPacketCopyAudioRetimeOperation,
   type CpuOperationState,
   type CpuOperation,
   type CpuPairedArtifactPromotionOperation,
@@ -171,6 +174,13 @@ import {
 } from "./inputEvidence.js";
 import { readMaxTemperatureC, readMedianMaxTemperatureC, ThermalPauseGuard } from "./thermal.js";
 import { buildFinalAudioRemuxArgs } from "./audioRemux.js";
+import {
+  buildPositiveAudioRetimePacketCopyArgs,
+  createPositiveAudioRetimeReceipt,
+  positiveAudioRetimeArgsSha256,
+  POSITIVE_AUDIO_RETIME_FFPROBE_ARGS_SHA256,
+  POSITIVE_AUDIO_RETIME_PROFILE,
+} from "./audioRetimeReceipt.js";
 import type {
   ProvenanceContainerImageEvidence,
   RunProvenance,
@@ -504,6 +514,7 @@ type BoundProcessOptions = {
   env: NodeJS.ProcessEnv;
   inheritedFds?: readonly number[];
   boundExecutable?: BoundExecutableDescriptor;
+  recheckExecutables?: readonly BoundExecutableDescriptor[];
   recheckDescriptors?: readonly VerifiedExecutionDescriptor[];
   startGate?: boolean;
   genericGate?: boolean;
@@ -1818,6 +1829,64 @@ function lipForcingVisualComparable(request: GenerationRequest): object {
   return comparable;
 }
 
+export type ProgramAudioDelayVariableId =
+  | "lipforcing-program-audio-delay-ms"
+  | "program-audio-delay-ms";
+
+export function programAudioDelayPath(variableId: ProgramAudioDelayVariableId): string {
+  return variableId === "program-audio-delay-ms"
+    ? "audio.outputDelayMs"
+    : "postprocess.lipForcing.programAudioDelayMs";
+}
+
+export function programAudioDelayValue(
+  request: GenerationRequest,
+  variableId: ProgramAudioDelayVariableId,
+): number {
+  return variableId === "program-audio-delay-ms"
+    ? request.audio.outputDelayMs
+    : request.postprocess.lipForcing.programAudioDelayMs;
+}
+
+function programAudioVisualComparable(
+  request: GenerationRequest,
+  variableId: ProgramAudioDelayVariableId,
+): object {
+  const comparable: Partial<GenerationRequest> = structuredClone(request);
+  delete comparable.outputName;
+  if (variableId === "program-audio-delay-ms") {
+    if (comparable.audio) comparable.audio.outputDelayMs = 0;
+  } else if (comparable.postprocess) {
+    comparable.postprocess.lipForcing.programAudioDelayMs = 0;
+  }
+  return comparable;
+}
+
+export function requestsShareProgramAudioVisual(
+  left: GenerationRequest,
+  right: GenerationRequest,
+  variableId: ProgramAudioDelayVariableId,
+): boolean {
+  return isDeepStrictEqual(
+    programAudioVisualComparable(left, variableId),
+    programAudioVisualComparable(right, variableId),
+  );
+}
+
+export function publishedOutputIsReusableProgramAudioVisual(
+  source: GenerationRequest,
+  target: GenerationRequest,
+  variableId: ProgramAudioDelayVariableId,
+): boolean {
+  const variableContractValid = variableId === "program-audio-delay-ms"
+    ? !source.postprocess.lipForcing.enabled && !target.postprocess.lipForcing.enabled
+    : source.postprocess.lipForcing.enabled && target.postprocess.lipForcing.enabled;
+  return variableContractValid
+    && !source.audio.finalMix.path
+    && !target.audio.finalMix.path
+    && requestsShareProgramAudioVisual(source, target, variableId);
+}
+
 export function requestsShareLipForcingVisual(
   left: GenerationRequest,
   right: GenerationRequest,
@@ -1829,11 +1898,11 @@ export function publishedOutputIsReusableLipForcingVisual(
   source: GenerationRequest,
   target: GenerationRequest,
 ): boolean {
-  return source.postprocess.lipForcing.enabled
-    && target.postprocess.lipForcing.enabled
-    && !source.audio.finalMix.path
-    && !target.audio.finalMix.path
-    && requestsShareLipForcingVisual(source, target);
+  return publishedOutputIsReusableProgramAudioVisual(
+    source,
+    target,
+    "lipforcing-program-audio-delay-ms",
+  );
 }
 
 export const DEVELOPMENT_LIPFORCING_RAW_OUTPUT_SURFACE_ID =
@@ -2043,6 +2112,9 @@ export type ReusableLtxBaseCandidate = {
   outputPath: string;
   jobId: string;
   request: GenerationRequest;
+  /** Exact request bytes originally sealed in the settings sidecar. */
+  authorityBoundRequest?: unknown;
+  authorityRequestSha256?: string;
   identityEvidence: IdentityInputEvidence;
   runProvenance: RunProvenance;
   settingsSidecarPath?: string;
@@ -2063,6 +2135,8 @@ export type ReusableLtxBase = {
 export type ReusableLipForcingOutput = ReusableLtxBase & {
   outputName: string;
   baselineRequestSha256: string;
+  sourceAuthorityRequestSha256?: string;
+  sourceRunProvenance: RunProvenance;
   sourceProvenanceFingerprint: string;
   settingsSidecarPath: string;
   analysisSidecarPath: string;
@@ -2122,6 +2196,48 @@ export function reusableLtxBaseFromSidecars(
   };
 }
 
+export function reusableProgramAudioOutputFromSidecars(
+  candidates: readonly ReusableLtxBaseCandidate[],
+  target: {
+    id: string;
+    request: GenerationRequest;
+    identityEvidence: IdentityInputEvidence | null;
+  },
+  fileReady: (path: string) => boolean,
+  variableId: ProgramAudioDelayVariableId,
+): ReusableLipForcingOutput | undefined {
+  const match = candidates.find((candidate) =>
+    candidate.jobId !== target.id
+    && Boolean(candidate.runProvenance.verifiedAt)
+    && typeof candidate.authorityRequestSha256 === "string"
+    && /^[0-9a-f]{64}$/.test(candidate.authorityRequestSha256)
+    && candidate.authorityBoundRequest !== undefined
+    && candidate.authorityRequestSha256
+      === experimentRequestSha256V1(candidate.authorityBoundRequest)
+    && publishedOutputIsReusableProgramAudioVisual(candidate.request, target.request, variableId)
+    && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
+    && candidate.settingsSidecarPath !== undefined
+    && fileReady(candidate.settingsSidecarPath)
+    && candidate.analysisSidecarPath !== undefined
+    && candidate.analysisSidecarVerified === true
+    && fileReady(candidate.analysisSidecarPath)
+    && fileReady(candidate.outputPath));
+  if (!match) return undefined;
+  return {
+    id: match.jobId,
+    outputPath: match.outputPath,
+    description: `Ausgabe „${match.outputName}" (Job ${match.jobId})`,
+    outputName: match.outputName,
+    baselineRequestSha256: experimentRequestSha256V1(match.request),
+    sourceAuthorityRequestSha256: match.authorityRequestSha256,
+    sourceRunProvenance: structuredClone(match.runProvenance),
+    sourceProvenanceFingerprint: match.runProvenance.fingerprint,
+    settingsSidecarPath: match.settingsSidecarPath ?? `${match.outputPath}.ltx-settings.json`,
+    analysisSidecarPath: match.analysisSidecarPath ?? `${match.outputPath}.ltx-analysis.json`,
+    programAudioDelayMs: programAudioDelayValue(match.request, variableId),
+  };
+}
+
 export function reusableLipForcingOutputFromSidecars(
   candidates: readonly ReusableLtxBaseCandidate[],
   target: {
@@ -2131,41 +2247,43 @@ export function reusableLipForcingOutputFromSidecars(
   },
   fileReady: (path: string) => boolean,
 ): ReusableLipForcingOutput | undefined {
-  const match = candidates.find((candidate) =>
-    candidate.jobId !== target.id
-    && Boolean(candidate.runProvenance.verifiedAt)
-    && publishedOutputIsReusableLipForcingVisual(candidate.request, target.request)
-    && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
-    && (candidate.settingsSidecarPath === undefined || fileReady(candidate.settingsSidecarPath))
-    && (candidate.analysisSidecarPath === undefined
-      || (candidate.analysisSidecarVerified === true && fileReady(candidate.analysisSidecarPath)))
-    && fileReady(candidate.outputPath));
-  if (!match) return undefined;
-  return {
-    id: match.jobId,
-    outputPath: match.outputPath,
-    description: `LipForcing-Ausgabe „${match.outputName}" (Job ${match.jobId})`,
-    outputName: match.outputName,
-    baselineRequestSha256: experimentRequestSha256V1(match.request),
-    sourceProvenanceFingerprint: match.runProvenance.fingerprint,
-    settingsSidecarPath: match.settingsSidecarPath ?? `${match.outputPath}.ltx-settings.json`,
-    analysisSidecarPath: match.analysisSidecarPath ?? `${match.outputPath}.ltx-analysis.json`,
-    programAudioDelayMs: match.request.postprocess.lipForcing.programAudioDelayMs,
-  };
+  return reusableProgramAudioOutputFromSidecars(
+    candidates,
+    target,
+    fileReady,
+    "lipforcing-program-audio-delay-ms",
+  );
+}
+
+function boundProgramAudioDelayVariable(
+  job: Pick<StudioJob, "experiment" | "request">,
+): ProgramAudioDelayVariableId | null {
+  const binding = job.experiment;
+  if (!binding
+    || binding.arm !== "candidate"
+    || !binding.baselineJobId
+    || !binding.baselineOutputName
+    || binding.changedRequestPaths.length !== 1) return null;
+  if (binding.variableId === "lipforcing-program-audio-delay-ms"
+    && binding.changedRequestPaths[0] === programAudioDelayPath(binding.variableId)
+    && job.request.postprocess.lipForcing.enabled) {
+    return binding.variableId;
+  }
+  if (binding.variableId === "program-audio-delay-ms"
+    && binding.changedRequestPaths[0] === programAudioDelayPath(binding.variableId)
+    && Number.isInteger(job.request.audio.outputDelayMs)
+    && job.request.audio.outputDelayMs >= 1
+    && job.request.audio.outputDelayMs <= 500) {
+    const baselineShape = structuredClone(job.request);
+    baselineShape.audio.outputDelayMs = 0;
+    if (!supportsProgramAudioDelayExperiment(baselineShape)) return null;
+    return binding.variableId;
+  }
+  return null;
 }
 
 function isBoundProgramAudioOnlyCandidate(job: Pick<StudioJob, "experiment" | "request">): boolean {
-  const binding = job.experiment;
-  return Boolean(
-    binding
-    && binding.arm === "candidate"
-    && binding.variableId === "lipforcing-program-audio-delay-ms"
-    && binding.changedRequestPaths.length === 1
-    && binding.changedRequestPaths[0] === "postprocess.lipForcing.programAudioDelayMs"
-    && binding.baselineJobId
-    && binding.baselineOutputName
-    && job.request.postprocess.lipForcing.enabled,
-  );
+  return boundProgramAudioDelayVariable(job) !== null;
 }
 
 /**
@@ -2174,23 +2292,29 @@ function isBoundProgramAudioOnlyCandidate(job: Pick<StudioJob, "experiment" | "r
  * its server-side binding. A compatible output from any other job is never a
  * fallback.
  */
-export function exactBoundLipForcingOutputFromSidecars(
+export function exactBoundProgramAudioOutputFromSidecars(
   candidates: readonly ReusableLtxBaseCandidate[],
   target: Pick<StudioJob, "id" | "request" | "identityEvidence" | "experiment">,
   fileReady: (path: string) => boolean,
 ): ReusableLipForcingOutput | undefined {
   const binding = target.experiment;
-  if (!binding || !isBoundProgramAudioOnlyCandidate(target) || !binding.baselineJobId) return undefined;
+  const variableId = boundProgramAudioDelayVariable(target);
+  if (!binding || !variableId || !binding.baselineJobId) return undefined;
   if (experimentRequestSha256V1(target.request) !== binding.requestSha256) {
     return undefined;
   }
   const exact = candidates.filter((candidate) =>
     candidate.jobId === binding.baselineJobId
     && candidate.outputName === binding.baselineOutputName
+    && typeof candidate.authorityRequestSha256 === "string"
+    && /^[0-9a-f]{64}$/.test(candidate.authorityRequestSha256)
+    && candidate.authorityBoundRequest !== undefined
+    && candidate.authorityRequestSha256
+      === experimentRequestSha256V1(candidate.authorityBoundRequest)
     && experimentRequestSha256V1(candidate.request) === binding.baselineRequestSha256
     && candidate.runProvenance.verifiedAt
     && /^[0-9a-f]{64}$/.test(candidate.runProvenance.fingerprint)
-    && publishedOutputIsReusableLipForcingVisual(candidate.request, target.request)
+    && publishedOutputIsReusableProgramAudioVisual(candidate.request, target.request, variableId)
     && identityEvidenceMatches(candidate.identityEvidence, target.identityEvidence)
     && candidate.analysisSidecarVerified === true);
   if (exact.length !== 1) return undefined;
@@ -2204,11 +2328,21 @@ export function exactBoundLipForcingOutputFromSidecars(
     outputPath: candidate.outputPath,
     description: `gebundene Baseline-Ausgabe „${candidate.outputName}" (Job ${candidate.jobId})`,
     baselineRequestSha256: binding.baselineRequestSha256,
+    sourceAuthorityRequestSha256: candidate.authorityRequestSha256,
+    sourceRunProvenance: structuredClone(candidate.runProvenance),
     sourceProvenanceFingerprint: candidate.runProvenance.fingerprint,
     settingsSidecarPath,
     analysisSidecarPath,
-    programAudioDelayMs: candidate.request.postprocess.lipForcing.programAudioDelayMs,
+    programAudioDelayMs: programAudioDelayValue(candidate.request, variableId),
   };
+}
+
+export function exactBoundLipForcingOutputFromSidecars(
+  candidates: readonly ReusableLtxBaseCandidate[],
+  target: Pick<StudioJob, "id" | "request" | "identityEvidence" | "experiment">,
+  fileReady: (path: string) => boolean,
+): ReusableLipForcingOutput | undefined {
+  return exactBoundProgramAudioOutputFromSidecars(candidates, target, fileReady);
 }
 
 export function buildLipForcingAudioRetimeArgs(
@@ -2238,6 +2372,14 @@ export function buildLipForcingAudioRetimeArgs(
     "-shortest", "-movflags", "+faststart",
     outputPath,
   ];
+}
+
+export function buildPositivePacketCopyAudioRetimeArgs(
+  inputPath: string,
+  outputPath: string,
+  deltaMs: number,
+): string[] {
+  return buildPositiveAudioRetimePacketCopyArgs(inputPath, outputPath, deltaMs);
 }
 
 export function resolveRenderOutputPaths(
@@ -2544,6 +2686,42 @@ function exclusiveDurableJsonFile(path: string, value: object): void {
   }
 }
 
+function exclusiveDurableReadonlyJsonFile(path: string, value: object): void {
+  const temporaryPath = join(dirname(path), `.${path.split("/").at(-1)}.${randomUUID()}.tmp`);
+  let descriptor: number | undefined;
+  let linked = false;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    descriptor = openSync(
+      temporaryPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    fchmodSync(descriptor, 0o400);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    linkSync(temporaryPath, path);
+    linked = true;
+    unlinkSync(temporaryPath);
+    const directoryDescriptor = openSync(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY);
+    try {
+      fsyncSync(directoryDescriptor);
+    } finally {
+      closeSync(directoryDescriptor);
+    }
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { closeSync(descriptor); } catch { /* retain the authoritative write failure */ }
+    }
+    if (!linked) {
+      try { unlinkSync(temporaryPath); } catch { /* retain the authoritative write failure */ }
+    }
+    throw error;
+  }
+}
+
 export type ProtectedJsonReadOperations = {
   lstat?: typeof lstatSync;
   open?: typeof openSync;
@@ -2719,6 +2897,22 @@ function verifyBoundExecutableDescriptor(executable: BoundExecutableDescriptor):
   if (sha256 !== executable.binding.sha256
     || !executionRevisionsEqual(beforeRevision, afterRevision)) {
     throw new Error("Gebundener Executable-FD änderte sich vor exec.");
+  }
+}
+
+function verifyRootOwnedBoundMediaTool(
+  executable: BoundExecutableDescriptor,
+  expectedPath: "/usr/bin/ffmpeg" | "/usr/bin/ffprobe",
+): void {
+  verifyBoundExecutableDescriptor(executable);
+  const revision = executable.binding.revision;
+  if (executable.binding.path !== expectedPath
+    || revision.uid !== 0
+    || revision.nlink !== 1
+    || (revision.mode & 0o170000) !== 0o100000
+    || (revision.mode & 0o111) === 0
+    || (revision.mode & 0o022) !== 0) {
+    throw new Error(`${expectedPath} ist nicht exakt als root-eigenes, nicht gruppen-/weltbeschreibbares Tool gebunden.`);
   }
 }
 
@@ -2915,6 +3109,34 @@ function recheckVerifiedExecutionDescriptor(descriptor: VerifiedExecutionDescrip
   }
 }
 
+function cpuAudioRetimeDescriptorsMatch(
+  source: CpuAudioRetimeReuseSourceBinding,
+  inheritedFds: readonly number[],
+  descriptors: readonly VerifiedExecutionDescriptor[],
+): boolean {
+  const expected = [
+    { sha256: source.snapshotOutputSha256, revision: source.snapshotOutputRevision },
+    { sha256: source.snapshotSettingsSidecarSha256, revision: source.snapshotSettingsSidecarRevision },
+    { sha256: source.snapshotAnalysisSidecarSha256, revision: source.snapshotAnalysisSidecarRevision },
+  ];
+  return inheritedFds.length === 1
+    && descriptors.length === expected.length
+    && inheritedFds[0] === descriptors[0]?.fd
+    && descriptors.every((descriptor, index) =>
+      descriptor.sha256 === expected[index]?.sha256
+      && executionRevisionsEqual(descriptor.revision, expected[index]!.revision));
+}
+
+function cpuAudioRetimeVerifierMatches(
+  operation: CpuFfmpegOperation | CpuPacketCopyAudioRetimeOperation,
+  verifiers: readonly BoundExecutableDescriptor[],
+): boolean {
+  if (operation.kind === "ffmpeg-audio-retime") return verifiers.length === 0;
+  return verifiers.length === 1
+    && canonicalJson(verifiers[0]?.binding) === canonicalJson(operation.ffprobe)
+    && verifiers[0]?.version === operation.ffprobeVersion;
+}
+
 /** Captures, snapshots, and rechecks all evidence before a CPU process may be classified or spawned. */
 export async function pinExactLipForcingReuse(
   reusable: ReusableLipForcingOutput,
@@ -2962,13 +3184,19 @@ export async function pinExactLipForcingReuse(
   const rawSettingsRequestSha256 = experimentRequestSha256V1(parsedSettings.request);
   const settingsRequest = migrateGenerationRequest(structuredClone(parsedSettings.request));
   const settingsProvenance = normalizeRunProvenance(parsedSettings.runProvenance);
-  const settingsRequestSha256 = settingsRequest ? rawSettingsRequestSha256 : null;
+  const settingsRequestSha256 = settingsRequest
+    ? experimentRequestSha256V1(settingsRequest)
+    : null;
+  const expectedAuthorityRequestSha256 = reusable.sourceAuthorityRequestSha256
+    ?? reusable.baselineRequestSha256;
   const settingsMismatch = parsedSettings.outputName !== reusable.outputName
     ? "Outputname"
     : parsedSettings.jobId !== reusable.id
       ? "Job-ID"
-      : settingsRequestSha256 !== reusable.baselineRequestSha256
-        ? "Request-SHA-256"
+      : rawSettingsRequestSha256 !== expectedAuthorityRequestSha256
+        ? "Authority-Request-SHA-256"
+        : settingsRequestSha256 !== reusable.baselineRequestSha256
+          ? "migrierte Request-SHA-256"
         : settingsProvenance?.fingerprint !== reusable.sourceProvenanceFingerprint
           ? "Provenienz-Fingerprint"
           : !settingsProvenance.verifiedAt
@@ -3171,13 +3399,17 @@ function restoreExecutionAuthority(
       && experiment.baselineRequestSha256 === decision.cpuReuse.baselineRequestSha256,
     );
     let operationBindingMatches = false;
-    if (decision.operation.kind === "ffmpeg-audio-retime"
+    if ((decision.operation.kind === "ffmpeg-audio-retime"
+      || decision.operation.kind === "ffmpeg-audio-retime-v2")
       && !("reuseKind" in decision.cpuReuse)) {
-      operationBindingMatches = experiment?.variableId === "lipforcing-program-audio-delay-ms"
-        && experiment.changedRequestPaths.length === 1
-        && experiment.changedRequestPaths[0] === "postprocess.lipForcing.programAudioDelayMs"
+      const variableId = boundProgramAudioDelayVariable({ request, experiment });
+      const operationMatchesVariable = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? variableId === "program-audio-delay-ms"
+        : variableId === "lipforcing-program-audio-delay-ms";
+      operationBindingMatches = variableId !== null
+        && operationMatchesVariable
         && decision.operation.deltaMs
-          === request.postprocess.lipForcing.programAudioDelayMs
+          === programAudioDelayValue(request, variableId)
             - decision.cpuReuse.sourceProgramAudioDelayMs;
     } else if (decision.operation.kind === "paired-artifact-promotion"
       && "reuseKind" in decision.cpuReuse
@@ -5149,6 +5381,17 @@ export class JobManager extends EventEmitter {
     request = experimentBinding || metadata.project
       ? structuredClone(request)
       : withOfficialSpeechModelPaths(request);
+    const outputTimingVariable = boundProgramAudioDelayVariable({
+      request,
+      experiment: experimentBinding,
+    });
+    if (request.audio.outputDelayMs !== 0
+      && outputTimingVariable !== "program-audio-delay-ms") {
+      throw new JobConflictError(
+        "Ein Ausgabetonversatz ungleich 0 ms ist ausschließlich als exakt gebundener "
+        + "Kandidatenarm eines eingefrorenen Audio-only-Experiments ausführbar.",
+      );
+    }
     const authorityBoundRequest = structuredClone(request);
     const requestSha256 = createHash("sha256").update(canonicalJson(authorityBoundRequest)).digest("hex");
     if (experimentBinding
@@ -7001,6 +7244,7 @@ export class JobManager extends EventEmitter {
   private async run(job: RuntimeJob): Promise<void> {
     const exactAdoptedRefinerRun = isAdoptedLipForcingCandidate(job.experiment);
     const rawMuxPairedCandidate = isBoundRawOutputCandidate(job);
+    const programAudioOnlyCandidate = isBoundProgramAudioOnlyCandidate(job);
     const positivePromptExperimentArm = job.experiment?.variableId === "positive-prompt"
       ? validPositivePromptExperimentArmBinding(job.request, job.experiment)
       : null;
@@ -7011,8 +7255,10 @@ export class JobManager extends EventEmitter {
       );
       return;
     }
-    if (!this.verifyNativeRuntimeSourceBeforeAdmission(job)) return;
-    const requiredAssetIds = exactAdoptedRefinerRun || rawMuxPairedCandidate
+    if (!programAudioOnlyCandidate && !this.verifyNativeRuntimeSourceBeforeAdmission(job)) return;
+    const requiredAssetIds = exactAdoptedRefinerRun
+      || rawMuxPairedCandidate
+      || programAudioOnlyCandidate
       ? []
       : requiredOfficialSpeechAssetIds(job.request);
     let inventory: ModelInventory | undefined;
@@ -7021,7 +7267,6 @@ export class JobManager extends EventEmitter {
       try {
         inventory = await this.modelInventoryOperations.read(true, requiredAssetIds);
       } catch (error) {
-        if (this.jobShouldStop(job)) return;
         pathErrors.push(
           `Die offizielle Modellintegrität konnte nicht geprüft werden: ${
             error instanceof Error ? error.message : String(error)
@@ -7030,7 +7275,7 @@ export class JobManager extends EventEmitter {
       }
       if (this.jobShouldStop(job)) return;
     }
-    if (!rawMuxPairedCandidate) {
+    if (!rawMuxPairedCandidate && !programAudioOnlyCandidate) {
       pathErrors.push(...validateRequestPlan(job.request, job.plan, inventory, {
         enforceOfficialAssets: !exactAdoptedRefinerRun,
       }));
@@ -7135,7 +7380,7 @@ export class JobManager extends EventEmitter {
         }
       }
     }
-    if (lipForcingEnabled && !rawMuxPairedCandidate) {
+    if (lipForcingEnabled && !rawMuxPairedCandidate && !programAudioOnlyCandidate) {
       const rawOutputImageAuthority = this.rawOutputBaselineImageAuthority(job);
       const lipForcingAvailabilityReference = rawOutputImageAuthority.evidence?.executionReference
         ?? lipForcingImage;
@@ -7211,7 +7456,9 @@ export class JobManager extends EventEmitter {
       this.changed();
       return;
     }
-    if (!rawMuxPairedCandidate && !pythonRuntimeAvailable(pythonExecutable)) {
+    if (!rawMuxPairedCandidate
+      && !programAudioOnlyCandidate
+      && !pythonRuntimeAvailable(pythonExecutable)) {
       job.status = "failed";
       job.finishedAt = now();
       job.error = `Die konfigurierte Python-LTX-Laufzeit ist unvollständig: ${pythonExecutable}`;
@@ -7225,6 +7472,15 @@ export class JobManager extends EventEmitter {
       job.status = "failed";
       job.finishedAt = now();
       job.error = "FFmpeg für die finale Tonspur ist nicht verfügbar.";
+      this.appendLog(job, job.error);
+      this.changed();
+      return;
+    }
+    if (programAudioOnlyCandidate
+      && (!executableAvailable("ffmpeg") || !executableAvailable("ffprobe"))) {
+      job.status = "failed";
+      job.finishedAt = now();
+      job.error = "FFmpeg und FFprobe für den beweisgebundenen Audio-only-Retime sind nicht verfügbar.";
       this.appendLog(job, job.error);
       this.changed();
       return;
@@ -7273,6 +7529,39 @@ export class JobManager extends EventEmitter {
       return;
     }
 
+    if (programAudioOnlyCandidate) {
+      const reusableProgramAudioOutput = this.findReusableLipForcingOutput(job);
+      if (!reusableProgramAudioOutput) {
+        this.failJob(
+          job,
+          "Die exakt protokollgebundene Baseline samt Ausgabe-, Einstellungs- und Analyse-Sidecar "
+            + "ist nicht unverändert verfügbar; kein Fremdquellen- oder DGX-Fallback ist zulässig.",
+        );
+        return;
+      }
+      try {
+        job.runProvenance = forkVerifiedRunProvenanceForArtifactPromotion(
+          reusableProgramAudioOutput.sourceRunProvenance,
+        );
+      } catch (error) {
+        this.failJob(
+          job,
+          `Historische Baseline-Provenienz konnte nicht für den CPU-only-Retime gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+      this.appendLog(
+        job,
+        "CPU-only Audio-Retime übernimmt die verifizierte historische Baseline-Provenienz; "
+          + "aktuelle DGX-Modelle, Python und Docker werden nicht benötigt.",
+      );
+      this.changed();
+      await this.runReusedLipForcingAudioRetime(job, reusableProgramAudioOutput);
+      return;
+    }
+
     const rawOutputBaselineImage = this.rawOutputBaselineImageAuthority(job);
     if (rawOutputBaselineImage.error) {
       this.failJob(job, rawOutputBaselineImage.error);
@@ -7296,19 +7585,6 @@ export class JobManager extends EventEmitter {
         this.failJob(job, environmentError);
         return;
       }
-    }
-
-    const reusableLipForcingOutput = this.findReusableLipForcingOutput(job);
-    if (reusableLipForcingOutput) {
-      await this.runReusedLipForcingAudioRetime(job, reusableLipForcingOutput);
-      return;
-    }
-    if (isBoundProgramAudioOnlyCandidate(job)) {
-      this.failJob(
-        job,
-        "Die exakt protokollgebundene Baseline samt Ausgabe-, Einstellungs- und Analyse-Sidecar ist nicht unverändert verfügbar; kein Fremdquellen- oder DGX-Fallback ist zulässig.",
-      );
-      return;
     }
 
     // Every remaining path can allocate DGX resources (including the LongCat
@@ -8707,6 +8983,7 @@ export class JobManager extends EventEmitter {
     result: ProcessResult,
     output: ExecutionFileBinding | null,
     errorDetail: string | null,
+    receipt: ExecutionFileBinding | null = null,
   ): boolean {
     const decision = normalizeJobExecutionDecision(job.executionDecision);
     if (!decision || decision.executionClass !== "cpu-only") {
@@ -8715,22 +8992,26 @@ export class JobManager extends EventEmitter {
     }
     if (["succeeded", "failed", "cancelled", "interrupted"].includes(decision.operation.state)) {
       return decision.operation.state === state
-        && JSON.stringify(decision.operation.output) === JSON.stringify(output);
+        && JSON.stringify(decision.operation.output) === JSON.stringify(output)
+        && (decision.operation.kind !== "ffmpeg-audio-retime-v2"
+          || JSON.stringify(decision.operation.receipt) === JSON.stringify(receipt));
     }
     const errorText = errorDetail ?? result.error?.message ?? null;
+    const terminalOperation = {
+      ...decision.operation,
+      state,
+      completedAt: now(),
+      exitCode: result.code,
+      signal: result.signal,
+      errorSha256: errorText === null
+        ? null
+        : createHash("sha256").update(errorText).digest("hex"),
+      output,
+      ...(decision.operation.kind === "ffmpeg-audio-retime-v2" ? { receipt } : {}),
+    };
     const completedDecision = {
       ...decision,
-      operation: {
-        ...decision.operation,
-        state,
-        completedAt: now(),
-        exitCode: result.code,
-        signal: result.signal,
-        errorSha256: errorText === null
-          ? null
-          : createHash("sha256").update(errorText).digest("hex"),
-        output,
-      },
+      operation: terminalOperation,
     } as JobExecutionDecision;
     return this.commitExecutionDecision(job, completedDecision);
   }
@@ -9458,12 +9739,453 @@ export class JobManager extends EventEmitter {
     await this.flushDgxTerminalDelivery(job);
   }
 
+  private async runPositivePacketCopyAudioRetime(
+    job: RuntimeJob,
+    reusable: ReusableLipForcingOutput,
+    pinned: PinnedCpuReuse,
+    stageRoot: string,
+    temporaryOutput: string,
+    deltaMs: number,
+  ): Promise<void> {
+    const experiment = job.experiment;
+    const receiptPath = join(stageRoot, "audio-retime-receipt.v1.json");
+    const verificationRoot = join(stageRoot, "audio-retime-replay");
+    if (!experiment
+      || experiment.arm !== "candidate"
+      || experiment.variableId !== "program-audio-delay-ms"
+      || experiment.changedRequestPaths.length !== 1
+      || experiment.changedRequestPaths[0] !== "audio.outputDelayMs"
+      || experiment.baselineJobId !== reusable.id
+      || experiment.baselineOutputName !== reusable.outputName
+      || experiment.baselineRequestSha256 !== reusable.baselineRequestSha256
+      || experiment.requestSha256 !== experimentRequestSha256V1(job.authorityBoundRequest)
+      || !experiment.protocolSha256
+      || reusable.programAudioDelayMs !== 0
+      || deltaMs !== job.request.audio.outputDelayMs
+      || !Number.isInteger(deltaMs)
+      || deltaMs < 1
+      || deltaMs > 500
+      || typeof reusable.sourceAuthorityRequestSha256 !== "string"
+      || !/^[0-9a-f]{64}$/u.test(reusable.sourceAuthorityRequestSha256)
+      || !/^[0-9a-f]{64}$/u.test(reusable.sourceProvenanceFingerprint)) {
+      this.failJob(
+        job,
+        "Der native Packet-Copy-Audioarm besitzt keine vollständige positive LTX-2.5-Experimentautorität.",
+      );
+      return;
+    }
+
+    let ffmpeg: BoundExecutableDescriptor | null = null;
+    let ffprobe: BoundExecutableDescriptor | null = null;
+    let pinnedOutput: VerifiedExecutionDescriptor | null = null;
+    let pinnedSettings: VerifiedExecutionDescriptor | null = null;
+    let pinnedAnalysis: VerifiedExecutionDescriptor | null = null;
+    let candidateDescriptor: VerifiedExecutionDescriptor | null = null;
+    let receiptDescriptor: VerifiedExecutionDescriptor | null = null;
+    let classified = false;
+    let result: ProcessResult | null = null;
+
+    const closeDescriptors = (): void => {
+      for (const descriptor of [
+        receiptDescriptor,
+        candidateDescriptor,
+        pinnedAnalysis,
+        pinnedSettings,
+        pinnedOutput,
+      ]) {
+        if (descriptor) closeSync(descriptor.fd);
+      }
+      if (ffprobe) closeSync(ffprobe.fd);
+      if (ffmpeg) closeSync(ffmpeg.fd);
+    };
+    const terminalFailure = (detail: string, failureResult?: ProcessResult): void => {
+      const terminalResult = failureResult ?? {
+        code: 1,
+        signal: null,
+        error: new Error(detail),
+      };
+      if (classified) this.terminalizeCpuOperation(job, "failed", terminalResult, null, detail);
+      if (!this.persistenceHold) quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+      this.failJob(job, detail);
+    };
+
+    try {
+      try {
+        ffmpeg = openBoundExecutable("/usr/bin/ffmpeg");
+        ffprobe = openBoundExecutable("/usr/bin/ffprobe");
+        verifyRootOwnedBoundMediaTool(ffmpeg, "/usr/bin/ffmpeg");
+        verifyRootOwnedBoundMediaTool(ffprobe, "/usr/bin/ffprobe");
+      } catch (error) {
+        this.failJob(
+          job,
+          `FFmpeg/FFprobe konnten nicht als root-eigene O_NOFOLLOW-Tools gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+      if (!job.runProvenance
+        || job.runProvenance.runtime.ffmpegVersion !== ffmpeg.version) {
+        this.failJob(job, "FFmpeg-Version des gebundenen Tools widerspricht der übernommenen Baseline-Provenienz.");
+        return;
+      }
+      try {
+        pinnedOutput = openVerifiedExecutionDescriptor(
+          pinned.source.snapshotOutputPath,
+          pinned.source.snapshotOutputSha256,
+          pinned.source.snapshotOutputRevision,
+        );
+        pinnedSettings = openVerifiedExecutionDescriptor(
+          pinned.source.snapshotSettingsSidecarPath,
+          pinned.source.snapshotSettingsSidecarSha256,
+          pinned.source.snapshotSettingsSidecarRevision,
+        );
+        pinnedAnalysis = openVerifiedExecutionDescriptor(
+          pinned.source.snapshotAnalysisSidecarPath,
+          pinned.source.snapshotAnalysisSidecarSha256,
+          pinned.source.snapshotAnalysisSidecarRevision,
+        );
+      } catch (error) {
+        this.failJob(
+          job,
+          `Private LTX-2.5-Baseline-Snapshots drifteten vor dem Packet-Copy-Retime: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+
+      const args = buildPositiveAudioRetimePacketCopyArgs(
+        "/proc/self/fd/4",
+        temporaryOutput,
+        deltaMs,
+      );
+      const operation: CpuPacketCopyAudioRetimeOperation = {
+        kind: "ffmpeg-audio-retime-v2",
+        profileId: POSITIVE_AUDIO_RETIME_PROFILE,
+        state: "prepared",
+        descriptorThreatModel: executionDescriptorThreatModel,
+        ffmpeg: ffmpeg.binding,
+        ffmpegVersion: ffmpeg.version,
+        ffprobe: ffprobe.binding,
+        ffprobeVersion: ffprobe.version,
+        ffmpegArgsSha256: positiveAudioRetimeArgsSha256(args),
+        ffprobeArgsSha256: POSITIVE_AUDIO_RETIME_FFPROBE_ARGS_SHA256,
+        deltaMs,
+        preparedAt: now(),
+        startedAt: null,
+        completedAt: null,
+        exitCode: null,
+        signal: null,
+        errorSha256: null,
+        output: null,
+        receipt: null,
+      };
+      if (!this.classifyExecution(job, "cpu-only", pinned.source, operation)) return;
+      classified = true;
+
+      job.progress = 90;
+      this.appendLog(
+        job,
+        `Native LTX-2.5-Baseline ${reusable.description} exakt gebunden; `
+          + `Video- und Audiopakete werden ohne Re-Encode kopiert und der hörbare Ton um +${deltaMs} ms verschoben. `
+          + "Der Kandidat läuft CPU-only und muss vor Publikation einen gebundenen Kausalitäts-Receipt bestehen.",
+      );
+      this.changed();
+      result = await this.runLoggedProcess(job, "/proc/self/fd/3", args, {
+        cwd: repoRoot,
+        env: { ...process.env, LC_ALL: "C" },
+        inheritedFds: [pinnedOutput.fd],
+        boundExecutable: ffmpeg,
+        recheckExecutables: [ffprobe],
+        recheckDescriptors: [pinnedOutput, pinnedSettings, pinnedAnalysis],
+      });
+      if (this.jobShouldStop(job)) {
+        this.terminalizeCpuOperation(
+          job,
+          job.status === "cancelled" ? "cancelled" : "interrupted",
+          result,
+          null,
+          job.error,
+        );
+        quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        return;
+      }
+      if (result.error || result.code !== 0 || !this.fileReady(temporaryOutput)) {
+        const detail = result.error?.message
+          ?? `Packet-Copy-Audio-Retime endete mit Code ${String(result.code)}`
+            + `${result.signal ? ` (${result.signal})` : ""}`
+            + `${this.fileReady(temporaryOutput) ? "." : "; Kandidatendatei fehlt."}`;
+        terminalFailure(detail, result);
+        return;
+      }
+
+      let privateOutput: HashedExecutionFile;
+      try {
+        privateOutput = await hashUnchangedExecutionFile(
+          temporaryOutput,
+          () => this.jobShouldStop(job),
+        );
+      } catch (error) {
+        if (this.jobShouldStop(job)) {
+          this.terminalizeCpuOperation(
+            job,
+            job.status === "cancelled" ? "cancelled" : "interrupted",
+            result,
+            null,
+            job.error,
+          );
+          quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+          return;
+        }
+        terminalFailure(
+          `Packet-Copy-Kandidat konnte nicht unverändert gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          result,
+        );
+        return;
+      }
+      const privateOutputBinding: ExecutionFileBinding = {
+        path: temporaryOutput,
+        sha256: privateOutput.sha256,
+        revision: privateOutput.revision,
+      };
+      try {
+        candidateDescriptor = openVerifiedExecutionDescriptor(
+          privateOutputBinding.path,
+          privateOutputBinding.sha256,
+          privateOutputBinding.revision,
+        );
+        mkdirSync(verificationRoot, { mode: 0o700 });
+        const receipt = createPositiveAudioRetimeReceipt({
+          profile: POSITIVE_AUDIO_RETIME_PROFILE,
+          requestedDelayMs: deltaMs,
+          authority: {
+            jobId: job.id,
+            experimentId: experiment.experimentId,
+            protocolSha256: experiment.protocolSha256,
+            candidateRequestSha256: experiment.requestSha256,
+            baselineJobId: reusable.id,
+            baselineOutputName: reusable.outputName,
+            baselineRequestSha256: reusable.baselineRequestSha256,
+            sourceAuthorityRequestSha256: reusable.sourceAuthorityRequestSha256,
+            sourceProvenanceFingerprint: reusable.sourceProvenanceFingerprint,
+          },
+          source: {
+            path: pinned.source.snapshotOutputPath,
+            sha256: pinned.source.snapshotOutputSha256,
+            revision: pinned.source.snapshotOutputRevision,
+          },
+          candidate: privateOutputBinding,
+          ffmpeg,
+          ffprobe,
+          transformArgs: args,
+          verificationRoot,
+        });
+        recheckVerifiedExecutionDescriptor(candidateDescriptor);
+        exclusiveDurableReadonlyJsonFile(receiptPath, receipt);
+      } catch (error) {
+        if (existsSync(receiptPath)) {
+          this.enterPersistenceHold(
+            error,
+            "der exklusive Audio-Retime-Receipt-Link wurde sichtbar, aber seine Durability ist nicht eindeutig",
+          );
+          return;
+        }
+        terminalFailure(
+          `Packet-Copy-Kausalitätsprüfung oder Receipt-Erzeugung scheiterte: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          result,
+        );
+        return;
+      }
+
+      let receiptFile: HashedExecutionFile;
+      try {
+        receiptFile = await hashUnchangedExecutionFile(
+          receiptPath,
+          () => this.jobShouldStop(job),
+        );
+        receiptDescriptor = openVerifiedExecutionDescriptor(
+          receiptPath,
+          receiptFile.sha256,
+          receiptFile.revision,
+        );
+      } catch (error) {
+        if (this.jobShouldStop(job)) {
+          this.terminalizeCpuOperation(
+            job,
+            job.status === "cancelled" ? "cancelled" : "interrupted",
+            result,
+            null,
+            job.error,
+          );
+          quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+          return;
+        }
+        terminalFailure(
+          `Persistierter Audio-Retime-Receipt konnte nicht unverändert gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          result,
+        );
+        return;
+      }
+      const receiptBinding: ExecutionFileBinding = {
+        path: receiptPath,
+        sha256: receiptFile.sha256,
+        revision: receiptFile.revision,
+      };
+      try {
+        if (!await this.bindJobRunProvenanceFile(
+          job,
+          receiptPath,
+          "evidence:cpu-audio-retime-receipt",
+        )) {
+          this.terminalizeCpuOperation(
+            job,
+            job.status === "cancelled" ? "cancelled" : "interrupted",
+            result,
+            null,
+            job.error,
+          );
+          quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+          return;
+        }
+      } catch (error) {
+        terminalFailure(
+          `Audio-Retime-Receipt konnte nicht an die Laufprovenienz gebunden werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          result,
+        );
+        return;
+      }
+
+      for (const descriptor of [
+        pinnedOutput,
+        pinnedSettings,
+        pinnedAnalysis,
+        candidateDescriptor,
+        receiptDescriptor,
+      ]) recheckVerifiedExecutionDescriptor(descriptor);
+      verifyRootOwnedBoundMediaTool(ffmpeg, "/usr/bin/ffmpeg");
+      verifyRootOwnedBoundMediaTool(ffprobe, "/usr/bin/ffprobe");
+      if (!this.terminalizeCpuOperation(
+        job,
+        "succeeded",
+        result,
+        privateOutputBinding,
+        null,
+        receiptBinding,
+      )) {
+        quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        return;
+      }
+      if (!await this.verifyJobIdentityEvidence(job, "nach dem nativen Packet-Copy-Audio-Retime")) {
+        quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        return;
+      }
+      if (!await this.verifyJobRunProvenance(job, "nach dem nativen Packet-Copy-Audio-Retime")) {
+        quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        return;
+      }
+      for (const descriptor of [
+        pinnedOutput,
+        pinnedSettings,
+        pinnedAnalysis,
+        candidateDescriptor,
+        receiptDescriptor,
+      ]) recheckVerifiedExecutionDescriptor(descriptor);
+      const releaseDecision = this.jobStartDecision(job);
+      if (!releaseDecision.allowed) {
+        quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        this.failJob(
+          job,
+          `Ausgabe bleibt wegen des aktuellen Activation-/Rights-Gates unveröffentlicht: ${releaseDecision.reason}`,
+        );
+        return;
+      }
+      if (!this.hasOutputReleaseAuthority(job, "der nativen Packet-Copy-Audio-Publikation")) {
+        if (!this.persistenceHold) quarantineUnreleasedArtifact(temporaryOutput, stageRoot);
+        return;
+      }
+
+      try {
+        for (const descriptor of [candidateDescriptor, receiptDescriptor]) {
+          recheckVerifiedExecutionDescriptor(descriptor);
+        }
+        verifyRootOwnedBoundMediaTool(ffmpeg, "/usr/bin/ffmpeg");
+        verifyRootOwnedBoundMediaTool(ffprobe, "/usr/bin/ffprobe");
+        this.revalidateRuntimeTrustBoundary(job, "native Packet-Copy-Audio-Publikation");
+        this.promotePrivateOutput(temporaryOutput, job.plan.outputPath);
+        recheckVerifiedExecutionDescriptor(candidateDescriptor);
+        recheckVerifiedExecutionDescriptor(receiptDescriptor);
+      } catch (error) {
+        quarantineUnreleasedArtifact(
+          existsSync(job.plan.outputPath) ? job.plan.outputPath : temporaryOutput,
+          stageRoot,
+        );
+        this.failJob(
+          job,
+          `Terminaler Packet-Copy-Kandidat konnte nicht atomar/fsync-persistiert werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+
+      const completedAt = now();
+      let publicationAuthority: OutputPublicationAuthority;
+      try {
+        this.revalidateRuntimeTrustBoundary(job, "nativer Packet-Copy-Audio-Publikationsautorität");
+        publicationAuthority = this.buildPublicationAuthority(job, completedAt);
+      } catch (error) {
+        if (isJobPersistenceHoldError(error)) throw error;
+        quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+        this.failJob(
+          job,
+          `Publikationsautorität des Packet-Copy-Kandidaten konnte nicht vorbereitet werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+      if (!this.hasOutputReleaseAuthority(job, "dem nativen Packet-Copy-Audio-Publikations-Commit")) {
+        if (!this.persistenceHold) quarantineUnreleasedArtifact(job.plan.outputPath, stageRoot);
+        return;
+      }
+      const completionMetadata: DgxTransitionMetadata = {
+        current_step: "receipt-bound native LTX-2.5 program-audio retiming completed",
+        artifact: {
+          type: "video",
+          path: job.plan.outputPath,
+          note: "native LTX-2.5 output with receipt-bound packet-copy audio timing correction",
+        },
+      };
+      if (!this.commitPreparedPublication(
+        job,
+        publicationAuthority,
+        completedAt,
+        completionMetadata,
+        "Native LTX-2.5-Pakete unverändert kopiert und positiver hörbarer Tonversatz receipt-gebunden publiziert.",
+        "Publikationsautorität des Packet-Copy-Kandidaten konnte nicht dauerhaft persistiert werden",
+        stageRoot,
+      )) return;
+      await this.flushDgxTerminalDelivery(job);
+    } finally {
+      closeDescriptors();
+    }
+  }
+
   private async runReusedLipForcingAudioRetime(
     job: RuntimeJob,
     reusable: ReusableLipForcingOutput,
   ): Promise<void> {
     const stageRoot = join(hybridRoot, job.id);
-    const temporaryOutput = join(stageRoot, "retimed-lipforcing-output.tmp.mp4");
+    const temporaryOutput = join(stageRoot, "retimed-program-audio-output.tmp.mp4");
     let pinned: PinnedCpuReuse;
     try {
       pinned = await pinExactLipForcingReuse(
@@ -9476,7 +10198,7 @@ export class JobManager extends EventEmitter {
       if (this.jobShouldStop(job)) return;
       this.failJob(
         job,
-        `Die exakt gebundene LipForcing-Baseline konnte nicht fail-closed übernommen werden: ${
+        `Die exakt gebundene Audio-Timing-Baseline konnte nicht fail-closed übernommen werden: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -9490,12 +10212,12 @@ export class JobManager extends EventEmitter {
       if (!await this.bindJobRunProvenanceFile(
         job,
         pinned.inputPath,
-        `input:reused-lipforcing-output:${reusable.id}`,
+        `input:reused-program-audio-output:${reusable.id}`,
       )) return;
     } catch (error) {
       this.failJob(
         job,
-        `Die wiederverwendete LipForcing-Ausgabe konnte nicht kryptografisch gebunden werden: ${
+        `Die wiederverwendete Baseline-Ausgabe konnte nicht kryptografisch gebunden werden: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -9504,8 +10226,24 @@ export class JobManager extends EventEmitter {
     if (!await this.verifyJobIdentityEvidence(job, "vor der Audio-only-Zeitkorrektur")) return;
     if (!await this.verifyJobRunProvenance(job, "vor der Audio-only-Zeitkorrektur")) return;
 
-    const targetDelayMs = job.request.postprocess.lipForcing.programAudioDelayMs;
+    const variableId = boundProgramAudioDelayVariable(job);
+    if (!variableId) {
+      this.failJob(job, "Die Audio-only-Zeitkorrektur besitzt keine gültige Einzelfaktor-Bindung.");
+      return;
+    }
+    const targetDelayMs = programAudioDelayValue(job.request, variableId);
     const deltaMs = targetDelayMs - reusable.programAudioDelayMs;
+    if (variableId === "program-audio-delay-ms") {
+      await this.runPositivePacketCopyAudioRetime(
+        job,
+        reusable,
+        pinned,
+        stageRoot,
+        temporaryOutput,
+        deltaMs,
+      );
+      return;
+    }
     let ffmpeg: BoundExecutableDescriptor;
     try {
       ffmpeg = openBoundExecutableFromPath("ffmpeg");
@@ -9586,7 +10324,7 @@ export class JobManager extends EventEmitter {
       job,
       `Visuell identische ${reusable.description} kryptografisch gebunden; `
         + `nur der hörbare Ton wird um ${deltaMs >= 0 ? "+" : ""}${deltaMs} ms relativ verschoben. `
-        + "Kein LTX- oder LipForcing-GPU-Lauf erforderlich.",
+        + "Kein LTX-, LipForcing- oder sonstiger GPU-Lauf erforderlich.",
     );
     this.changed();
     let result: ProcessResult;
@@ -9710,11 +10448,11 @@ export class JobManager extends EventEmitter {
       return;
     }
     const completionMetadata: DgxTransitionMetadata = {
-      current_step: "provenance-bound LipForcing audio-only retiming completed",
+      current_step: "provenance-bound program-audio-only retiming completed",
       artifact: {
         type: "video",
         path: job.plan.outputPath,
-        note: "final LTX Studio LipForcing output with audio-only timing correction",
+        note: "final LTX Studio output with audio-only timing correction",
       },
     };
     if (!this.commitPreparedPublication(
@@ -9722,7 +10460,7 @@ export class JobManager extends EventEmitter {
       publicationAuthority,
       completedAt,
       completionMetadata,
-      "LipForcing-Bildstrom unverändert wiederverwendet und hörbare Sprachspur erfolgreich neu getimt.",
+      "Videostream unverändert wiederverwendet und hörbare Sprachspur erfolgreich neu getimt.",
       "Publikationsautorität konnte nicht dauerhaft persistiert werden",
       stageRoot,
     )) return;
@@ -12954,6 +13692,7 @@ export class JobManager extends EventEmitter {
     const {
       boundExecutable,
       inheritedFds = [],
+      recheckExecutables = [],
       recheckDescriptors = [],
       startGate = false,
       genericGate = false,
@@ -12966,17 +13705,46 @@ export class JobManager extends EventEmitter {
       throw new Error("Der Refiner-Startgate-FD darf nicht mit anderen geerbten Deskriptoren geteilt werden.");
     }
     if (decision.executionClass === "cpu-only") {
-      if (decision.operation.kind !== "ffmpeg-audio-retime"
-        || "reuseKind" in decision.cpuReuse
+      const audioRetimeOperation = decision.operation.kind === "ffmpeg-audio-retime"
+        || decision.operation.kind === "ffmpeg-audio-retime-v2";
+      const expectedExecutable = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? decision.operation.ffmpeg
+        : decision.operation.kind === "ffmpeg-audio-retime"
+          ? decision.operation.executable
+          : null;
+      const expectedVersion = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? decision.operation.ffmpegVersion
+        : decision.operation.kind === "ffmpeg-audio-retime"
+          ? decision.operation.ffmpegVersion
+          : null;
+      const expectedArgsSha256 = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? decision.operation.ffmpegArgsSha256
+        : decision.operation.kind === "ffmpeg-audio-retime"
+          ? decision.operation.argsSha256
+          : null;
+      const processBindingsMatch = (decision.operation.kind === "ffmpeg-audio-retime"
+        || decision.operation.kind === "ffmpeg-audio-retime-v2")
+        && !("reuseKind" in decision.cpuReuse)
+        && cpuAudioRetimeDescriptorsMatch(
+          decision.cpuReuse,
+          inheritedFds,
+          recheckDescriptors,
+        )
+        && cpuAudioRetimeVerifierMatches(decision.operation, recheckExecutables);
+      if (!audioRetimeOperation
+        || !processBindingsMatch
         || !boundExecutable
         || executable !== "/proc/self/fd/3"
-        || JSON.stringify(decision.operation.executable) !== JSON.stringify(boundExecutable.binding)
-        || decision.operation.ffmpegVersion !== boundExecutable.version
-        || decision.operation.argsSha256
+        || JSON.stringify(expectedExecutable) !== JSON.stringify(boundExecutable.binding)
+        || expectedVersion !== boundExecutable.version
+        || expectedArgsSha256
           !== createHash("sha256").update(canonicalJson(args)).digest("hex")) {
         throw new Error("FFmpeg-FD oder Argumente stimmen nicht mit der persistierten CPU-Operation überein.");
       }
       verifyBoundExecutableDescriptor(boundExecutable);
+      for (const executableDescriptor of recheckExecutables) {
+        verifyBoundExecutableDescriptor(executableDescriptor);
+      }
       for (const descriptor of recheckDescriptors) recheckVerifiedExecutionDescriptor(descriptor);
       if (decision.operation.state === "prepared") {
         const runningDecision = {
@@ -12984,7 +13752,9 @@ export class JobManager extends EventEmitter {
           operation: {
             ...decision.operation,
             state: "running",
-            startedAt: job.startedAt ?? now(),
+            // This is the CPU operation start, not the earlier Studio-job
+            // start. It must be at or after the durably bound preparedAt.
+            startedAt: now(),
           },
         } as JobExecutionDecision;
         if (!this.commitExecutionDecision(job, runningDecision)) {
@@ -12999,8 +13769,14 @@ export class JobManager extends EventEmitter {
       // pathname replacement; the v4 threat model explicitly retains the
       // same-uid in-place mutation residual without memfd/fs-verity.
       verifyBoundExecutableDescriptor(boundExecutable);
+      for (const executableDescriptor of recheckExecutables) {
+        verifyBoundExecutableDescriptor(executableDescriptor);
+      }
       for (const descriptor of recheckDescriptors) recheckVerifiedExecutionDescriptor(descriptor);
-    } else if (boundExecutable || inheritedFds.length > 0 || recheckDescriptors.length > 0) {
+    } else if (boundExecutable
+      || inheritedFds.length > 0
+      || recheckExecutables.length > 0
+      || recheckDescriptors.length > 0) {
       throw new Error("Nur eine CPU-Operation darf gebundene Executable-, Medien- oder Prüf-FDs übergeben.");
     }
     this.revalidateRuntimeTrustBoundary(job, "Prozess-Spawn");
@@ -13053,23 +13829,56 @@ export class JobManager extends EventEmitter {
     const {
       boundExecutable,
       inheritedFds = [],
+      recheckExecutables = [],
       recheckDescriptors = [],
     } = options;
     if (decision.executionClass === "cpu-only") {
-      if (decision.operation.kind !== "ffmpeg-audio-retime"
+      const audioRetimeOperation = decision.operation.kind === "ffmpeg-audio-retime"
+        || decision.operation.kind === "ffmpeg-audio-retime-v2";
+      const expectedExecutable = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? decision.operation.ffmpeg
+        : decision.operation.kind === "ffmpeg-audio-retime"
+          ? decision.operation.executable
+          : null;
+      const expectedVersion = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? decision.operation.ffmpegVersion
+        : decision.operation.kind === "ffmpeg-audio-retime"
+          ? decision.operation.ffmpegVersion
+          : null;
+      const expectedArgsSha256 = decision.operation.kind === "ffmpeg-audio-retime-v2"
+        ? decision.operation.ffmpegArgsSha256
+        : decision.operation.kind === "ffmpeg-audio-retime"
+          ? decision.operation.argsSha256
+          : null;
+      const processBindingsMatch = (decision.operation.kind === "ffmpeg-audio-retime"
+        || decision.operation.kind === "ffmpeg-audio-retime-v2")
+        && !("reuseKind" in decision.cpuReuse)
+        && cpuAudioRetimeDescriptorsMatch(
+          decision.cpuReuse,
+          inheritedFds,
+          recheckDescriptors,
+        )
+        && cpuAudioRetimeVerifierMatches(decision.operation, recheckExecutables);
+      if (!audioRetimeOperation
         || decision.operation.state !== "running"
-        || "reuseKind" in decision.cpuReuse
+        || !processBindingsMatch
         || !boundExecutable
         || executable !== "/proc/self/fd/3"
-        || JSON.stringify(decision.operation.executable) !== JSON.stringify(boundExecutable.binding)
-        || decision.operation.ffmpegVersion !== boundExecutable.version
-        || decision.operation.argsSha256
+        || JSON.stringify(expectedExecutable) !== JSON.stringify(boundExecutable.binding)
+        || expectedVersion !== boundExecutable.version
+        || expectedArgsSha256
           !== createHash("sha256").update(canonicalJson(args)).digest("hex")) {
         throw new Error("CPU-Prozessautorität driftete vor der Startgate-Freigabe.");
       }
       verifyBoundExecutableDescriptor(boundExecutable);
+      for (const executableDescriptor of recheckExecutables) {
+        verifyBoundExecutableDescriptor(executableDescriptor);
+      }
       for (const descriptor of recheckDescriptors) recheckVerifiedExecutionDescriptor(descriptor);
-    } else if (boundExecutable || inheritedFds.length > 0 || recheckDescriptors.length > 0) {
+    } else if (boundExecutable
+      || inheritedFds.length > 0
+      || recheckExecutables.length > 0
+      || recheckDescriptors.length > 0) {
       throw new Error("Nicht-CPU-Prozess besitzt unerlaubte Deskriptoren am Startgate-Fence.");
     }
     const activationDecision = this.jobStartDecision(job);
@@ -13668,11 +14477,20 @@ export class JobManager extends EventEmitter {
         && binding.protocolSha256 === normalized.protocolSha256,
       );
       let operationBindingMatches = false;
-      if (normalized.operation.kind === "ffmpeg-audio-retime"
+      if ((normalized.operation.kind === "ffmpeg-audio-retime"
+        || normalized.operation.kind === "ffmpeg-audio-retime-v2")
         && !("reuseKind" in normalized.cpuReuse)) {
-        operationBindingMatches = binding?.variableId === "lipforcing-program-audio-delay-ms"
+        const variableId = boundProgramAudioDelayVariable({
+          request: job.request,
+          experiment: binding,
+        });
+        const operationMatchesVariable = normalized.operation.kind === "ffmpeg-audio-retime-v2"
+          ? variableId === "program-audio-delay-ms"
+          : variableId === "lipforcing-program-audio-delay-ms";
+        operationBindingMatches = variableId !== null
+          && operationMatchesVariable
           && normalized.operation.deltaMs
-            === job.request.postprocess.lipForcing.programAudioDelayMs
+            === programAudioDelayValue(job.request, variableId)
               - normalized.cpuReuse.sourceProgramAudioDelayMs;
       } else if (normalized.operation.kind === "paired-artifact-promotion"
         && "reuseKind" in normalized.cpuReuse

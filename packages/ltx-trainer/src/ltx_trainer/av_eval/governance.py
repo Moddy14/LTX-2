@@ -33,9 +33,9 @@ MAPPING_SCHEMA_VERSION = "ltx-studio-viseme-mapping.v1"
 RIGHTS_ATTESTATION_SCHEMA_VERSION = "ltx-av-eval-rights-attestation.v1"
 PREPROCESSING_VERSION = "mouth-npz-rgb96-audio-wav16k-cfr.v2"
 FFMPEG_PATH = Path("/usr/bin/ffmpeg")
-FFMPEG_SHA256 = "9f126bd755615d8c5d9aa2e67c568626be05389feb795478e0f14d41217270f4"
+FFMPEG_SHA256 = "de3099d88e092174168b4d436187b970eab6578c5987a4f09b0fee543794f31e"
 FFPROBE_PATH = Path("/usr/bin/ffprobe")
-FFPROBE_SHA256 = "b98cabc72a01bf522a3eb85cae3cf7a8843817bfb0315ff14d8699cef5413f7d"
+FFPROBE_SHA256 = "f22ffd9a2968073e68e52ec35966cac8f0060fb1f8ff9b37105b39f6b8cae1b9"
 # This digest is updated only by reviewed code changes after the preregistration is
 # externally approved. The corresponding split seed is intentionally absent here.
 TRUSTED_PREREGISTRATION_SHA256 = "9e54bf253621576ecc3caf6617183e2d4ff89d521c04d6078e15374f79f80c6e"

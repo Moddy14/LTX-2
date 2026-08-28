@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   reusableLtxBaseFromSidecars,
+  exactBoundProgramAudioOutputFromSidecars,
   exactBoundLipForcingOutputFromSidecars,
   openVerifiedExecutionDescriptor,
   pinExactLipForcingReuse,
@@ -21,7 +22,7 @@ import { sha256Json } from "../server/experimentStore.js";
 import type { IdentityInputEvidence } from "../server/inputEvidence.js";
 import type { RunProvenance } from "../shared/provenance.js";
 import { OutputLibrary } from "../server/outputs.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 import { publishCompletedOutputFixture } from "./output-publication-fixture.js";
 
 const roots: string[] = [];
@@ -278,6 +279,8 @@ describe("exact protocol-bound LipForcing CPU reuse", () => {
     exact.request.outputName = exact.outputName;
     exact.request.postprocess.lipForcing.enabled = true;
     exact.request.postprocess.lipForcing.programAudioDelayMs = 0;
+    exact.authorityBoundRequest = structuredClone(exact.request);
+    exact.authorityRequestSha256 = sha256Json(exact.authorityBoundRequest);
     exact.analysisSidecarVerified = true;
     const request = structuredClone(exact.request);
     request.outputName = "candidate.mp4";
@@ -331,17 +334,22 @@ describe("exact protocol-bound LipForcing CPU reuse", () => {
     exact.outputPath = outputPath;
     exact.request.outputName = exact.outputName;
     const baselineRequestSha256 = sha256Json(exact.request);
+    const legacySettingsRequest = structuredClone(exact.request) as unknown as {
+      audio: Record<string, unknown>;
+    };
+    delete legacySettingsRequest.audio.outputDelayMs;
+    const sourceAuthorityRequestSha256 = sha256Json(legacySettingsRequest);
     await writeFile(outputPath, "immutable-video-with-audio");
     await writeFile(settingsSidecarPath, JSON.stringify({
       schemaVersion: "ltx-studio-output.v7",
       outputName: exact.outputName,
       jobId: exact.jobId,
-      request: exact.request,
+      request: legacySettingsRequest,
       runProvenance: exact.runProvenance,
     }));
     const storedSettings = JSON.parse(await readFile(settingsSidecarPath, "utf8"));
     expect(sha256Json(storedSettings.request))
-      .toBe(baselineRequestSha256);
+      .toBe(sourceAuthorityRequestSha256);
     const outputStats = await lstat(outputPath);
     await writeFile(analysisSidecarPath, JSON.stringify({
       schemaVersion: "ltx-studio-output-analysis.v1",
@@ -369,6 +377,8 @@ describe("exact protocol-bound LipForcing CPU reuse", () => {
       outputPath,
       description: "test baseline",
       baselineRequestSha256,
+      sourceAuthorityRequestSha256,
+      sourceRunProvenance: exact.runProvenance,
       sourceProvenanceFingerprint: exact.runProvenance.fingerprint,
       settingsSidecarPath,
       analysisSidecarPath,
@@ -424,6 +434,7 @@ describe("exact protocol-bound LipForcing CPU reuse", () => {
       outputPath,
       description: "test baseline",
       baselineRequestSha256,
+      sourceRunProvenance: exact.runProvenance,
       sourceProvenanceFingerprint: exact.runProvenance.fingerprint,
       settingsSidecarPath,
       analysisSidecarPath,
@@ -468,6 +479,66 @@ describe("exact protocol-bound LipForcing CPU reuse", () => {
     } finally {
       closeSync(pinned.fd);
     }
+  });
+});
+
+describe("exact protocol-bound native LTX-2.5 audio timing reuse", () => {
+  it("selects a historical sidecar only through separate raw and migrated request authority", () => {
+    const exact = sidecarCandidate();
+    exact.request = validLtx25SplitRequest("image-audio-to-video");
+    exact.request.outputName = exact.outputName;
+    exact.request.audio.outputDelayMs = 0;
+    exact.request.postprocess.lipForcing.enabled = false;
+    exact.settingsSidecarPath = "/outputs/base.mp4.ltx-settings.json";
+    exact.analysisSidecarPath = "/outputs/base.mp4.ltx-analysis.json";
+    exact.analysisSidecarVerified = true;
+
+    const rawAuthorityRequest = structuredClone(exact.request) as unknown as {
+      audio: Record<string, unknown>;
+    };
+    delete rawAuthorityRequest.audio.outputDelayMs;
+    exact.authorityBoundRequest = rawAuthorityRequest;
+    exact.authorityRequestSha256 = sha256Json(rawAuthorityRequest);
+
+    const candidateRequest = structuredClone(exact.request);
+    candidateRequest.outputName = "native-delay-candidate.mp4";
+    candidateRequest.audio.outputDelayMs = 83;
+    const target = {
+      id: REFINER_JOB_ID,
+      request: candidateRequest,
+      identityEvidence: {
+        ...verifiedIdentityEvidence(),
+        status: "captured" as const,
+        verifiedAt: null,
+      },
+      experiment: {
+        schemaVersion: "ltx-studio-experiment-run.v1" as const,
+        experimentId: "11111111-1111-4111-8111-111111111111",
+        protocolSha256: "1".repeat(64),
+        arm: "candidate" as const,
+        kind: "ablation" as const,
+        variableId: "program-audio-delay-ms",
+        changedRequestPaths: ["audio.outputDelayMs"],
+        baselineRequestSha256: sha256Json(exact.request),
+        requestSha256: sha256Json(candidateRequest),
+        baselineJobId: exact.jobId,
+        baselineOutputName: exact.outputName,
+      },
+    };
+
+    const selected = exactBoundProgramAudioOutputFromSidecars([exact], target, () => true);
+
+    expect(selected).toMatchObject({
+      id: exact.jobId,
+      baselineRequestSha256: sha256Json(exact.request),
+      sourceAuthorityRequestSha256: sha256Json(rawAuthorityRequest),
+      programAudioDelayMs: 0,
+    });
+
+    const authorityDrift = structuredClone(exact);
+    authorityDrift.authorityRequestSha256 = "0".repeat(64);
+    expect(exactBoundProgramAudioOutputFromSidecars([authorityDrift], target, () => true))
+      .toBeUndefined();
   });
 });
 

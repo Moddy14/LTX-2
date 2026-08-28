@@ -35,7 +35,7 @@ export {
 
 export const T2A_AUDIO_QUALITY_SCHEMA_VERSION = "t2a-audio-quality.v2" as const;
 export const T2A_SPOKEN_CONTENT_GATE_SCHEMA_VERSION = "t2a-spoken-content-gate.v1" as const;
-export const T2A_FFMPEG_SHA256 = "9f126bd755615d8c5d9aa2e67c568626be05389feb795478e0f14d41217270f4" as const;
+export const T2A_FFMPEG_SHA256 = "de3099d88e092174168b4d436187b970eab6578c5987a4f09b0fee543794f31e" as const;
 export const T2A_WHISPER_SMALL_SHA256 = "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794" as const;
 export const T2A_RAW_ASR_CONTENT_METHOD = "whisper-small-independent-raw-asr-token-edits.v1" as const;
 export const T2A_PHONEME_VERIFICATION_REASON = "Kein unabhaengig gebundener Zweit-Recognizer oder Phonem-Scorer ist verfuegbar." as const;

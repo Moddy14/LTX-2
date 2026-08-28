@@ -27,6 +27,7 @@ import type {
   ProvenanceFileEntry,
   ProvenanceFileEvidence,
   ProvenanceRuntimeEvidence,
+  ProvenancePromotionSource,
   RunProvenance,
 } from "../shared/provenance.js";
 import { releaseIdentity } from "./releaseIdentity.js";
@@ -636,6 +637,27 @@ function provenanceFingerprint(value: Omit<RunProvenance, "fingerprint" | "verif
   return sha256Text(stableJson(value));
 }
 
+function promotionHistoricalEnvironmentFingerprint(
+  evidence: Pick<
+    RunProvenance,
+    "schemaVersion" | "capturedAt" | "files" | "code" | "runtime"
+      | "upstreamContracts" | "release" | "containerImages"
+  >,
+): string {
+  return sha256Text(stableJson({
+    schemaVersion: evidence.schemaVersion,
+    capturedAt: evidence.capturedAt,
+    files: evidence.files,
+    code: evidence.code,
+    runtime: evidence.runtime,
+    upstreamContracts: evidence.upstreamContracts ?? [],
+    release: evidence.release,
+    ...(evidence.containerImages !== undefined
+      ? { containerImages: evidence.containerImages }
+      : {}),
+  }));
+}
+
 export function runProvenanceFingerprintMatches(evidence: RunProvenance): boolean {
   const base = {
     schemaVersion: evidence.schemaVersion,
@@ -649,6 +671,7 @@ export function runProvenanceFingerprintMatches(evidence: RunProvenance): boolea
       ? { containerImages: evidence.containerImages }
       : {}),
     ...(evidence.executionDecision ? { executionDecision: evidence.executionDecision } : {}),
+    ...(evidence.promotionSource ? { promotionSource: evidence.promotionSource } : {}),
   };
   return provenanceFingerprint(base) === evidence.fingerprint;
 }
@@ -699,6 +722,9 @@ export function runProvenanceEnvironmentMatches(
 export function forkVerifiedRunProvenanceForArtifactPromotion(
   evidence: RunProvenance,
 ): RunProvenance {
+  if (evidence.promotionSource) {
+    throw new Error("Eine CPU-Promotion darf nicht erneut als historische Baseline verkettet werden.");
+  }
   if (!evidence.verifiedAt || !runProvenanceFingerprintMatches(evidence)) {
     throw new Error("Historische Baseline-Laufprovenienz ist nicht verifiziert oder ihr Fingerprint driftete.");
   }
@@ -714,10 +740,21 @@ export function forkVerifiedRunProvenanceForArtifactPromotion(
       ? { containerImages: evidence.containerImages }
       : {}),
   });
-  return {
+  const promotionSource: ProvenancePromotionSource = {
+    kind: "verified-historical-run",
+    provenanceFingerprint: evidence.fingerprint,
+    verifiedAt: evidence.verifiedAt,
+    historicalEnvironmentFingerprint: promotionHistoricalEnvironmentFingerprint(base),
+    historicalFileCount: evidence.files.length,
+  };
+  const promotionBase = {
     ...base,
+    promotionSource,
+  };
+  return {
+    ...promotionBase,
     verifiedAt: null,
-    fingerprint: provenanceFingerprint(base),
+    fingerprint: provenanceFingerprint(promotionBase),
   };
 }
 
@@ -973,6 +1010,11 @@ export async function bindRunProvenanceFile(
   path: string,
   role: string,
 ): Promise<RunProvenance> {
+  if (evidence.promotionSource
+    && evidence.files.slice(0, evidence.promotionSource.historicalFileCount)
+      .some((candidate) => candidate.role === role)) {
+    throw new Error("Eine Promotion-Datei darf keine historische Provenienzrolle ersetzen.");
+  }
   const file = await captureProvenanceFile(path, role);
   const base = {
     schemaVersion: evidence.schemaVersion,
@@ -989,6 +1031,7 @@ export async function bindRunProvenanceFile(
       ? { containerImages: evidence.containerImages }
       : {}),
     ...(evidence.executionDecision ? { executionDecision: evidence.executionDecision } : {}),
+    ...(evidence.promotionSource ? { promotionSource: evidence.promotionSource } : {}),
   };
   return {
     ...base,
@@ -1015,6 +1058,7 @@ export function bindRunExecutionDecision(
       ? { containerImages: evidence.containerImages }
       : {}),
     executionDecision: normalized,
+    ...(evidence.promotionSource ? { promotionSource: evidence.promotionSource } : {}),
   };
   return {
     ...base,
@@ -1069,6 +1113,56 @@ export async function verifyRunProvenance(
     if ((evidence.executionDecision || evidence.containerImages !== undefined)
       && !runProvenanceFingerprintMatches(evidence)) {
       return { evidence, error: "Gebundene Laufprovenienz stimmt nicht mit ihrem Fingerprint überein." };
+    }
+    if (evidence.promotionSource) {
+      if (!runProvenanceFingerprintMatches(evidence)) {
+        return { evidence, error: "Historische Promotionsprovenienz stimmt nicht mit ihrem Fingerprint überein." };
+      }
+      const decision = evidence.executionDecision
+        ? normalizeJobExecutionDecision(evidence.executionDecision)
+        : null;
+      if (evidence.executionDecision && (decision?.executionClass !== "cpu-only"
+        || decision.cpuReuse.sourceProvenanceFingerprint
+          !== evidence.promotionSource.provenanceFingerprint)) {
+        return {
+          evidence,
+          error: "CPU-Promotion stimmt nicht mit ihrer verifizierten historischen Quellprovenienz überein.",
+        };
+      }
+      const historicalFiles = evidence.files.slice(
+        0,
+        evidence.promotionSource.historicalFileCount,
+      );
+      if (historicalFiles.length !== evidence.promotionSource.historicalFileCount
+        || promotionHistoricalEnvironmentFingerprint({
+          ...evidence,
+          files: historicalFiles,
+        }) !== evidence.promotionSource.historicalEnvironmentFingerprint) {
+        return {
+          evidence,
+          error: "Die eingefrorene historische Promotionsumgebung driftete.",
+        };
+      }
+      if (evidence.upstreamContracts !== undefined) {
+        const expectedContracts = upstreamWorkflowContractsForRequest(request);
+        if (stableJson(evidence.upstreamContracts) !== stableJson(expectedContracts)) {
+          return {
+            evidence,
+            error: "Der historische offizielle Workflow-Vertrag stimmt nicht mit dem Promotionsauftrag überein.",
+          };
+        }
+      }
+      for (const file of evidence.files.slice(evidence.promotionSource.historicalFileCount)) {
+        const error = verifyProvenanceFileEvidence(file);
+        if (error) return { evidence, error };
+      }
+      return {
+        evidence: {
+          ...evidence,
+          verifiedAt: new Date().toISOString(),
+        },
+        error: null,
+      };
     }
     if (evidence.schemaVersion === "ltx-studio-run-provenance.v2"
       && stableJson(evidence.release) !== stableJson(releaseIdentity)) {
@@ -1302,6 +1396,28 @@ function validContainerImages(value: unknown): value is ProvenanceContainerImage
   }
 }
 
+function validPromotionSource(value: unknown): value is ProvenancePromotionSource {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Partial<ProvenancePromotionSource>;
+  return Object.keys(item).sort().join("\n") === [
+    "historicalEnvironmentFingerprint",
+    "historicalFileCount",
+    "kind",
+    "provenanceFingerprint",
+    "verifiedAt",
+  ].sort().join("\n")
+    && item.kind === "verified-historical-run"
+    && typeof item.provenanceFingerprint === "string"
+    && HASH_PATTERN.test(item.provenanceFingerprint)
+    && typeof item.verifiedAt === "string"
+    && Number.isFinite(Date.parse(item.verifiedAt))
+    && typeof item.historicalEnvironmentFingerprint === "string"
+    && HASH_PATTERN.test(item.historicalEnvironmentFingerprint)
+    && typeof item.historicalFileCount === "number"
+    && Number.isSafeInteger(item.historicalFileCount)
+    && item.historicalFileCount >= 0;
+}
+
 export function normalizeRunProvenance(value: unknown): RunProvenance | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Partial<RunProvenance>;
@@ -1320,6 +1436,9 @@ export function normalizeRunProvenance(value: unknown): RunProvenance | null {
     || (item.schemaVersion === "ltx-studio-run-provenance.v1" && item.release !== undefined)
     || (item.containerImages !== undefined && !validContainerImages(item.containerImages))
     || (item.executionDecision !== undefined && !normalizeJobExecutionDecision(item.executionDecision))
+    || (item.promotionSource !== undefined && !validPromotionSource(item.promotionSource))
+    || (item.promotionSource !== undefined
+      && item.promotionSource.historicalFileCount > item.files.length)
     || typeof item.fingerprint !== "string"
     || !HASH_PATTERN.test(item.fingerprint)) return null;
   return structuredClone(item as RunProvenance);

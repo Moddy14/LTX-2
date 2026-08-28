@@ -98,9 +98,10 @@ claim set from satisfying the SOTA gate vacuously.
 `configs/av_eval/design-pilot.v2.json` is the current machine-readable
 pre-acquisition contract for effect sizes, VBench gates, precision targets,
 power, and quoted strata. Its `candidate_surface` binding enumerates exactly
-the 24 unique claims selected by `targetStatus=candidate` plus the
-`vbench-i2v` gate, and the validator requires the complete 24-by-6 matrix of
-144 claim/dimension gates. It intentionally remains `draft`: empirical design-effect,
+the 25 selected entries and 21 unique claims selected by
+`targetStatus=candidate` plus the `vbench-i2v` gate, and the validator requires
+the complete 21-by-6 matrix of 126 claim/dimension gates. It intentionally
+remains `draft`: empirical design-effect,
 repeatability, clinically/perceptually meaningful deltas, per-endpoint
 alternatives/CI widths, and quota counts are `null`. The official VBench-I2V
 Git revision and canonical source contract are already pinned;
@@ -130,7 +131,10 @@ uv run python scripts/av_eval.py design-check \
 The v2 design producer derives and compares both the full-surface digest and
 the complete candidate-plus-`vbench-i2v` projection from that supplied Studio
 document. A stored syntactically valid digest, a partial surface, or an
-unregistered claim projection is rejected before a D0a report is emitted.
+unregistered claim projection is rejected before a D0a report is emitted. A
+non-projected release-surface change therefore updates the full-surface digest
+while leaving the projection digest unchanged; both values must still be
+re-derived and validated against the supplied document.
 
 ```bash
 uv run python scripts/av_eval.py vbench-runtime-check \

@@ -104,9 +104,9 @@ const SYSTEMD_STOP_DEADLINE_MS = 15_000;
 
 // These are server-owned trust pins, not command arguments. Update them only
 // together with a reviewed evaluator release and its tests.
-export const T2A_AUDIO_WORKER_SHA256 = "922d74b680c57e81c73c2b46d7c73f85fa85fb67cb8f8b6a3b4d40f69fc36317";
+export const T2A_AUDIO_WORKER_SHA256 = "80aff75d77d4597c92c3e9988b6573212607e17d5df95c4845585f510a025bb3";
 export const T2A_DIALOGUE_EVALUATOR_SHA256 = "6ffcbdbb472305f8834d07675b77fe7c461fb960fd5b5a30f4ad6954b33712af";
-export const T2A_AUDIO_QUALITY_SCHEMA_SHA256 = "06bcdfe96d441f24219f6ac5a37b412bc34884658b8ac4558cd8b33c38303dc7";
+export const T2A_AUDIO_QUALITY_SCHEMA_SHA256 = "7c7f07dd3b6da59d48b0271f5933606205dbf08d6a3fbe8b102cefc3def9ba1a";
 export const T2A_AUDIO_BASE_CONTRACTS_SHA256 = "720dc089bdeaebbbe0e76831a88931bd7459c1ba6b7305174e2c0c6a6c2fc79b";
 export const T2A_AUDIO_EVALUATOR_REVISION = "ltx-studio-t2a-audio-evaluator.v4";
 export const T2A_INDEPENDENT_IPA_AUTHORITY_REVISION =
@@ -131,9 +131,9 @@ const T2A_INDEPENDENT_IPA_MODEL_FILES = [
 export const T2A_PRONUNCIATION_AUTHORITY_REVISION =
   "ltx-studio-t2a-pronunciation-authority.v1" as const;
 export const T2A_IPA_ADJUDICATOR_RUNNER_SHA256 =
-  "2a5b6201357d17d538be36e6af204a982db2943218eca29ee677639fb34a4d8f" as const;
+  "5e27fd4a86fd04c580fd756ad8be6daeab59b51c1fe8446d2cb82b514989ca53" as const;
 export const T2A_GERMAN_G2P_CONTRACT_SHA256 =
-  "07693cdeedc06c71b03d992b8e8ed7d0634d85d48162c4a7f16a78bca907bdee" as const;
+  "e217dacb9b622804b9ad59988043b61ddadddd03a6a43ef2996066800c152212" as const;
 export const T2A_IPA_ADJUDICATION_CONTRACT_SHA256 =
   "ed3e5a670b5a6c8fa89a38a3a97162bde5cefaf89a73c3b59bd475347c59edaa" as const;
 const T2A_INDEPENDENT_IPA_AUXILIARY_SHA256 = {
