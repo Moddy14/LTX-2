@@ -23,7 +23,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import type { Stats } from "node:fs";
-import { createHash, randomInt, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -96,10 +96,13 @@ import {
   readQueueJob,
   replayPreparedQueueAdmission,
   retryAfterMs,
+  submitConditionalQueueSuccessor,
   submitPreparedQueueAdmission,
   supportsCooperativeCheckpoint,
   transitionQueueJob,
   type AdmissionRequest,
+  type ConditionalSuccessorResult,
+  type ConditionalSuccessorTerminalEvidence,
   type QueueArtifact,
   type QueueHeartbeatPayload,
   type QueueJobSummary,
@@ -109,7 +112,10 @@ import {
   type QueueTransitionState,
   type SegmentBoundaryDecision,
 } from "./admission.js";
-import { dgxRuntimeRequestSha256Matches } from "./dgxRequestDigest.js";
+import {
+  dgxRuntimeRequestSha256,
+  dgxRuntimeRequestSha256Matches,
+} from "./dgxRequestDigest.js";
 import { buildCommand, type CommandPlan, validateRequestPlan } from "./command.js";
 import { getModelInventory } from "./models.js";
 import {
@@ -462,6 +468,9 @@ type RuntimeJob = StudioJob & {
   dgxTerminalDelivery?: DgxTerminalDelivery;
   /** Durable proof that this exact remote lease was observed terminal. */
   dgxTerminalReceipt?: DgxTerminalReceipt;
+  /** One-shot authority for replacing one exact never-started terminal lease. */
+  dgxSuccessorAuthorization?: DgxSuccessorAuthorization;
+  dgxSuccessorSubmitInFlight?: Promise<DgxSuccessorSubmitOutcome>;
   dgxTerminalDeliveryInFlight?: Promise<boolean>;
   dgxTerminalRetry?: NodeJS.Timeout;
   dgxOwnerHeartbeat?: DgxOwnerHeartbeatState;
@@ -596,6 +605,34 @@ type DgxTerminalReceipt = {
         finishedAt: string;
         reapedAt: string;
         reason: string | null;
+      }
+    | {
+        kind: "conditional-successor";
+        schemaVersion: "dgx-conditional-successor-result.v0";
+        successorToken: string;
+        predecessorDgxJobId: string;
+        requestSha256: string;
+        outcome: "created" | "terminal";
+        requestedBy: string;
+        sourceApp: "LTX Studio";
+        idempotencyKey: string;
+      }
+    | {
+        kind: "conditional-successor-reaped";
+        schemaVersion: "dgx-conditional-successor-result.v0";
+        runtimeEvidenceSchemaVersion: "dgx-conditional-successor-terminal.v0";
+        successorToken: string;
+        predecessorDgxJobId: string;
+        requestSha256: string;
+        idempotencyKey: string;
+        createdAt: string;
+        startedAt: string | null;
+        finishedAt: string;
+        reapedAt: string;
+        decision: string;
+        reason: string;
+        clientAction: string;
+        recordSha256: string;
       };
 };
 type DgxLeaseReceipt = {
@@ -619,9 +656,72 @@ type DgxLeaseReceipt = {
         kind: "queue-positive";
         schemaVersion: "dgx-queue-read.v0";
         observedAt: string;
+      }
+    | {
+        kind: "conditional-successor";
+        schemaVersion: "dgx-conditional-successor-result.v0";
+        successorToken: string;
+        predecessorDgxJobId: string;
+        requestSha256: string;
+        outcome: "created" | "replayed";
       };
   confirmedAt: string;
 };
+type DgxSuccessorReplayEvidence = {
+  kind: "exact-bound-replay";
+  schemaVersion: "dgx-queue-submit.v0";
+  replayBoundJobId: string;
+  idempotentReplay: true;
+  terminalState: Extract<DgxObservedTerminalState, "failed" | "rejected" | "cancelled">;
+  reservationActive: false;
+  admissionReservationActive: false;
+  startedAt: null | "";
+  admissionDecision: "rejected_terminal_record";
+  admissionReason: "unstarted_terminal_record_released";
+  clientAction: "retry_now_key_is_free";
+};
+type DgxSuccessorAuthorizationBase = {
+  schemaVersion: "ltx-studio-dgx-successor-authorization.v1";
+  generation: 1;
+  successorToken: string;
+  studioJobId: string;
+  predecessorDgxJobId: string;
+  predecessorLeaseReceipt: DgxLeaseReceipt;
+  predecessorLeaseReceiptSha256: string;
+  preparedAdmissionSha256: string;
+  requestSha256: string;
+  authorizedAt: string;
+  replayEvidence: DgxSuccessorReplayEvidence;
+};
+type DgxSuccessorAuthorization = DgxSuccessorAuthorizationBase & (
+  | {
+      phase: "submit-pending";
+    }
+  | {
+      phase: "consumed";
+      successorDgxJobId: string;
+      successorAuthorityKind: "lease" | "terminal";
+      successorAuthorityReceipt: DgxLeaseReceipt | DgxTerminalReceipt;
+      successorAuthoritySha256: string;
+      consumedAt: string;
+    }
+);
+type DgxSuccessorSubmitOutcome =
+  | { kind: "positive"; remote: QueueJobSummary }
+  | { kind: "terminal" }
+  | { kind: "ambiguous" };
+type DgxValidatedConditionalSuccessorResult =
+  | {
+      kind: "positive";
+      result: ConditionalSuccessorResult;
+      remote: QueueJobSummary;
+      receipt: DgxLeaseReceipt;
+    }
+  | {
+      kind: "terminal";
+      result: ConditionalSuccessorResult;
+      observation: DgxTerminalObservation;
+    };
 type DgxStartOutcome = "started" | "queued" | "stopped";
 type LocalProcessGroupIdentity = {
   bootId: string;
@@ -648,6 +748,7 @@ type PersistedStudioJob = Omit<StudioJob, "request"> & {
   dgxSubmitStartedAt?: string;
   dgxPreparedAdmission?: AdmissionRequest;
   dgxPreparedAdmissionSha256?: string;
+  dgxSuccessorAuthorization?: DgxSuccessorAuthorization;
 };
 
 export type ArchivedOutputAuthority = {
@@ -691,6 +792,7 @@ type DgxAdmissionOperations = {
   submit: typeof submitPreparedQueueAdmission;
   replay?: typeof replayPreparedQueueAdmission;
   list?: typeof listQueueJobs;
+  successor?: typeof submitConditionalQueueSuccessor;
 };
 type DgxSchedulerOperations = {
   decide: typeof decideSegmentBoundary;
@@ -871,6 +973,10 @@ type DgxBoundReplayResult =
       kind: "gone";
       observation: DgxTerminalObservation;
       receipt: DgxLeaseReceipt;
+    }
+  | {
+      kind: "successor-already-authorized";
+      receipt: DgxLeaseReceipt;
     };
 
 function dgxResponseBoundJob(
@@ -987,6 +1093,35 @@ function dgxReplayResponseLeaseBound(
     || DGX_REMOTE_TERMINAL_STATES.has(response.job.state);
 }
 
+function dgxRetryNowSuccessorEvidence(
+  value: QueueSubmitResponse,
+  receipt: DgxLeaseReceipt,
+): DgxSuccessorReplayEvidence | null {
+  if (!dgxReplayResponseLeaseBound(value, receipt)
+    || (value.job.state !== "failed"
+      && value.job.state !== "rejected"
+      && value.job.state !== "cancelled")
+    || value.job.reservation_active !== false
+    || value.admission.reservation_active !== false
+    || !isDgxNeverStarted(value.job.started_at)
+    || value.admission.decision !== "rejected_terminal_record"
+    || value.admission.reason !== "unstarted_terminal_record_released"
+    || value.admission.client_action !== "retry_now_key_is_free") return null;
+  return {
+    kind: "exact-bound-replay",
+    schemaVersion: "dgx-queue-submit.v0",
+    replayBoundJobId: receipt.dgxJobId,
+    idempotentReplay: true,
+    terminalState: value.job.state,
+    reservationActive: false,
+    admissionReservationActive: false,
+    startedAt: value.job.started_at,
+    admissionDecision: "rejected_terminal_record",
+    admissionReason: "unstarted_terminal_record_released",
+    clientAction: "retry_now_key_is_free",
+  };
+}
+
 function dgxQueueJobIdentityMatchesPreparedAdmission(
   remote: QueueJobSummary,
   studioJobId: string,
@@ -1089,6 +1224,266 @@ function dgxLeaseReceiptFromQueuePositive(
     schemaVersion: "dgx-queue-read.v0",
     observedAt: now(),
   });
+}
+
+const CONDITIONAL_SUCCESSOR_RESULT_FIELDS = [
+  "schema_version",
+  "successor_token",
+  "predecessor_job_id",
+  "successor_job_id",
+  "request_sha256",
+  "created",
+  "outcome",
+  "job",
+  "admission",
+  "terminal_evidence",
+] as const;
+
+const CONDITIONAL_SUCCESSOR_TERMINAL_FIELDS = [
+  "schema_version",
+  "job_id",
+  "state",
+  "created_at",
+  "started_at",
+  "finished_at",
+  "reaped_at",
+  "request_sha256",
+  "idempotency_key",
+  "decision",
+  "reason",
+  "client_action",
+  "record_sha256",
+] as const;
+
+function lowercaseSha256Equals(left: unknown, right: unknown): left is string {
+  if (typeof left !== "string"
+    || typeof right !== "string"
+    || !/^[0-9a-f]{64}$/.test(left)
+    || !/^[0-9a-f]{64}$/.test(right)) return false;
+  return timingSafeEqual(Buffer.from(left, "ascii"), Buffer.from(right, "ascii"));
+}
+
+function dgxConditionalSuccessorStatusIsAmbiguous(statusCode: number | null): boolean {
+  return statusCode === null
+    || statusCode === 408
+    || statusCode === 425
+    || statusCode === 429
+    || (statusCode >= 500 && statusCode <= 599);
+}
+
+function conditionalSuccessorEnvelope(
+  value: unknown,
+  authorization: DgxSuccessorAuthorization,
+  preparedAdmission: AdmissionRequest,
+): ConditionalSuccessorResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (!hasExactKeys(candidate, CONDITIONAL_SUCCESSOR_RESULT_FIELDS)
+    || candidate.schema_version !== "dgx-conditional-successor-result.v0"
+    || !lowercaseSha256Equals(candidate.successor_token, authorization.successorToken)
+    || candidate.predecessor_job_id !== authorization.predecessorDgxJobId
+    || !isDgxJobId(candidate.successor_job_id)
+    || candidate.successor_job_id === authorization.predecessorDgxJobId
+    || !lowercaseSha256Equals(candidate.request_sha256, authorization.requestSha256)
+    || !dgxRuntimeRequestSha256Matches(preparedAdmission, candidate.request_sha256)
+    || typeof candidate.created !== "boolean"
+    || (candidate.outcome !== "created"
+      && candidate.outcome !== "replayed"
+      && candidate.outcome !== "terminal"
+      && candidate.outcome !== "reaped")
+    || candidate.created !== (candidate.outcome === "created")) return null;
+  return candidate as unknown as ConditionalSuccessorResult;
+}
+
+function validateRetainedConditionalSuccessorResult(
+  value: unknown,
+  authorization: DgxSuccessorAuthorization,
+  preparedAdmission: AdmissionRequest,
+): DgxValidatedConditionalSuccessorResult | null {
+  const result = conditionalSuccessorEnvelope(value, authorization, preparedAdmission);
+  const createdAtMs = result?.job
+    ? parseStrictOffsetDateTime(result.job.created_at)
+    : null;
+  const authorizedAtMs = parseStrictOffsetDateTime(authorization.authorizedAt);
+  if (!result
+    || result.outcome === "reaped"
+    || result.terminal_evidence !== null
+    || !result.job
+    || typeof result.job !== "object"
+    || Array.isArray(result.job)
+    || !result.admission
+    || typeof result.admission !== "object"
+    || Array.isArray(result.admission)
+    || createdAtMs === null
+    || authorizedAtMs === null
+    || createdAtMs < authorizedAtMs
+    || result.job.job_id !== result.successor_job_id
+    || !dgxQueueJobCallerBound(result.job, authorization.studioJobId)
+    || !dgxQueueJobIdentityMatchesPreparedAdmission(
+      result.job,
+      authorization.studioJobId,
+      preparedAdmission,
+      authorization.authorizedAt,
+    )
+    || typeof result.admission.decision !== "string"
+    || (result.admission.job_id !== undefined
+      && result.admission.job_id !== result.successor_job_id)) return null;
+
+  if (DGX_POSITIVE_DISCOVERY_STATES.has(result.job.state)) {
+    const reservationActive = result.job.state === "accepted";
+    if (result.outcome === "terminal"
+      || !dgxQueueJobMatchesPreparedAdmission(
+        result.job,
+        authorization.studioJobId,
+        preparedAdmission,
+        authorization.authorizedAt,
+      )
+      || result.admission.job_id !== result.successor_job_id
+      || result.job.reservation_active !== reservationActive
+      || result.admission.reservation_active !== reservationActive
+      || result.admission.decision !== result.job.state
+      || result.job.decision !== result.admission.decision
+      || result.job.reason !== result.admission.reason
+      || result.job.client_action !== result.admission.client_action) return null;
+    const receipt = dgxLeaseReceiptFromBoundJob(
+      result.job,
+      authorization.studioJobId,
+      preparedAdmission,
+      authorization.authorizedAt,
+      {
+        kind: "conditional-successor",
+        schemaVersion: "dgx-conditional-successor-result.v0",
+        successorToken: authorization.successorToken,
+        predecessorDgxJobId: authorization.predecessorDgxJobId,
+        requestSha256: authorization.requestSha256,
+        outcome: result.outcome,
+      },
+    );
+    return { kind: "positive", result, remote: result.job, receipt };
+  }
+
+  const finishedAtMs = parseStrictOffsetDateTime(result.job.finished_at);
+  const updatedAtMs = parseStrictOffsetDateTime(result.job.updated_at);
+  const neverStarted = isDgxNeverStarted(result.job.started_at);
+  const startedAtMs = neverStarted
+    ? null
+    : parseStrictOffsetDateTime(result.job.started_at);
+  if (!DGX_REMOTE_TERMINAL_STATES.has(result.job.state)
+    || result.job.reservation_active !== false
+    || result.admission.reservation_active !== false
+    || finishedAtMs === null
+    || updatedAtMs === null
+    || (!neverStarted && startedAtMs === null)
+    || finishedAtMs < createdAtMs
+    || (startedAtMs !== null
+      && (startedAtMs < createdAtMs || startedAtMs > finishedAtMs))
+    || updatedAtMs < finishedAtMs
+    || updatedAtMs > Date.now()
+    || typeof result.admission.decision !== "string"
+    || result.admission.decision.length === 0
+    || typeof result.admission.reason !== "string"
+    || result.admission.reason.length === 0
+    || typeof result.admission.client_action !== "string"
+    || result.admission.client_action.length === 0
+    || result.job.decision !== result.admission.decision
+    || result.job.reason !== result.admission.reason
+    || result.job.client_action !== result.admission.client_action
+    || (result.outcome !== "created" && result.outcome !== "terminal")) return null;
+  const expectedCaller = `ltx-studio:${authorization.studioJobId}`;
+  return {
+    kind: "terminal",
+    result,
+    observation: {
+      state: result.job.state as DgxObservedTerminalState,
+      evidence: {
+        kind: "conditional-successor",
+        schemaVersion: "dgx-conditional-successor-result.v0",
+        successorToken: authorization.successorToken,
+        predecessorDgxJobId: authorization.predecessorDgxJobId,
+        requestSha256: authorization.requestSha256,
+        outcome: result.outcome,
+        requestedBy: expectedCaller,
+        sourceApp: "LTX Studio",
+        idempotencyKey: expectedCaller,
+      },
+    },
+  };
+}
+
+function validateReapedConditionalSuccessorResult(
+  value: unknown,
+  authorization: DgxSuccessorAuthorization,
+  preparedAdmission: AdmissionRequest,
+): DgxValidatedConditionalSuccessorResult | null {
+  const result = conditionalSuccessorEnvelope(value, authorization, preparedAdmission);
+  if (!result
+    || result.outcome !== "reaped"
+    || result.created !== false
+    || result.job !== null
+    || result.admission !== null
+    || !result.terminal_evidence
+    || typeof result.terminal_evidence !== "object"
+    || Array.isArray(result.terminal_evidence)) return null;
+  const evidence = result.terminal_evidence as ConditionalSuccessorTerminalEvidence;
+  if (!hasExactKeys(
+    evidence as unknown as Record<string, unknown>,
+    CONDITIONAL_SUCCESSOR_TERMINAL_FIELDS,
+  )
+    || evidence.schema_version !== "dgx-conditional-successor-terminal.v0"
+    || evidence.job_id !== result.successor_job_id
+    || !DGX_REMOTE_TERMINAL_STATES.has(evidence.state)
+    || !lowercaseSha256Equals(evidence.request_sha256, authorization.requestSha256)
+    || evidence.idempotency_key !== preparedAdmission.idempotency_key
+    || !/^[0-9a-f]{64}$/.test(evidence.record_sha256)
+    || typeof evidence.decision !== "string"
+    || !evidence.decision
+    || typeof evidence.reason !== "string"
+    || !evidence.reason
+    || typeof evidence.client_action !== "string"
+    || !evidence.client_action) return null;
+  const createdAtMs = parseStrictOffsetDateTime(evidence.created_at);
+  const finishedAtMs = parseStrictOffsetDateTime(evidence.finished_at);
+  const reapedAtMs = parseStrictOffsetDateTime(evidence.reaped_at);
+  const authorizedAtMs = parseStrictOffsetDateTime(authorization.authorizedAt);
+  const startedAtMs = isDgxNeverStarted(evidence.started_at)
+    ? null
+    : parseStrictOffsetDateTime(evidence.started_at);
+  if (createdAtMs === null
+    || finishedAtMs === null
+    || reapedAtMs === null
+    || authorizedAtMs === null
+    || (!isDgxNeverStarted(evidence.started_at) && startedAtMs === null)
+    || createdAtMs < authorizedAtMs
+    || finishedAtMs < createdAtMs
+    || (startedAtMs !== null && (startedAtMs < createdAtMs || startedAtMs > finishedAtMs))
+    || reapedAtMs < finishedAtMs
+    || reapedAtMs > Date.now()) return null;
+  return {
+    kind: "terminal",
+    result,
+    observation: {
+      state: evidence.state,
+      evidence: {
+        kind: "conditional-successor-reaped",
+        schemaVersion: "dgx-conditional-successor-result.v0",
+        runtimeEvidenceSchemaVersion: "dgx-conditional-successor-terminal.v0",
+        successorToken: authorization.successorToken,
+        predecessorDgxJobId: authorization.predecessorDgxJobId,
+        requestSha256: authorization.requestSha256,
+        idempotencyKey: evidence.idempotency_key,
+        createdAt: new Date(createdAtMs).toISOString(),
+        startedAt: isDgxNeverStarted(evidence.started_at)
+          ? evidence.started_at
+          : new Date(startedAtMs!).toISOString(),
+        finishedAt: new Date(finishedAtMs).toISOString(),
+        reapedAt: new Date(reapedAtMs).toISOString(),
+        decision: evidence.decision,
+        reason: evidence.reason,
+        clientAction: evidence.client_action,
+        recordSha256: evidence.record_sha256,
+      },
+    },
+  };
 }
 
 function exactPositiveQueueCandidate(
@@ -3008,6 +3403,40 @@ function preparedAdmissionSha256(value: AdmissionRequest): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
+function dgxAuthoritySha256(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function dgxSuccessorAuthorityBindsAuthorization(
+  authorization: DgxSuccessorAuthorizationBase,
+  kind: "lease" | "terminal",
+  receipt: DgxLeaseReceipt | DgxTerminalReceipt,
+): boolean {
+  if (receipt.studioJobId !== authorization.studioJobId
+    || receipt.dgxJobId === authorization.predecessorDgxJobId
+    || receipt.idempotencyKey
+      !== authorization.predecessorLeaseReceipt.preparedAdmission.idempotency_key) return false;
+  if (kind === "lease") {
+    if (receipt.schemaVersion !== "ltx-studio-dgx-lease-receipt.v1") return false;
+    const evidence = receipt.evidence;
+    return receipt.submitStartedAt === authorization.authorizedAt
+      && receipt.preparedAdmissionSha256 === authorization.preparedAdmissionSha256
+      && canonicalJson(receipt.preparedAdmission)
+        === canonicalJson(authorization.predecessorLeaseReceipt.preparedAdmission)
+      && evidence.kind === "conditional-successor"
+      && evidence.successorToken === authorization.successorToken
+      && evidence.predecessorDgxJobId === authorization.predecessorDgxJobId
+      && evidence.requestSha256 === authorization.requestSha256;
+  }
+  if (receipt.schemaVersion !== "ltx-studio-dgx-terminal-receipt.v1") return false;
+  const evidence = receipt.evidence;
+  return (evidence.kind === "conditional-successor"
+      || evidence.kind === "conditional-successor-reaped")
+    && evidence.successorToken === authorization.successorToken
+    && evidence.predecessorDgxJobId === authorization.predecessorDgxJobId
+    && evidence.requestSha256 === authorization.requestSha256;
+}
+
 function normalizeDgxLeaseReceipt(value: unknown): DgxLeaseReceipt | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Partial<DgxLeaseReceipt>;
@@ -3034,6 +3463,20 @@ function normalizeDgxLeaseReceipt(value: unknown): DgxLeaseReceipt | undefined {
           observedAt,
         };
       }
+    } else if (rawEvidence.kind === "conditional-successor"
+      && rawEvidence.schemaVersion === "dgx-conditional-successor-result.v0"
+      && /^[0-9a-f]{64}$/.test(rawEvidence.successorToken)
+      && isDgxJobId(rawEvidence.predecessorDgxJobId)
+      && /^[0-9a-f]{64}$/.test(rawEvidence.requestSha256)
+      && (rawEvidence.outcome === "created" || rawEvidence.outcome === "replayed")) {
+      evidence = {
+        kind: "conditional-successor",
+        schemaVersion: "dgx-conditional-successor-result.v0",
+        successorToken: rawEvidence.successorToken,
+        predecessorDgxJobId: rawEvidence.predecessorDgxJobId,
+        requestSha256: rawEvidence.requestSha256,
+        outcome: rawEvidence.outcome,
+      };
     }
   }
   const futureLimit = Date.now() + 5 * 60_000;
@@ -3075,6 +3518,168 @@ function normalizeDgxLeaseReceipt(value: unknown): DgxLeaseReceipt | undefined {
     observedCreatedAt,
     evidence,
     confirmedAt,
+  };
+}
+
+function normalizeDgxSuccessorAuthorization(
+  value: unknown,
+): DgxSuccessorAuthorization | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<DgxSuccessorAuthorization>;
+  const predecessorLeaseReceipt = normalizeDgxLeaseReceipt(candidate.predecessorLeaseReceipt);
+  const authorizedAt = canonicalIsoTimestamp(candidate.authorizedAt);
+  const rawReplayEvidence = candidate.replayEvidence;
+  if (candidate.schemaVersion !== "ltx-studio-dgx-successor-authorization.v1"
+    || candidate.generation !== 1
+    || typeof candidate.successorToken !== "string"
+    || !/^[0-9a-f]{64}$/.test(candidate.successorToken)
+    || typeof candidate.studioJobId !== "string"
+    || !STUDIO_JOB_ID_PATTERN.test(candidate.studioJobId)
+    || !isDgxJobId(candidate.predecessorDgxJobId)
+    || !predecessorLeaseReceipt
+    || predecessorLeaseReceipt.studioJobId !== candidate.studioJobId
+    || predecessorLeaseReceipt.dgxJobId !== candidate.predecessorDgxJobId
+    || candidate.predecessorLeaseReceiptSha256 !== dgxAuthoritySha256(predecessorLeaseReceipt)
+    || candidate.preparedAdmissionSha256 !== predecessorLeaseReceipt.preparedAdmissionSha256
+    || !dgxRuntimeRequestSha256Matches(
+      predecessorLeaseReceipt.preparedAdmission,
+      candidate.requestSha256,
+    )
+    || !authorizedAt
+    || Date.parse(authorizedAt) < Date.parse(predecessorLeaseReceipt.confirmedAt)
+    || Date.parse(authorizedAt) > Date.now() + 5 * 60_000
+    || !rawReplayEvidence
+    || typeof rawReplayEvidence !== "object"
+    || Array.isArray(rawReplayEvidence)
+    || rawReplayEvidence.kind !== "exact-bound-replay"
+    || rawReplayEvidence.schemaVersion !== "dgx-queue-submit.v0"
+    || rawReplayEvidence.replayBoundJobId !== candidate.predecessorDgxJobId
+    || rawReplayEvidence.idempotentReplay !== true
+    || (rawReplayEvidence.terminalState !== "failed"
+      && rawReplayEvidence.terminalState !== "rejected"
+      && rawReplayEvidence.terminalState !== "cancelled")
+    || rawReplayEvidence.reservationActive !== false
+    || rawReplayEvidence.admissionReservationActive !== false
+    || !isDgxNeverStarted(rawReplayEvidence.startedAt)
+    || rawReplayEvidence.admissionDecision !== "rejected_terminal_record"
+    || rawReplayEvidence.admissionReason !== "unstarted_terminal_record_released"
+    || rawReplayEvidence.clientAction !== "retry_now_key_is_free") return undefined;
+  const replayEvidence: DgxSuccessorReplayEvidence = {
+    kind: "exact-bound-replay",
+    schemaVersion: "dgx-queue-submit.v0",
+    replayBoundJobId: candidate.predecessorDgxJobId,
+    idempotentReplay: true,
+    terminalState: rawReplayEvidence.terminalState,
+    reservationActive: false,
+    admissionReservationActive: false,
+    startedAt: rawReplayEvidence.startedAt,
+    admissionDecision: "rejected_terminal_record",
+    admissionReason: "unstarted_terminal_record_released",
+    clientAction: "retry_now_key_is_free",
+  };
+  const base: DgxSuccessorAuthorizationBase = {
+    schemaVersion: "ltx-studio-dgx-successor-authorization.v1",
+    generation: 1,
+    successorToken: candidate.successorToken,
+    studioJobId: candidate.studioJobId,
+    predecessorDgxJobId: candidate.predecessorDgxJobId,
+    predecessorLeaseReceipt,
+    predecessorLeaseReceiptSha256: candidate.predecessorLeaseReceiptSha256,
+    preparedAdmissionSha256: candidate.preparedAdmissionSha256,
+    requestSha256: candidate.requestSha256,
+    authorizedAt,
+    replayEvidence,
+  };
+  if (candidate.phase === "submit-pending") return { ...base, phase: "submit-pending" };
+  const consumedCandidate = candidate as Partial<Extract<
+    DgxSuccessorAuthorization,
+    { phase: "consumed" }
+  >>;
+  const consumedAt = canonicalIsoTimestamp(
+    candidate.phase === "consumed" ? consumedCandidate.consumedAt : undefined,
+  );
+  const successorAuthorityReceipt = consumedCandidate.successorAuthorityKind === "lease"
+    ? normalizeDgxLeaseReceipt(consumedCandidate.successorAuthorityReceipt)
+    : consumedCandidate.successorAuthorityKind === "terminal"
+      ? normalizeDgxTerminalReceipt(consumedCandidate.successorAuthorityReceipt)
+      : undefined;
+  if (candidate.phase !== "consumed"
+    || !isDgxJobId(consumedCandidate.successorDgxJobId)
+    || consumedCandidate.successorDgxJobId === candidate.predecessorDgxJobId
+    || (consumedCandidate.successorAuthorityKind !== "lease"
+      && consumedCandidate.successorAuthorityKind !== "terminal")
+    || !successorAuthorityReceipt
+    || successorAuthorityReceipt.studioJobId !== candidate.studioJobId
+    || successorAuthorityReceipt.dgxJobId !== consumedCandidate.successorDgxJobId
+    || successorAuthorityReceipt.idempotencyKey
+      !== predecessorLeaseReceipt.preparedAdmission.idempotency_key
+    || (consumedCandidate.successorAuthorityKind === "lease"
+      && (successorAuthorityReceipt.schemaVersion !== "ltx-studio-dgx-lease-receipt.v1"
+        || successorAuthorityReceipt.preparedAdmissionSha256
+          !== candidate.preparedAdmissionSha256
+        || canonicalJson(successorAuthorityReceipt.preparedAdmission)
+          !== canonicalJson(predecessorLeaseReceipt.preparedAdmission)))
+    || !dgxSuccessorAuthorityBindsAuthorization(
+      base,
+      consumedCandidate.successorAuthorityKind,
+      successorAuthorityReceipt,
+    )
+    || typeof consumedCandidate.successorAuthoritySha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(consumedCandidate.successorAuthoritySha256)
+    || consumedCandidate.successorAuthoritySha256 !== dgxAuthoritySha256(successorAuthorityReceipt)
+    || !consumedAt
+    || Date.parse(consumedAt) < Date.parse(authorizedAt)
+    || Date.parse(consumedAt) > Date.now() + 5 * 60_000) return undefined;
+  return {
+    ...base,
+    phase: "consumed",
+    successorDgxJobId: consumedCandidate.successorDgxJobId,
+    successorAuthorityKind: consumedCandidate.successorAuthorityKind,
+    successorAuthorityReceipt,
+    successorAuthoritySha256: consumedCandidate.successorAuthoritySha256,
+    consumedAt,
+  };
+}
+
+function dgxSuccessorAuthorizationBindsPredecessor(
+  value: unknown,
+  receipt: DgxLeaseReceipt,
+): boolean {
+  const authorization = normalizeDgxSuccessorAuthorization(value);
+  return Boolean(
+    authorization
+    && authorization.studioJobId === receipt.studioJobId
+    && authorization.predecessorDgxJobId === receipt.dgxJobId
+    && authorization.predecessorLeaseReceiptSha256 === dgxAuthoritySha256(receipt)
+    && canonicalJson(authorization.predecessorLeaseReceipt) === canonicalJson(receipt),
+  );
+}
+
+function consumeDgxSuccessorAuthorization(
+  value: unknown,
+  successorDgxJobId: string,
+  successorAuthorityKind: "lease" | "terminal",
+  successorAuthority: DgxLeaseReceipt | DgxTerminalReceipt,
+): DgxSuccessorAuthorization | undefined {
+  const authorization = normalizeDgxSuccessorAuthorization(value);
+  if (!authorization
+    || authorization.phase !== "submit-pending"
+    || !isDgxJobId(successorDgxJobId)
+    || successorDgxJobId === authorization.predecessorDgxJobId
+    || successorAuthority.dgxJobId !== successorDgxJobId
+    || !dgxSuccessorAuthorityBindsAuthorization(
+      authorization,
+      successorAuthorityKind,
+      successorAuthority,
+    )) return undefined;
+  return {
+    ...authorization,
+    phase: "consumed",
+    successorDgxJobId,
+    successorAuthorityKind,
+    successorAuthorityReceipt: structuredClone(successorAuthority),
+    successorAuthoritySha256: dgxAuthoritySha256(successorAuthority),
+    consumedAt: now(),
   };
 }
 
@@ -3191,6 +3796,75 @@ function normalizeDgxTerminalReceipt(value: unknown): DgxTerminalReceipt | undef
       idempotencyKey: expectedCaller,
       replayBoundJobId: candidate.dgxJobId,
       idempotentReplay: true,
+    };
+  } else if (rawEvidence.kind === "conditional-successor"
+    && rawEvidence.schemaVersion === "dgx-conditional-successor-result.v0"
+    && /^[0-9a-f]{64}$/.test(rawEvidence.successorToken)
+    && isDgxJobId(rawEvidence.predecessorDgxJobId)
+    && rawEvidence.predecessorDgxJobId !== candidate.dgxJobId
+    && /^[0-9a-f]{64}$/.test(rawEvidence.requestSha256)
+    && (rawEvidence.outcome === "created" || rawEvidence.outcome === "terminal")
+    && rawEvidence.requestedBy === expectedCaller
+    && rawEvidence.sourceApp === "LTX Studio"
+    && rawEvidence.idempotencyKey === expectedCaller) {
+    evidence = {
+      kind: "conditional-successor",
+      schemaVersion: "dgx-conditional-successor-result.v0",
+      successorToken: rawEvidence.successorToken,
+      predecessorDgxJobId: rawEvidence.predecessorDgxJobId,
+      requestSha256: rawEvidence.requestSha256,
+      outcome: rawEvidence.outcome,
+      requestedBy: expectedCaller,
+      sourceApp: "LTX Studio",
+      idempotencyKey: expectedCaller,
+    };
+  } else if (rawEvidence.kind === "conditional-successor-reaped"
+    && rawEvidence.schemaVersion === "dgx-conditional-successor-result.v0"
+    && rawEvidence.runtimeEvidenceSchemaVersion === "dgx-conditional-successor-terminal.v0"
+    && /^[0-9a-f]{64}$/.test(rawEvidence.successorToken)
+    && isDgxJobId(rawEvidence.predecessorDgxJobId)
+    && rawEvidence.predecessorDgxJobId !== candidate.dgxJobId
+    && /^[0-9a-f]{64}$/.test(rawEvidence.requestSha256)
+    && rawEvidence.idempotencyKey === expectedCaller
+    && /^[0-9a-f]{64}$/.test(rawEvidence.recordSha256)
+    && typeof rawEvidence.decision === "string"
+    && rawEvidence.decision.length > 0
+    && typeof rawEvidence.reason === "string"
+    && rawEvidence.reason.length > 0
+    && typeof rawEvidence.clientAction === "string"
+    && rawEvidence.clientAction.length > 0) {
+    const createdAt = canonicalIsoTimestamp(rawEvidence.createdAt);
+    const finishedAt = canonicalIsoTimestamp(rawEvidence.finishedAt);
+    const reapedAt = canonicalIsoTimestamp(rawEvidence.reapedAt);
+    const startedAt = isDgxNeverStarted(rawEvidence.startedAt)
+      ? rawEvidence.startedAt
+      : canonicalIsoTimestamp(rawEvidence.startedAt);
+    if (!createdAt
+      || !finishedAt
+      || !reapedAt
+      || startedAt === null && !isDgxNeverStarted(rawEvidence.startedAt)
+      || Date.parse(finishedAt) < Date.parse(createdAt)
+      || (startedAt !== null
+        && startedAt !== ""
+        && (Date.parse(startedAt) < Date.parse(createdAt)
+          || Date.parse(startedAt) > Date.parse(finishedAt)))
+      || Date.parse(reapedAt) < Date.parse(finishedAt)) return undefined;
+    evidence = {
+      kind: "conditional-successor-reaped",
+      schemaVersion: "dgx-conditional-successor-result.v0",
+      runtimeEvidenceSchemaVersion: "dgx-conditional-successor-terminal.v0",
+      successorToken: rawEvidence.successorToken,
+      predecessorDgxJobId: rawEvidence.predecessorDgxJobId,
+      requestSha256: rawEvidence.requestSha256,
+      idempotencyKey: expectedCaller,
+      createdAt,
+      startedAt,
+      finishedAt,
+      reapedAt,
+      decision: rawEvidence.decision,
+      reason: rawEvidence.reason,
+      clientAction: rawEvidence.clientAction,
+      recordSha256: rawEvidence.recordSha256,
     };
   } else if (rawEvidence.kind === "job-gone"
     && rawEvidence.schemaVersion === "ltx-studio-dgx-job-gone-evidence.v1"
@@ -3579,6 +4253,7 @@ function runtimeSettlementPending(job: RuntimeJob): boolean {
     || job.dgxSubmitReconcileInFlight
     || job.dgxAdmissionAbortController
     || job.dgxStateTransitionInFlight
+    || job.dgxSuccessorSubmitInFlight
     || job.dgxTerminalDelivery
     || job.dgxTerminalDeliveryInFlight
     || job.dgxTerminalRetry
@@ -3626,6 +4301,8 @@ function publicJob(
   delete value.dgxJobTerminal;
   delete value.dgxLeaseReceipt;
   delete value.dgxStateTransitionInFlight;
+  delete value.dgxSuccessorAuthorization;
+  delete value.dgxSuccessorSubmitInFlight;
   delete value.dgxTerminalDelivery;
   delete value.dgxTerminalReceipt;
   delete value.dgxTerminalDeliveryInFlight;
@@ -3654,6 +4331,9 @@ function persistedJob(job: RuntimeJob): PersistedStudioJob {
   if (job.dgxTerminalDelivery) value.dgxTerminalDelivery = structuredClone(job.dgxTerminalDelivery);
   if (job.dgxTerminalReceipt) value.dgxTerminalReceipt = structuredClone(job.dgxTerminalReceipt);
   if (job.dgxLeaseReceipt) value.dgxLeaseReceipt = structuredClone(job.dgxLeaseReceipt);
+  if (job.dgxSuccessorAuthorization) {
+    value.dgxSuccessorAuthorization = structuredClone(job.dgxSuccessorAuthorization);
+  }
   if (job.localProcessSpawnPending) value.localProcessSpawnPending = true;
   if (job.localProcessGroupPending) value.localProcessGroupPending = true;
   if (job.localProcessGroupIdentity) {
@@ -3926,6 +4606,7 @@ export class JobManager extends EventEmitter {
       submit: submitPreparedQueueAdmission,
       replay: replayPreparedQueueAdmission,
       list: listQueueJobs,
+      successor: submitConditionalQueueSuccessor,
     },
     private readonly runProvenanceOperations: RunProvenanceOperations = {
       capture: captureRunProvenance,
@@ -9129,6 +9810,36 @@ export class JobManager extends EventEmitter {
         "DGX-Lease-Evidenz traf ohne dauerhaften unbekannten Submit-Intent ein.",
       );
     }
+    const successorAuthorization = job.dgxSuccessorAuthorization === undefined
+      ? undefined
+      : normalizeDgxSuccessorAuthorization(job.dgxSuccessorAuthorization);
+    if (job.dgxSuccessorAuthorization !== undefined
+      && (!successorAuthorization
+        || successorAuthorization.phase !== "submit-pending"
+        || canonicalJson(successorAuthorization) !== canonicalJson(job.dgxSuccessorAuthorization)
+        || successorAuthorization.studioJobId !== job.id
+        || successorAuthorization.preparedAdmissionSha256 !== receipt.preparedAdmissionSha256
+        || successorAuthorization.authorizedAt !== receipt.submitStartedAt
+        || canonicalJson(successorAuthorization.predecessorLeaseReceipt.preparedAdmission)
+          !== canonicalJson(receipt.preparedAdmission)
+        || successorAuthorization.predecessorDgxJobId === remote.job_id)) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Successor-Receipt widerspricht seiner dauerhaften Einmal-Autorisierung.",
+      );
+    }
+    const consumedSuccessorAuthorization = successorAuthorization
+      ? consumeDgxSuccessorAuthorization(
+          successorAuthorization,
+          remote.job_id,
+          "lease",
+          receipt,
+        )
+      : undefined;
+    if (successorAuthorization && !consumedSuccessorAuthorization) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Successor-Autorisierung konnte nicht exakt einmal konsumiert werden.",
+      );
+    }
 
     const snapshot = {
       dgxJobId: job.dgxJobId,
@@ -9145,6 +9856,9 @@ export class JobManager extends EventEmitter {
       dgxTerminalDelivery: job.dgxTerminalDelivery
         ? structuredClone(job.dgxTerminalDelivery)
         : undefined,
+      dgxSuccessorAuthorization: job.dgxSuccessorAuthorization
+        ? structuredClone(job.dgxSuccessorAuthorization)
+        : undefined,
       logs: [...job.logs],
     };
     job.dgxJobId = remote.job_id;
@@ -9154,6 +9868,9 @@ export class JobManager extends EventEmitter {
     delete job.dgxSubmitStartedAt;
     delete job.dgxPreparedAdmission;
     delete job.dgxPreparedAdmissionSha256;
+    if (consumedSuccessorAuthorization) {
+      job.dgxSuccessorAuthorization = consumedSuccessorAuthorization;
+    }
     if (terminalIntent) {
       this.prepareDgxTerminalDelivery(job, "cancelled", {
         current_step: "terminal Studio intent after ambiguous DGX submit",
@@ -9180,6 +9897,9 @@ export class JobManager extends EventEmitter {
         } else delete job.dgxPreparedAdmissionSha256;
         if (snapshot.dgxTerminalDelivery) job.dgxTerminalDelivery = snapshot.dgxTerminalDelivery;
         else delete job.dgxTerminalDelivery;
+        if (snapshot.dgxSuccessorAuthorization) {
+          job.dgxSuccessorAuthorization = snapshot.dgxSuccessorAuthorization;
+        } else delete job.dgxSuccessorAuthorization;
         job.logs.splice(0, job.logs.length, ...snapshot.logs);
       }
       throw error;
@@ -9205,8 +9925,32 @@ export class JobManager extends EventEmitter {
         "Terminale DGX-Submit-Antwort war nicht exakt an den dauerhaften Einmal-Submit gebunden.",
       );
     }
+    this.commitTerminalPreparedDgxObservation(
+      job,
+      response.job.job_id,
+      observation,
+      preparedAdmission,
+      submitStartedAt,
+      message,
+    );
+  }
+
+  private commitTerminalPreparedDgxObservation(
+    job: RuntimeJob,
+    terminalDgxJobId: string,
+    observation: DgxTerminalObservation,
+    preparedAdmission: AdmissionRequest,
+    submitStartedAt: string,
+    message: string,
+  ): void {
+    if (!isDgxJobId(terminalDgxJobId)
+      || !DGX_REMOTE_TERMINAL_STATES.has(observation.state)) {
+      throw new DgxLeaseAuthorityError(
+        "Terminale DGX-Evidenz besitzt keine gültige gebundene Jobidentität.",
+      );
+    }
     if (job.dgxTerminalReceipt) {
-      if (job.dgxTerminalReceipt.dgxJobId === response.job.job_id) return;
+      if (job.dgxTerminalReceipt.dgxJobId === terminalDgxJobId) return;
       throw new DgxLeaseAuthorityError(
         "Terminale Submit-Antwort widerspricht einem bereits bestätigten DGX-Terminalbeleg.",
       );
@@ -9218,6 +9962,24 @@ export class JobManager extends EventEmitter {
       || canonicalJson(job.dgxPreparedAdmission) !== canonicalJson(preparedAdmission)) {
       throw new DgxLeaseAuthorityError(
         "Terminale Submit-Antwort traf nicht auf den exakt vorbereiteten unbekannten Submit-Intent.",
+      );
+    }
+    const successorAuthorization = job.dgxSuccessorAuthorization === undefined
+      ? undefined
+      : normalizeDgxSuccessorAuthorization(job.dgxSuccessorAuthorization);
+    if (job.dgxSuccessorAuthorization !== undefined
+      && (!successorAuthorization
+        || successorAuthorization.phase !== "submit-pending"
+        || canonicalJson(successorAuthorization) !== canonicalJson(job.dgxSuccessorAuthorization)
+        || successorAuthorization.studioJobId !== job.id
+        || successorAuthorization.preparedAdmissionSha256
+          !== preparedAdmissionSha256(preparedAdmission)
+        || successorAuthorization.authorizedAt !== canonicalIsoTimestamp(submitStartedAt)
+        || canonicalJson(successorAuthorization.predecessorLeaseReceipt.preparedAdmission)
+          !== canonicalJson(preparedAdmission)
+        || successorAuthorization.predecessorDgxJobId === terminalDgxJobId)) {
+      throw new DgxLeaseAuthorityError(
+        "Terminaler DGX-Successor widerspricht seiner dauerhaften Einmal-Autorisierung.",
       );
     }
 
@@ -9246,8 +10008,34 @@ export class JobManager extends EventEmitter {
       dgxTerminalReceipt: job.dgxTerminalReceipt
         ? structuredClone(job.dgxTerminalReceipt)
         : undefined,
+      dgxSuccessorAuthorization: job.dgxSuccessorAuthorization
+        ? structuredClone(job.dgxSuccessorAuthorization)
+        : undefined,
     };
     const localIntentState: DgxTerminalState = jobWasCancelled(job) ? "cancelled" : "failed";
+    const terminalReceipt: DgxTerminalReceipt = {
+      schemaVersion: "ltx-studio-dgx-terminal-receipt.v1",
+      studioJobId: job.id,
+      dgxJobId: terminalDgxJobId,
+      idempotencyKey: preparedAdmission.idempotency_key,
+      localIntentState,
+      remoteTerminalState: observation.state,
+      confirmedAt: now(),
+      evidence: structuredClone(observation.evidence),
+    };
+    const consumedSuccessorAuthorization = successorAuthorization
+      ? consumeDgxSuccessorAuthorization(
+          successorAuthorization,
+          terminalDgxJobId,
+          "terminal",
+          terminalReceipt,
+        )
+      : undefined;
+    if (successorAuthorization && !consumedSuccessorAuthorization) {
+      throw new DgxLeaseAuthorityError(
+        "Terminale DGX-Successor-Autorisierung konnte nicht exakt einmal konsumiert werden.",
+      );
+    }
     const queueIndex = this.queue.indexOf(job.id);
     if (queueIndex >= 0) this.queue.splice(queueIndex, 1);
     if (!jobWasCancelled(job)) {
@@ -9257,7 +10045,7 @@ export class JobManager extends EventEmitter {
       if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
     }
     job.dgxMemoryWait = null;
-    job.dgxJobId = response.job.job_id;
+    job.dgxJobId = terminalDgxJobId;
     job.dgxJobTerminal = true;
     delete job.dgxSubmitPending;
     delete job.dgxSubmitStartedAt;
@@ -9265,19 +10053,13 @@ export class JobManager extends EventEmitter {
     delete job.dgxPreparedAdmissionSha256;
     delete job.dgxLeaseReceipt;
     delete job.dgxTerminalDelivery;
-    job.dgxTerminalReceipt = {
-      schemaVersion: "ltx-studio-dgx-terminal-receipt.v1",
-      studioJobId: job.id,
-      dgxJobId: response.job.job_id,
-      idempotencyKey: preparedAdmission.idempotency_key,
-      localIntentState,
-      remoteTerminalState: observation.state,
-      confirmedAt: now(),
-      evidence: structuredClone(observation.evidence),
-    };
+    job.dgxTerminalReceipt = terminalReceipt;
+    if (consumedSuccessorAuthorization) {
+      job.dgxSuccessorAuthorization = consumedSuccessorAuthorization;
+    }
     this.appendLog(
       job,
-      `${message} Exakte terminale Einmal-Submit-Antwort: ${response.job.job_id} ist ${observation.state}.`,
+      `${message} Exakte terminale Einmal-Submit-Antwort: ${terminalDgxJobId} ist ${observation.state}.`,
     );
     try {
       this.changed();
@@ -9307,9 +10089,323 @@ export class JobManager extends EventEmitter {
         else delete job.dgxTerminalDelivery;
         if (snapshot.dgxTerminalReceipt) job.dgxTerminalReceipt = snapshot.dgxTerminalReceipt;
         else delete job.dgxTerminalReceipt;
+        if (snapshot.dgxSuccessorAuthorization) {
+          job.dgxSuccessorAuthorization = snapshot.dgxSuccessorAuthorization;
+        } else delete job.dgxSuccessorAuthorization;
       }
       throw error;
     }
+  }
+
+  private authorizeDgxSuccessorSubmit(
+    job: RuntimeJob,
+    predecessorReceipt: DgxLeaseReceipt,
+    replayEvidence: DgxSuccessorReplayEvidence,
+  ): DgxSuccessorAuthorization | null {
+    if (job.dgxSuccessorAuthorization !== undefined) {
+      if (dgxSuccessorAuthorizationBindsPredecessor(
+        job.dgxSuccessorAuthorization,
+        predecessorReceipt,
+      )) return null;
+      throw new DgxLeaseAuthorityError(
+        "Eine vorhandene DGX-Successor-Generation widerspricht der exakten Replay-Lease.",
+      );
+    }
+    const currentReceipt = normalizeDgxLeaseReceipt(job.dgxLeaseReceipt);
+    if (this.jobShouldStop(job)
+      || job.dgxSubmitPending
+      || job.dgxTerminalReceipt
+      || job.dgxTerminalDelivery
+      || !currentReceipt
+      || job.dgxJobId !== predecessorReceipt.dgxJobId
+      || canonicalJson(currentReceipt) !== canonicalJson(predecessorReceipt)
+      || replayEvidence.replayBoundJobId !== predecessorReceipt.dgxJobId) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Successor-Autorisierung verlor vor ihrem Commit die alte Lease-Bindung.",
+      );
+    }
+    const authorizedAt = now();
+    const requestSha256 = dgxRuntimeRequestSha256(predecessorReceipt.preparedAdmission);
+    if (!requestSha256) {
+      throw new DgxLeaseAuthorityError(
+        "Der versiegelte DGX-Successor-Request besitzt keinen kanonischen Runtime-Digest.",
+      );
+    }
+    const authorization: DgxSuccessorAuthorization = {
+      schemaVersion: "ltx-studio-dgx-successor-authorization.v1",
+      generation: 1,
+      phase: "submit-pending",
+      successorToken: randomBytes(32).toString("hex"),
+      studioJobId: job.id,
+      predecessorDgxJobId: predecessorReceipt.dgxJobId,
+      predecessorLeaseReceipt: structuredClone(predecessorReceipt),
+      predecessorLeaseReceiptSha256: dgxAuthoritySha256(predecessorReceipt),
+      preparedAdmissionSha256: predecessorReceipt.preparedAdmissionSha256,
+      requestSha256,
+      authorizedAt,
+      replayEvidence: structuredClone(replayEvidence),
+    };
+    const normalized = normalizeDgxSuccessorAuthorization(authorization);
+    if (!normalized || canonicalJson(normalized) !== canonicalJson(authorization)) {
+      throw new DgxLeaseAuthorityError(
+        "DGX-Successor-Autorisierung war nicht kanonisch persistierbar.",
+      );
+    }
+    const snapshot = {
+      dgxJobId: job.dgxJobId,
+      dgxJobTerminal: job.dgxJobTerminal,
+      dgxLeaseReceipt: job.dgxLeaseReceipt
+        ? structuredClone(job.dgxLeaseReceipt)
+        : undefined,
+      dgxSubmitPending: job.dgxSubmitPending,
+      dgxSubmitStartedAt: job.dgxSubmitStartedAt,
+      dgxPreparedAdmission: job.dgxPreparedAdmission
+        ? structuredClone(job.dgxPreparedAdmission)
+        : undefined,
+      dgxPreparedAdmissionSha256: job.dgxPreparedAdmissionSha256,
+      dgxSuccessorAuthorization: job.dgxSuccessorAuthorization
+        ? structuredClone(job.dgxSuccessorAuthorization)
+        : undefined,
+      logs: [...job.logs],
+    };
+    job.dgxJobId = null;
+    job.dgxJobTerminal = false;
+    delete job.dgxLeaseReceipt;
+    job.dgxSubmitPending = true;
+    job.dgxSubmitStartedAt = authorizedAt;
+    job.dgxPreparedAdmission = structuredClone(predecessorReceipt.preparedAdmission);
+    job.dgxPreparedAdmissionSha256 = predecessorReceipt.preparedAdmissionSha256;
+    job.dgxSuccessorAuthorization = normalized;
+    this.appendLog(
+      job,
+      `DGX-Successor-Generation 1 wurde vor jedem neuen POST atomar autorisiert: `
+        + `${predecessorReceipt.dgxJobId} war exakt replay-gebunden, terminal, reservierungsfrei und nie gestartet; `
+        + `Token ${authorization.successorToken.slice(0, 12)}… ist dauerhaft gebunden.`,
+    );
+    try {
+      this.changed();
+    } catch (error) {
+      if (!isJobPersistenceHoldError(error)) {
+        job.dgxJobId = snapshot.dgxJobId;
+        job.dgxJobTerminal = snapshot.dgxJobTerminal;
+        if (snapshot.dgxLeaseReceipt) job.dgxLeaseReceipt = snapshot.dgxLeaseReceipt;
+        else delete job.dgxLeaseReceipt;
+        if (snapshot.dgxSubmitPending) job.dgxSubmitPending = true;
+        else delete job.dgxSubmitPending;
+        if (snapshot.dgxSubmitStartedAt) job.dgxSubmitStartedAt = snapshot.dgxSubmitStartedAt;
+        else delete job.dgxSubmitStartedAt;
+        if (snapshot.dgxPreparedAdmission) job.dgxPreparedAdmission = snapshot.dgxPreparedAdmission;
+        else delete job.dgxPreparedAdmission;
+        if (snapshot.dgxPreparedAdmissionSha256) {
+          job.dgxPreparedAdmissionSha256 = snapshot.dgxPreparedAdmissionSha256;
+        } else delete job.dgxPreparedAdmissionSha256;
+        if (snapshot.dgxSuccessorAuthorization) {
+          job.dgxSuccessorAuthorization = snapshot.dgxSuccessorAuthorization;
+        } else delete job.dgxSuccessorAuthorization;
+        job.logs.splice(0, job.logs.length, ...snapshot.logs);
+      }
+      throw error;
+    }
+    return normalized;
+  }
+
+  private async performAuthorizedDgxSuccessorSubmit(
+    job: RuntimeJob,
+    authorizationInput: DgxSuccessorAuthorization,
+  ): Promise<DgxSuccessorSubmitOutcome> {
+    const authorization = normalizeDgxSuccessorAuthorization(job.dgxSuccessorAuthorization);
+    const preparedAdmission = normalizePreparedAdmission(job.dgxPreparedAdmission);
+    const submitStartedAt = canonicalIsoTimestamp(job.dgxSubmitStartedAt);
+    if (!authorization
+      || authorization.phase !== "submit-pending"
+      || canonicalJson(authorization) !== canonicalJson(authorizationInput)
+      || canonicalJson(authorization) !== canonicalJson(job.dgxSuccessorAuthorization)
+      || !job.dgxSubmitPending
+      || job.dgxJobId
+      || job.dgxLeaseReceipt
+      || !preparedAdmission
+      || !submitStartedAt
+      || submitStartedAt !== authorization.authorizedAt
+      || job.dgxPreparedAdmissionSha256 !== authorization.preparedAdmissionSha256
+      || preparedAdmissionSha256(preparedAdmission) !== authorization.preparedAdmissionSha256
+      || canonicalJson(preparedAdmission)
+        !== canonicalJson(authorization.predecessorLeaseReceipt.preparedAdmission)) {
+      throw new DgxLeaseAuthorityError(
+        "Der autorisierte DGX-Successor verlor vor seinem token-idempotenten POST die dauerhafte Generation.",
+      );
+    }
+    if (this.shuttingDown || this.persistenceHold) {
+      return { kind: "ambiguous" };
+    }
+    if (!this.dgxAdmissionOperations.successor) {
+      throw new DgxLeaseAuthorityError(
+        "Der DGX-Client besitzt keinen Conditional-Successor-Transport; normaler Submit-Fallback ist verboten.",
+      );
+    }
+    const abortController = new AbortController();
+    job.dgxAdmissionAbortController = abortController;
+    let validated: DgxValidatedConditionalSuccessorResult;
+    try {
+      const response = await this.dgxAdmissionOperations.successor(
+        authorization.predecessorDgxJobId,
+        authorization.successorToken,
+        structuredClone(preparedAdmission),
+        abortController.signal,
+      );
+      const retained = validateRetainedConditionalSuccessorResult(
+        response,
+        authorization,
+        preparedAdmission,
+      );
+      if (!retained) {
+        throw new DgxLeaseAuthorityError(
+          "DGX-Conditional-Successor lieferte keine feldgeschlossene token-, Vorgänger- und Request-gebundene Antwort.",
+        );
+      }
+      validated = retained;
+    } catch (error) {
+      if (error instanceof DgxLeaseAuthorityError) throw error;
+      if (error instanceof RuntimeApiError && error.statusCode === 410) {
+        const reaped = validateReapedConditionalSuccessorResult(
+          error.payload,
+          authorization,
+          preparedAdmission,
+        );
+        if (!reaped) {
+          throw new DgxLeaseAuthorityError(
+            "DGX-Conditional-Successor-410 besaß keinen exakt gebundenen feldgeschlossenen Tombstone.",
+          );
+        }
+        validated = reaped;
+      } else if (error instanceof RuntimeApiError
+        && !dgxConditionalSuccessorStatusIsAmbiguous(error.statusCode)) {
+        throw new DgxLeaseAuthorityError(
+          `DGX-Conditional-Successor wurde autoritativ mit HTTP ${error.statusCode} abgelehnt; `
+            + "definitive Protokollantworten erlauben keinen normalen Submit-Fallback.",
+        );
+      } else {
+        this.appendLog(
+          job,
+          `Der token-idempotente DGX-Successor-POST blieb ohne autoritative Antwort; `
+            + `Generation 1 wird ausschließlich über denselben Endpunkt und Token erneut abgeglichen: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+        );
+        this.changed();
+        return { kind: "ambiguous" };
+      }
+    } finally {
+      if (job.dgxAdmissionAbortController === abortController) {
+        this.clearCancellationSettlementTransient(
+          job,
+          () => delete job.dgxAdmissionAbortController,
+        );
+      }
+    }
+    try {
+      if (validated.kind === "positive") {
+        const terminalIntent = this.jobShouldStop(job);
+        this.commitDgxLeaseReceipt(
+          job,
+          validated.remote,
+          validated.receipt,
+          terminalIntent,
+        );
+        const logsBeforeConsumedMessage = [...job.logs];
+        this.appendLog(
+          job,
+          `DGX-Successor-Generation 1 wurde token-idempotent konsumiert: ${validated.remote.job_id} `
+            + `ist ${validated.remote.state} (${validated.result.outcome}).`,
+        );
+        try {
+          this.changed();
+        } catch (error) {
+          if (this.persistenceHold || isJobPersistenceHoldError(error)) throw error;
+          job.logs.splice(0, job.logs.length, ...logsBeforeConsumedMessage);
+          process.stderr.write(
+            `LTX Studio konnte das Diagnose-Log des bereits konsumierten DGX-Successors ${validated.remote.job_id} nicht persistieren: ${
+              error instanceof Error ? error.message : String(error)
+            }\n`,
+          );
+        }
+        if (terminalIntent) {
+          await this.flushDgxTerminalDelivery(job);
+          return { kind: "terminal" };
+        }
+        return { kind: "positive", remote: validated.remote };
+      }
+      this.commitTerminalPreparedDgxObservation(
+        job,
+        validated.result.successor_job_id,
+        validated.observation,
+        preparedAdmission,
+        authorization.authorizedAt,
+        `DGX-Successor-Generation 1 ist tokengebunden ${validated.result.outcome} als `
+          + `${validated.observation.state} bestätigt.`,
+      );
+      return { kind: "terminal" };
+    } catch (error) {
+      if (error instanceof DgxLeaseAuthorityError || isJobPersistenceHoldError(error)) throw error;
+      this.appendLog(
+        job,
+        `Der lokale Successor-Commit blieb nach autoritativer Token-Antwort unklar; `
+          + `derselbe Endpunkt und Token werden wiederholt: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.changed();
+      return { kind: "ambiguous" };
+    }
+  }
+
+  private async advanceDgxSuccessorSubmit(
+    job: RuntimeJob,
+    freshlyAuthorized?: DgxSuccessorAuthorization,
+  ): Promise<DgxSuccessorSubmitOutcome | { kind: "follower" }> {
+    if (!freshlyAuthorized && job.dgxSuccessorSubmitInFlight) {
+      await job.dgxSuccessorSubmitInFlight;
+      return { kind: "follower" };
+    }
+    const firstAuthorization = normalizeDgxSuccessorAuthorization(
+      freshlyAuthorized ?? job.dgxSuccessorAuthorization,
+    );
+    if (!firstAuthorization
+      || (freshlyAuthorized
+        && canonicalJson(firstAuthorization) !== canonicalJson(freshlyAuthorized))) {
+      throw new DgxLeaseAuthorityError(
+        "Die persistierte DGX-Successor-Autorisierung ist für den Token-Retry ungültig.",
+      );
+    }
+    if (firstAuthorization.phase === "consumed") return { kind: "follower" };
+    let authorization = firstAuthorization;
+    while (!this.shuttingDown && !this.persistenceHold) {
+      const operation = this.performAuthorizedDgxSuccessorSubmit(job, authorization);
+      job.dgxSuccessorSubmitInFlight = operation;
+      let outcome: DgxSuccessorSubmitOutcome;
+      try {
+        outcome = await operation;
+      } finally {
+        if (job.dgxSuccessorSubmitInFlight === operation) {
+          this.clearCancellationSettlementTransient(
+            job,
+            () => delete job.dgxSuccessorSubmitInFlight,
+          );
+        }
+      }
+      if (outcome.kind !== "ambiguous") return outcome;
+      if (this.jobShouldStop(job)
+        || !await this.waitForDelay(job, DGX_SUBMIT_RECONCILE_POLL_MS)) {
+        return outcome;
+      }
+      const current = normalizeDgxSuccessorAuthorization(job.dgxSuccessorAuthorization);
+      if (!current
+        || current.phase !== "submit-pending"
+        || canonicalJson(current) !== canonicalJson(authorization)) {
+        throw new DgxLeaseAuthorityError(
+          "DGX-Successor-Tokenbindung änderte sich während des identischen Retries.",
+        );
+      }
+      authorization = current;
+    }
+    return { kind: "ambiguous" };
   }
 
   private async reconcilePendingDgxSubmit(
@@ -9318,15 +10414,41 @@ export class JobManager extends EventEmitter {
     if (!job.dgxSubmitPending) return null;
     const preparedAdmission = normalizePreparedAdmission(job.dgxPreparedAdmission);
     const submitStartedAt = canonicalIsoTimestamp(job.dgxSubmitStartedAt);
+    const successorAuthorization = job.dgxSuccessorAuthorization === undefined
+      ? undefined
+      : normalizeDgxSuccessorAuthorization(job.dgxSuccessorAuthorization);
     if (!preparedAdmission
       || !submitStartedAt
-      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)) {
+      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)
+      || (job.dgxSuccessorAuthorization !== undefined
+        && (!successorAuthorization
+          || successorAuthorization.phase !== "submit-pending"
+          || canonicalJson(successorAuthorization) !== canonicalJson(job.dgxSuccessorAuthorization)
+          || successorAuthorization.authorizedAt !== submitStartedAt
+          || successorAuthorization.preparedAdmissionSha256
+            !== job.dgxPreparedAdmissionSha256))) {
       this.appendLog(
         job,
         "DGX-Submit-Ausgang bleibt fail-closed: Der vollständige persistierte Einmal-Submit-Vertrag ist ungültig.",
       );
       this.changed();
       return undefined;
+    }
+    if (successorAuthorization) {
+      try {
+        const outcome = await this.advanceDgxSuccessorSubmit(job);
+        return outcome.kind === "positive" ? outcome.remote : undefined;
+      } catch (error) {
+        if (this.persistenceHold || isJobPersistenceHoldError(error)) return undefined;
+        if (error instanceof DgxLeaseAuthorityError) {
+          this.enterPersistenceHold(
+            error,
+            "DGX-Conditional-Successor-Recovery verlor Token-, Vorgänger- oder Request-Autorität",
+          );
+          return undefined;
+        }
+        throw error;
+      }
     }
     let lastError = "";
     while (!this.jobShouldStop(job) && job.dgxSubmitPending) {
@@ -9442,9 +10564,19 @@ export class JobManager extends EventEmitter {
     if (this.shuttingDown || this.persistenceHold || !job.dgxSubmitPending || isActiveJobStatus(job.status)) return;
     const preparedAdmission = normalizePreparedAdmission(job.dgxPreparedAdmission);
     const submitStartedAt = canonicalIsoTimestamp(job.dgxSubmitStartedAt);
+    const successorAuthorization = job.dgxSuccessorAuthorization === undefined
+      ? undefined
+      : normalizeDgxSuccessorAuthorization(job.dgxSuccessorAuthorization);
     if (!preparedAdmission
       || !submitStartedAt
-      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)) {
+      || job.dgxPreparedAdmissionSha256 !== preparedAdmissionSha256(preparedAdmission)
+      || (job.dgxSuccessorAuthorization !== undefined
+        && (!successorAuthorization
+          || successorAuthorization.phase !== "submit-pending"
+          || canonicalJson(successorAuthorization) !== canonicalJson(job.dgxSuccessorAuthorization)
+          || successorAuthorization.authorizedAt !== submitStartedAt
+          || successorAuthorization.preparedAdmissionSha256
+            !== job.dgxPreparedAdmissionSha256))) {
       this.appendLog(
         job,
         "Terminaler DGX-Submit-Ausgang bleibt ohne vollständigen Einmal-Submit-Vertrag fail-closed unaufgelöst.",
@@ -9453,6 +10585,14 @@ export class JobManager extends EventEmitter {
       return;
     }
     try {
+      if (successorAuthorization) {
+        const outcome = await this.advanceDgxSuccessorSubmit(job);
+        if (outcome.kind === "positive") {
+          await this.flushDgxTerminalDelivery(job);
+          this.scheduleDgxTerminalRetry(job);
+        }
+        return;
+      }
       if (!this.dgxAdmissionOperations.list) {
         throw new Error("Die DGX-Queue unterstützt keine positive Submit-Discovery.");
       }
@@ -9493,7 +10633,12 @@ export class JobManager extends EventEmitter {
     } catch (error) {
       if (this.persistenceHold || isJobPersistenceHoldError(error)) return;
       if (error instanceof DgxLeaseAuthorityError) {
-        this.enterPersistenceHold(error, "terminale positive DGX-Submit-Discovery war mehrdeutig");
+        this.enterPersistenceHold(
+          error,
+          successorAuthorization
+            ? "terminaler DGX-Conditional-Successor-Abgleich verlor seine gebundene Autorität"
+            : "terminale positive DGX-Submit-Discovery war mehrdeutig",
+        );
         return;
       }
       this.appendLog(
@@ -9812,6 +10957,29 @@ export class JobManager extends EventEmitter {
         try {
           const replayResult = await this.replayBoundDgxQueueAdmission(job);
           const replayReceipt = replayResult.receipt;
+          if (replayResult.kind === "successor-already-authorized") {
+            const successorOutcome = await this.advanceDgxSuccessorSubmit(job);
+            if (successorOutcome.kind !== "positive") return "stopped";
+            queueJob = successorOutcome.remote;
+            this.observeDgxMemoryWait(job, queueJobMemoryBlocker(queueJob));
+            if (!await this.confirmDgxCooperativeQueueContract(
+              job,
+              queueJob,
+              "im parallel abgeglichenen DGX-Successor",
+            )) return "stopped";
+            this.appendLog(
+              job,
+              `Paralleler DGX-Successor-Beobachter übernimmt keinen POST; Generation 1 ist `
+                + `bereits durch ${queueJob.job_id} konsumiert.`,
+            );
+            this.changed();
+            if (queueJob.state === "accepted") {
+              return await this.startAcceptedDgxJob(job, queueJob);
+            }
+            replayAt = Date.now() + DGX_START_FENCE_RETRY_MS;
+            delayMs = DGX_START_FENCE_RETRY_MS;
+            continue;
+          }
           if (replayResult.kind === "gone") {
             if (this.jobShouldStop(job)) {
               this.commitCancelledDgxReplayTerminalObservation(
@@ -9856,6 +11024,27 @@ export class JobManager extends EventEmitter {
               );
             }
             return "stopped";
+          }
+          const retryNowEvidence = dgxRetryNowSuccessorEvidence(
+            replayResponse,
+            replayReceipt,
+          );
+          if (retryNowEvidence) {
+            const authorization = this.authorizeDgxSuccessorSubmit(
+              job,
+              replayReceipt,
+              retryNowEvidence,
+            );
+            const successorOutcome = await this.advanceDgxSuccessorSubmit(
+              job,
+              authorization ?? undefined,
+            );
+            if (successorOutcome.kind === "follower") return "stopped";
+            if (successorOutcome.kind === "terminal"
+              || successorOutcome.kind === "ambiguous") return "stopped";
+            queueJob = successorOutcome.remote;
+            terminalObservation = null;
+            this.observeDgxMemoryWait(job, queueJobMemoryBlocker(queueJob));
           }
           if (DGX_POSITIVE_DISCOVERY_STATES.has(queueJob.state)
             && !await this.confirmDgxCooperativeQueueContract(
@@ -10023,6 +11212,14 @@ export class JobManager extends EventEmitter {
         throw new DgxLeaseAuthorityError(
           "DGX-Queue-Replay war nicht als exakte idempotente Beobachtung der bestehenden Lease gebunden.",
         );
+      }
+      if ((job.dgxJobId !== expectedDgxJobId
+          || canonicalJson(normalizeDgxLeaseReceipt(job.dgxLeaseReceipt)) !== receiptJson)
+        && dgxSuccessorAuthorizationBindsPredecessor(
+          job.dgxSuccessorAuthorization,
+          receipt,
+        )) {
+        return { kind: "successor-already-authorized", receipt };
       }
       if (!this.jobShouldStop(job)) {
         if (job.dgxJobId !== expectedDgxJobId) {
@@ -12821,6 +14018,7 @@ export class JobManager extends EventEmitter {
           && entry.dgxSubmitStartedAt === undefined
           && entry.dgxPreparedAdmission === undefined
           && entry.dgxPreparedAdmissionSha256 === undefined
+          && entry.dgxSuccessorAuthorization === undefined
           && entry.dgxLeaseReceipt === undefined
           && entry.dgxTerminalDelivery === undefined
           && entry.dgxTerminalReceipt === undefined
@@ -12858,6 +14056,7 @@ export class JobManager extends EventEmitter {
           || entry.dgxSubmitStartedAt !== undefined
           || entry.dgxPreparedAdmission !== undefined
           || entry.dgxPreparedAdmissionSha256 !== undefined
+          || entry.dgxSuccessorAuthorization !== undefined
           || entry.dgxLeaseReceipt !== undefined
           || entry.dgxTerminalDelivery !== undefined
           || entry.dgxTerminalReceipt !== undefined
@@ -12931,6 +14130,65 @@ export class JobManager extends EventEmitter {
             )
           : entry.dgxPreparedAdmission === undefined
             && entry.dgxPreparedAdmissionSha256 === undefined;
+        const normalizedSuccessorAuthorization = normalizeDgxSuccessorAuthorization(
+          entry.dgxSuccessorAuthorization,
+        );
+        const successorAuthorizationValid = entry.dgxSuccessorAuthorization === undefined
+          || Boolean(
+            validId
+            && validStatus
+            && normalizedSuccessorAuthorization
+            && canonicalJson(entry.dgxSuccessorAuthorization)
+              === canonicalJson(normalizedSuccessorAuthorization)
+            && normalizedSuccessorAuthorization.studioJobId === rawId
+            && (normalizedSuccessorAuthorization.phase === "submit-pending"
+              ? entry.status !== "completed"
+                && entry.dgxSubmitPending === true
+                && !rawDgxClaim
+                && entry.dgxJobTerminal !== true
+                && entry.dgxLeaseReceipt === undefined
+                && entry.dgxTerminalDelivery === undefined
+                && entry.dgxTerminalReceipt === undefined
+                && entry.dgxSubmitStartedAt === normalizedSuccessorAuthorization.authorizedAt
+                && normalizedPreparedAdmission !== undefined
+                && normalizedSuccessorAuthorization.preparedAdmissionSha256
+                  === entry.dgxPreparedAdmissionSha256
+                && canonicalJson(normalizedPreparedAdmission)
+                  === canonicalJson(
+                    normalizedSuccessorAuthorization.predecessorLeaseReceipt.preparedAdmission,
+                  )
+              : rawDgxClaim
+                && entry.dgxJobId === normalizedSuccessorAuthorization.successorDgxJobId
+                && entry.dgxSubmitPending !== true
+                && entry.dgxSubmitStartedAt === undefined
+                && entry.dgxPreparedAdmission === undefined
+                && entry.dgxPreparedAdmissionSha256 === undefined
+                && (normalizedSuccessorAuthorization.successorAuthorityKind === "lease"
+                  ? normalizeDgxLeaseReceipt(
+                    normalizedSuccessorAuthorization.successorAuthorityReceipt,
+                  ) !== undefined
+                    && (normalizedLeaseReceipt !== undefined
+                      ? entry.dgxJobTerminal !== true
+                        && entry.dgxTerminalReceipt === undefined
+                        && canonicalJson(normalizedLeaseReceipt)
+                          === canonicalJson(
+                            normalizedSuccessorAuthorization.successorAuthorityReceipt,
+                          )
+                      : normalizedTerminalReceipt !== undefined
+                        && entry.dgxLeaseReceipt === undefined
+                        && Date.parse(normalizedTerminalReceipt.confirmedAt)
+                          >= Date.parse(
+                            normalizedSuccessorAuthorization.successorAuthorityReceipt.confirmedAt,
+                          ))
+                  : normalizedTerminalReceipt !== undefined
+                    && entry.dgxLeaseReceipt === undefined
+                    && Date.parse(normalizedSuccessorAuthorization.consumedAt)
+                      >= Date.parse(normalizedTerminalReceipt.confirmedAt)
+                    && canonicalJson(normalizedTerminalReceipt)
+                      === canonicalJson(
+                        normalizedSuccessorAuthorization.successorAuthorityReceipt,
+                      ))),
+          );
         const dgxAuthorityCombinationValid = entry.dgxSubmitPending === true
           ? !rawDgxClaim
             && entry.dgxLeaseReceipt === undefined
@@ -12998,6 +14256,7 @@ export class JobManager extends EventEmitter {
             || entry.status === "paused"
             || rawDgxClaim
             || entry.dgxSubmitPending === true
+            || entry.dgxSuccessorAuthorization !== undefined
             || entry.dgxTerminalDelivery !== undefined
             || entry.dgxTerminalReceipt !== undefined
             || entry.localProcessSpawnPending === true
@@ -13061,6 +14320,7 @@ export class JobManager extends EventEmitter {
           || !processGroupValid
           || !submitStartedAtValid
           || !preparedAdmissionValid
+          || !successorAuthorizationValid
           || !dgxAuthorityCombinationValid
           || !terminalLocalLeaseHasDelivery
           || !ownedContainerValid
@@ -13101,6 +14361,9 @@ export class JobManager extends EventEmitter {
           const hasTerminalReceipt = normalizeDgxTerminalReceipt(entry.dgxTerminalReceipt) !== undefined;
           const hasPendingSubmit = entry.dgxSubmitPending === true;
           const hasLeaseReceipt = normalizeDgxLeaseReceipt(entry.dgxLeaseReceipt) !== undefined;
+          const hasSuccessorAuthorization = normalizeDgxSuccessorAuthorization(
+            entry.dgxSuccessorAuthorization,
+          ) !== undefined;
           const hasPendingLocalProcess = entry.localProcessSpawnPending === true
             || entry.localProcessGroupPending === true;
           const hasPendingOwnedContainer = entry.ownedDockerContainer !== undefined
@@ -13119,6 +14382,7 @@ export class JobManager extends EventEmitter {
             || hasPendingTerminal
             || hasPendingSubmit
             || hasLeaseReceipt
+            || hasSuccessorAuthorization
             || hasPendingLocalProcess
             || hasPendingOwnedContainer
             || hasPendingPublicationCommit
@@ -13163,6 +14427,7 @@ export class JobManager extends EventEmitter {
           && entry.dgxSubmitStartedAt === undefined
           && entry.dgxPreparedAdmission === undefined
           && entry.dgxPreparedAdmissionSha256 === undefined
+          && entry.dgxSuccessorAuthorization === undefined
           && entry.dgxLeaseReceipt === undefined
           && entry.dgxTerminalDelivery === undefined
           && entry.dgxTerminalReceipt === undefined
@@ -13486,8 +14751,11 @@ export class JobManager extends EventEmitter {
           restorationRequiresPersist = true;
         } else if (recoverableLocalQueue && status === "queued") {
           restoredLogs.push(
-            entry.dgxSubmitPending === true
-              ? "Studio-Neustart: unklarer Einmal-Submit wird ausschließlich über positive Queue-Evidenz abgeglichen."
+            normalizeDgxSuccessorAuthorization(entry.dgxSuccessorAuthorization)?.phase
+              === "submit-pending"
+              ? "Studio-Neustart: autorisierte DGX-Successor-Generation 1 wird ausschließlich am Conditional-Endpunkt mit demselben dauerhaften Token fortgesetzt."
+              : entry.dgxSubmitPending === true
+                ? "Studio-Neustart: unklarer Einmal-Submit wird ausschließlich über positive Queue-Evidenz abgeglichen."
               : "Studio-Neustart: rein lokal wartender Job wird automatisch fortgesetzt.",
           );
         }
@@ -13717,6 +14985,9 @@ export class JobManager extends EventEmitter {
             && typeof entry.dgxPreparedAdmissionSha256 === "string"
             ? entry.dgxPreparedAdmissionSha256
             : undefined,
+          dgxSuccessorAuthorization: normalizeDgxSuccessorAuthorization(
+            entry.dgxSuccessorAuthorization,
+          ),
           identityEvidence: normalizeIdentityInputEvidence(entry.identityEvidence),
           runProvenance: restoredRunProvenance,
           executionClass: executionAuthority.executionClass,
@@ -13796,6 +15067,7 @@ export class JobManager extends EventEmitter {
     for (const job of entries.slice(MAX_JOBS)) {
       if (!job.legacyHistory
         && !job.experiment
+        && !job.dgxSuccessorAuthorization
         && !isActiveJobStatus(job.status)
         && !this.jobSettlementPending(job)) this.jobs.delete(job.id);
     }

@@ -92,6 +92,7 @@ import { dgxRuntimeRequestSha256 } from "../server/dgxRequestDigest.js";
 import {
   buildAdmissionRequests,
   type AdmissionRequest,
+  type ConditionalSuccessorResult,
   QueueAdmissionState,
   QueueJobState,
   QueueJobSummary,
@@ -264,6 +265,126 @@ function boundDgxReplay(
   };
 }
 
+function retryNowDgxReplay(
+  studioJobId: string,
+  dgxJobId: string,
+  state: "failed" | "rejected" | "cancelled",
+  admissionRequest: AdmissionRequest,
+  observedCreatedAt: string,
+  startedAt: null | "" = null,
+) {
+  const response = boundDgxReplay(
+    studioJobId,
+    dgxJobId,
+    state,
+    admissionRequest,
+    observedCreatedAt,
+  );
+  response.job.started_at = startedAt;
+  response.job.reservation_active = false;
+  return {
+    ...response,
+    admission: {
+      ...response.admission,
+      decision: "rejected_terminal_record",
+      reason: "unstarted_terminal_record_released",
+      client_action: "retry_now_key_is_free",
+      reservation_active: false,
+    },
+  };
+}
+
+function boundConditionalSuccessor(
+  studioJobId: string,
+  predecessorDgxJobId: string,
+  successorDgxJobId: string,
+  successorToken: string,
+  admissionRequest: AdmissionRequest,
+  outcome: "created" | "replayed" | "terminal" = "created",
+  state: QueueJobState = "accepted",
+): ConditionalSuccessorResult {
+  const job = boundDgxJob(
+    studioJobId,
+    successorDgxJobId,
+    state,
+    dgxJobIdentityFromAdmission(admissionRequest),
+  );
+  if (state === "queued" || ["completed", "failed", "cancelled", "rejected"].includes(state)) {
+    job.reservation_active = false;
+  }
+  const terminal = ["completed", "failed", "cancelled", "rejected"].includes(state);
+  const decision = state === "accepted" ? "accepted"
+    : state === "queued" ? "queued"
+      : "rejected_terminal_record";
+  const reason = terminal ? "unstarted_terminal_record_released"
+    : state === "accepted" ? "resources_available"
+      : "memory_pressure";
+  const clientAction = terminal ? "retry_now_key_is_free"
+    : state === "accepted" ? "proceed_to_start_fence"
+      : "poll_job_status";
+  job.decision = decision;
+  job.reason = reason;
+  job.client_action = clientAction;
+  if (terminal) {
+    job.finished_at = job.created_at;
+    job.updated_at = job.created_at;
+  }
+  return {
+    schema_version: "dgx-conditional-successor-result.v0",
+    successor_token: successorToken,
+    predecessor_job_id: predecessorDgxJobId,
+    successor_job_id: successorDgxJobId,
+    request_sha256: exactDgxRequestSha256(admissionRequest),
+    created: outcome === "created",
+    outcome,
+    job,
+    admission: {
+      decision,
+      reservation_active: state === "accepted",
+      ...(!terminal ? { job_id: successorDgxJobId } : {}),
+      reason,
+      client_action: clientAction,
+    },
+    terminal_evidence: null,
+  };
+}
+
+function reapedConditionalSuccessor(
+  studioJobId: string,
+  predecessorDgxJobId: string,
+  successorDgxJobId: string,
+  successorToken: string,
+  admissionRequest: AdmissionRequest,
+): ConditionalSuccessorResult {
+  const terminalAt = new Date().toISOString();
+  return {
+    schema_version: "dgx-conditional-successor-result.v0",
+    successor_token: successorToken,
+    predecessor_job_id: predecessorDgxJobId,
+    successor_job_id: successorDgxJobId,
+    request_sha256: exactDgxRequestSha256(admissionRequest),
+    created: false,
+    outcome: "reaped",
+    job: null,
+    admission: null,
+    terminal_evidence: {
+      schema_version: "dgx-conditional-successor-terminal.v0",
+      job_id: successorDgxJobId,
+      state: "failed",
+      created_at: terminalAt,
+      started_at: null,
+      finished_at: terminalAt,
+      reaped_at: terminalAt,
+      request_sha256: exactDgxRequestSha256(admissionRequest),
+      idempotency_key: dgxCaller(studioJobId),
+      decision: "rejected_terminal_record",
+      reason: "unstarted_terminal_record_released",
+      client_action: "retry_now_key_is_free",
+      record_sha256: createHash("sha256").update(successorDgxJobId).digest("hex"),
+    },
+  };
+}
+
 function queueListJobHint(
   studioJobId: string,
   dgxJobId: string,
@@ -344,6 +465,33 @@ function bindTestDgxLease(
 ): void {
   job.dgxJobId = dgxJobId;
   job.dgxLeaseReceipt = testDgxLeaseReceipt(studioJobId, dgxJobId, request);
+}
+
+function authorizeTestDgxSuccessor(
+  manager: JobManager,
+  job: Record<string, unknown>,
+): Record<string, unknown> {
+  const receipt = structuredClone(
+    job.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>,
+  );
+  const authorize = Reflect.get(manager, "authorizeDgxSuccessorSubmit") as (
+    runtimeJob: Record<string, unknown>,
+    predecessorReceipt: typeof receipt,
+    evidence: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  return authorize.call(manager, job, receipt, {
+    kind: "exact-bound-replay",
+    schemaVersion: "dgx-queue-submit.v0",
+    replayBoundJobId: receipt.dgxJobId,
+    idempotentReplay: true,
+    terminalState: "failed",
+    reservationActive: false,
+    admissionReservationActive: false,
+    startedAt: null,
+    admissionDecision: "rejected_terminal_record",
+    admissionReason: "unstarted_terminal_record_released",
+    clientAction: "retry_now_key_is_free",
+  });
 }
 
 function bindActiveTestDgxLease(
@@ -9564,6 +9712,1213 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     expect(manager.get(created.id)?.logs.join("\n")).toContain(
       "Queue-Replay bestätigte per 410-Beleg",
     );
+  });
+
+  it("persists the conditional token before network and consumes the exact created successor", async () => {
+    const path = await statePath();
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-created-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-created-successor");
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const replay = vi.fn(async (admissionRequest: AdmissionRequest) => retryNowDgxReplay(
+      studioJobId,
+      predecessorDgxJobId,
+      "cancelled",
+      admissionRequest,
+      predecessorReceipt.observedCreatedAt,
+      "",
+    ));
+    const successor = vi.fn(async (
+      predecessorJobId: string,
+      successorToken: string,
+      admissionRequest: AdmissionRequest,
+    ) => {
+      const persisted = JSON.parse(await readFile(path, "utf8")) as Array<Record<string, unknown>>;
+      expect(predecessorJobId).toBe(predecessorDgxJobId);
+      expect(successorToken).toMatch(/^[0-9a-f]{64}$/);
+      expect(canonicalJson(admissionRequest)).toBe(canonicalJson(predecessorReceipt.preparedAdmission));
+      expect(persisted[0]).toMatchObject({
+        dgxJobId: null,
+        dgxSubmitPending: true,
+        dgxSuccessorAuthorization: {
+          phase: "submit-pending",
+          successorToken,
+          predecessorDgxJobId,
+          requestSha256: exactDgxRequestSha256(admissionRequest),
+        },
+      });
+      return boundConditionalSuccessor(
+        studioJobId,
+        predecessorDgxJobId,
+        successorDgxJobId,
+        successorToken,
+        admissionRequest,
+      );
+    });
+    const manager = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition: vi.fn(),
+      },
+      null,
+      { submit: normalSubmit, replay, list, successor },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    runtimeJob.runProvenance = runProvenance();
+    expect((Reflect.get(manager, "classifyExecution") as (
+      job: Record<string, unknown>,
+      executionClass: "dgx",
+    ) => boolean).call(manager, runtimeJob, "dgx")).toBe(true);
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const predecessorReceipt = structuredClone(
+      runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>,
+    );
+    Reflect.set(manager, "waitForDelay", async () => true);
+    const startAccepted = vi.fn(async () => "started" as const);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueued = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: Record<string, unknown>,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueued.call(manager, runtimeJob, 0)).resolves.toBe("started");
+
+    expect(replay).toHaveBeenCalledOnce();
+    expect(successor).toHaveBeenCalledOnce();
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(startAccepted).toHaveBeenCalledOnce();
+    expect(runtimeJob).toMatchObject({
+      dgxJobId: successorDgxJobId,
+      dgxLeaseReceipt: {
+        dgxJobId: successorDgxJobId,
+        evidence: { kind: "conditional-successor", outcome: "created" },
+      },
+      dgxSuccessorAuthorization: {
+        generation: 1,
+        phase: "consumed",
+        predecessorDgxJobId,
+        successorDgxJobId,
+        successorAuthorityKind: "lease",
+        successorAuthorityReceipt: { dgxJobId: successorDgxJobId },
+      },
+    });
+  });
+
+  it.each([
+    "completed-predecessor",
+    "started-predecessor",
+    "malformed-started-at",
+    "active-job-reservation",
+    "missing-job-reservation",
+    "active-admission-reservation",
+    "missing-admission-reservation",
+    "wrong-decision",
+    "wrong-reason",
+    "wrong-client-action",
+  ] as const)("never authorizes a conditional successor for %s", async (fault) => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId(`conditional-negative-${fault}`);
+    const normalSubmit = vi.fn();
+    const successor = vi.fn();
+    const replay = vi.fn(async (admissionRequest: AdmissionRequest) => {
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      const response = retryNowDgxReplay(
+        studioJobId,
+        predecessorDgxJobId,
+        "failed",
+        admissionRequest,
+        receipt.observedCreatedAt,
+      );
+      if (fault === "completed-predecessor") response.job.state = "completed";
+      if (fault === "started-predecessor") response.job.started_at = new Date().toISOString();
+      if (fault === "malformed-started-at") response.job.started_at = "not-a-timestamp";
+      if (fault === "active-job-reservation") response.job.reservation_active = true;
+      if (fault === "missing-job-reservation") delete response.job.reservation_active;
+      if (fault === "active-admission-reservation") response.admission.reservation_active = true;
+      if (fault === "missing-admission-reservation") {
+        delete (response.admission as { reservation_active?: boolean }).reservation_active;
+      }
+      if (fault === "wrong-decision") response.admission.decision = "rejected";
+      if (fault === "wrong-reason") response.admission.reason = "another_reason";
+      if (fault === "wrong-client-action") response.admission.client_action = "do_not_retry";
+      return response;
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition: vi.fn(),
+      },
+      null,
+      { submit: normalSubmit, replay, successor },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    Reflect.set(manager, "waitForDelay", async () => true);
+    const waitForQueued = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: Record<string, unknown>,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueued.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(replay).toHaveBeenCalledOnce();
+    expect(successor).not.toHaveBeenCalled();
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(runtimeJob).not.toHaveProperty("dgxSuccessorAuthorization");
+  });
+
+  it("accepts an exact queued positive projection with both reservations false", async () => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-queued-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-queued-successor");
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const successor = vi.fn(async (
+      _predecessor: string,
+      token: string,
+      admissionRequest: AdmissionRequest,
+    ) => boundConditionalSuccessor(
+      studioJobId,
+      predecessorDgxJobId,
+      successorDgxJobId,
+      token,
+      admissionRequest,
+      "created",
+      "queued",
+    ));
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      { submit: normalSubmit, list, successor },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    await expect(advance.call(manager, runtimeJob, authorization)).resolves.toMatchObject({
+      kind: "positive",
+      remote: {
+        job_id: successorDgxJobId,
+        state: "queued",
+        decision: "queued",
+        reason: "memory_pressure",
+        client_action: "poll_job_status",
+        reservation_active: false,
+      },
+    });
+
+    expect(successor).toHaveBeenCalledOnce();
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(runtimeJob).toMatchObject({
+      dgxJobId: successorDgxJobId,
+      dgxLeaseReceipt: { observedState: "queued" },
+      dgxSuccessorAuthorization: { phase: "consumed", successorDgxJobId },
+    });
+  });
+
+  it.each([null, 408, 425, 429, 500, 503] as const)(
+    "retries an ambiguous conditional response (HTTP %s) with the identical durable token",
+    async (statusCode) => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId(`conditional-ambiguous-${statusCode}-predecessor`);
+    const successorDgxJobId = testDgxJobId(`conditional-ambiguous-${statusCode}-successor`);
+    const tokens: string[] = [];
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const successor = vi.fn(async (
+      _predecessorJobId: string,
+      successorToken: string,
+      admissionRequest: AdmissionRequest,
+    ) => {
+      tokens.push(successorToken);
+      if (tokens.length === 1) {
+        if (statusCode === null) throw new Error("synthetic lost response after server commit");
+        throw new RuntimeApiError(
+          "synthetic HTTP response after durable server commit",
+          statusCode,
+          { error: "post_commit_failure" },
+        );
+      }
+      return boundConditionalSuccessor(
+        studioJobId,
+        predecessorDgxJobId,
+        successorDgxJobId,
+        successorToken,
+        admissionRequest,
+        "replayed",
+      );
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      { submit: normalSubmit, list, successor },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    Reflect.set(manager, "waitForDelay", async () => true);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    await expect(advance.call(manager, runtimeJob, authorization)).resolves.toMatchObject({
+      kind: "positive",
+      remote: { job_id: successorDgxJobId },
+    });
+
+    expect(successor).toHaveBeenCalledTimes(2);
+    expect(tokens).toHaveLength(2);
+    expect(tokens[0]).toBe(tokens[1]);
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(runtimeJob).toMatchObject({
+      dgxSuccessorAuthorization: {
+        phase: "consumed",
+        successorToken: tokens[0],
+        successorDgxJobId,
+      },
+    });
+    },
+  );
+
+  it("stops a persistent ambiguous 5xx loop cleanly when the Studio job is cancelled", async () => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-persistent-5xx-predecessor");
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    let releaseRequest!: () => void;
+    let requestEntered!: () => void;
+    const entered = new Promise<void>((resolvePromise) => {
+      requestEntered = resolvePromise;
+    });
+    const release = new Promise<void>((resolvePromise) => {
+      releaseRequest = resolvePromise;
+    });
+    const successor = vi.fn(async () => {
+      requestEntered();
+      await release;
+      throw new RuntimeApiError(
+        "persistent post-commit server failure",
+        500,
+        { error: "post_commit_failure" },
+      );
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      { submit: normalSubmit, list, successor },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    const pending = advance.call(manager, runtimeJob, authorization);
+    await entered;
+    expect(manager.cancel(created.id)).toMatchObject({ status: "cancelled" });
+    releaseRequest();
+
+    await expect(pending).resolves.toMatchObject({ kind: "ambiguous" });
+    expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+    expect(successor).toHaveBeenCalledOnce();
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(runtimeJob).toMatchObject({
+      status: "cancelled",
+      dgxSubmitPending: true,
+      dgxSuccessorAuthorization: {
+        phase: "submit-pending",
+        successorToken: authorization.successorToken,
+      },
+    });
+    await manager.shutdown(100);
+  });
+
+  it("recovers a crash before network by calling only the conditional endpoint with the persisted token", async () => {
+    const path = await statePath();
+    const first = new JobManager(path, false);
+    const created = first.create(validRequest());
+    const predecessorDgxJobId = testDgxJobId("conditional-before-crash-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-before-crash-successor");
+    const firstJob = (Reflect.get(first, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    firstJob.runProvenance = runProvenance();
+    expect((Reflect.get(first, "classifyExecution") as (
+      job: Record<string, unknown>,
+      executionClass: "dgx",
+    ) => boolean).call(first, firstJob, "dgx")).toBe(true);
+    bindTestDgxLease(firstJob, created.id, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(first, firstJob);
+    const token = authorization.successorToken as string;
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const successor = vi.fn(async (
+      predecessorJobId: string,
+      successorToken: string,
+      admissionRequest: AdmissionRequest,
+    ) => {
+      expect(predecessorJobId).toBe(predecessorDgxJobId);
+      expect(successorToken).toBe(token);
+      return boundConditionalSuccessor(
+        created.id,
+        predecessorDgxJobId,
+        successorDgxJobId,
+        successorToken,
+        admissionRequest,
+      );
+    });
+    const restarted = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      { submit: normalSubmit, list, successor },
+    );
+    const restored = (Reflect.get(restarted, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const reconcile = Reflect.get(restarted, "reconcilePendingDgxSubmit") as (
+      job: Record<string, unknown>,
+    ) => Promise<QueueJobSummary | null | undefined>;
+
+    await expect(reconcile.call(restarted, restored)).resolves.toMatchObject({
+      job_id: successorDgxJobId,
+    });
+
+    expect(successor).toHaveBeenCalledOnce();
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(restored).toMatchObject({
+      dgxJobId: successorDgxJobId,
+      dgxSuccessorAuthorization: { phase: "consumed", successorToken: token },
+    });
+  });
+
+  it("recovers a crash after an ambiguous server commit by replaying the same endpoint and token", async () => {
+    const path = await statePath();
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-after-crash-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-after-crash-successor");
+    const firstTokens: string[] = [];
+    const first = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      {
+        submit: vi.fn(),
+        successor: vi.fn(async (_predecessor, token) => {
+          firstTokens.push(token);
+          throw new Error("socket lost after durable server ledger commit");
+        }),
+      },
+    );
+    const created = first.create(validRequest());
+    studioJobId = created.id;
+    const firstJob = (Reflect.get(first, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    firstJob.runProvenance = runProvenance();
+    expect((Reflect.get(first, "classifyExecution") as (
+      job: Record<string, unknown>,
+      executionClass: "dgx",
+    ) => boolean).call(first, firstJob, "dgx")).toBe(true);
+    bindTestDgxLease(firstJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(first, firstJob);
+    Reflect.set(first, "waitForDelay", async () => false);
+    const advance = Reflect.get(first, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+    await expect(advance.call(first, firstJob, authorization)).resolves.toMatchObject({
+      kind: "ambiguous",
+    });
+
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const secondTokens: string[] = [];
+    const restarted = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      {
+        submit: normalSubmit,
+        list,
+        successor: vi.fn(async (_predecessor, token, admissionRequest) => {
+          secondTokens.push(token);
+          return boundConditionalSuccessor(
+            studioJobId,
+            predecessorDgxJobId,
+            successorDgxJobId,
+            token,
+            admissionRequest,
+            "replayed",
+          );
+        }),
+      },
+    );
+    const restored = (Reflect.get(restarted, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const reconcile = Reflect.get(restarted, "reconcilePendingDgxSubmit") as (
+      job: Record<string, unknown>,
+    ) => Promise<QueueJobSummary | null | undefined>;
+
+    await expect(reconcile.call(restarted, restored)).resolves.toMatchObject({
+      job_id: successorDgxJobId,
+    });
+
+    expect(firstTokens).toEqual([authorization.successorToken]);
+    expect(secondTokens).toEqual(firstTokens);
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("serializes parallel observers behind one conditional successor request", async () => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-parallel-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-parallel-successor");
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolvePromise) => {
+      entered = resolvePromise;
+    });
+    const barrier = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    const successor = vi.fn(async (
+      _predecessor: string,
+      token: string,
+      admissionRequest: AdmissionRequest,
+    ) => {
+      entered();
+      await barrier;
+      return boundConditionalSuccessor(
+        studioJobId,
+        predecessorDgxJobId,
+        successorDgxJobId,
+        token,
+        admissionRequest,
+      );
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      { submit: vi.fn(), successor },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    const leader = advance.call(manager, runtimeJob, authorization);
+    await enteredPromise;
+    const follower = advance.call(manager, runtimeJob);
+    release();
+    const outcomes = await Promise.all([leader, follower]);
+
+    expect(successor).toHaveBeenCalledOnce();
+    expect(outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "positive" }),
+      expect.objectContaining({ kind: "follower" }),
+    ]));
+    expect(runtimeJob).toMatchObject({
+      dgxJobId: successorDgxJobId,
+      dgxSuccessorAuthorization: { phase: "consumed", successorDgxJobId },
+    });
+  });
+
+  it("consumes an initially created terminal result with an exact admission job id", async () => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-created-terminal-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-created-terminal-successor");
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      {
+        submit: normalSubmit,
+        list,
+        successor: vi.fn(async (_predecessor, token, admissionRequest) => {
+          const result = boundConditionalSuccessor(
+            studioJobId,
+            predecessorDgxJobId,
+            successorDgxJobId,
+            token,
+            admissionRequest,
+            "created",
+            "failed",
+          );
+          result.admission!.job_id = successorDgxJobId;
+          return result;
+        }),
+      },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const startAccepted = vi.fn();
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    await expect(advance.call(manager, runtimeJob, authorization)).resolves.toMatchObject({
+      kind: "terminal",
+    });
+
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob).toMatchObject({
+      status: "failed",
+      dgxJobId: successorDgxJobId,
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: {
+        dgxJobId: successorDgxJobId,
+        evidence: { kind: "conditional-successor", outcome: "created" },
+      },
+      dgxSuccessorAuthorization: {
+        phase: "consumed",
+        successorAuthorityKind: "terminal",
+        successorAuthorityReceipt: { dgxJobId: successorDgxJobId },
+      },
+    });
+  });
+
+  it("consumes a replayed terminal result when admission omits job_id", async () => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-terminal-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-terminal-successor");
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      {
+        submit: vi.fn(),
+        successor: vi.fn(async (_predecessor, token, admissionRequest) => {
+          const result = boundConditionalSuccessor(
+            studioJobId,
+            predecessorDgxJobId,
+            successorDgxJobId,
+            token,
+            admissionRequest,
+            "terminal",
+            "failed",
+          );
+          result.job!.started_at = result.job!.created_at;
+          return result;
+        }),
+      },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    await expect(advance.call(manager, runtimeJob, authorization)).resolves.toMatchObject({
+      kind: "terminal",
+    });
+
+    expect(runtimeJob).toMatchObject({
+      status: "failed",
+      dgxJobId: successorDgxJobId,
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: {
+        dgxJobId: successorDgxJobId,
+        evidence: { kind: "conditional-successor", outcome: "terminal" },
+      },
+      dgxSuccessorAuthorization: {
+        phase: "consumed",
+        successorAuthorityKind: "terminal",
+        successorAuthorityReceipt: { dgxJobId: successorDgxJobId },
+      },
+    });
+  });
+
+  it("accepts only an exact 410 reaped tombstone bound to token, predecessor, request and successor", async () => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-reaped-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-reaped-successor");
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      {
+        submit: vi.fn(),
+        successor: vi.fn(async (_predecessor, token, admissionRequest) => {
+          throw new RuntimeApiError(
+            "successor reaped",
+            410,
+            reapedConditionalSuccessor(
+              studioJobId,
+              predecessorDgxJobId,
+              successorDgxJobId,
+              token,
+              admissionRequest,
+            ),
+          );
+        }),
+      },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+
+    await expect(advance.call(manager, runtimeJob, authorization)).resolves.toMatchObject({
+      kind: "terminal",
+    });
+
+    expect(runtimeJob).toMatchObject({
+      dgxJobId: successorDgxJobId,
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: {
+        remoteTerminalState: "failed",
+        evidence: {
+          kind: "conditional-successor-reaped",
+          successorToken: authorization.successorToken,
+          predecessorDgxJobId,
+          requestSha256: authorization.requestSha256,
+        },
+      },
+    });
+  });
+
+  it.each(["retained", "reaped"] as const)(
+    "accepts high-resolution same-second %s successor evidence created after authorization",
+    async (kind) => {
+      const path = await statePath();
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-28T12:00:00.100Z"));
+        let studioJobId = "";
+        const predecessorDgxJobId = testDgxJobId(`conditional-same-second-${kind}-predecessor`);
+        const successorDgxJobId = testDgxJobId(`conditional-same-second-${kind}-successor`);
+        const successor = vi.fn(async (
+          _predecessor: string,
+          token: string,
+          admissionRequest: AdmissionRequest,
+        ) => {
+          vi.setSystemTime(new Date("2026-08-28T12:00:00.200Z"));
+          if (kind === "reaped") {
+            throw new RuntimeApiError(
+              "same-second reaped successor",
+              410,
+              reapedConditionalSuccessor(
+                studioJobId,
+                predecessorDgxJobId,
+                successorDgxJobId,
+                token,
+                admissionRequest,
+              ),
+            );
+          }
+          return boundConditionalSuccessor(
+            studioJobId,
+            predecessorDgxJobId,
+            successorDgxJobId,
+            token,
+            admissionRequest,
+          );
+        });
+        const manager = new JobManager(
+          path,
+          false,
+          null,
+          undefined,
+          undefined,
+          null,
+          { submit: vi.fn(), successor },
+        );
+        const created = manager.create(validRequest());
+        studioJobId = created.id;
+        const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+          .get(created.id)!;
+        bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+        const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+        expect(authorization.authorizedAt).toBe("2026-08-28T12:00:00.100Z");
+        const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+          job: Record<string, unknown>,
+          freshlyAuthorized?: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+
+        await expect(advance.call(manager, runtimeJob, authorization)).resolves.toMatchObject({
+          kind: kind === "retained" ? "positive" : "terminal",
+        });
+
+        expect(successor).toHaveBeenCalledOnce();
+        if (kind === "retained") {
+          expect(runtimeJob).toMatchObject({
+            dgxLeaseReceipt: { observedCreatedAt: "2026-08-28T12:00:00.200Z" },
+          });
+        } else {
+          expect(runtimeJob).toMatchObject({
+            dgxTerminalReceipt: {
+              evidence: { createdAt: "2026-08-28T12:00:00.200Z" },
+            },
+          });
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    "missing-operation",
+    "http-404",
+    "http-409",
+    "wrong-token",
+    "wrong-request-digest",
+    "wrong-successor",
+    "missing-admission-job-id",
+    "wrong-admission-job-id",
+    "positive-job-decision-mismatch",
+    "positive-job-reason-mismatch",
+    "positive-job-client-action-mismatch",
+    "accepted-reservation-false",
+    "accepted-admission-reservation-false",
+    "queued-job-reservation-active",
+    "queued-admission-reservation-active",
+    "offsetless-created-at",
+    "rfc1123-created-at",
+    "truncated-retained-created-at",
+    "empty-terminal-decision",
+    "empty-terminal-reason",
+    "empty-terminal-client-action",
+    "terminal-job-reservation-active",
+    "terminal-admission-reservation-active",
+    "terminal-wrong-admission-job-id",
+    "terminal-job-decision-mismatch",
+    "terminal-job-reason-mismatch",
+    "terminal-job-client-action-mismatch",
+    "terminal-offsetless-created-at",
+    "terminal-rfc1123-created-at",
+    "terminal-offsetless-started-at",
+    "terminal-rfc1123-started-at",
+    "terminal-offsetless-finished-at",
+    "terminal-rfc1123-finished-at",
+    "terminal-offsetless-updated-at",
+    "terminal-rfc1123-updated-at",
+    "terminal-malformed-updated-at",
+    "terminal-missing-finished-at",
+    "terminal-created-before-authorization",
+    "terminal-started-before-created",
+    "terminal-started-after-finished",
+    "terminal-finished-before-created",
+    "terminal-updated-before-finished",
+    "terminal-future-updated-at",
+    "extra-result-field",
+    "malformed-410",
+    "truncated-reaped-created-at",
+  ] as const)("fails closed without normal submit fallback for %s", async (fault) => {
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId(`conditional-closed-${fault}-predecessor`);
+    const successorDgxJobId = testDgxJobId(`conditional-closed-${fault}-successor`);
+    const normalSubmit = vi.fn();
+    const list = vi.fn();
+    const successor = vi.fn(async (
+      _predecessor: string,
+      token: string,
+      admissionRequest: AdmissionRequest,
+    ) => {
+      if (fault === "http-404") throw new RuntimeApiError("missing operation", 404, { error: "not_found" });
+      if (fault === "http-409") {
+        throw new RuntimeApiError("conflict", 409, {
+          schema_version: "dgx-conditional-successor-conflict.v0",
+          error: "conditional_successor_conflict",
+        });
+      }
+      const terminalFault = fault.startsWith("terminal-")
+        || fault.startsWith("empty-terminal-");
+      const responseState: QueueJobState = terminalFault
+        ? "failed"
+        : fault.startsWith("queued-") ? "queued" : "accepted";
+      const result = boundConditionalSuccessor(
+        studioJobId,
+        predecessorDgxJobId,
+        successorDgxJobId,
+        token,
+        admissionRequest,
+        terminalFault ? "terminal" : "created",
+        responseState,
+      );
+      if (fault === "wrong-token") result.successor_token = token.startsWith("0")
+        ? `1${token.slice(1)}`
+        : `0${token.slice(1)}`;
+      if (fault === "wrong-request-digest") result.request_sha256 = "0".repeat(64);
+      if (fault === "wrong-successor") result.successor_job_id = predecessorDgxJobId;
+      if (fault === "missing-admission-job-id" && result.admission) {
+        delete result.admission.job_id;
+      }
+      if (fault === "wrong-admission-job-id" && result.admission) {
+        result.admission.job_id = predecessorDgxJobId;
+      }
+      if (fault === "positive-job-decision-mismatch" && result.job) {
+        result.job.decision = "queued";
+      }
+      if (fault === "positive-job-reason-mismatch" && result.job) {
+        result.job.reason = "different_reason";
+      }
+      if (fault === "positive-job-client-action-mismatch" && result.job) {
+        result.job.client_action = "different_action";
+      }
+      if (fault === "accepted-reservation-false" && result.job && result.admission) {
+        result.job.reservation_active = false;
+        result.admission.reservation_active = false;
+      }
+      if (fault === "accepted-admission-reservation-false" && result.admission) {
+        result.admission.reservation_active = false;
+      }
+      if (fault === "queued-job-reservation-active" && result.job) {
+        result.job.reservation_active = true;
+      }
+      if (fault === "queued-admission-reservation-active" && result.admission) {
+        result.admission.reservation_active = true;
+      }
+      if (fault === "offsetless-created-at" && result.job) {
+        result.job.created_at = new Date().toISOString().replace(/Z$/, "");
+      }
+      if (fault === "rfc1123-created-at" && result.job) {
+        result.job.created_at = new Date().toUTCString();
+      }
+      if (fault === "truncated-retained-created-at" && result.job) {
+        const authorizedAt = (runtimeJob.dgxSuccessorAuthorization as { authorizedAt: string })
+          .authorizedAt;
+        const authorizedAtMs = Date.parse(authorizedAt);
+        const truncatedMs = Math.floor(authorizedAtMs / 1_000) * 1_000;
+        result.job.created_at = new Date(
+          truncatedMs < authorizedAtMs ? truncatedMs : truncatedMs - 1_000,
+        ).toISOString().replace(".000Z", "Z");
+      }
+      if (fault === "empty-terminal-decision" && result.job && result.admission) {
+        result.job.decision = "";
+        result.admission.decision = "";
+      }
+      if (fault === "empty-terminal-reason" && result.job && result.admission) {
+        result.job.reason = "";
+        result.admission.reason = "";
+      }
+      if (fault === "empty-terminal-client-action" && result.job && result.admission) {
+        result.job.client_action = "";
+        result.admission.client_action = "";
+      }
+      if (fault === "terminal-job-reservation-active" && result.job) {
+        result.job.reservation_active = true;
+      }
+      if (fault === "terminal-admission-reservation-active" && result.admission) {
+        result.admission.reservation_active = true;
+      }
+      if (fault === "terminal-wrong-admission-job-id" && result.admission) {
+        result.admission.job_id = predecessorDgxJobId;
+      }
+      if (fault === "terminal-job-decision-mismatch" && result.job) {
+        result.job.decision = "different_terminal_decision";
+      }
+      if (fault === "terminal-job-reason-mismatch" && result.job) {
+        result.job.reason = "different_terminal_reason";
+      }
+      if (fault === "terminal-job-client-action-mismatch" && result.job) {
+        result.job.client_action = "different_terminal_action";
+      }
+      if ((fault === "terminal-offsetless-created-at"
+          || fault === "terminal-rfc1123-created-at") && result.job) {
+        const createdAt = new Date(result.job.created_at!);
+        result.job.created_at = fault === "terminal-offsetless-created-at"
+          ? createdAt.toISOString().replace(/Z$/, "")
+          : createdAt.toUTCString();
+      }
+      if ((fault === "terminal-offsetless-started-at"
+          || fault === "terminal-rfc1123-started-at") && result.job) {
+        const startedAt = new Date(result.job.created_at!);
+        result.job.started_at = fault === "terminal-offsetless-started-at"
+          ? startedAt.toISOString().replace(/Z$/, "")
+          : startedAt.toUTCString();
+      }
+      if ((fault === "terminal-offsetless-finished-at"
+          || fault === "terminal-rfc1123-finished-at") && result.job) {
+        const finishedAt = new Date(result.job.finished_at!);
+        result.job.finished_at = fault === "terminal-offsetless-finished-at"
+          ? finishedAt.toISOString().replace(/Z$/, "")
+          : finishedAt.toUTCString();
+      }
+      if ((fault === "terminal-offsetless-updated-at"
+          || fault === "terminal-rfc1123-updated-at") && result.job) {
+        const updatedAt = new Date(result.job.updated_at!);
+        result.job.updated_at = fault === "terminal-offsetless-updated-at"
+          ? updatedAt.toISOString().replace(/Z$/, "")
+          : updatedAt.toUTCString();
+      }
+      if (fault === "terminal-malformed-updated-at" && result.job) {
+        result.job.updated_at = "not-a-timestamp";
+      }
+      if (fault === "terminal-missing-finished-at" && result.job) {
+        delete result.job.finished_at;
+      }
+      if (fault === "terminal-created-before-authorization" && result.job) {
+        const authorizedAt = (runtimeJob.dgxSuccessorAuthorization as { authorizedAt: string })
+          .authorizedAt;
+        result.job.created_at = new Date(Date.parse(authorizedAt) - 1).toISOString();
+      }
+      if (fault === "terminal-started-before-created" && result.job) {
+        result.job.started_at = new Date(Date.parse(result.job.created_at!) - 1).toISOString();
+      }
+      if (fault === "terminal-started-after-finished" && result.job) {
+        result.job.started_at = new Date(Date.parse(result.job.finished_at!) + 1).toISOString();
+      }
+      if (fault === "terminal-finished-before-created" && result.job) {
+        result.job.finished_at = new Date(Date.parse(result.job.created_at!) - 1).toISOString();
+      }
+      if (fault === "terminal-updated-before-finished" && result.job) {
+        result.job.updated_at = new Date(Date.parse(result.job.finished_at!) - 1).toISOString();
+      }
+      if (fault === "terminal-future-updated-at" && result.job) {
+        result.job.updated_at = new Date(Date.now() + 60_000).toISOString();
+      }
+      if (fault === "extra-result-field") {
+        return Object.assign(result, { additive_unbound_field: true });
+      }
+      if (fault === "malformed-410") {
+        throw new RuntimeApiError(
+          "malformed reaped result",
+          410,
+          Object.assign(reapedConditionalSuccessor(
+            studioJobId,
+            predecessorDgxJobId,
+            successorDgxJobId,
+            token,
+            admissionRequest,
+          ), { additive_unbound_field: true }),
+        );
+      }
+      if (fault === "truncated-reaped-created-at") {
+        const reaped = reapedConditionalSuccessor(
+          studioJobId,
+          predecessorDgxJobId,
+          successorDgxJobId,
+          token,
+          admissionRequest,
+        );
+        const authorizedAt = (runtimeJob.dgxSuccessorAuthorization as { authorizedAt: string })
+          .authorizedAt;
+        const authorizedAtMs = Date.parse(authorizedAt);
+        const truncatedMs = Math.floor(authorizedAtMs / 1_000) * 1_000;
+        reaped.terminal_evidence!.created_at = new Date(
+          truncatedMs < authorizedAtMs ? truncatedMs : truncatedMs - 1_000,
+        ).toISOString().replace(".000Z", "Z");
+        throw new RuntimeApiError("truncated reaped timestamp", 410, reaped);
+      }
+      return result;
+    });
+    const operations = fault === "missing-operation"
+      ? { submit: normalSubmit, list }
+      : { submit: normalSubmit, list, successor };
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      operations,
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    authorizeTestDgxSuccessor(manager, runtimeJob);
+    const startAccepted = vi.fn();
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const reconcile = Reflect.get(manager, "reconcilePendingDgxSubmit") as (
+      job: Record<string, unknown>,
+    ) => Promise<QueueJobSummary | null | undefined>;
+
+    await expect(reconcile.call(manager, runtimeJob)).resolves.toBeUndefined();
+
+    expect(manager.persistenceHealth()).toMatchObject({ status: "hold", restartRequired: true });
+    expect(normalSubmit).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    if (fault === "missing-operation") expect(successor).not.toHaveBeenCalled();
+    else expect(successor).toHaveBeenCalledOnce();
+    expect(runtimeJob).toMatchObject({
+      dgxJobId: null,
+      dgxSubmitPending: true,
+      dgxSuccessorAuthorization: { phase: "submit-pending" },
+    });
+    expect(runtimeJob).not.toHaveProperty("dgxLeaseReceipt");
+    expect(runtimeJob).not.toHaveProperty("dgxTerminalReceipt");
+  });
+
+  it("restores consumed successor lineage after the lease later terminalizes normally", async () => {
+    const path = await statePath();
+    let studioJobId = "";
+    const predecessorDgxJobId = testDgxJobId("conditional-lineage-predecessor");
+    const successorDgxJobId = testDgxJobId("conditional-lineage-successor");
+    const manager = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      {
+        submit: vi.fn(),
+        successor: vi.fn(async (_predecessor, token, admissionRequest) =>
+          boundConditionalSuccessor(
+            studioJobId,
+            predecessorDgxJobId,
+            successorDgxJobId,
+            token,
+            admissionRequest,
+          )),
+      },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    runtimeJob.runProvenance = runProvenance();
+    expect((Reflect.get(manager, "classifyExecution") as (
+      job: Record<string, unknown>,
+      executionClass: "dgx",
+    ) => boolean).call(manager, runtimeJob, "dgx")).toBe(true);
+    bindTestDgxLease(runtimeJob, studioJobId, predecessorDgxJobId);
+    const authorization = authorizeTestDgxSuccessor(manager, runtimeJob);
+    const advance = Reflect.get(manager, "advanceDgxSuccessorSubmit") as (
+      job: Record<string, unknown>,
+      freshlyAuthorized?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+    await advance.call(manager, runtimeJob, authorization);
+    runtimeJob.status = "failed";
+    runtimeJob.finishedAt = new Date().toISOString();
+    const prepareTerminal = Reflect.get(manager, "prepareDgxTerminalDelivery") as (
+      job: Record<string, unknown>,
+      state: "failed",
+      metadata: Record<string, unknown>,
+    ) => void;
+    prepareTerminal.call(manager, runtimeJob, "failed", { current_step: "test terminalization" });
+    const commitTerminal = Reflect.get(manager, "commitDgxTerminalReceipt") as (
+      job: Record<string, unknown>,
+      observation: Record<string, unknown>,
+      detail: string,
+    ) => void;
+    commitTerminal.call(manager, runtimeJob, {
+      state: "failed",
+      evidence: {
+        kind: "job-read",
+        schemaVersion: "dgx-job-read.v0",
+        requestedBy: dgxCaller(studioJobId),
+        sourceApp: "LTX Studio",
+        idempotencyKey: dgxCaller(studioJobId),
+      },
+    }, "normal terminal poll after successor start");
+
+    const restarted = new JobManager(path, false);
+
+    expect(restarted.persistenceHealth()).toMatchObject({ status: "ok" });
+    const restored = (Reflect.get(restarted, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    expect(restored).toMatchObject({
+      status: "failed",
+      dgxJobId: successorDgxJobId,
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: { dgxJobId: successorDgxJobId },
+      dgxSuccessorAuthorization: {
+        phase: "consumed",
+        successorAuthorityKind: "lease",
+        successorAuthorityReceipt: { dgxJobId: successorDgxJobId },
+      },
+    });
   });
 
   it("persists a retained exact terminal replay as replay-bound evidence without PATCH or HOLD", async () => {

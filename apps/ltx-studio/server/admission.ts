@@ -61,6 +61,8 @@ export type AdmissionDecision = {
   decision: string;
   reason?: string;
   client_action?: string;
+  /** Canonical retained-terminal replay proof that no reservation remains. */
+  reservation_active?: boolean;
   message_for_humans?: string;
   app_message?: string;
   retry_after_seconds?: number | null;
@@ -116,6 +118,8 @@ export type QueueJobSummary = {
   exclusive_runtime?: string;
   created_at?: string;
   started_at?: string | null;
+  finished_at?: string | null;
+  updated_at?: string;
   /**
    * Public scheduler capabilities projected by the current Runtime API.
    * They remain optional at the transport boundary so an older/drifted
@@ -232,6 +236,35 @@ export type QueueSubmitResponse = {
   schema_version: "dgx-queue-submit.v0";
   job: QueueJobSummary;
   admission: AdmissionDecision;
+};
+
+export type ConditionalSuccessorTerminalEvidence = {
+  schema_version: "dgx-conditional-successor-terminal.v0";
+  job_id: string;
+  state: Extract<QueueJobState, "completed" | "failed" | "cancelled" | "rejected">;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string;
+  reaped_at: string;
+  request_sha256: string;
+  idempotency_key: string;
+  decision: string;
+  reason: string;
+  client_action: string;
+  record_sha256: string;
+};
+
+export type ConditionalSuccessorResult = {
+  schema_version: "dgx-conditional-successor-result.v0";
+  successor_token: string;
+  predecessor_job_id: string;
+  successor_job_id: string;
+  request_sha256: string;
+  created: boolean;
+  outcome: "created" | "replayed" | "terminal" | "reaped";
+  job: QueueJobSummary | null;
+  admission: AdmissionDecision | null;
+  terminal_evidence: ConditionalSuccessorTerminalEvidence | null;
 };
 
 export type QueueJobReadResponse = {
@@ -554,6 +587,35 @@ export async function replayPreparedQueueAdmission(
     `/dgx/queue/replay/${encodeURIComponent(expectedDgxJobId)}`,
     admissionRequest,
     { timeoutMs: 25_000, signal },
+  );
+}
+
+/**
+ * Atomically creates or observes the one token-bound successor of an exact
+ * never-started terminal predecessor. The caller must durably persist the
+ * token before invoking this transport and must reuse it for every retry.
+ */
+export async function submitConditionalQueueSuccessor(
+  predecessorJobId: string,
+  successorToken: string,
+  admissionRequest: AdmissionRequest,
+  signal?: AbortSignal,
+): Promise<ConditionalSuccessorResult> {
+  if (!isDgxJobId(predecessorJobId)) {
+    throw new Error("DGX-Conditional-Successor verlangt eine gültige Vorgänger-ID.");
+  }
+  if (!/^[0-9a-f]{64}$/.test(successorToken)) {
+    throw new Error("DGX-Conditional-Successor verlangt einen dauerhaften lowercase-64hex Token.");
+  }
+  return runtimeApiJson(
+    "POST",
+    `/dgx/queue/successor/${encodeURIComponent(predecessorJobId)}`,
+    {
+      schema_version: "dgx-conditional-successor-submit.v0",
+      successor_token: successorToken,
+      request: admissionRequest,
+    },
+    { timeoutMs: 120_000, signal },
   );
 }
 
