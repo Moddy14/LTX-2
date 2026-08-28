@@ -306,7 +306,7 @@ export const PIPELINES: readonly PipelineDefinition[] = [
     defaultHeight: 704,
     defaultWidth: 1280,
     defaultSteps: 30,
-    needsNegativePrompt: true,
+    needsNegativePrompt: false,
     needsSpatialUpscaler: true,
     needsDistilledLora: true,
   },
@@ -1465,6 +1465,54 @@ export function createPreferredRequest(mode: PipelineMode = "distilled"): Genera
   };
 }
 
+const IA2V_INERT_GUIDANCE_FIELDS = [
+  "cfgScale",
+  "stgScale",
+  "rescaleScale",
+  "modalityScale",
+  "skipStep",
+  "stgBlocks",
+] as const;
+
+export const IA2V_EDITOR_NORMALIZATION_MESSAGE =
+  "Alte IA2V-Einstellungen wurden für den offiziellen SimpleDenoiser-Pfad bereinigt; "
+  + "wirkungsloser Negativprompt bzw. Guidance-Werte wurden nicht in die Editierkopie übernommen.";
+
+export function ia2vEditorNormalizationPaths(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  if (record.mode !== "image-audio-to-video") return [];
+  const defaults = createDefaultRequest("image-audio-to-video");
+  const paths: string[] = [];
+  if (typeof record.negativePrompt === "string" && record.negativePrompt.trim()) {
+    paths.push("negativePrompt");
+  }
+  for (const [group, expected] of [
+    ["videoGuidance", defaults.videoGuidance],
+    ["audioGuidance", defaults.audioGuidance],
+  ] as const) {
+    const storedGuidance = record[group];
+    if (!storedGuidance || typeof storedGuidance !== "object" || Array.isArray(storedGuidance)) continue;
+    const storedRecord = storedGuidance as Record<string, unknown>;
+    for (const field of IA2V_INERT_GUIDANCE_FIELDS) {
+      if (
+        Object.hasOwn(storedRecord, field)
+        && JSON.stringify(storedRecord[field]) !== JSON.stringify(expected[field])
+      ) {
+        paths.push(`${group}.${field}`);
+      }
+    }
+  }
+  return paths;
+}
+
+export function ia2vEditorNormalizationWarnings(value: unknown): string[] {
+  const paths = ia2vEditorNormalizationPaths(value);
+  return paths.length > 0
+    ? [`${IA2V_EDITOR_NORMALIZATION_MESSAGE} Bereinigt: ${paths.join(", ")}.`]
+    : [];
+}
+
 export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMode = "two-stage"): GenerationRequest {
   const storedRecord = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -1692,6 +1740,25 @@ export function mergeGenerationRequest(value: unknown, fallbackMode: PipelineMod
     retake: { ...defaults.retake, ...stored.retake },
     continuity: { ...defaults.continuity, ...stored.continuity },
     longClipAcknowledged: stored.longClipAcknowledged ?? mergedDuration > 10,
+  };
+}
+
+/**
+ * Builds a mutable editor copy without changing the canonical migration used
+ * by server-side job/output/project recovery and historical hash authority.
+ */
+export function mergeEditableGenerationRequest(
+  value: unknown,
+  fallbackMode: PipelineMode = "two-stage",
+): GenerationRequest {
+  const merged = mergeGenerationRequest(value, fallbackMode);
+  if (merged.mode !== "image-audio-to-video") return merged;
+  const defaults = createDefaultRequest("image-audio-to-video");
+  return {
+    ...merged,
+    negativePrompt: "",
+    videoGuidance: defaults.videoGuidance,
+    audioGuidance: defaults.audioGuidance,
   };
 }
 

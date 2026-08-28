@@ -4,6 +4,7 @@ import {
   defaultLipForcingRawOutputProfile,
   experimentalLipForcingRawOutputProfile,
   generationRequestSchema,
+  hasDialogueIntent,
   isAudioConditionedMode,
   outputNameSchema,
   type GenerationRequest,
@@ -61,6 +62,52 @@ export const experimentCandidateSchema = z.discriminatedUnion("variable", [
 export type ExperimentCandidate = z.infer<typeof experimentCandidateSchema>;
 export type ExperimentVariableId = ExperimentCandidate["variable"];
 export type ExperimentKind = "ablation" | "replicate";
+
+/**
+ * The official split-pack IA2V workflow is intentionally guidance-free: both
+ * stages use SimpleDenoiser and therefore do not consume MultiModalGuider
+ * parameters. Only the non-official audio-to-video path currently binds the
+ * A2V guidance value to executable Python semantics.
+ */
+export function supportsA2vGuidanceExperiment(
+  request: Pick<GenerationRequest, "mode">,
+): boolean {
+  return request.mode === "audio-to-video";
+}
+
+export function availableExperimentVariables(request: GenerationRequest): ExperimentVariableId[] {
+  const variables: ExperimentVariableId[] = ["replicate-seed", "resolution"];
+  if (supportsA2vGuidanceExperiment(request)) variables.unshift("a2v-guidance");
+  if (request.images[0]) variables.push("reference-image-strength", "reference-image-crf");
+  if (request.mode === "lipdub") variables.unshift("lipdub-reference-strength");
+  if (
+    (
+      hasDialogueIntent(request)
+      || isAudioConditionedMode(request.mode)
+      || request.mode === "id-lora"
+    )
+    && !request.postprocess.longcatLipsync.enabled
+    && !request.postprocess.latentSync.enabled
+    && !request.postprocess.museTalk.enabled
+    && !request.postprocess.lipForcing.enabled
+  ) {
+    variables.push("lipforcing-enabled");
+  }
+  if (request.postprocess.lipForcing.enabled) {
+    variables.push(
+      "lipforcing-decoder",
+      "lipforcing-mouth-delay-ms",
+      "lipforcing-program-audio-delay-ms",
+    );
+    if (
+      request.postprocess.lipForcing.rawOutputProfile === defaultLipForcingRawOutputProfile
+      && rawMuxPairV1BaselineError(request) === null
+    ) {
+      variables.push("lipforcing-raw-output-profile");
+    }
+  }
+  return variables;
+}
 
 export const experimentCreateInputSchema = z.object({
   title: z.string().trim().min(1).max(120).refine((value) => !value.includes("\0"), {
@@ -290,7 +337,9 @@ export function applyExperimentCandidate(
   switch (candidate.variable) {
     case "a2v-guidance":
       if (!isAudioConditionedMode(request.mode)) {
-        throw new Error("A2V Guidance ist nur für Audio zu Video als kontrollierte Variable zulässig.");
+        throw new Error(
+          "A2V Guidance ist nur für Audio zu Video als kontrollierte Variable zulässig.",
+        );
       }
       request.videoGuidance.modalityScale = candidate.value;
       break;

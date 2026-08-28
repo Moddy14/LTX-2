@@ -14,9 +14,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { AdmissionPreflightReport } from "../../shared/admissionPreflight";
 import {
+  availableExperimentVariables,
   experimentVariableLabels,
   generationRequestDiffPaths,
   rawMuxPairV1BaselineError,
+  supportsA2vGuidanceExperiment,
   type ExperimentCandidate,
   type ExperimentCreateInput,
   type ExperimentVariableId,
@@ -26,8 +28,6 @@ import { qualificationHoldForRequest } from "../../shared/qualificationHold";
 import {
   defaultLipForcingRawOutputProfile,
   experimentalLipForcingRawOutputProfile,
-  hasDialogueIntent,
-  isAudioConditionedMode,
   type GenerationRequest,
 } from "../../shared/pipelines";
 import { blindEvaluationNavigation, createBlindEvaluation, preflightExperimentArm } from "../api";
@@ -51,40 +51,6 @@ type ExperimentPanelProps = {
   onAnalyze: (output: StudioOutput) => Promise<void>;
   onCompare: (outputs: [StudioOutput, StudioOutput]) => void;
 };
-
-function availableVariables(request: GenerationRequest): ExperimentVariableId[] {
-  const variables: ExperimentVariableId[] = ["replicate-seed", "resolution"];
-  if (isAudioConditionedMode(request.mode)) variables.unshift("a2v-guidance");
-  if (request.images[0]) variables.push("reference-image-strength", "reference-image-crf");
-  if (request.mode === "lipdub") variables.unshift("lipdub-reference-strength");
-  if (
-    (
-      hasDialogueIntent(request)
-      || isAudioConditionedMode(request.mode)
-      || request.mode === "id-lora"
-    )
-    && !request.postprocess.longcatLipsync.enabled
-    && !request.postprocess.latentSync.enabled
-    && !request.postprocess.museTalk.enabled
-    && !request.postprocess.lipForcing.enabled
-  ) {
-    variables.push("lipforcing-enabled");
-  }
-  if (request.postprocess.lipForcing.enabled) {
-    variables.push(
-      "lipforcing-decoder",
-      "lipforcing-mouth-delay-ms",
-      "lipforcing-program-audio-delay-ms",
-    );
-    if (
-      request.postprocess.lipForcing.rawOutputProfile === defaultLipForcingRawOutputProfile
-      && rawMuxPairV1BaselineError(request) === null
-    ) {
-      variables.push("lipforcing-raw-output-profile");
-    }
-  }
-  return variables;
-}
 
 function adjacentLipForcingDelay(current: number): number {
   return current <= 475 ? current + 25 : current - 25;
@@ -256,7 +222,7 @@ export function ExperimentPanel({
   onAnalyze,
   onCompare,
 }: ExperimentPanelProps) {
-  const variables = useMemo(() => availableVariables(request), [request]);
+  const variables = useMemo(() => availableExperimentVariables(request), [request]);
   const rawMuxEligibilityError = useMemo(() => (
     request.postprocess.lipForcing.enabled
       && request.postprocess.lipForcing.rawOutputProfile === defaultLipForcingRawOutputProfile
@@ -456,6 +422,8 @@ export function ExperimentPanel({
             const candidateOutput = outputForArm(experiment, 1, outputs);
             const baselineRetryable = armRetryable(baseline, baselineJob, baselineOutput);
             const candidateRetryable = armRetryable(candidate, candidateJob, candidateOutput);
+            const unsupportedHistoricalTreatment = experiment.candidate.variable === "a2v-guidance"
+              && !supportsA2vGuidanceExperiment(baseline.request);
             const baselineQualificationHold = qualificationHoldForRequest(baseline.request);
             const candidateQualificationHold = qualificationHoldForRequest(candidate.request);
             const experimentQualificationHold = baselineQualificationHold ?? candidateQualificationHold;
@@ -473,6 +441,7 @@ export function ExperimentPanel({
               && currentAnalysisCompleted(candidateOutput);
             const outputsReady = Boolean(baselineOutput && candidateOutput);
             const startableArm: "baseline" | "candidate" | null = experiment.status !== "frozen"
+              || unsupportedHistoricalTreatment
               ? null
               : (!baseline.jobId || baselineRetryable)
                 ? "baseline"
@@ -542,7 +511,12 @@ export function ExperimentPanel({
                   </span>
                 </div>
                 <div className="experiment-gates">
-                  {experimentQualificationHold ? (
+                  {unsupportedHistoricalTreatment ? (
+                    <span className="is-waiting">
+                      <TriangleAlert size={14} /> Historischer IA2V-Guidance-Arm nicht wiederholbar
+                      <InfoTooltip text="Der offizielle IA2V-8+3-Pfad verwendet in beiden Stufen SimpleDenoiser und konsumiert die registrierte Guidance-Variable nicht. Der abgebrochene Arm bleibt als Audit-Evidenz sichtbar, kann aber nicht erneut gestartet werden." />
+                    </span>
+                  ) : experimentQualificationHold ? (
                     <span className="is-waiting">
                       <TriangleAlert size={14} /> DFR Qualification-HOLD: Produktstarts und CPU-only-Reuse sind gesperrt
                       <InfoTooltip text={experimentQualificationHold.reason} />
@@ -632,7 +606,9 @@ export function ExperimentPanel({
                       Einfrieren
                     </button>
                   ) : null}
-                  {experiment.status === "frozen" && (!baseline.jobId || baselineRetryable) ? (
+                  {experiment.status === "frozen"
+                    && !unsupportedHistoricalTreatment
+                    && (!baseline.jobId || baselineRetryable) ? (
                     <button
                       type="button"
                       className="button button--secondary"
@@ -655,6 +631,7 @@ export function ExperimentPanel({
                     </button>
                   ) : null}
                   {experiment.status === "frozen"
+                    && !unsupportedHistoricalTreatment
                     && baseline.jobId
                     && (!candidate.jobId || candidateRetryable) ? (
                     <button

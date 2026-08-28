@@ -10758,7 +10758,7 @@
     },
     "requestSchema": {
       "path": "shared/pipelines.ts",
-      "sha256": "ba9aec76f051ca860cb9d5aeb6cbd4c6bad0d7ce1a6c33c84b3c1caa1659ba8b"
+      "sha256": "543b09b7ddc2365be27d86e3ba95da7fe8aae11c95290a1c3b965e3e5fe81edf"
     }
   },
   "policyVersion": "ltx-studio-release-rights.v1",

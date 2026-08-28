@@ -5,6 +5,9 @@ import {
   dfrOutputGeometry,
   generationRequestSchema,
   hasDialogueIntent,
+  ia2vEditorNormalizationPaths,
+  ia2vEditorNormalizationWarnings,
+  mergeEditableGenerationRequest,
   mergeGenerationRequest,
   migrateGenerationRequest,
   isLegacyDfrRequest,
@@ -27,6 +30,39 @@ describe("generationRequestSchema", () => {
     expect(createDefaultRequest("text-to-audio").audioGuidance.modalityScale).toBe(1);
     expect(createDefaultRequest("text-to-audio").textToAudio.peakCeilingDbfs).toBe(-3);
     expect(createDefaultRequest("two-stage").models.gemmaLora.enabled).toBe(false);
+  });
+
+  it("normalizes hidden inert IA2V controls only in the editable copy", () => {
+    const historical = validLtx25SplitRequest("image-audio-to-video");
+    historical.negativePrompt = "bad anatomy";
+    historical.videoGuidance.modalityScale = 5;
+    historical.audioGuidance.stgBlocks = [12];
+    const original = structuredClone(historical);
+
+    expect(ia2vEditorNormalizationPaths(historical)).toEqual([
+      "negativePrompt",
+      "videoGuidance.modalityScale",
+      "audioGuidance.stgBlocks",
+    ]);
+    expect(ia2vEditorNormalizationWarnings(historical)[0]).toContain(
+      "nicht in die Editierkopie übernommen",
+    );
+    const editable = mergeEditableGenerationRequest(historical, historical.mode);
+    const defaults = createDefaultRequest("image-audio-to-video");
+    expect(editable.negativePrompt).toBe("");
+    expect(editable.videoGuidance).toEqual(defaults.videoGuidance);
+    expect(editable.audioGuidance).toEqual(defaults.audioGuidance);
+    expect(historical).toEqual(original);
+  });
+
+  it("preserves inert historical IA2V values in canonical server migration", () => {
+    const historical = validLtx25SplitRequest("image-audio-to-video");
+    historical.negativePrompt = "historical exclusions";
+    historical.videoGuidance.modalityScale = 5;
+    historical.audioGuidance.cfgScale = 9;
+
+    expect(mergeGenerationRequest(historical, historical.mode)).toEqual(historical);
+    expect(migrateGenerationRequest(historical)).toEqual(historical);
   });
 
   it("rejects a no-op cross-modal guidance override for audio-only T2A", () => {

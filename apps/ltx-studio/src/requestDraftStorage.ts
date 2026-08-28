@@ -1,7 +1,8 @@
 import {
   createDefaultRequest,
   createPreferredRequest,
-  mergeGenerationRequest,
+  ia2vEditorNormalizationWarnings,
+  mergeEditableGenerationRequest,
   type GenerationRequest,
 } from "../shared/pipelines.js";
 import { withOfficialSpeechModelPaths } from "../shared/models.js";
@@ -19,6 +20,7 @@ export type RequestDraftMigration = {
 export type RestoredRequestDraft = {
   request: GenerationRequest;
   migration: RequestDraftMigration | null;
+  warnings: string[];
 };
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
@@ -34,7 +36,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function preparedRequest(value: unknown): GenerationRequest {
-  return withOfficialSpeechModelPaths(mergeGenerationRequest(value));
+  return withOfficialSpeechModelPaths(mergeEditableGenerationRequest(value));
 }
 
 function preferredRequest(): GenerationRequest {
@@ -81,6 +83,7 @@ function parseCurrentDraft(raw: string): RestoredRequestDraft | null {
   return {
     request: preparedRequest(value.request),
     migration,
+    warnings: ia2vEditorNormalizationWarnings(value.request),
   };
 }
 
@@ -98,13 +101,14 @@ export function restorePersistedRequest(storage: StorageLike): RestoredRequestDr
   try {
     const legacyRaw = storage.getItem(LEGACY_REQUEST_STORAGE_KEY);
     if (legacyRaw === null || legacyRaw === "null") {
-      return { request: preferredRequest(), migration: null };
+      return { request: preferredRequest(), migration: null, warnings: [] };
     }
     const legacyValue: unknown = JSON.parse(legacyRaw);
     const legacyRequest = preparedRequest(legacyValue);
     if (isExactLegacyAutoDefault(legacyValue)) {
       return {
         request: preferredRequest(),
+        warnings: [],
         migration: {
           kind: "auto-default-upgraded",
           legacyRequest,
@@ -114,6 +118,7 @@ export function restorePersistedRequest(storage: StorageLike): RestoredRequestDr
     }
     return {
       request: preferredRequest(),
+      warnings: [],
       migration: {
         kind: "legacy-draft-archived",
         legacyRequest,
@@ -121,7 +126,7 @@ export function restorePersistedRequest(storage: StorageLike): RestoredRequestDr
       },
     };
   } catch {
-    return { request: preferredRequest(), migration: null };
+    return { request: preferredRequest(), migration: null, warnings: [] };
   }
 }
 

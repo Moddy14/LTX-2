@@ -1,4 +1,7 @@
-import type { ControlledExperiment } from "../shared/experiments.js";
+import {
+  supportsA2vGuidanceExperiment,
+  type ControlledExperiment,
+} from "../shared/experiments.js";
 import {
   assertAuthoritativeQueueAbsence,
   assertAuthoritativeQueueList,
@@ -51,6 +54,15 @@ export async function inspectRetryableExperimentArm(
   arm: "baseline" | "candidate",
   deps: ExperimentArmRetryReadDeps,
 ): Promise<string | null> {
+  if (
+    experiment.candidate.variable === "a2v-guidance"
+    && !supportsA2vGuidanceExperiment(experiment.arms[0].request)
+  ) {
+    throw new ExperimentConflictError(
+      "Der historische IA2V-Guidance-Arm bleibt als Evidenz lesbar, darf aber nicht erneut gestartet werden: "
+      + "der offizielle SimpleDenoiser-Vertrag konsumiert die kontrollierte Variable nicht.",
+    );
+  }
   const selected = experiment.arms[arm === "baseline" ? 0 : 1];
   if (!selected.jobId) return null;
   const previous = deps.getJob(selected.jobId);

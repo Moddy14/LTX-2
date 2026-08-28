@@ -6102,12 +6102,12 @@ describe("job persistence and reservations", () => {
     expect(await waitForDgxQueueStart.call(manager, runtimeJob)).toBe(true);
 
     expect(submitted).toMatchObject({
-      estimated_memory_gib: 66,
-      resource_profile: { required_gib: 66 },
+      estimated_memory_gib: 82,
+      resource_profile: { required_gib: 82 },
     });
     expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
       expect.stringContaining(
-        "RAM-Basis provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+        "RAM-Basis provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-observed-conservative-floor-82gib.v2",
       ),
     ]));
   });
@@ -6182,10 +6182,10 @@ describe("job persistence and reservations", () => {
     const valid = {
       binding: {
         cooperativeGeneration: 0,
-        declaredMemoryGiB: 66,
-        requiredMemoryGiB: 66,
+        declaredMemoryGiB: 82,
+        requiredMemoryGiB: 82,
         memoryBasis:
-          "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+          "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-observed-conservative-floor-82gib.v2",
         processIdentity: summary.identity,
         observerIdentity: observer,
       },
@@ -6232,7 +6232,7 @@ describe("job persistence and reservations", () => {
           ...summary.metrics,
           processGroup: {
             ...summary.metrics.processGroup,
-            maximumAccountedResidentKiB: 66 * 1_048_576 + 1,
+            maximumAccountedResidentKiB: 82 * 1_048_576 + 1,
           },
         },
       } }, "resident_peak_exceeds_declared_memory"],
@@ -6698,8 +6698,8 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       binding: {
         studioJobId: created.id,
         dgxJobId,
-        declaredMemoryGiB: 66,
-        requiredMemoryGiB: 66,
+        declaredMemoryGiB: 82,
+        requiredMemoryGiB: 82,
         memoryBasis: expect.stringMatching(/^provisional-proxy:/u),
         cooperativeGeneration: 0,
       },

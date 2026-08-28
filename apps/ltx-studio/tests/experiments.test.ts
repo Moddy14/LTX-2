@@ -71,6 +71,68 @@ describe("controlled experiment contract", () => {
     )).toThrow("Nicht freigegebene Request-Änderung: seed");
   });
 
+  it("rejects a new fake A2V-guidance treatment on the official IA2V SimpleDenoiser path", async () => {
+    const officialIa2v = validRequest("image-audio-to-video");
+    const store = new ExperimentStore(await experimentRoot());
+
+    expect(() => store.create({
+      title: "Wirkungsloser historischer IA2V-Regler",
+      baselineRequest: officialIa2v,
+      candidate: { variable: "a2v-guidance", value: 5 },
+    })).toThrow("guidance-freien SimpleDenoiser-Vertrag");
+
+    // Pure reconstruction remains backward-compatible so an already frozen,
+    // hash-bound historical record stays readable during startup reconciliation.
+    expect(applyExperimentCandidate(officialIa2v, {
+      variable: "a2v-guidance",
+      value: 5,
+    }).videoGuidance.modalityScale).toBe(5);
+  });
+
+  it("keeps a hash-valid historical IA2V-guidance record readable but blocks both direct launch bindings", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const frozen = store.freeze(store.create({
+      title: "Historischer wirkungsloser IA2V-Regler",
+      baselineRequest: baselineRequest(),
+      candidate: { variable: "a2v-guidance", value: 3 },
+    }).id, "2026-08-28T00:00:01.000Z");
+    const path = join(root, `${frozen.id}.json`);
+    const historical = JSON.parse(await readFile(path, "utf8")) as typeof frozen;
+    for (const selected of historical.arms) {
+      selected.request.mode = "image-audio-to-video";
+      selected.requestSha256 = sha256Json(selected.request);
+      selected.settingsSha256 = requestSettingsSha256(selected.request);
+    }
+    historical.arms[0].jobId = "11111111-1111-4111-8111-111111111111";
+    historical.arms[0].attemptJobIds = [historical.arms[0].jobId];
+    historical.protocolSha256 = sha256Json({
+      schemaVersion: historical.schemaVersion,
+      id: historical.id,
+      title: historical.title,
+      claimScope: historical.claimScope,
+      kind: historical.kind,
+      candidate: historical.candidate,
+      changedRequestPaths: historical.changedRequestPaths,
+      createdAt: historical.createdAt,
+      arms: historical.arms.map((selected) => ({
+        arm: selected.arm,
+        request: selected.request,
+        requestSha256: selected.requestSha256,
+        settingsSha256: selected.settingsSha256,
+      })),
+    });
+    await writeFile(path, JSON.stringify(historical));
+
+    const reopened = new ExperimentStore(root);
+    expect(reopened.verifyFrozenIntegrity(frozen.id).protocolSha256)
+      .toBe(historical.protocolSha256);
+    expect(() => reopened.bindingFor(frozen.id, "baseline"))
+      .toThrow("darf aber nicht gestartet werden");
+    expect(() => reopened.bindingFor(frozen.id, "candidate"))
+      .toThrow("darf aber nicht gestartet werden");
+  });
+
   it("registers LipForcing as the only changed treatment on an identical speech baseline", () => {
     const baseline = baselineRequest();
     baseline.postprocess.lipForcing.decoder = "wan-vae";

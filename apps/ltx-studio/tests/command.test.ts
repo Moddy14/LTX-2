@@ -371,6 +371,32 @@ describe("buildCommand", () => {
     expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
   });
 
+  it("fails closed when an official IA2V request claims a guidance value the command cannot consume", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.videoGuidance.modalityScale = 5;
+    request.videoGuidance.cfgScale = 4;
+    request.audioGuidance.skipStep = 1;
+    request.audioGuidance.stgBlocks = [17];
+    const plan = buildCommand(request);
+
+    expect(plan.args).not.toContain("--a2v-guidance-scale");
+    expect(validateRequestPlan(request, plan)).toContain(
+      "Der offizielle IA2V-8+3-Pfad verwendet einen guidance-freien SimpleDenoiser-Vertrag; "
+      + "abweichende wirkungslose Guidance-Felder werden abgewiesen: "
+      + "videoGuidance.cfgScale, videoGuidance.modalityScale, audioGuidance.skipStep, audioGuidance.stgBlocks.",
+    );
+  });
+
+  it("rejects an inert negative prompt on official IA2V instead of pretending it affects output", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.negativePrompt = "no zoom";
+
+    expect(validateRequestPlan(request, buildCommand(request))).toContain(
+      "Der offizielle IA2V-8+3-SimpleDenoiser konsumiert keinen negativen Prompt; "
+      + "Ausschlüsse müssen im positiven Prompt stehen.",
+    );
+  });
+
   it("passes the official Gemma LoRA separately from transformer LoRAs", () => {
     const request = validRequest("two-stage");
     request.quantization.amaxPath = "/models/ignored-amax.json";

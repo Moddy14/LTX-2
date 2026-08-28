@@ -8,6 +8,7 @@ import type {
   ControlledExperiment,
   ExperimentRunBinding,
 } from "../shared/experiments.js";
+import { supportsA2vGuidanceExperiment } from "../shared/experiments.js";
 import type { StudioOutput } from "../shared/outputs.js";
 import {
   publishedOutputIsReusableLipForcingVisual,
@@ -205,6 +206,16 @@ export async function experimentAdmissionPreflight(
   const selected = experiment.arms[arm === "baseline" ? 0 : 1];
   const qualificationHold = qualificationHoldAdmissionPreflight(selected.request, checkedAt);
   if (qualificationHold) return qualificationHold;
+  if (
+    experiment.candidate.variable === "a2v-guidance"
+    && !supportsA2vGuidanceExperiment(experiment.arms[0].request)
+  ) {
+    return unverifiableExperimentAdmissionPreflight(
+      "Der eingefrorene A2V-Guidance-Arm ist für den offiziellen IA2V-8+3-Pfad nicht ausführbar: "
+      + "dessen SimpleDenoiser-Vertrag konsumiert diesen Wert nicht.",
+      { checkedAt },
+    );
+  }
   if (isRawMuxPairCandidate(experiment, arm)) {
     const proof = context.verifyRawMuxPairAuthority?.(selected.request, context.binding)
       ?? { error: "Der Server besitzt keinen Raw-Mux-Paar-Authority-Prüfer." };

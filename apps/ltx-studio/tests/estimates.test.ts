@@ -82,7 +82,7 @@ describe("resource and runtime estimates", () => {
     expect(estimateResources(validLtx25SplitRequest("distilled")).memoryGiB).toBe(58);
   });
 
-  it("uses a provisional 66-GiB proxy only for the audited full IA2V profile", () => {
+  it("uses the provisional 82-GiB observed safety floor for the audited full IA2V profile", () => {
     const request = validLtx25SplitRequest("image-audio-to-video");
     request.width = 1024;
     request.height = 1536;
@@ -93,12 +93,12 @@ describe("resource and runtime estimates", () => {
     const estimate = estimateResources(request);
 
     expect(estimate).toMatchObject({
-      memoryGiB: 66,
+      memoryGiB: 82,
       memoryBasis:
-        "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+        "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-observed-conservative-floor-82gib.v2",
     });
     // The orchestrator owns this canonical 12-GiB non-Qwen headroom.
-    expect(estimate.memoryGiB + 12).toBe(78);
+    expect(estimate.memoryGiB + 12).toBe(94);
   });
 
   it.each([
@@ -126,7 +126,7 @@ describe("resource and runtime estimates", () => {
     ["legacy model generation", (request: GenerationRequest) => { request.models.generation = "2.3"; }],
     ["prompt enhancement", (request: GenerationRequest) => { request.enhancePrompt = true; }],
     ["a postprocessor", (request: GenerationRequest) => { request.postprocess.latentSync.enabled = true; }],
-  ] as const)("falls back to the generic IA2V estimator for %s", (_label, mutate) => {
+  ] as const)("does not claim the exact IA2V measurement basis for %s", (_label, mutate) => {
     const request = validLtx25SplitRequest("image-audio-to-video");
     request.width = 1024;
     request.height = 1536;
@@ -139,6 +139,48 @@ describe("resource and runtime estimates", () => {
     const estimate = estimateResources(request);
     expect(estimate.memoryBasis).toBeUndefined();
     expect(estimate.memoryGiB).toBeGreaterThanOrEqual(68);
+  });
+
+  it.each([
+    [960, 1536, 289],
+    [1024, 1504, 289],
+    [1024, 1536, 281],
+    [320, 576, 25],
+  ] as const)(
+    "keeps the provisional split-BF16 IA2V safety floor continuous at %sx%s/%sf",
+    (width, height, numFrames) => {
+      const request = validLtx25SplitRequest("image-audio-to-video");
+      request.width = width;
+      request.height = height;
+      request.numFrames = numFrames;
+
+      expect(estimateResources(request).memoryGiB).toBe(82);
+    },
+  );
+
+  it.each(["fp8-cast", "fp8-scaled-mm"] as const)(
+    "keeps the split-BF16 IA2V cold-load floor under %s runtime quantization",
+    (mode) => {
+      const request = validLtx25SplitRequest("image-audio-to-video");
+      request.width = 1024;
+      request.height = 1536;
+      request.numFrames = 289;
+      request.quantization.mode = mode;
+
+      expect(request.models.transformerPath).toContain("-bf16.safetensors");
+      expect(estimateResources(request).memoryGiB).toBe(82);
+    },
+  );
+
+  it("does not misclassify a genuine native FP8 split transformer as a BF16 cold load", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.quantization.mode = "fp8-scaled-mm";
+    request.models.transformerPath = "/models/ltx-2.5/ltx-2.5-22b-transformer-fp8.safetensors";
+
+    expect(estimateResources(request).memoryGiB).toBeLessThan(82);
   });
 
   it("does not apply the IA2V proxy to audio-only conditioning", () => {

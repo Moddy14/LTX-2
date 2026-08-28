@@ -94,12 +94,12 @@ describe("source preview media selection", () => {
   it("marks a provisional RAM proxy visibly instead of presenting it as measured", () => {
     const props = minimalRunPanelProps(validRequest("image-audio-to-video"));
     props.estimate = {
-      memoryGiB: 66,
+      memoryGiB: 82,
       outputGiB: 0.01,
       etaSeconds: null,
       etaSamples: 0,
       memoryBasis:
-        "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+        "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-observed-conservative-floor-82gib.v2",
     };
 
     const markup = renderToStaticMarkup(createElement(RunPanel, props));

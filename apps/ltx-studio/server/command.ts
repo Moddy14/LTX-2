@@ -38,6 +38,40 @@ import { probeVideoMetadata } from "./mediaProbe.js";
 
 export { recommendedLipDubOutputSize };
 
+const officialIa2vInertGuidanceDefaults = {
+  videoGuidance: {
+    cfgScale: 3,
+    stgScale: 1,
+    rescaleScale: 0.7,
+    modalityScale: 3,
+    skipStep: 0,
+    stgBlocks: [28],
+  },
+  audioGuidance: {
+    cfgScale: 7,
+    stgScale: 1,
+    rescaleScale: 0.7,
+    modalityScale: 3,
+    skipStep: 0,
+    stgBlocks: [28],
+  },
+} as const;
+
+function officialIa2vInertGuidanceDiffPaths(request: GenerationRequest): string[] {
+  const paths: string[] = [];
+  for (const key of ["videoGuidance", "audioGuidance"] as const) {
+    const expected = officialIa2vInertGuidanceDefaults[key];
+    const actual = request[key];
+    for (const field of ["cfgScale", "stgScale", "rescaleScale", "modalityScale", "skipStep"] as const) {
+      if (actual[field] !== expected[field]) paths.push(`${key}.${field}`);
+    }
+    if (JSON.stringify(actual.stgBlocks) !== JSON.stringify(expected.stgBlocks)) {
+      paths.push(`${key}.stgBlocks`);
+    }
+  }
+  return paths;
+}
+
 const MODULES: Record<PipelineMode, string> = {
   "two-stage": "ltx_pipelines.ti2vid_two_stages",
   "two-stage-hq": "ltx_pipelines.ti2vid_two_stages_hq",
@@ -1014,6 +1048,21 @@ export function validateRequestPlan(
       "Für wortgetreuen nativen Dialog muss die Gemma-Promptverbesserung ausgeschaltet bleiben; "
       + "sie kann den gesprochenen Wortlaut umformulieren.",
     );
+  }
+  if (request.mode === "image-audio-to-video") {
+    const inertGuidancePaths = officialIa2vInertGuidanceDiffPaths(request);
+    if (inertGuidancePaths.length > 0) {
+      errors.push(
+        "Der offizielle IA2V-8+3-Pfad verwendet einen guidance-freien SimpleDenoiser-Vertrag; "
+        + `abweichende wirkungslose Guidance-Felder werden abgewiesen: ${inertGuidancePaths.join(", ")}.`,
+      );
+    }
+    if (request.negativePrompt.trim()) {
+      errors.push(
+        "Der offizielle IA2V-8+3-SimpleDenoiser konsumiert keinen negativen Prompt; "
+        + "Ausschlüsse müssen im positiven Prompt stehen.",
+      );
+    }
   }
   if (hasDuplicateDfrDetailingLora(request)) {
     errors.push(

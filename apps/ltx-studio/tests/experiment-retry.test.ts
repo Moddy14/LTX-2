@@ -85,6 +85,17 @@ function deps(overrides: Partial<ExperimentArmRetryDeps>, released: ControlledEx
 }
 
 describe("releaseRetryableExperimentArm", () => {
+  it("keeps a historical official-IA2V guidance arm readable but permanently non-retryable", async () => {
+    const { experiment } = await frozenExperimentWithCandidate();
+    experiment.arms[0].request.mode = "image-audio-to-video";
+    experiment.arms[1].request.mode = "image-audio-to-video";
+    const wired = deps({ getJob: () => ({ status: "cancelled", dgxJobId: null }) }, experiment);
+
+    await expect(inspectRetryableExperimentArm(experiment, "candidate", wired))
+      .rejects.toThrow("darf aber nicht erneut gestartet werden");
+    expect(wired.releaseArm).not.toHaveBeenCalled();
+  });
+
   it("proves a cancelled retry read-only without releasing the stored arm", async () => {
     const { experiment } = await frozenExperimentWithCandidate();
     const wired = deps({ getJob: () => ({ status: "cancelled", dgxJobId: null }) }, experiment);

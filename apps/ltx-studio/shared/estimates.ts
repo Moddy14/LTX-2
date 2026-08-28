@@ -74,18 +74,16 @@ export const DFR_MEMORY_BASIS = "unmeasured-bootstrap:official-dfr-v1.3.0-single
 export const LTX25_SPLIT_BF16_T2A_MEMORY_GIB = 72;
 export const LTX25_SPLIT_BF16_T2A_MEMORY_BASIS =
   "measured-cold-start:ltx-2.5-split-bf16-t2a.v1";
-// The first full-size native IA2V qualification run uses the same sequential
-// split-BF16 transformer, spatial upscaler and video VAE loads as the measured
-// 1024x1536 / 289-frame distilled baseline. IA2V adds a 0.365-GB audio VAE and
-// small frozen audio latents, but the historical generic A2V 50/18 constants
-// have no local peak measurement behind them. Reserve the baseline's 66-GiB
-// workload budget for this one audited, refiner-free profile and let the DGX
-// orchestrator add its canonical 12-GiB start headroom. This is deliberately a
-// provisional proxy, not a measured IA2V profile; every profile deviation
-// falls back to the generic estimator until the first run records a real peak.
-export const LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB = 66;
+// The first complete full-size native IA2V observation recorded a conservative
+// process-group envelope of 77.3754 GiB, exceeding the previous 66-GiB proxy.
+// Thermal pause, host swap and one source timeout make that run ineligible for
+// calibration, but they cannot justify continuing to declare a lower safety
+// budget. Round the observed lower bound up to 82 GiB (~6% margin) and let the
+// DGX orchestrator add its independent canonical 12-GiB headroom. This remains
+// a provisional safety floor, not a calibrated performance profile.
+export const LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB = 82;
 export const LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS =
-  "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1";
+  "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-observed-conservative-floor-82gib.v2";
 
 function isLtx25SplitBf16TextToAudio(request: GenerationRequest): boolean {
   return request.mode === "text-to-audio"
@@ -123,7 +121,15 @@ function isLtx25SplitBf16Ia2vCalibrationProfile(
     && !postprocess.lipForcing.enabled;
 }
 
+function isLtx25SplitBf16Ia2vSafetyEnvelope(request: GenerationRequest): boolean {
+  return request.mode === "image-audio-to-video"
+    && request.models.layout === "split"
+    && request.models.generation === "2.5"
+    && !isNativeFp8Checkpoint(request);
+}
+
 function selectedCheckpointPath(request: GenerationRequest): string {
+  if (request.models.layout === "split") return request.models.transformerPath;
   if (["distilled", "ic-lora", "keyframes"].includes(request.mode)
     || (request.mode === "lipdub" && !usesOfficialComfyLipDub(request))) {
     return request.models.distilledCheckpointPath;
@@ -202,12 +208,19 @@ export function estimateResources(request: GenerationRequest, options: EstimateO
     + (dfr.spatialUpscalings === 2 ? 8 : 0);
   const ltx25T2aSplitBf16 = isLtx25SplitBf16TextToAudio(request);
   const ltx25Ia2vCalibration = isLtx25SplitBf16Ia2vCalibrationProfile(request, resourceFrames);
+  // The only observed split-BF16 IA2V process crossed the former generic
+  // estimate by more than 3 GiB. Resolution/frame interpolation is therefore
+  // not evidence that a nearby (or smaller) request safely sheds the same
+  // checkpoint/cold-load residency. Keep the provisional floor continuous
+  // across the complete split-BF16 IA2V family until profile-specific clean
+  // measurements justify narrower envelopes.
+  const ltx25Ia2vSafetyEnvelope = isLtx25SplitBf16Ia2vSafetyEnvelope(request);
   const memoryGiB = request.mode === "dfr"
     ? Math.max(dfrBootstrapFloor, roundedMemoryGiB)
     : ltx25T2aSplitBf16
       ? Math.max(LTX25_SPLIT_BF16_T2A_MEMORY_GIB, roundedMemoryGiB)
-      : ltx25Ia2vCalibration
-        ? LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB
+      : ltx25Ia2vSafetyEnvelope
+        ? Math.max(LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB, roundedMemoryGiB)
         : roundedMemoryGiB;
 
   const dfrOutput = request.mode === "dfr" ? dfrOutputGeometry(request) : null;

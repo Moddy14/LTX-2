@@ -73,6 +73,19 @@ describe("editor mode transition", () => {
     },
   );
 
+  it("drops controls that the official IA2V SimpleDenoiser cannot consume", () => {
+    const current = createDefaultRequest("audio-to-video");
+    current.negativePrompt = "legacy exclusions";
+    current.videoGuidance.modalityScale = 9;
+    current.audioGuidance.stgBlocks = [4, 12];
+
+    const next = requestForModeChange(current, "image-audio-to-video", null);
+    const defaults = createDefaultRequest("image-audio-to-video");
+    expect(next.negativePrompt).toBe("");
+    expect(next.videoGuidance).toEqual(defaults.videoGuidance);
+    expect(next.audioGuidance).toEqual(defaults.audioGuidance);
+  });
+
   it("uses an implemented single-stage Ingredients contract for latest-first IC-LoRA", () => {
     const request = createPreferredRequest("ic-lora");
     const workflow = LTX25_WORKFLOW_CATALOG.find(({ nativeBinding }) =>

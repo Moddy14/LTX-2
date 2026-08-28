@@ -56,7 +56,7 @@ export function requestForModeChange(
     ...modeDefaults,
     prompt: current.prompt,
     promptParts: current.promptParts,
-    negativePrompt: current.negativePrompt,
+    negativePrompt: mode === "image-audio-to-video" ? "" : current.negativePrompt,
     enhancePrompt: isPreferredLtx25PipelineMode(mode)
       ? false
       : ["lipdub", "id-lora", "keyframes", "ic-lora", "text-to-audio"].includes(mode)

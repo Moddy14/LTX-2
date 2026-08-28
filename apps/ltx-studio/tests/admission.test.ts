@@ -248,7 +248,7 @@ describe("DGX admission contract", () => {
     });
   });
 
-  it("submits the exact provisional LTX-2.5 IA2V profile as a 66-GiB durable waiter", () => {
+  it("submits the full LTX-2.5 IA2V profile with its 82-GiB provisional safety floor", () => {
     const request = validLtx25SplitRequest("image-audio-to-video");
     request.width = 1024;
     request.height = 1536;
@@ -261,14 +261,14 @@ describe("DGX admission contract", () => {
 
     expect(admission).toMatchObject({
       job_type: "ltx2_native_image_audio_to_video",
-      estimated_memory_gib: 66,
-      resource_profile: { required_gib: 66 },
+      estimated_memory_gib: 82,
+      resource_profile: { required_gib: 82 },
       resumability: "required",
       scheduling: { mode: "segmented" },
     });
   });
 
-  it("submits a near-miss LTX-2.5 IA2V profile with the generic 74-GiB estimate", () => {
+  it("never lets a full-size near-miss LTX-2.5 IA2V profile fall below the 82-GiB safety floor", () => {
     const request = validLtx25SplitRequest("image-audio-to-video");
     request.width = 1024;
     request.height = 1536;
@@ -281,8 +281,8 @@ describe("DGX admission contract", () => {
     const [admission] = buildAdmissionRequests(request, undefined, "ia2v-near-miss-job");
 
     expect(admission).toMatchObject({
-      estimated_memory_gib: 74,
-      resource_profile: { required_gib: 74 },
+      estimated_memory_gib: 82,
+      resource_profile: { required_gib: 82 },
     });
   });
 

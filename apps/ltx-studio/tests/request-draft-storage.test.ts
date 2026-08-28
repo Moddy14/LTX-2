@@ -101,6 +101,24 @@ describe("request draft storage upgrade", () => {
     expect(second).toEqual(first);
   });
 
+  it("restores an old IA2V draft as a valid editable copy with a visible normalization warning", () => {
+    const storage = new MemoryStorage();
+    const historical = createDefaultRequest("image-audio-to-video");
+    historical.negativePrompt = "hidden legacy exclusions";
+    historical.videoGuidance.modalityScale = 5;
+    historical.audioGuidance.cfgScale = 9;
+    persistRequestDraft(storage, historical, null);
+
+    const restored = restorePersistedRequest(storage);
+    const defaults = createDefaultRequest("image-audio-to-video");
+    expect(restored.request.negativePrompt).toBe("");
+    expect(restored.request.videoGuidance).toEqual(defaults.videoGuidance);
+    expect(restored.request.audioGuidance).toEqual(defaults.audioGuidance);
+    expect(restored.warnings).toEqual([
+      expect.stringContaining("nicht in die Editierkopie übernommen"),
+    ]);
+  });
+
   it("falls back to the intact v1 draft when a v2 envelope is malformed", () => {
     const storage = new MemoryStorage();
     const custom = v1AutoDefault();

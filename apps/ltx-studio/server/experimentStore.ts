@@ -19,6 +19,7 @@ import {
   experimentCreateInputSchema,
   experimentKind,
   experimentRunBindingSchema,
+  supportsA2vGuidanceExperiment,
   type ControlledExperiment,
   type ExperimentBaselineEvidence,
   type ExperimentCreateInput,
@@ -248,6 +249,15 @@ export class ExperimentStore {
     baselineEvidence: ExperimentBaselineEvidence | null = null,
   ): ControlledExperiment {
     if (
+      input.candidate.variable === "a2v-guidance"
+      && !supportsA2vGuidanceExperiment(input.baselineRequest)
+    ) {
+      throw new ExperimentConflictError(
+        "Der offizielle IA2V-8+3-Pfad verwendet einen guidance-freien SimpleDenoiser-Vertrag; "
+        + "dafür darf kein A2V-Guidance-Experiment neu registriert werden.",
+      );
+    }
+    if (
       input.candidate.variable === "lipforcing-raw-output-profile"
       && (input.baselineOutputName !== undefined || baselineEvidence !== null)
     ) {
@@ -320,6 +330,15 @@ export class ExperimentStore {
   freeze(id: string, frozenAt = new Date().toISOString()): ControlledExperiment {
     const current = this.require(id);
     if (current.status !== "draft") throw new ExperimentConflictError("Das Experiment ist bereits eingefroren.");
+    if (
+      current.candidate.variable === "a2v-guidance"
+      && !supportsA2vGuidanceExperiment(current.arms[0].request)
+    ) {
+      throw new ExperimentConflictError(
+        "Der offizielle IA2V-8+3-Pfad verwendet einen guidance-freien SimpleDenoiser-Vertrag; "
+        + "dieser historische Draft darf nicht eingefroren werden.",
+      );
+    }
     const candidate = applyExperimentCandidate(current.arms[0].request, current.candidate);
     candidate.outputName = current.arms[1].request.outputName;
     const changedRequestPaths = validateControlledExperimentDifference(
@@ -390,6 +409,7 @@ export class ExperimentStore {
       throw new ExperimentConflictError("Das Experiment muss vor dem Start eingefroren werden.");
     }
     this.assertFrozenIntegrity(current);
+    this.assertRunnableTreatment(current);
     const armIndex = arm === "baseline" ? 0 : 1;
     const selected = current.arms[armIndex];
     if (selected.jobId) throw new ExperimentConflictError(`Der ${arm === "baseline" ? "Baseline" : "Kandidaten"}arm wurde bereits gestartet.`);
@@ -414,6 +434,7 @@ export class ExperimentStore {
       throw new ExperimentConflictError("Das Experiment muss vor der Startprüfung eingefroren werden.");
     }
     this.assertFrozenIntegrity(current);
+    this.assertRunnableTreatment(current);
     const armIndex = arm === "baseline" ? 0 : 1;
     if (current.arms[armIndex].jobId !== failedJobId) {
       throw new ExperimentConflictError("Der retryfähige Experimentarm hat sich zwischenzeitlich geändert.");
@@ -451,6 +472,18 @@ export class ExperimentStore {
         : {}),
     });
     return binding;
+  }
+
+  private assertRunnableTreatment(experiment: ControlledExperiment): void {
+    if (
+      experiment.candidate.variable === "a2v-guidance"
+      && !supportsA2vGuidanceExperiment(experiment.arms[0].request)
+    ) {
+      throw new ExperimentConflictError(
+        "Der historische IA2V-Guidance-Arm bleibt als Evidenz lesbar, darf aber nicht gestartet werden: "
+        + "der offizielle SimpleDenoiser-Vertrag konsumiert die kontrollierte Variable nicht.",
+      );
+    }
   }
 
   reconcileJobs(jobs: readonly ExperimentBoundJob[]): void {

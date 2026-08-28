@@ -17,7 +17,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { canonicalizeJson, canonicalJson } from "../shared/canonicalJson.js";
-import { LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS } from "../shared/estimates.js";
+import {
+  LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS,
+  LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB,
+} from "../shared/estimates.js";
 import {
   LOCAL_PROCESS_RESOURCE_JSONL_BASENAME,
   LOCAL_PROCESS_RESOURCE_MAX_GAP_MS,
@@ -274,8 +277,8 @@ async function createEvidenceFixture(): Promise<EvidenceFixture> {
     studioJobId,
     dgxJobId: "dgx-job-20260828-fixture",
     preparedAdmissionSha256: "a".repeat(64),
-    declaredMemoryGiB: 66,
-    requiredMemoryGiB: 66,
+    declaredMemoryGiB: LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB,
+    requiredMemoryGiB: LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB,
     memoryBasis: LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS,
     requestSha256: "b".repeat(64),
     runProvenanceFingerprint: "c".repeat(64),
@@ -378,7 +381,10 @@ describe("LTX resource telemetry evidence verifier", () => {
     })).toContain("output_technical_contract_invalid");
     expect(ltxResourceTelemetryMeasurementBlockers({
       ...base,
-      binding: { ...base.binding, declaredMemoryGiB: 67 },
+      binding: {
+        ...base.binding,
+        declaredMemoryGiB: LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB + 1,
+      },
     })).toContain("memory_profile_not_exact");
     expect(ltxResourceTelemetryMeasurementBlockers({
       ...base,
@@ -398,7 +404,8 @@ describe("LTX resource telemetry evidence verifier", () => {
           ...base.summary.metrics,
           processGroup: {
             ...base.summary.metrics.processGroup,
-            maximumAccountedResidentKiB: 66 * 1_048_576 + 1,
+            maximumAccountedResidentKiB:
+              LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB * 1_048_576 + 1,
           },
         },
       },

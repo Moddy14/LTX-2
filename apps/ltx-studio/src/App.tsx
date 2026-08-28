@@ -6,8 +6,9 @@ import packageJson from "../package.json";
 import {
   createPreferredRequest,
   generationRequestSchema,
+  ia2vEditorNormalizationWarnings,
   isLegacyDfrRequest,
-  mergeGenerationRequest,
+  mergeEditableGenerationRequest,
   PIPELINES,
   type GenerationRequest,
   type PipelineMode,
@@ -105,8 +106,9 @@ function restoreRequest(): RestoredRequestDraft {
       currentUrl.searchParams.delete("draft");
       window.history.replaceState(null, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
       return {
-        request: withOfficialSpeechModelPaths(mergeGenerationRequest(draft)),
+        request: withOfficialSpeechModelPaths(mergeEditableGenerationRequest(draft)),
         migration: null,
+        warnings: ia2vEditorNormalizationWarnings(draft),
       };
     }
     return restorePersistedRequest(localStorage);
@@ -114,6 +116,7 @@ function restoreRequest(): RestoredRequestDraft {
     return {
       request: withOfficialSpeechModelPaths(createPreferredRequest()),
       migration: null,
+      warnings: [],
     };
   }
 }
@@ -165,7 +168,7 @@ export function App() {
   const [deletingOutputName, setDeletingOutputName] = useState<string | null>(null);
   const [extractingReferenceFrom, setExtractingReferenceFrom] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
-  const [serverWarnings, setServerWarnings] = useState<string[]>([]);
+  const [serverWarnings, setServerWarnings] = useState<string[]>(restoredDraft.warnings);
   const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
   const [preflightWarnings, setPreflightWarnings] = useState<string[]>([]);
   const [preflightSuggestions, setPreflightSuggestions] = useState<PlanSuggestion[]>([]);
@@ -366,7 +369,9 @@ export function App() {
     setRequest((current) => requestForModeChange(current, mode, modelInventory));
     setAttempted(false);
     setServerErrors([]);
-    setServerWarnings([]);
+    setServerWarnings(mode === "image-audio-to-video"
+      ? ia2vEditorNormalizationWarnings({ ...request, mode })
+      : []);
     setPreflightErrors([]);
     setPreflightWarnings([]);
     setPreflightSuggestions([]);
@@ -530,7 +535,7 @@ export function App() {
   };
 
   const loadProjectRequest = (projectRequest: GenerationRequest) => {
-    const merged = mergeGenerationRequest(projectRequest, projectRequest.mode);
+    const merged = mergeEditableGenerationRequest(projectRequest, projectRequest.mode);
     const loaded = withOfficialSpeechModelPaths(
       modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
     );
@@ -538,7 +543,7 @@ export function App() {
     setPromptUndo(null);
     setAttempted(false);
     setServerErrors([]);
-    setServerWarnings([]);
+    setServerWarnings(ia2vEditorNormalizationWarnings(projectRequest));
     setPreflightErrors([]);
     setPreflightWarnings([]);
     setPreflightSuggestions([]);
@@ -794,7 +799,7 @@ export function App() {
   };
 
   const loadJobSettings = (job: StudioJob) => {
-    const merged = mergeGenerationRequest(job.request, job.mode);
+    const merged = mergeEditableGenerationRequest(job.request, job.mode);
     const loaded = withOfficialSpeechModelPaths(
       modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
     );
@@ -804,7 +809,7 @@ export function App() {
     setPromptUndo(null);
     setAttempted(false);
     setServerErrors([]);
-    setServerWarnings([]);
+    setServerWarnings(ia2vEditorNormalizationWarnings(job.request));
     setPreflightErrors([]);
     setPreflightWarnings([]);
     setCommand(null);
@@ -823,7 +828,7 @@ export function App() {
       setPreflightSuggestions([]);
       return;
     }
-    const merged = mergeGenerationRequest(output.request, output.request.mode);
+    const merged = mergeEditableGenerationRequest(output.request, output.request.mode);
     const loaded = withOfficialSpeechModelPaths(
       modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
     );
@@ -833,7 +838,7 @@ export function App() {
     setPromptUndo(null);
     setAttempted(false);
     setServerErrors([]);
-    setServerWarnings([]);
+    setServerWarnings(ia2vEditorNormalizationWarnings(output.request));
     setPreflightErrors([]);
     setPreflightWarnings([]);
     setPreflightSuggestions([]);
@@ -849,7 +854,7 @@ export function App() {
       setServerErrors(["Für dieses Video können keine LipDub-Einstellungen vorbereitet werden."]);
       return;
     }
-    const merged = mergeGenerationRequest(output.request, "lipdub");
+    const merged = mergeEditableGenerationRequest(output.request, "lipdub");
     const loaded = withOfficialSpeechModelPaths(
       modelInventory ? withDiscoveredModelDefaults(merged, modelInventory) : merged,
     );

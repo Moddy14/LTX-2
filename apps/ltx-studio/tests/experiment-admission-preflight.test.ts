@@ -162,6 +162,30 @@ function fixture(): {
 }
 
 describe("experimentAdmissionPreflight", () => {
+  it("blocks a historical IA2V guidance experiment before admission", async () => {
+    const value = fixture();
+    value.experiment.candidate = { variable: "a2v-guidance", value: 5 };
+    value.experiment.changedRequestPaths = ["videoGuidance.modalityScale"];
+    value.binding.variableId = "a2v-guidance";
+    value.binding.changedRequestPaths = ["videoGuidance.modalityScale"];
+    const regular = vi.fn();
+
+    const report = await experimentAdmissionPreflight(
+      value.experiment,
+      "candidate",
+      { binding: value.binding, outputs: [], reusableCandidates: [] },
+      regular,
+      CHECKED_AT,
+    );
+
+    expect(regular).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      verdict: "nicht-pruefbar",
+      steps: [{ decision: "nicht-pruefbar", accepted: false }],
+    });
+    expect(report.notes.join(" ")).toContain("SimpleDenoiser-Vertrag");
+  });
+
   it("short-circuits a regular DFR arm before any admission call", async () => {
     const value = fixture();
     value.experiment.candidate = { variable: "replicate-seed", value: 23_072_027 };
