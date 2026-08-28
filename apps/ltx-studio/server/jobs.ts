@@ -90,8 +90,10 @@ import {
   heartbeatQueueJob,
   isDgxJobId,
   listQueueJobs,
+  parseStrictOffsetDateTime,
   queueAdmissionMemoryGiB,
   readQueueJob,
+  replayPreparedQueueAdmission,
   retryAfterMs,
   submitPreparedQueueAdmission,
   supportsCooperativeCheckpoint,
@@ -557,6 +559,15 @@ type DgxTerminalReceipt = {
         idempotencyKey: string;
       }
     | {
+        kind: "queue-replay";
+        schemaVersion: "dgx-queue-submit.v0";
+        requestedBy: string;
+        sourceApp: "LTX Studio";
+        idempotencyKey: string;
+        replayBoundJobId: string;
+        idempotentReplay: true;
+      }
+    | {
         kind: "job-gone";
         schemaVersion: "dgx-job-gone.v0";
         idempotencyKey: string;
@@ -656,6 +667,7 @@ type DgxQueueOperations = {
 };
 type DgxAdmissionOperations = {
   submit: typeof submitPreparedQueueAdmission;
+  replay?: typeof replayPreparedQueueAdmission;
   list?: typeof listQueueJobs;
 };
 type DgxSchedulerOperations = {
@@ -763,6 +775,18 @@ type DgxTerminalObservation = {
   evidence: DgxTerminalReceipt["evidence"];
 };
 
+type DgxBoundReplayResult =
+  | {
+      kind: "response";
+      response: QueueSubmitResponse;
+      receipt: DgxLeaseReceipt;
+    }
+  | {
+      kind: "gone";
+      observation: DgxTerminalObservation;
+      receipt: DgxLeaseReceipt;
+    };
+
 function dgxResponseBoundJob(
   value: unknown,
   kind: "job-read" | "job-transition" | "job-heartbeat",
@@ -832,6 +856,49 @@ function dgxSubmitResponseCallerBound(
     && typeof response.admission === "object"
     && !Array.isArray(response.admission)
     && typeof (response.admission as Record<string, unknown>).decision === "string";
+}
+
+/**
+ * Proves that a replay-endpoint response is an idempotent observation of the
+ * already durable lease. A caller-bound submit envelope alone is insufficient:
+ * a drifted orchestrator could otherwise return a newly created job for the
+ * same Studio UUID and silently replace mutation authority.
+ */
+function dgxReplayResponseLeaseBound(
+  value: unknown,
+  receipt: DgxLeaseReceipt,
+): value is QueueSubmitResponse {
+  if (!dgxSubmitResponseCallerBound(value, receipt.studioJobId)) return false;
+  const response = value as QueueSubmitResponse;
+  const createdAt = canonicalIsoTimestamp(response.job.created_at);
+  if (response.admission.idempotent_replay !== true
+    || response.admission.replay_bound_job_id !== receipt.dgxJobId
+    || (response.admission.job_id !== undefined
+      && response.admission.job_id !== receipt.dgxJobId)
+    || response.job.job_id !== receipt.dgxJobId
+    || createdAt !== receipt.observedCreatedAt
+    || !dgxQueueJobIdentityMatchesPreparedAdmission(
+      response.job,
+      receipt.studioJobId,
+      receipt.preparedAdmission,
+      receipt.submitStartedAt,
+    )) return false;
+  if (DGX_POSITIVE_DISCOVERY_STATES.has(response.job.state)
+    && response.job.started_at !== null) return false;
+  if (response.job.state === "queued"
+    && (response.admission.decision !== "queued"
+      || response.job.reservation_active !== false)) return false;
+  if (response.job.state === "accepted"
+    && (response.admission.decision !== "accepted"
+      || typeof response.job.reservation_active !== "boolean")) return false;
+  if (DGX_REMOTE_TERMINAL_STATES.has(response.job.state)
+    && response.job.reservation_active !== false) return false;
+  // An accepted durable waiter can legitimately still report
+  // reservation_active=false until the subsequent authoritative start-fence.
+  // Therefore replay identity must not reuse the initial lease-acquisition
+  // predicate, which intentionally requires accepted=>reservation_active.
+  return DGX_POSITIVE_DISCOVERY_STATES.has(response.job.state)
+    || DGX_REMOTE_TERMINAL_STATES.has(response.job.state);
 }
 
 function dgxQueueJobIdentityMatchesPreparedAdmission(
@@ -1003,10 +1070,15 @@ function dgxSubmitTerminalObservation(
   expectedStudioJobId: string,
   preparedAdmission: AdmissionRequest,
   submitStartedAt: string,
+  replayBoundJobId?: string,
 ): DgxTerminalObservation | null {
   if (!dgxSubmitResponseCallerBound(value, expectedStudioJobId)) return null;
   const response = value as QueueSubmitResponse;
   if (!DGX_REMOTE_TERMINAL_STATES.has(response.job.state)
+    || (replayBoundJobId !== undefined
+      && (response.job.job_id !== replayBoundJobId
+        || response.admission.idempotent_replay !== true
+        || response.admission.replay_bound_job_id !== replayBoundJobId))
     || !dgxQueueJobIdentityMatchesPreparedAdmission(
       response.job,
       expectedStudioJobId,
@@ -1015,20 +1087,29 @@ function dgxSubmitTerminalObservation(
     )) return null;
   return {
     state: response.job.state as DgxObservedTerminalState,
-    evidence: {
-      kind: "queue-submit",
-      schemaVersion: "dgx-queue-submit.v0",
-      requestedBy: preparedAdmission.requested_by,
-      sourceApp: "LTX Studio",
-      idempotencyKey: preparedAdmission.idempotency_key,
-    },
+    evidence: replayBoundJobId === undefined
+      ? {
+          kind: "queue-submit",
+          schemaVersion: "dgx-queue-submit.v0",
+          requestedBy: preparedAdmission.requested_by,
+          sourceApp: "LTX Studio",
+          idempotencyKey: preparedAdmission.idempotency_key,
+        }
+      : {
+          kind: "queue-replay",
+          schemaVersion: "dgx-queue-submit.v0",
+          requestedBy: preparedAdmission.requested_by,
+          sourceApp: "LTX Studio",
+          idempotencyKey: preparedAdmission.idempotency_key,
+          replayBoundJobId,
+          idempotentReplay: true,
+        },
   };
 }
 
 function dgxGoneTerminalObservation(
   error: unknown,
-  expectedDgxJobId: string,
-  expectedStudioJobId: string,
+  receipt: DgxLeaseReceipt,
 ): DgxTerminalObservation | null {
   if (!(error instanceof RuntimeApiError)
     || error.statusCode !== 410
@@ -1037,24 +1118,32 @@ function dgxGoneTerminalObservation(
     || Array.isArray(error.payload)) return null;
   const payload = error.payload as Record<string, unknown>;
   const state = payload.state;
-  const finishedAt = canonicalIsoTimestamp(payload.finished_at);
-  const reapedAt = canonicalIsoTimestamp(payload.reaped_at);
+  const finishedAtMs = parseStrictOffsetDateTime(payload.finished_at);
+  const reapedAtMs = parseStrictOffsetDateTime(payload.reaped_at);
+  const observedCreatedAtMs = parseStrictOffsetDateTime(receipt.observedCreatedAt);
+  const observedAtMs = Date.now();
   if (payload.error !== "job_gone"
     || payload.schema_version !== "dgx-job-gone.v0"
     || payload.terminal !== true
-    || payload.job_id !== expectedDgxJobId
-    || payload.idempotency_key !== `ltx-studio:${expectedStudioJobId}`
+    || payload.job_id !== receipt.dgxJobId
+    || payload.idempotency_key !== receipt.idempotencyKey
     || typeof state !== "string"
     || !DGX_REMOTE_TERMINAL_STATES.has(state as QueueJobState)
-    || !finishedAt
-    || !reapedAt
-    || Date.parse(reapedAt) < Date.parse(finishedAt)) return null;
+    || finishedAtMs === null
+    || reapedAtMs === null
+    || observedCreatedAtMs === null
+    || finishedAtMs < observedCreatedAtMs
+    || reapedAtMs < finishedAtMs
+    || finishedAtMs > observedAtMs
+    || reapedAtMs > observedAtMs) return null;
+  const finishedAt = new Date(finishedAtMs).toISOString();
+  const reapedAt = new Date(reapedAtMs).toISOString();
   return {
     state: state as DgxObservedTerminalState,
     evidence: {
       kind: "job-gone",
       schemaVersion: "dgx-job-gone.v0",
-      idempotencyKey: `ltx-studio:${expectedStudioJobId}`,
+      idempotencyKey: receipt.idempotencyKey,
       finishedAt,
       reapedAt,
       reason: typeof payload.reason === "string" ? payload.reason.slice(0, 1_000) : null,
@@ -1083,6 +1172,32 @@ function retryableStartFenceDelayMs(error: unknown): number | null {
   return ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT"].includes(String(error.code))
     ? DGX_START_FENCE_RETRY_MS
     : null;
+}
+
+function definitiveDgxReplayProtocolFailure(error: unknown): string | null {
+  if (!(error instanceof RuntimeApiError) || error.statusCode === null) return null;
+  if (![400, 401, 403, 404, 405, 409, 410, 412, 415, 422].includes(error.statusCode)) {
+    return null;
+  }
+  const code = runtimePayloadError(error);
+  return `HTTP ${error.statusCode}${code ? `, ${code}` : ""}: ${error.message}`;
+}
+
+function dgxReplayTargetTemporarilyUnavailable(
+  error: unknown,
+  expectedDgxJobId: string,
+): boolean {
+  if (!(error instanceof RuntimeApiError)
+    || error.statusCode !== 409
+    || !error.payload
+    || typeof error.payload !== "object"
+    || Array.isArray(error.payload)) return false;
+  const payload = error.payload as Record<string, unknown>;
+  return payload.schema_version === "dgx-queue-replay-conflict.v0"
+    && payload.error === "replay_target_mismatch"
+    && payload.expected_job_id === expectedDgxJobId
+    && payload.observed_job_id === null
+    && payload.client_action === "poll_expected_job_status";
 }
 
 function definitiveHeartbeatLeaseLoss(error: unknown): string | null {
@@ -2972,6 +3087,22 @@ function normalizeDgxTerminalReceipt(value: unknown): DgxTerminalReceipt | undef
       sourceApp: "LTX Studio",
       idempotencyKey: expectedCaller,
     };
+  } else if (rawEvidence.kind === "queue-replay"
+    && rawEvidence.schemaVersion === "dgx-queue-submit.v0"
+    && rawEvidence.requestedBy === expectedCaller
+    && rawEvidence.sourceApp === "LTX Studio"
+    && rawEvidence.idempotencyKey === expectedCaller
+    && rawEvidence.replayBoundJobId === candidate.dgxJobId
+    && rawEvidence.idempotentReplay === true) {
+    evidence = {
+      kind: "queue-replay",
+      schemaVersion: "dgx-queue-submit.v0",
+      requestedBy: expectedCaller,
+      sourceApp: "LTX Studio",
+      idempotencyKey: expectedCaller,
+      replayBoundJobId: candidate.dgxJobId,
+      idempotentReplay: true,
+    };
   } else if (rawEvidence.kind === "job-gone"
     && rawEvidence.schemaVersion === "dgx-job-gone.v0"
     && rawEvidence.idempotencyKey === expectedCaller) {
@@ -3682,6 +3813,7 @@ export class JobManager extends EventEmitter {
     private readonly dgxTerminalRetryBaseMs: number | null = DEFAULT_DGX_TERMINAL_RETRY_BASE_MS,
     private readonly dgxAdmissionOperations: DgxAdmissionOperations = {
       submit: submitPreparedQueueAdmission,
+      replay: replayPreparedQueueAdmission,
       list: listQueueJobs,
     },
     private readonly runProvenanceOperations: RunProvenanceOperations = {
@@ -4552,9 +4684,10 @@ export class JobManager extends EventEmitter {
       const process = job.process;
       const admission = job.dgxAdmissionAbortController;
       this.commitStudioCancellationIntent(job, true);
-      // The cancellation intent is durable now. Abort the one and only
-      // in-flight submit request so cancellation never waits on a hung HTTP
-      // response. Reconciliation remains read-only; this POST is not replayed.
+      // The cancellation intent is durable now. Abort the current in-flight
+      // submit or receipt-bound replay so cancellation never waits on a hung
+      // HTTP response. Pending-first-submit reconciliation remains read-only;
+      // no POST is issued after terminal intent.
       admission?.abort();
       if (job.dgxAdmissionAbortController === admission) {
         delete job.dgxAdmissionAbortController;
@@ -8816,10 +8949,11 @@ export class JobManager extends EventEmitter {
   }
 
   /**
-   * Converts either the sole submit response or one authoritative positive
+   * Converts either the initial submit response or one authoritative positive
    * queue observation into durable mutation authority.  The commit is the
    * only point where an unknown submit may acquire a remote ID; callers may
-   * issue GET/PATCH only after this method has returned successfully.
+   * issue GET/PATCH or exact idempotent POST replays only after this method has
+   * returned successfully.
    */
   private commitDgxLeaseReceipt(
     job: RuntimeJob,
@@ -9394,7 +9528,8 @@ export class JobManager extends EventEmitter {
         const message = error instanceof Error ? error.message : "DGX-Queue-Submit ist fehlgeschlagen.";
         this.appendLog(
           job,
-          `DGX-Queue-Submit endete ohne autoritative Antwort; derselbe Studio-Job sendet nie erneut und wartet ausschließlich auf positive Queue-Evidenz: ${message}`,
+          `Der initiale DGX-Queue-Submit endete ohne autoritative Antwort; bis zu positiver `
+            + `Queue-Evidenz wird er nie erneut gesendet und ausschließlich read-only abgeglichen: ${message}`,
         );
         this.changed();
         if (this.jobShouldStop(job)) {
@@ -9478,16 +9613,18 @@ export class JobManager extends EventEmitter {
   }
 
   private async waitForQueuedDgxJob(job: RuntimeJob, initialDelayMs: number): Promise<DgxStartOutcome> {
-    let delayMs = initialDelayMs;
+    let replayAt = Date.now() + Math.max(0, initialDelayMs);
+    let delayMs = Math.min(DGX_START_FENCE_RETRY_MS, Math.max(0, initialDelayMs));
     while (!this.shuttingDown && isActiveJobStatus(job.status) && job.dgxJobId) {
       this.appendLog(job, `DGX-Queue-Job wartet beim Orchestrator; nächste Prüfung in ${(delayMs / 1000).toFixed(0)} s.`);
       this.changed();
       if (!await this.waitForDelay(job, delayMs)) return "stopped";
       let queueJob: QueueJobSummary;
       let terminalObservation: DgxTerminalObservation | null = null;
+      let pollReceipt: DgxLeaseReceipt | null = null;
       try {
         const expectedDgxJobId = job.dgxJobId;
-        requireDgxLeaseAuthority(job);
+        pollReceipt = requireDgxLeaseAuthority(job);
         const response = await this.dgxQueueOperations.read(expectedDgxJobId);
         const boundJob = dgxResponseBoundJob(response, "job-read", expectedDgxJobId, job.id);
         if (!boundJob) {
@@ -9504,11 +9641,24 @@ export class JobManager extends EventEmitter {
           job.id,
         );
       } catch (error) {
-        if (this.jobShouldStop(job)) return "stopped";
-        const goneObservation = job.dgxJobId
-          ? dgxGoneTerminalObservation(error, job.dgxJobId, job.id)
+        if (error instanceof DgxLeaseAuthorityError) {
+          this.enterPersistenceHold(error, "DGX-Queue-Poll verlor seine Lease-Autorität");
+          return "stopped";
+        }
+        if (isJobPersistenceHoldError(error)) return "stopped";
+        const goneObservation = pollReceipt
+          ? dgxGoneTerminalObservation(error, pollReceipt)
           : null;
-        if (goneObservation) {
+        if (goneObservation && pollReceipt) {
+          if (this.jobShouldStop(job)) {
+            this.commitCancelledDgxReplayTerminalObservation(
+              job,
+              pollReceipt,
+              goneObservation,
+              "abgebrochener Queue-Poll erhielt exakten HTTP-410-Beleg",
+            );
+            return "stopped";
+          }
           const message = `DGX-Queue-Job ist per 410-Beleg terminal: ${goneObservation.state}. `
             + "Derselbe Studio-Job wird niemals erneut submitten.";
           this.failJob(job, message);
@@ -9517,10 +9667,7 @@ export class JobManager extends EventEmitter {
           }
           return "stopped";
         }
-        if (error instanceof DgxLeaseAuthorityError) {
-          this.enterPersistenceHold(error, "DGX-Queue-Poll verlor seine Lease-Autorität");
-          return "stopped";
-        }
+        if (this.jobShouldStop(job)) return "stopped";
         const message = error instanceof Error ? error.message : "DGX-Queue-Status konnte nicht gelesen werden.";
         this.appendLog(job, `DGX-Queue-Status vorübergehend nicht lesbar: ${message}. Prüfung wird wiederholt.`);
         this.changed();
@@ -9535,16 +9682,133 @@ export class JobManager extends EventEmitter {
           "im positiven Queue-Poll",
         )) return "stopped";
       this.appendLog(job, `DGX-Queue-Status: ${queueJob.job_id} ${queueJob.state}${queueJob.reason ? ` - ${queueJob.reason}` : ""}.`);
+      if (queueJob.state === "queued" && Date.now() >= replayAt) {
+        try {
+          const replayResult = await this.replayBoundDgxQueueAdmission(job);
+          const replayReceipt = replayResult.receipt;
+          if (replayResult.kind === "gone") {
+            if (this.jobShouldStop(job)) {
+              this.commitCancelledDgxReplayTerminalObservation(
+                job,
+                replayReceipt,
+                replayResult.observation,
+                "abgebrochener Queue-Replay erhielt exakten HTTP-410-Beleg",
+              );
+              return "stopped";
+            }
+            this.failJob(
+              job,
+              `DGX-Queue-Replay bestätigte per 410-Beleg den terminalen Zustand `
+                + `${replayResult.observation.state} der bestehenden Lease.`,
+            );
+            if (job.dgxTerminalDelivery) {
+              this.commitDgxTerminalReceipt(
+                job,
+                replayResult.observation,
+                "Queue-Replay erhielt exakten HTTP-410-Beleg",
+              );
+            }
+            return "stopped";
+          }
+          const replayResponse = replayResult.response;
+          queueJob = replayResponse.job;
+          terminalObservation = dgxSubmitTerminalObservation(
+            replayResponse,
+            job.id,
+            replayReceipt.preparedAdmission,
+            replayReceipt.submitStartedAt,
+            replayReceipt.dgxJobId,
+          );
+          if (this.jobShouldStop(job)) {
+            if (terminalObservation) {
+              this.commitCancelledDgxReplayTerminalObservation(
+                job,
+                replayReceipt,
+                terminalObservation,
+                "abgebrochener Queue-Replay erhielt gebundene Terminalantwort",
+              );
+            }
+            return "stopped";
+          }
+          if (DGX_POSITIVE_DISCOVERY_STATES.has(queueJob.state)
+            && !await this.confirmDgxCooperativeQueueContract(
+              job,
+              queueJob,
+              "im exakt idempotenten Queue-Replay",
+            )) return "stopped";
+          this.appendLog(
+            job,
+            `DGX-Queue-Replay: bestehende Lease ${queueJob.job_id} ist ${queueJob.state}; `
+              + `Admission ${replayResponse.admission.decision}`
+              + `${replayResponse.admission.reason ? ` - ${replayResponse.admission.reason}` : ""}.`,
+          );
+          replayAt = Date.now() + Math.max(1_000, retryAfterMs(replayResponse.admission));
+        } catch (error) {
+          if (error instanceof DgxLeaseAuthorityError) {
+            this.enterPersistenceHold(error, "DGX-Queue-Replay verlor seine gebundene Lease-Autorität");
+            return "stopped";
+          }
+          if (isJobPersistenceHoldError(error)) return "stopped";
+          const expectedDgxJobId = job.dgxJobId;
+          if (expectedDgxJobId
+            && dgxReplayTargetTemporarilyUnavailable(error, expectedDgxJobId)) {
+            if (this.jobShouldStop(job)) return "stopped";
+            this.appendLog(
+              job,
+              `DGX-Queue-Replay fand die erwartete Lease zwischen GET und POST nicht mehr; `
+                + "der Replay-only-Vertrag hat keinen Ersatzjob erzeugt. Exakter GET-Abgleich folgt.",
+            );
+            this.changed();
+            replayAt = Date.now() + DGX_START_FENCE_RETRY_MS;
+            delayMs = 1_000;
+            continue;
+          }
+          const protocolFailure = definitiveDgxReplayProtocolFailure(error);
+          if (protocolFailure) {
+            this.enterPersistenceHold(
+              new DgxLeaseAuthorityError(
+                `Der erwartete-ID-gebundene DGX-Queue-Replay wurde autoritativ abgelehnt (${protocolFailure}).`,
+              ),
+              "DGX-Queue-Replay-Vertrag ist nicht verfügbar oder widersprüchlich",
+            );
+            return "stopped";
+          }
+          if (this.jobShouldStop(job)) return "stopped";
+          const message = error instanceof Error
+            ? error.message
+            : "DGX-Queue-Replay blieb ohne autoritative Antwort.";
+          this.appendLog(
+            job,
+            `DGX-Queue-Replay blieb vorübergehend unbestätigt; die vorhandene Lease bleibt `
+              + `unverändert und wird per GET weiter geprüft: ${message}`,
+          );
+          this.changed();
+          replayAt = Date.now() + DGX_START_FENCE_RETRY_MS;
+          // Der Replay-Transport ist auf 25 s begrenzt. Danach folgt fast
+          // sofort ein read-only GET; der POST darf serverseitig fertiglaufen
+          // und kann beim GET keine neue Lease unterschieben.
+          delayMs = 1_000;
+          continue;
+        }
+      }
       if (queueJob.state === "accepted") {
         const outcome = await this.startAcceptedDgxJob(job, queueJob);
         if (outcome === "queued") {
+          replayAt = Date.now() + DGX_START_FENCE_RETRY_MS;
           delayMs = DGX_START_FENCE_RETRY_MS;
           continue;
         }
         return outcome;
       }
       if (queueJob.state === "queued") {
-        delayMs = 30_000;
+        // Die read-only GET-Planung bleibt unabhängig vom Server-Backoff auf
+        // höchstens 30 s begrenzt. Transportlaufzeiten kommen hinzu; deshalb
+        // ist der Replay-POST separat auf 25 s begrenzt und ein Timeout führt
+        // nach 1 s wieder zu einem GET.
+        delayMs = Math.min(
+          DGX_START_FENCE_RETRY_MS,
+          Math.max(1_000, replayAt - Date.now()),
+        );
         continue;
       }
       if (queueJob.state === "cancelled") {
@@ -9576,6 +9840,110 @@ export class JobManager extends EventEmitter {
       delayMs = 30_000;
     }
     return "stopped";
+  }
+
+  /**
+   * Replays only the canonically equal admission object already sealed into a
+   * durable lease receipt.  This is intentionally disjoint from recovery of
+   * an ambiguous initial POST, which remains read-only until positive queue
+   * evidence establishes a lease.
+   */
+  private async replayBoundDgxQueueAdmission(
+    job: RuntimeJob,
+  ): Promise<DgxBoundReplayResult> {
+    const receipt = requireDgxLeaseAuthority(job);
+    const expectedDgxJobId = receipt.dgxJobId;
+    const receiptJson = canonicalJson(receipt);
+    const replayRequest = structuredClone(receipt.preparedAdmission);
+    const abortController = new AbortController();
+    job.dgxAdmissionAbortController = abortController;
+    try {
+      try {
+        this.revalidateRuntimeTrustBoundary(job, "exakter DGX-Queue-Replay");
+      } catch (error) {
+        if (isJobPersistenceHoldError(error)) throw error;
+        throw new DgxLeaseAuthorityError(
+          `Lokaler Replay-Preflight verweigerte die bestehende Lease: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      if (!this.dgxAdmissionOperations.replay) {
+        throw new DgxLeaseAuthorityError(
+          "Der DGX-Client besitzt keinen erwartete-ID-gebundenen Replay-Transport.",
+        );
+      }
+      let response: QueueSubmitResponse;
+      try {
+        response = await this.dgxAdmissionOperations.replay(
+          replayRequest,
+          expectedDgxJobId,
+          abortController.signal,
+        );
+      } catch (error) {
+        const goneObservation = dgxGoneTerminalObservation(error, receipt);
+        if (goneObservation) {
+          return { kind: "gone", observation: goneObservation, receipt };
+        }
+        throw error;
+      }
+      // Auch wenn ein lokaler Abbruch waehrend des POST gewann, muss eine
+      // autoritative Antwort zuerst gegen den unveraenderlichen Receipt-
+      // Snapshot geprueft werden. Sonst bliebe eine fremde Ersatz-ID als
+      // unerkannter Remote-Orphan zurueck.
+      if (receipt.preparedAdmissionSha256 !== preparedAdmissionSha256(replayRequest)
+        || !dgxReplayResponseLeaseBound(response, receipt)) {
+        throw new DgxLeaseAuthorityError(
+          "DGX-Queue-Replay war nicht als exakte idempotente Beobachtung der bestehenden Lease gebunden.",
+        );
+      }
+      if (!this.jobShouldStop(job)) {
+        if (job.dgxJobId !== expectedDgxJobId) {
+          throw new DgxLeaseAuthorityError(
+            "DGX-Queue-Replay verlor waehrend der Antwort seine dauerhafte Job-ID-Bindung.",
+          );
+        }
+        const currentReceipt = requireDgxLeaseAuthority(job);
+        if (canonicalJson(currentReceipt) !== receiptJson) {
+          throw new DgxLeaseAuthorityError(
+            "DGX-Queue-Replay verlor waehrend der Antwort seine dauerhafte Receipt-Bindung.",
+          );
+        }
+      }
+      return { kind: "response", response, receipt };
+    } finally {
+      if (job.dgxAdmissionAbortController === abortController) {
+        this.clearCancellationSettlementTransient(
+          job,
+          () => delete job.dgxAdmissionAbortController,
+        );
+      }
+    }
+  }
+
+  private commitCancelledDgxReplayTerminalObservation(
+    job: RuntimeJob,
+    replayReceipt: DgxLeaseReceipt,
+    observation: DgxTerminalObservation,
+    detail: string,
+  ): void {
+    if (this.persistenceHold || job.cancelledBy !== "studio") return;
+    if (job.dgxTerminalReceipt) {
+      if (job.dgxTerminalReceipt.dgxJobId === replayReceipt.dgxJobId) return;
+      throw new DgxLeaseAuthorityError(
+        "Terminaler Cancel-Replay widerspricht einem bereits bestätigten DGX-Terminalbeleg.",
+      );
+    }
+    if (!job.dgxTerminalDelivery) return;
+    const currentReceipt = normalizeDgxLeaseReceipt(job.dgxLeaseReceipt);
+    if (!currentReceipt
+      || job.dgxJobId !== replayReceipt.dgxJobId
+      || canonicalJson(currentReceipt) !== canonicalJson(replayReceipt)) {
+      throw new DgxLeaseAuthorityError(
+        "Terminaler Cancel-Replay verlor vor dem Receipt-Commit seine dauerhafte Lease-Bindung.",
+      );
+    }
+    this.commitDgxTerminalReceipt(job, observation, detail);
   }
 
   private async startAcceptedDgxJob(
@@ -9865,9 +10233,10 @@ export class JobManager extends EventEmitter {
       : String(transitionError);
     while (!this.shuttingDown && isActiveJobStatus(job.status) && job.dgxJobId) {
       let remote: QueueJobSummary;
+      let pollReceipt: DgxLeaseReceipt | null = null;
       try {
         const expectedDgxJobId = job.dgxJobId;
-        requireDgxLeaseAuthority(job);
+        pollReceipt = requireDgxLeaseAuthority(job);
         const response = await this.dgxQueueOperations.read(expectedDgxJobId);
         const boundJob = dgxResponseBoundJob(response, "job-read", expectedDgxJobId, job.id);
         if (!boundJob) {
@@ -9879,9 +10248,8 @@ export class JobManager extends EventEmitter {
         remote = boundJob;
       } catch (error) {
         if (this.persistenceHold || isJobPersistenceHoldError(error)) return "failed";
-        const expectedDgxJobId = job.dgxJobId;
-        const goneObservation = expectedDgxJobId
-          ? dgxGoneTerminalObservation(error, expectedDgxJobId, job.id)
+        const goneObservation = pollReceipt
+          ? dgxGoneTerminalObservation(error, pollReceipt)
           : null;
         if (goneObservation) {
           this.failJob(
@@ -10059,6 +10427,7 @@ export class JobManager extends EventEmitter {
   private async attemptDgxTerminalDelivery(job: RuntimeJob): Promise<boolean> {
     const delivery = job.dgxTerminalDelivery;
     const jobId = job.dgxJobId;
+    let deliveryReceipt: DgxLeaseReceipt | null = null;
     if (!delivery || !jobId) return true;
     const previousAttempts = delivery.attempts;
     const previousUpdatedAt = delivery.updatedAt;
@@ -10082,7 +10451,7 @@ export class JobManager extends EventEmitter {
       // Every terminal mutation is GET-first. A persisted/adopted job ID alone
       // is not mutation authority: the current public record must bind both
       // caller fields to this exact Studio job before PATCH.
-      requireDgxLeaseAuthority(job);
+      deliveryReceipt = requireDgxLeaseAuthority(job);
       if (job.dgxJobId !== jobId) throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Terminal-GET.");
       const current = await this.dgxQueueOperations.read(jobId);
       if (this.persistenceHold) return false;
@@ -10141,7 +10510,9 @@ export class JobManager extends EventEmitter {
       if (this.persistenceHold || isJobPersistenceHoldError(transitionError)) return false;
       if (transitionError instanceof DgxTerminalReceiptPersistenceError) throw transitionError;
       if (transitionError instanceof DgxLeaseAuthorityError) throw transitionError;
-      const goneObservation = dgxGoneTerminalObservation(transitionError, jobId, job.id);
+      const goneObservation = deliveryReceipt
+        ? dgxGoneTerminalObservation(transitionError, deliveryReceipt)
+        : null;
       if (goneObservation) return this.settleDgxGoneEvidence(job, delivery, goneObservation);
       const transitionMessage = transitionError instanceof Error ? transitionError.message : String(transitionError);
       try {
@@ -10181,7 +10552,9 @@ export class JobManager extends EventEmitter {
         if (this.persistenceHold || isJobPersistenceHoldError(readError)) return false;
         if (readError instanceof DgxTerminalReceiptPersistenceError) throw readError;
         if (readError instanceof DgxLeaseAuthorityError) throw readError;
-        const readGoneObservation = dgxGoneTerminalObservation(readError, jobId, job.id);
+        const readGoneObservation = deliveryReceipt
+          ? dgxGoneTerminalObservation(readError, deliveryReceipt)
+          : null;
         if (readGoneObservation) return this.settleDgxGoneEvidence(job, delivery, readGoneObservation);
         const readMessage = readError instanceof Error ? readError.message : String(readError);
         this.deferDgxTerminalDelivery(job, `${transitionMessage}; Statusabgleich fehlgeschlagen: ${readMessage}`);
@@ -10727,8 +11100,9 @@ export class JobManager extends EventEmitter {
         state.failureStartedAt ??= failedAt;
         state.consecutiveFailures += 1;
         let terminalObservation: DgxTerminalObservation | null = null;
+        let statusReceipt: DgxLeaseReceipt | null = null;
         try {
-          requireDgxLeaseAuthority(job);
+          statusReceipt = requireDgxLeaseAuthority(job);
           if (job.dgxJobId !== state.jobId) {
             throw new DgxLeaseAuthorityError("DGX-Lease-ID änderte sich vor dem Heartbeat-Statusabgleich.");
           }
@@ -10767,7 +11141,9 @@ export class JobManager extends EventEmitter {
             || isJobPersistenceHoldError(readError)
             || state.stopped
             || job.dgxOwnerHeartbeat !== state) return;
-          const goneObservation = dgxGoneTerminalObservation(readError, state.jobId, job.id);
+          const goneObservation = statusReceipt
+            ? dgxGoneTerminalObservation(readError, statusReceipt)
+            : null;
           if (goneObservation) {
             await this.failStopDgxOwnerHeartbeat(
               job,

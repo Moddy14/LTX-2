@@ -229,6 +229,34 @@ function boundDgxSubmit(
   };
 }
 
+function boundDgxReplay(
+  studioJobId: string,
+  dgxJobId: string,
+  state: QueueJobState,
+  admissionRequest: AdmissionRequest,
+  observedCreatedAt: string,
+  retryAfterSeconds = 30,
+) {
+  const response = boundDgxSubmit(
+    studioJobId,
+    dgxJobId,
+    state,
+    admissionRequest,
+  );
+  response.job.created_at = observedCreatedAt;
+  if (state === "accepted") response.job.reservation_active = false;
+  return {
+    ...response,
+    admission: {
+      ...response.admission,
+      decision: state === "queued" ? "queued" : response.admission.decision,
+      idempotent_replay: true as const,
+      replay_bound_job_id: dgxJobId,
+      retry_after_seconds: retryAfterSeconds,
+    },
+  };
+}
+
 function queueListJobHint(
   studioJobId: string,
   dgxJobId: string,
@@ -278,6 +306,7 @@ function testDgxLeaseReceipt(
 ) {
   const [preparedAdmission] = buildAdmissionRequests(request, 58, studioJobId);
   const caller = dgxCaller(studioJobId);
+  const observedNow = Date.now();
   return {
     schemaVersion: "ltx-studio-dgx-lease-receipt.v1" as const,
     studioJobId,
@@ -289,14 +318,14 @@ function testDgxLeaseReceipt(
     preparedAdmissionSha256: createHash("sha256")
       .update(canonicalJson(preparedAdmission))
       .digest("hex"),
-    submitStartedAt: new Date().toISOString(),
+    submitStartedAt: new Date(observedNow - 2).toISOString(),
     observedState: "accepted" as const,
-    observedCreatedAt: new Date(Date.now() + 1).toISOString(),
+    observedCreatedAt: new Date(observedNow - 1).toISOString(),
     evidence: {
       kind: "submit-response" as const,
       schemaVersion: "dgx-queue-submit.v0" as const,
     },
-    confirmedAt: new Date(Date.now() + 2).toISOString(),
+    confirmedAt: new Date(observedNow).toISOString(),
   };
 }
 
@@ -8912,6 +8941,1465 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     ]));
   });
 
+  it("replays only the exact receipt-bound admission and accepts the same lease before reservation activation", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("receipt-bound-replay");
+    let submittedRequest: AdmissionRequest | null = null;
+    let submittedExpectedJobId: string | null = null;
+    let submittedSignal: AbortSignal | undefined;
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async (
+      admissionRequest: AdmissionRequest,
+      expectedDgxJobId: string,
+      signal?: AbortSignal,
+    ) => {
+      submittedRequest = structuredClone(admissionRequest);
+      submittedExpectedJobId = expectedDgxJobId;
+      submittedSignal = signal;
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      return boundDgxReplay(
+        studioJobId,
+        dgxJobId,
+        "accepted",
+        admissionRequest,
+        receipt.observedCreatedAt,
+      );
+    });
+    const read = vi.fn(async (jobId: string) =>
+      boundDgxRead(studioJobId, jobId, "queued"));
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read,
+        transition: async () => {
+          throw new Error("start transition is stubbed in this replay test");
+        },
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = structuredClone(
+      runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>,
+    );
+    const startAccepted = vi.fn(async (_job: unknown, remote: QueueJobSummary) => {
+      expect(remote).toMatchObject({
+        job_id: dgxJobId,
+        state: "accepted",
+        reservation_active: false,
+      });
+      return "started";
+    });
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("started");
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(startAccepted).toHaveBeenCalledOnce();
+    expect(submittedExpectedJobId).toBe(dgxJobId);
+    expect(submittedSignal).toBeInstanceOf(AbortSignal);
+    expect(submittedRequest).not.toBe(receiptBefore.preparedAdmission);
+    expect(canonicalJson(submittedRequest)).toBe(canonicalJson(receiptBefore.preparedAdmission));
+    expect(createHash("sha256").update(canonicalJson(submittedRequest)).digest("hex"))
+      .toBe(receiptBefore.preparedAdmissionSha256);
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(canonicalJson(receiptBefore));
+    expect(runtimeJob).not.toHaveProperty("dgxPreparedAdmission");
+    expect(runtimeJob).not.toHaveProperty("dgxPreparedAdmissionSha256");
+  });
+
+  it.each([
+    "missing-replay-marker",
+    "missing-replay-bound-id",
+    "different-admission-job-id",
+    "different-job-id",
+    "different-created-at",
+    "different-caller",
+    "accepted-wrong-decision",
+    "accepted-missing-reservation",
+    "queued-wrong-decision",
+    "queued-active-reservation",
+    "missing-cooperative-capability",
+  ] as const)("fails closed without starting for a %s queue replay", async (fault) => {
+    let studioJobId = "";
+    let remoteState: QueueJobState = "queued";
+    const dgxJobId = testDgxJobId(`malformed-replay-${fault}`);
+    const otherDgxJobId = testDgxJobId(`malformed-replay-other-${fault}`);
+    const transitions: QueueTransitionState[] = [];
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async (
+      admissionRequest: AdmissionRequest,
+      expectedDgxJobId: string,
+    ) => {
+      expect(expectedDgxJobId).toBe(dgxJobId);
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      const replayState = fault.startsWith("queued-") ? "queued" : "accepted";
+      const response = boundDgxReplay(
+        studioJobId,
+        dgxJobId,
+        replayState,
+        admissionRequest,
+        receipt.observedCreatedAt,
+      );
+      if (fault === "missing-replay-marker") {
+        delete (response.admission as Record<string, unknown>).idempotent_replay;
+      }
+      if (fault === "missing-replay-bound-id") {
+        delete (response.admission as Record<string, unknown>).replay_bound_job_id;
+      }
+      if (fault === "different-admission-job-id") {
+        (response.admission as Record<string, unknown>).job_id = otherDgxJobId;
+      }
+      if (fault === "different-job-id") response.job.job_id = otherDgxJobId;
+      if (fault === "different-created-at") {
+        response.job.created_at = new Date(Date.parse(receipt.observedCreatedAt) + 1_000).toISOString();
+      }
+      if (fault === "different-caller") response.job.requested_by = "ltx-studio:foreign-caller";
+      if (fault === "accepted-wrong-decision") response.admission.decision = "queued";
+      if (fault === "accepted-missing-reservation") {
+        delete response.job.reservation_active;
+      }
+      if (fault === "queued-wrong-decision") response.admission.decision = "accepted";
+      if (fault === "queued-active-reservation") response.job.reservation_active = true;
+      if (fault === "missing-cooperative-capability") response.job.segment_waiter = false;
+      return response;
+    });
+    const read = vi.fn(async (jobId: string) =>
+      boundDgxRead(studioJobId, jobId, remoteState));
+    const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+      transitions.push(state);
+      remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+      return boundDgxTransition(studioJobId, jobId, remoteState);
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      { read, transition },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(runtimeJob).not.toHaveProperty("process");
+    expect(runtimeJob).not.toHaveProperty("localProcessSpawnPending");
+    if (fault === "missing-cooperative-capability") {
+      expect(transitions).toEqual(["cancelled"]);
+      expect(runtimeJob).toMatchObject({
+        status: "failed",
+        dgxJobTerminal: true,
+        dgxTerminalReceipt: {
+          dgxJobId,
+          remoteTerminalState: "cancelled",
+        },
+      });
+      expect(runtimeJob).not.toHaveProperty("dgxLeaseReceipt");
+    } else {
+      expect(transitions).toEqual([]);
+      expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+      expect(manager.persistenceHealth()).toMatchObject({ status: "hold" });
+    }
+  });
+
+  it("keeps the durable lease and continues GET polling after an ambiguous replay transport failure", async () => {
+    let studioJobId = "";
+    let reads = 0;
+    const dgxJobId = testDgxJobId("ambiguous-replay-transport");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async () => {
+      throw Object.assign(new Error("socket hang up during exact replay"), { code: "ECONNRESET" });
+    });
+    const read = vi.fn(async (jobId: string) => {
+      reads += 1;
+      return boundDgxRead(studioJobId, jobId, reads === 1 ? "queued" : "accepted");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read,
+        transition: async () => {
+          throw new Error("start transition is stubbed in this replay test");
+        },
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("started");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(startAccepted).toHaveBeenCalledOnce();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+    expect(manager.get(created.id)?.logs.join("\n")).toContain(
+      "die vorhandene Lease bleibt unverändert und wird per GET weiter geprüft",
+    );
+  });
+
+  it("never falls back to the lease-creating submit endpoint when replay transport is unavailable", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("missing-replay-transport");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("the lease-creating endpoint must never be a replay fallback");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition: async () => {
+          throw new Error("missing replay transport must prevent PATCH");
+        },
+      },
+      null,
+      { submit: initialSubmit },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(manager.persistenceHealth()).toMatchObject({ status: "hold" });
+  });
+
+  it("reconciles an exact replay target-mismatch race by GET without creating a replacement lease", async () => {
+    let studioJobId = "";
+    let reads = 0;
+    const waits: number[] = [];
+    const dgxJobId = testDgxJobId("replay-target-mismatch");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("the lease-creating endpoint must never resolve a replay race");
+    });
+    const replay = vi.fn(async () => {
+      throw new RuntimeApiError("replay target moved before conditional POST", 409, {
+        schema_version: "dgx-queue-replay-conflict.v0",
+        error: "replay_target_mismatch",
+        expected_job_id: dgxJobId,
+        observed_job_id: null,
+        client_action: "poll_expected_job_status",
+      });
+    });
+    const read = vi.fn(async (jobId: string) => {
+      reads += 1;
+      return boundDgxRead(studioJobId, jobId, reads === 1 ? "queued" : "accepted");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read,
+        transition: async () => {
+          throw new Error("start transition is stubbed in this replay-race test");
+        },
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    Reflect.set(manager, "waitForDelay", async (_job: unknown, delayMs: number) => {
+      waits.push(delayMs);
+      return true;
+    });
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("started");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(waits).toEqual([0, 1_000]);
+    expect(startAccepted).toHaveBeenCalledOnce();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+    expect(manager.get(created.id)?.logs.join("\n")).toContain(
+      "der Replay-only-Vertrag hat keinen Ersatzjob erzeugt",
+    );
+  });
+
+  it.each([
+    ["wrong observed ID", {
+      observed_job_id: testDgxJobId("replay-target-mismatch-foreign"),
+    }],
+    ["wrong schema", {
+      schema_version: "dgx-queue-submit.v0",
+    }],
+  ] as const)("enters HOLD for an unbound replay target-mismatch conflict: %s", async (
+    _case,
+    override,
+  ) => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId(`invalid-replay-target-mismatch-${_case}`);
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("the lease-creating endpoint must never resolve a replay race");
+    });
+    const replay = vi.fn(async () => {
+      throw new RuntimeApiError("unbound replay target mismatch", 409, {
+        schema_version: "dgx-queue-replay-conflict.v0",
+        error: "replay_target_mismatch",
+        expected_job_id: dgxJobId,
+        observed_job_id: null,
+        client_action: "poll_expected_job_status",
+        ...override,
+      });
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition: async () => {
+          throw new Error("an unbound replay conflict must prevent PATCH");
+        },
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(manager.persistenceHealth()).toMatchObject({ status: "hold" });
+  });
+
+  it("settles an exact replay-endpoint HTTP 410 tombstone without entering global HOLD", async () => {
+    let studioJobId = "";
+    let observedCreatedAt = "";
+    const dgxJobId = testDgxJobId("replay-exact-gone");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async () => {
+      throw new RuntimeApiError("job_gone", 410, {
+        error: "job_gone",
+        job_id: dgxJobId,
+        schema_version: "dgx-job-gone.v0",
+        terminal: true,
+        state: "cancelled",
+        reason: "terminal_record_bound_to_key",
+        finished_at: observedCreatedAt,
+        reaped_at: observedCreatedAt,
+        idempotency_key: `ltx-studio:${studioJobId}`,
+      });
+    });
+    const transition = vi.fn(async () => {
+      throw new Error("an exact 410 tombstone must prevent PATCH");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition,
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    observedCreatedAt = (
+      runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
+    ).observedCreatedAt;
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(transition).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+    expect(runtimeJob).toMatchObject({
+      status: "failed",
+      dgxJobId,
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: {
+        dgxJobId,
+        localIntentState: "failed",
+        remoteTerminalState: "cancelled",
+        evidence: {
+          kind: "job-gone",
+          idempotencyKey: dgxCaller(created.id),
+        },
+      },
+    });
+    expect(runtimeJob).not.toHaveProperty("dgxLeaseReceipt");
+    expect(manager.get(created.id)?.logs.join("\n")).toContain(
+      "Queue-Replay bestätigte per 410-Beleg",
+    );
+  });
+
+  it("persists a retained exact terminal replay as replay-bound evidence without PATCH or HOLD", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("retained-terminal-replay");
+    const path = await statePath();
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("a retained terminal replay must never use the lease-creating endpoint");
+    });
+    const replay = vi.fn(async (
+      admissionRequest: AdmissionRequest,
+      expectedDgxJobId: string,
+    ) => {
+      expect(expectedDgxJobId).toBe(dgxJobId);
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      return boundDgxReplay(
+        studioJobId,
+        dgxJobId,
+        "cancelled",
+        admissionRequest,
+        receipt.observedCreatedAt,
+      );
+    });
+    const transition = vi.fn(async () => {
+      throw new Error("a retained terminal replay must never issue a PATCH");
+    });
+    const manager = new JobManager(
+      path,
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition,
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(transition).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+    expect(runtimeJob).toMatchObject({
+      status: "failed",
+      dgxJobId,
+      dgxJobTerminal: true,
+      dgxTerminalReceipt: {
+        dgxJobId,
+        localIntentState: "failed",
+        remoteTerminalState: "cancelled",
+        evidence: {
+          kind: "queue-replay",
+          schemaVersion: "dgx-queue-submit.v0",
+          requestedBy: dgxCaller(created.id),
+          sourceApp: "LTX Studio",
+          idempotencyKey: dgxCaller(created.id),
+          replayBoundJobId: dgxJobId,
+          idempotentReplay: true,
+        },
+      },
+    });
+    expect(runtimeJob).not.toHaveProperty("dgxLeaseReceipt");
+
+    const restarted = new JobManager(path, false);
+    const restored = (Reflect.get(restarted, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    expect(restored.dgxTerminalReceipt).toMatchObject({
+      dgxJobId,
+      evidence: {
+        kind: "queue-replay",
+        replayBoundJobId: dgxJobId,
+        idempotentReplay: true,
+      },
+    });
+    expect(restored.dgxLeaseReceipt).toBeUndefined();
+  });
+
+  it.each([
+    "missing-marker",
+    "wrong-bound-id",
+    "different-created-at",
+    "active-reservation",
+    "missing-reservation",
+  ] as const)("enters HOLD for a malformed retained terminal replay: %s", async (fault) => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId(`malformed-retained-terminal-${fault}`);
+    const foreignDgxJobId = testDgxJobId(`malformed-retained-terminal-foreign-${fault}`);
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("a malformed terminal replay must never use the lease-creating endpoint");
+    });
+    const replay = vi.fn(async (
+      admissionRequest: AdmissionRequest,
+      expectedDgxJobId: string,
+    ) => {
+      expect(expectedDgxJobId).toBe(dgxJobId);
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      const response = boundDgxReplay(
+        studioJobId,
+        dgxJobId,
+        "cancelled",
+        admissionRequest,
+        receipt.observedCreatedAt,
+      );
+      if (fault === "missing-marker") {
+        delete (response.admission as Record<string, unknown>).idempotent_replay;
+      } else if (fault === "wrong-bound-id") {
+        response.admission.replay_bound_job_id = foreignDgxJobId;
+      } else if (fault === "different-created-at") {
+        response.job.created_at = new Date(
+          Date.parse(receipt.observedCreatedAt) + 1_000,
+        ).toISOString();
+      } else if (fault === "active-reservation") {
+        response.job.reservation_active = true;
+      } else {
+        delete response.job.reservation_active;
+      }
+      return response;
+    });
+    const transition = vi.fn(async () => {
+      throw new Error("a malformed terminal replay must prevent PATCH");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition,
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(transition).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(runtimeJob).not.toHaveProperty("dgxTerminalReceipt");
+    expect(manager.persistenceHealth()).toMatchObject({ status: "hold" });
+  });
+
+  it.each([
+    "wrong job",
+    "wrong caller",
+    "non-terminal",
+    "finished before lease creation",
+    "reaped before finished",
+    "future timestamp",
+    "timestamp without offset",
+  ] as const)("enters HOLD for an unbound replay-endpoint 410 tombstone: %s", async (_case) => {
+    let studioJobId = "";
+    let observedCreatedAt = "";
+    const dgxJobId = testDgxJobId(`replay-invalid-gone-${_case}`);
+    const foreignDgxJobId = testDgxJobId("replay-gone-foreign");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async () => {
+      const observedCreatedAtMs = Date.parse(observedCreatedAt);
+      const payload: Record<string, unknown> = {
+        error: "job_gone",
+        job_id: dgxJobId,
+        schema_version: "dgx-job-gone.v0",
+        terminal: true,
+        state: "cancelled",
+        finished_at: observedCreatedAt,
+        reaped_at: observedCreatedAt,
+        idempotency_key: `ltx-studio:${studioJobId}`,
+      };
+      if (_case === "wrong job") payload.job_id = foreignDgxJobId;
+      if (_case === "wrong caller") payload.idempotency_key = "ltx-studio:foreign-caller";
+      if (_case === "non-terminal") payload.terminal = false;
+      if (_case === "finished before lease creation") {
+        payload.finished_at = new Date(observedCreatedAtMs - 1).toISOString();
+      }
+      if (_case === "reaped before finished") {
+        payload.reaped_at = new Date(observedCreatedAtMs - 1).toISOString();
+      }
+      if (_case === "future timestamp") {
+        const future = new Date(Date.now() + 60_000).toISOString();
+        payload.finished_at = future;
+        payload.reaped_at = future;
+      }
+      if (_case === "timestamp without offset") {
+        payload.finished_at = observedCreatedAt.replace(/Z$/u, "");
+        payload.reaped_at = observedCreatedAt.replace(/Z$/u, "");
+      }
+      throw new RuntimeApiError("untrusted job_gone", 410, {
+        ...payload,
+      });
+    });
+    const transition = vi.fn(async () => {
+      throw new Error("an invalid 410 tombstone must prevent PATCH");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, "queued"),
+        transition,
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    observedCreatedAt = (
+      runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
+    ).observedCreatedAt;
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(transition).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(manager.persistenceHealth()).toMatchObject({ status: "hold" });
+  });
+
+  it.each([
+    ["short 5-second", 5, [0, 5_000], 2],
+    ["long 120-second", 120, [0, 30_000, 30_000, 30_000, 30_000], 5],
+  ] as const)("honors a %s replay backoff while GET heartbeats remain at most 30 seconds", async (
+    _case,
+    retryAfterSeconds,
+    expectedWaits,
+    expectedReads,
+  ) => {
+    let studioJobId = "";
+    let clock = Date.now();
+    const waits: number[] = [];
+    const dgxJobId = testDgxJobId("independent-replay-backoff");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async (
+      admissionRequest: AdmissionRequest,
+      expectedDgxJobId: string,
+    ) => {
+      expect(expectedDgxJobId).toBe(dgxJobId);
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      const replayNumber = replay.mock.calls.length;
+      return boundDgxReplay(
+        studioJobId,
+        dgxJobId,
+        replayNumber === 1 ? "queued" : "accepted",
+        admissionRequest,
+        receipt.observedCreatedAt,
+        retryAfterSeconds,
+      );
+    });
+    const read = vi.fn(async (jobId: string) =>
+      boundDgxRead(studioJobId, jobId, "queued"));
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read,
+        transition: async () => {
+          throw new Error("start transition is stubbed in this replay test");
+        },
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    clock = Date.parse(
+      (runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>).confirmedAt,
+    ) + 100;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    Reflect.set(manager, "waitForDelay", async (_job: unknown, delayMs: number) => {
+      waits.push(delayMs);
+      clock += delayMs;
+      return true;
+    });
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    const outcome = await waitForQueuedDgxJob.call(manager, runtimeJob, 0);
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(expectedReads);
+    expect(waits).toEqual(expectedWaits);
+    expect(startAccepted).toHaveBeenCalledOnce();
+    expect(outcome).toBe("started");
+  });
+
+  it("does not start when Studio cancellation wins an in-flight exact replay", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("cancelled-replay-race");
+    let replayStartedResolve!: () => void;
+    const replayStarted = new Promise<void>((resolvePromise) => {
+      replayStartedResolve = resolvePromise;
+    });
+    let releaseReplayResolve!: () => void;
+    const releaseReplay = new Promise<void>((resolvePromise) => {
+      releaseReplayResolve = resolvePromise;
+    });
+    let replaySignal: AbortSignal | undefined;
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run for a bound lease");
+    });
+    const replay = vi.fn(async (
+      admissionRequest: AdmissionRequest,
+      expectedDgxJobId: string,
+      signal?: AbortSignal,
+    ) => {
+      expect(expectedDgxJobId).toBe(dgxJobId);
+      replaySignal = signal;
+      replayStartedResolve();
+      await releaseReplay;
+      const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+      return boundDgxReplay(
+        studioJobId,
+        dgxJobId,
+        "accepted",
+        admissionRequest,
+        receipt.observedCreatedAt,
+      );
+    });
+    let remoteState: QueueJobState = "queued";
+    const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+      remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+      return boundDgxTransition(studioJobId, jobId, remoteState);
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read: async (jobId) => boundDgxRead(studioJobId, jobId, remoteState),
+        transition,
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    const waiting = waitForQueuedDgxJob.call(manager, runtimeJob, 0);
+    await replayStarted;
+    expect(manager.cancel(created.id)).toMatchObject({ status: "cancelled" });
+    expect(replaySignal?.aborted).toBe(true);
+    releaseReplayResolve();
+
+    await expect(waiting).resolves.toBe("stopped");
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+    expect(runtimeJob).toMatchObject({
+      dgxTerminalReceipt: {
+        dgxJobId,
+        remoteTerminalState: "cancelled",
+      },
+    });
+    expect(runtimeJob).not.toHaveProperty("dgxLeaseReceipt");
+    expect(manager.get(created.id)).toMatchObject({ status: "cancelled", outputUrl: null });
+  });
+
+  it.each([
+    ["foreign response job ID", "response-foreign-id", true],
+    ["different response created_at", "response-created-at", true],
+    ["missing response replay marker", "response-missing-marker", true],
+    ["malformed authoritative 409", "error-malformed-409", true],
+    ["malformed authoritative 410", "error-malformed-410", true],
+    ["exact safe 409", "error-safe-409", false],
+    ["exact safe 410", "error-safe-410", false],
+  ] as const)(
+    "validates an in-flight replay after cancellation and applies HOLD semantics for %s",
+    async (_case, outcome, expectHold) => {
+      let studioJobId = "";
+      const dgxJobId = testDgxJobId(`cancelled-replay-contract-${outcome}`);
+      const foreignDgxJobId = testDgxJobId(`cancelled-replay-contract-foreign-${outcome}`);
+      let observedCreatedAt = "";
+      let replayStartedResolve!: () => void;
+      const replayStarted = new Promise<void>((resolvePromise) => {
+        replayStartedResolve = resolvePromise;
+      });
+      let releaseReplayResolve!: () => void;
+      const releaseReplay = new Promise<void>((resolvePromise) => {
+        releaseReplayResolve = resolvePromise;
+      });
+      let replaySignal: AbortSignal | undefined;
+      const initialSubmit = vi.fn(async () => {
+        throw new Error("cancellation reconciliation must never use the lease-creating endpoint");
+      });
+      const replay = vi.fn(async (
+        admissionRequest: AdmissionRequest,
+        expectedDgxJobId: string,
+        signal?: AbortSignal,
+      ) => {
+        expect(expectedDgxJobId).toBe(dgxJobId);
+        replaySignal = signal;
+        replayStartedResolve();
+        await releaseReplay;
+        if (outcome.startsWith("response-")) {
+          const response = boundDgxReplay(
+            studioJobId,
+            dgxJobId,
+            "accepted",
+            admissionRequest,
+            observedCreatedAt,
+          );
+          if (outcome === "response-foreign-id") {
+            response.job.job_id = foreignDgxJobId;
+          } else if (outcome === "response-created-at") {
+            response.job.created_at = new Date(
+              Date.parse(observedCreatedAt) + 1_000,
+            ).toISOString();
+          } else {
+            delete (response.admission as Record<string, unknown>).idempotent_replay;
+          }
+          return response;
+        }
+        if (outcome.endsWith("409")) {
+          throw new RuntimeApiError("conditional replay target mismatch", 409, {
+            schema_version: "dgx-queue-replay-conflict.v0",
+            error: "replay_target_mismatch",
+            expected_job_id: dgxJobId,
+            observed_job_id: outcome === "error-safe-409" ? null : foreignDgxJobId,
+            client_action: "poll_expected_job_status",
+          });
+        }
+        throw new RuntimeApiError("conditional replay target is gone", 410, {
+          error: "job_gone",
+          job_id: outcome === "error-safe-410" ? dgxJobId : foreignDgxJobId,
+          schema_version: "dgx-job-gone.v0",
+          terminal: true,
+          state: "cancelled",
+          reason: "terminal_record_bound_to_key",
+          finished_at: observedCreatedAt,
+          reaped_at: observedCreatedAt,
+          idempotency_key: `ltx-studio:${studioJobId}`,
+        });
+      });
+      let remoteState: QueueJobState = "queued";
+      const transition = vi.fn(async (jobId: string, state: QueueTransitionState) => {
+        expect(jobId).toBe(dgxJobId);
+        remoteState = applyStateSensitiveDgxTransition(remoteState, state);
+        return boundDgxTransition(studioJobId, jobId, remoteState);
+      });
+      const manager = new JobManager(
+        await statePath(),
+        false,
+        null,
+        undefined,
+        {
+          read: async (jobId) => boundDgxRead(studioJobId, jobId, remoteState),
+          transition,
+        },
+        null,
+        { submit: initialSubmit, replay },
+      );
+      const created = manager.create(validRequest());
+      studioJobId = created.id;
+      const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+        .get(created.id)!;
+      bindTestDgxLease(
+        runtimeJob,
+        created.id,
+        dgxJobId,
+        runtimeJob.request as ReturnType<typeof validRequest>,
+      );
+      observedCreatedAt = (
+        runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
+      ).observedCreatedAt;
+      const startAccepted = vi.fn(async () => "started");
+      Reflect.set(manager, "waitForDelay", async () => true);
+      Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+      const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+        job: unknown,
+        delayMs: number,
+      ) => Promise<string>;
+
+      const waiting = waitForQueuedDgxJob.call(manager, runtimeJob, 0);
+      await replayStarted;
+      expect(manager.cancel(created.id)).toMatchObject({ status: "cancelled" });
+      expect(replaySignal?.aborted).toBe(true);
+      releaseReplayResolve();
+
+      await expect(waiting).resolves.toBe("stopped");
+      expect(initialSubmit).not.toHaveBeenCalled();
+      expect(replay).toHaveBeenCalledOnce();
+      expect(startAccepted).not.toHaveBeenCalled();
+      expect(runtimeJob.dgxJobId).toBe(dgxJobId);
+      expect(manager.get(created.id)).toMatchObject({ status: "cancelled", outputUrl: null });
+      expect(manager.persistenceHealth()).toMatchObject({
+        status: expectHold ? "hold" : "ok",
+      });
+    },
+  );
+
+  it.each([
+    ["retained terminal response", "response"],
+    ["exact HTTP 410 tombstone", "gone"],
+  ] as const)(
+    "persists %s when cancellation wins and the parallel PATCH/GET settlement is unavailable",
+    async (_case, outcome) => {
+      let studioJobId = "";
+      let observedCreatedAt = "";
+      let readCount = 0;
+      const dgxJobId = testDgxJobId(`cancel-terminal-evidence-${outcome}`);
+      let replayStartedResolve!: () => void;
+      const replayStarted = new Promise<void>((resolvePromise) => {
+        replayStartedResolve = resolvePromise;
+      });
+      let releaseReplayResolve!: () => void;
+      const releaseReplay = new Promise<void>((resolvePromise) => {
+        releaseReplayResolve = resolvePromise;
+      });
+      let terminalReadStartedResolve!: () => void;
+      const terminalReadStarted = new Promise<void>((resolvePromise) => {
+        terminalReadStartedResolve = resolvePromise;
+      });
+      const initialSubmit = vi.fn(async () => {
+        throw new Error("cancellation reconciliation must never create a replacement lease");
+      });
+      const replay = vi.fn(async (
+        admissionRequest: AdmissionRequest,
+        expectedDgxJobId: string,
+      ) => {
+        expect(expectedDgxJobId).toBe(dgxJobId);
+        replayStartedResolve();
+        await releaseReplay;
+        if (outcome === "response") {
+          return boundDgxReplay(
+            studioJobId,
+            dgxJobId,
+            "cancelled",
+            admissionRequest,
+            observedCreatedAt,
+          );
+        }
+        throw new RuntimeApiError("exact replay target is retained only as a tombstone", 410, {
+          error: "job_gone",
+          job_id: dgxJobId,
+          schema_version: "dgx-job-gone.v0",
+          terminal: true,
+          state: "cancelled",
+          reason: "terminal_record_bound_to_key",
+          finished_at: observedCreatedAt,
+          reaped_at: observedCreatedAt,
+          idempotency_key: `ltx-studio:${studioJobId}`,
+        });
+      });
+      const read = vi.fn(async (jobId: string) => {
+        readCount += 1;
+        if (readCount === 1) return boundDgxRead(studioJobId, jobId, "queued");
+        terminalReadStartedResolve();
+        throw new Error("parallel terminal GET is unavailable");
+      });
+      const transition = vi.fn(async () => {
+        throw new Error("parallel terminal PATCH is unavailable");
+      });
+      const path = await statePath();
+      const manager = new JobManager(
+        path,
+        false,
+        null,
+        undefined,
+        { read, transition },
+        null,
+        { submit: initialSubmit, replay },
+      );
+      const created = manager.create(validRequest());
+      studioJobId = created.id;
+      const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+        .get(created.id)!;
+      runtimeJob.runProvenance = runProvenance();
+      expect((Reflect.get(manager, "classifyExecution") as (
+        job: unknown,
+        executionClass: "dgx",
+      ) => boolean).call(manager, runtimeJob, "dgx")).toBe(true);
+      bindTestDgxLease(
+        runtimeJob,
+        created.id,
+        dgxJobId,
+        runtimeJob.request as ReturnType<typeof validRequest>,
+      );
+      observedCreatedAt = (
+        runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
+      ).observedCreatedAt;
+      Reflect.set(manager, "waitForDelay", async () => true);
+      const startAccepted = vi.fn(async () => "started");
+      Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+      const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+        job: unknown,
+        delayMs: number,
+      ) => Promise<string>;
+
+      const waiting = waitForQueuedDgxJob.call(manager, runtimeJob, 0);
+      await replayStarted;
+      expect(manager.cancel(created.id)).toMatchObject({ status: "cancelled" });
+      const terminalDelivery = runtimeJob.dgxTerminalDeliveryInFlight as Promise<boolean>;
+      await terminalReadStarted;
+      releaseReplayResolve();
+
+      await expect(waiting).resolves.toBe("stopped");
+      await expect(terminalDelivery).resolves.toBe(false);
+      expect(initialSubmit).not.toHaveBeenCalled();
+      expect(replay).toHaveBeenCalledOnce();
+      expect(read).toHaveBeenCalledTimes(3);
+      expect(transition).not.toHaveBeenCalled();
+      expect(startAccepted).not.toHaveBeenCalled();
+      expect(runtimeJob).toMatchObject({
+        status: "cancelled",
+        dgxJobId,
+        dgxJobTerminal: true,
+        dgxTerminalReceipt: {
+          dgxJobId,
+          localIntentState: "cancelled",
+          remoteTerminalState: "cancelled",
+          evidence: {
+            kind: outcome === "response" ? "queue-replay" : "job-gone",
+          },
+        },
+      });
+      expect(runtimeJob).not.toHaveProperty("dgxLeaseReceipt");
+      expect(runtimeJob).not.toHaveProperty("dgxTerminalDelivery");
+      expect(manager.get(created.id)).toMatchObject({
+        status: "cancelled",
+        cancellationState: "settled",
+      });
+      expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+
+      const restartRead = vi.fn(async () => {
+        throw new Error("persisted cancel-replay receipt must suppress GET after restart");
+      });
+      const restartTransition = vi.fn(async () => {
+        throw new Error("persisted cancel-replay receipt must suppress PATCH after restart");
+      });
+      const restarted = new JobManager(path, false, null, undefined, {
+        read: restartRead,
+        transition: restartTransition,
+      }, null);
+      expect(restarted.get(created.id)).toMatchObject({
+        status: "cancelled",
+        cancellationState: "settled",
+      });
+      const restartedRuntimeJob = (
+        Reflect.get(restarted, "jobs") as Map<string, Record<string, unknown>>
+      ).get(created.id)!;
+      expect(restartedRuntimeJob.dgxTerminalReceipt).toMatchObject({
+        dgxJobId,
+        localIntentState: "cancelled",
+        remoteTerminalState: "cancelled",
+        evidence: {
+          kind: outcome === "response" ? "queue-replay" : "job-gone",
+        },
+      });
+      expect(restartedRuntimeJob.dgxLeaseReceipt).toBeUndefined();
+      expect(restartedRuntimeJob.dgxTerminalDelivery).toBeUndefined();
+      expect(restartRead).not.toHaveBeenCalled();
+      expect(restartTransition).not.toHaveBeenCalled();
+    },
+  );
+
+  it("enters HOLD before replay HTTP when the local Runtime-Trust preflight fails", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("replay-runtime-trust-preflight");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("a bound replay must never call the lease-creating endpoint");
+    });
+    const replay = vi.fn(async () => {
+      throw new Error("Runtime-Trust denial must prevent replay HTTP");
+    });
+    const read = vi.fn(async (jobId: string) =>
+      boundDgxRead(studioJobId, jobId, "queued"));
+    const transition = vi.fn(async () => {
+      throw new Error("Runtime-Trust denial must prevent PATCH");
+    });
+    const runtimeTrustRevalidation = vi.fn(() => {
+      throw new Error("synthetic local Runtime-Trust drift before replay HTTP");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      { read, transition },
+      null,
+      { submit: initialSubmit, replay },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      runtimeTrustRevalidation,
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const receiptBefore = canonicalJson(runtimeJob.dgxLeaseReceipt);
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "waitForDelay", async () => true);
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("stopped");
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(runtimeTrustRevalidation).toHaveBeenCalledOnce();
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).not.toHaveBeenCalled();
+    expect(transition).not.toHaveBeenCalled();
+    expect(startAccepted).not.toHaveBeenCalled();
+    expect(canonicalJson(runtimeJob.dgxLeaseReceipt)).toBe(receiptBefore);
+    expect(manager.persistenceHealth()).toMatchObject({ status: "hold" });
+  });
+
+  it("performs a GET one second after a synthetic 25-second replay timeout without resubmitting", async () => {
+    let studioJobId = "";
+    let clock = Date.now();
+    let reads = 0;
+    const readAt: number[] = [];
+    const waits: number[] = [];
+    const dgxJobId = testDgxJobId("slow-replay-timeout-get-cadence");
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("a replay timeout must never fall back to lease-creating submit");
+    });
+    const replay = vi.fn(async () => {
+      clock += 25_000;
+      throw new RuntimeApiError("DGX Runtime API Timeout.", null);
+    });
+    const read = vi.fn(async (jobId: string) => {
+      readAt.push(clock);
+      reads += 1;
+      return boundDgxRead(studioJobId, jobId, reads === 1 ? "queued" : "accepted");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      {
+        read,
+        transition: async () => {
+          throw new Error("start transition is stubbed in the timeout cadence test");
+        },
+      },
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob,
+      created.id,
+      dgxJobId,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    clock = Date.parse(
+      (runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>).confirmedAt,
+    ) + 100;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    Reflect.set(manager, "waitForDelay", async (_job: unknown, delayMs: number) => {
+      waits.push(delayMs);
+      clock += delayMs;
+      return true;
+    });
+    const startAccepted = vi.fn(async () => "started");
+    Reflect.set(manager, "startAcceptedDgxJob", startAccepted);
+    const waitForQueuedDgxJob = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+
+    await expect(waitForQueuedDgxJob.call(manager, runtimeJob, 0)).resolves.toBe("started");
+
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(readAt[1] - readAt[0]).toBe(26_000);
+    expect(waits).toEqual([0, 1_000]);
+    expect(startAccepted).toHaveBeenCalledOnce();
+    expect(manager.persistenceHealth()).toMatchObject({ status: "ok" });
+  });
+
+  it("never exact-replays an ambiguous submit intent before a lease receipt is bound", async () => {
+    const initialSubmit = vi.fn(async () => {
+      throw new Error("initial submit must not run through the replay helper");
+    });
+    const replay = vi.fn(async () => {
+      throw new Error("unbound admission must not be replayed");
+    });
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      undefined,
+      undefined,
+      null,
+      { submit: initialSubmit, replay },
+    );
+    const created = manager.create(validRequest());
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestPendingDgxSubmit(
+      runtimeJob,
+      created.id,
+      runtimeJob.request as ReturnType<typeof validRequest>,
+    );
+    const replayBoundDgxQueueAdmission = Reflect.get(
+      manager,
+      "replayBoundDgxQueueAdmission",
+    ) as (job: unknown) => Promise<unknown>;
+
+    await expect(replayBoundDgxQueueAdmission.call(manager, runtimeJob))
+      .rejects.toThrow(/kein gültiges dauerhaftes Submit-Receipt/u);
+    expect(initialSubmit).not.toHaveBeenCalled();
+    expect(replay).not.toHaveBeenCalled();
+    expect(runtimeJob).toMatchObject({ dgxJobId: null, dgxSubmitPending: true });
+  });
+
   it("maps a failed accepted-to-starting transition to remote cancellation before compute", async () => {
     let remoteState: "accepted" | "cancelled" = "accepted";
     const transitions: string[] = [];
@@ -9898,6 +11386,9 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     seedJob.startedAt = new Date(Date.now() - 1_000).toISOString();
     seedJob.finishedAt = new Date().toISOString();
     bindTestDgxLease(seedJob, created.id, dgxJobId);
+    const leaseObservedCreatedAt = (
+      seedJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
+    ).observedCreatedAt;
     const queue = Reflect.get(seed, "queue") as string[];
     queue.splice(queue.indexOf(created.id), 1);
     (Reflect.get(seed, "prepareDgxTerminalDelivery") as (
@@ -9921,8 +11412,8 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
           terminal: true,
           state: "cancelled",
           reason: "terminal_record_bound_to_key",
-          finished_at: "2026-08-26T17:40:15+00:00",
-          reaped_at: "2026-08-26T18:45:08+00:00",
+          finished_at: leaseObservedCreatedAt,
+          reaped_at: leaseObservedCreatedAt,
           idempotency_key: `ltx-studio:${created.id}`,
         });
       },
@@ -9957,8 +11448,8 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
         evidence: {
           kind: "job-gone",
           schemaVersion: "dgx-job-gone.v0",
-          finishedAt: "2026-08-26T17:40:15.000Z",
-          reapedAt: "2026-08-26T18:45:08.000Z",
+          finishedAt: leaseObservedCreatedAt,
+          reapedAt: leaseObservedCreatedAt,
           reason: "terminal_record_bound_to_key",
           idempotencyKey: dgxCaller(created.id),
         },
@@ -9998,6 +11489,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     statusCode,
     override,
   ) => {
+    let leaseObservedCreatedAt = "";
     const manager = new JobManager(await statePath(), false, null, undefined, {
       read: async (jobId) => {
         throw new RuntimeApiError("untrusted gone response", statusCode, {
@@ -10006,8 +11498,8 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
           schema_version: "dgx-job-gone.v0",
           terminal: true,
           state: "cancelled",
-          finished_at: "2026-08-26T17:40:15+00:00",
-          reaped_at: "2026-08-26T18:45:08+00:00",
+          finished_at: leaseObservedCreatedAt,
+          reaped_at: leaseObservedCreatedAt,
           idempotency_key: `ltx-studio:${created.id}`,
           ...override,
         });
@@ -10027,6 +11519,9 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       created.id,
       testDgxJobId(`invalid-gone-${statusCode}-${_case}`),
     );
+    leaseObservedCreatedAt = (
+      active.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
+    ).observedCreatedAt;
     (Reflect.get(manager, "prepareDgxTerminalDelivery") as (
       job: unknown,
       state: "cancelled",

@@ -80,6 +80,24 @@ export function runtimeApiJson<T>(
   }
 
   return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const clearDeadline = (): void => {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      deadlineTimer = undefined;
+    };
+    const resolveOnce = (value: T): void => {
+      if (settled) return;
+      settled = true;
+      clearDeadline();
+      resolvePromise(value);
+    };
+    const rejectOnce = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      clearDeadline();
+      rejectPromise(error);
+    };
     const requestHandle = request(url, { method, headers, signal: options.signal }, (response) => {
       let responseBody = "";
       let byteLength = 0;
@@ -98,21 +116,32 @@ export function runtimeApiJson<T>(
         try {
           parsed = responseBody ? JSON.parse(responseBody) : null;
         } catch {
-          rejectPromise(new RuntimeApiError("DGX Runtime API lieferte ungültiges JSON.", response.statusCode ?? null));
+          rejectOnce(new RuntimeApiError("DGX Runtime API lieferte ungültiges JSON.", response.statusCode ?? null));
           return;
         }
         const statusCode = response.statusCode ?? 0;
         if (statusCode < 200 || statusCode >= 300) {
-          rejectPromise(new RuntimeApiError(errorMessage(statusCode, parsed), statusCode, parsed));
+          rejectOnce(new RuntimeApiError(errorMessage(statusCode, parsed), statusCode, parsed));
           return;
         }
-        resolvePromise(parsed as T);
+        resolveOnce(parsed as T);
+      });
+      response.once("error", rejectOnce);
+      response.once("aborted", () => {
+        rejectOnce(new RuntimeApiError("DGX Runtime API Antwort wurde vorzeitig abgebrochen.", response.statusCode ?? null));
       });
     });
-    requestHandle.setTimeout(options.timeoutMs ?? 120_000, () => {
-      requestHandle.destroy(new RuntimeApiError("DGX Runtime API Timeout.", null));
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    deadlineTimer = setTimeout(() => {
+      const error = new RuntimeApiError("DGX Runtime API Timeout.", null);
+      requestHandle.destroy(error);
+      rejectOnce(error);
+    }, timeoutMs);
+    deadlineTimer.unref();
+    requestHandle.once("error", rejectOnce);
+    requestHandle.once("close", () => {
+      if (settled) clearDeadline();
     });
-    requestHandle.once("error", rejectPromise);
     requestHandle.end(payload ?? undefined);
   });
 }

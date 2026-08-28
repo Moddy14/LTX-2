@@ -62,7 +62,18 @@ export type AdmissionDecision = {
   client_action?: string;
   message_for_humans?: string;
   app_message?: string;
-  retry_after_seconds?: number;
+  retry_after_seconds?: number | null;
+  /**
+   * The Runtime API sets this only when an exact idempotency replay resolved
+   * the caller's existing job instead of creating a new one.  Bound callers
+   * use POST /dgx/queue/replay/<expected-job-id>; legacy submit responses can
+   * also carry the marker.  Callers must still bind the returned job identity
+   * to their durable local lease before treating the response as evidence.
+   */
+  idempotent_replay?: boolean;
+  /** Exact existing queue identity fenced by the replay-only endpoint. */
+  replay_bound_job_id?: string;
+  job_id?: string;
   evicted_for?: {
     requested_by?: string;
     job_id?: string;
@@ -113,6 +124,8 @@ export type QueueJobSummary = {
   queue_position?: number | null;
   decision?: string;
   reason?: string;
+  client_action?: string;
+  retry_after_seconds?: number | null;
   message_for_humans?: string;
   app_message?: string;
   current_step?: string;
@@ -390,14 +403,18 @@ export function decisionMessage(decision: AdmissionDecision | QueueJobSummary): 
 }
 
 export function retryAfterMs(decision: AdmissionDecision | QueueJobSummary): number {
-  const seconds = "retry_after_seconds" in decision && typeof decision.retry_after_seconds === "number"
-    ? decision.retry_after_seconds
-    : decision.decision === "rejected_insufficient_resources"
-      && "client_action" in decision
-      && decision.client_action === "retry_when_resources_free"
-      ? 900
-      : 30;
-  return Math.max(0, seconds * 1000);
+  const fallbackSeconds = decision.decision === "rejected_insufficient_resources"
+    && decision.client_action === "retry_when_resources_free"
+    ? 900
+    : 30;
+  const requestedSeconds = decision.retry_after_seconds;
+  const seconds = typeof requestedSeconds === "number"
+    && Number.isSafeInteger(requestedSeconds)
+    && requestedSeconds >= 1
+    && requestedSeconds <= 4_800
+    ? requestedSeconds
+    : fallbackSeconds;
+  return seconds * 1000;
 }
 
 export function shouldRetryQueueSubmit(decision: AdmissionDecision): boolean {
@@ -491,8 +508,10 @@ export async function submitQueueAdmission(
 }
 
 /**
- * Replays the exact durable request object. Callers recovering an ambiguous
- * POST must never regenerate this payload from newer config or code.
+ * Performs the one lease-creating queue submit for a Studio job.  An
+ * ambiguous response is reconciled read-only; this endpoint must never be
+ * called again for recovery.  Once a durable lease exists, only
+ * replayPreparedQueueAdmission may refresh it.
  */
 export async function submitPreparedQueueAdmission(
   admissionRequest: AdmissionRequest,
@@ -502,6 +521,29 @@ export async function submitPreparedQueueAdmission(
     timeoutMs: 120_000,
     signal,
   });
+}
+
+/**
+ * Refreshes one already-known queue lease without granting the server
+ * authority to create a successor job when the known record became terminal
+ * between the caller's GET and POST.  The bounded client wait keeps a slow
+ * local replay from monopolizing the read-only observation loop; the server
+ * may finish the fenced operation and the following GET will reconcile it.
+ */
+export async function replayPreparedQueueAdmission(
+  admissionRequest: AdmissionRequest,
+  expectedDgxJobId: string,
+  signal?: AbortSignal,
+): Promise<QueueSubmitResponse> {
+  if (!isDgxJobId(expectedDgxJobId)) {
+    throw new Error("DGX-Queue-Replay verlangt eine gültige erwartete Job-ID.");
+  }
+  return runtimeApiJson(
+    "POST",
+    `/dgx/queue/replay/${encodeURIComponent(expectedDgxJobId)}`,
+    admissionRequest,
+    { timeoutMs: 25_000, signal },
+  );
 }
 
 export async function listQueueJobs(): Promise<QueueListResponse> {
@@ -524,7 +566,7 @@ export function normalizeQueueJobs(response: unknown): QueueJobSummary[] {
 
 const OFFSET_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
-function parseStrictOffsetDateTime(value: unknown): number | null {
+export function parseStrictOffsetDateTime(value: unknown): number | null {
   if (typeof value !== "string") return null;
   const match = OFFSET_DATE_TIME_PATTERN.exec(value);
   if (!match) return null;

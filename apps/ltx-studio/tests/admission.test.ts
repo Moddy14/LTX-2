@@ -338,6 +338,17 @@ describe("DGX admission contract", () => {
     expect(retryAfterMs({ ...decision, retry_after_seconds: 120 })).toBe(120_000);
   });
 
+  it("rejects malformed or unbounded replay delays instead of weakening queue liveness", () => {
+    const decision = { decision: "accepted" };
+    expect(retryAfterMs({ ...decision, retry_after_seconds: 0 })).toBe(30_000);
+    expect(retryAfterMs({ ...decision, retry_after_seconds: 1.5 })).toBe(30_000);
+    expect(retryAfterMs({ ...decision, retry_after_seconds: Number.NaN })).toBe(30_000);
+    expect(retryAfterMs({ ...decision, retry_after_seconds: Number.POSITIVE_INFINITY }))
+      .toBe(30_000);
+    expect(retryAfterMs({ ...decision, retry_after_seconds: 4_801 })).toBe(30_000);
+    expect(retryAfterMs({ ...decision, retry_after_seconds: 4_800 })).toBe(4_800_000);
+  });
+
   it("does not retry requests that require caller-side fixes", () => {
     expect(shouldRetryQueueSubmit({
       decision: "rejected_policy",
