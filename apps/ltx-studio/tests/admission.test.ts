@@ -12,7 +12,7 @@ import {
   shouldRetryQueueSubmit,
   supportsCooperativeCheckpoint,
 } from "../server/admission.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 const queueAuthority = {
   admission_state: "local_queue_v0",
@@ -245,6 +245,44 @@ describe("DGX admission contract", () => {
       resource_profile: { required_gib: 58 },
       resumability: "required",
       scheduling: { mode: "segmented" },
+    });
+  });
+
+  it("submits the exact provisional LTX-2.5 IA2V profile as a 66-GiB durable waiter", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.frameRate = 24;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    const [admission] = buildAdmissionRequests(request, undefined, "ia2v-calibration-job");
+
+    expect(admission).toMatchObject({
+      job_type: "ltx2_native_image_audio_to_video",
+      estimated_memory_gib: 66,
+      resource_profile: { required_gib: 66 },
+      resumability: "required",
+      scheduling: { mode: "segmented" },
+    });
+  });
+
+  it("submits a near-miss LTX-2.5 IA2V profile with the generic 74-GiB estimate", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.frameRate = 24;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    request.images.push({ ...request.images[0], name: "second.png" });
+    const [admission] = buildAdmissionRequests(request, undefined, "ia2v-near-miss-job");
+
+    expect(admission).toMatchObject({
+      estimated_memory_gib: 74,
+      resource_profile: { required_gib: 74 },
     });
   });
 

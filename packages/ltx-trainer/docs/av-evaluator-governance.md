@@ -246,9 +246,12 @@ complete measurement.
 
 `q2-score` is the fail-closed bridge from the frozen evaluator evidence to the
 only `q2-holdout` report accepted by the Studio release audit. It verifies the
-Studio-canonical F0 candidate, frozen preregistration and independent
+Studio-canonical `ltx-av-eval-f0-candidate.v3`, frozen preregistration and independent
 evaluation authorization; the trusted-key policy itself must match the F0
-digest. The owner-only consumption directory must contain canonical,
+digest. The signed F0 candidate must carry the exact externally verified
+RuntimeTrust v2 binding already attested by signed Rights v2 and every pre-Q2
+report; Q2 copies that binding verbatim and cannot derive or override it. The
+owner-only consumption directory must contain canonical,
 write-once `started.json` and `consumed.json` records for the exact
 authorization, transaction, nonce and writer, with consumption and report
 generation completed before `complete_by`.
@@ -288,7 +291,7 @@ uv run python scripts/av_eval.py q2-score \
   --consumption-root /sealed/q2/consumption
 ```
 
-The command emits a Studio `ltx-studio-qualification-report.v1` only when all
+The command emits a Studio `ltx-studio-qualification-report.v2` only when all
 candidate gates pass. Every frozen target claim is `sota-qualified` and binds
 the exact external anchor artifact digest; non-target candidates can only be
 `local-only`. It never emits production authorization and never opens or
@@ -567,7 +570,8 @@ report's `producerDigest`.
 ```bash
 uv run python scripts/av_eval.py technical-score \
   --observations /secure/evidence/technical-observations.v1.json \
-  --surface ../../apps/ltx-studio/release/candidate-release-surface.v1.json
+  --surface ../../apps/ltx-studio/release/candidate-release-surface.v1.json \
+  --runtime-trust /secure/external/runtime-trust-binding.v2.json
 ```
 
 It accepts one cold, playable, provenance-bound canary per candidate entry,
@@ -580,9 +584,15 @@ non-bitwise result requires a preregistered equivalence-rule digest. Soak rows
 must cover the full candidate surface, match their registered terminal or
 recovered state, meet their per-row recovery SLO, and contain no lost,
 orphaned, duplicate, unbound, or foreign-service behavior. The command emits
-the four detailed reports plus unsigned Studio qualification documents; the
-independent qualification attestor signs those documents only after this
-validation succeeds.
+the four detailed reports plus unsigned Studio v2 qualification documents. It
+never synthesizes RuntimeTrust: the binding must come from Studio's external
+Host-TCB verifier and must already contain an attested, isolated authority. F0
+then requires the exact same RuntimeTrust in the separately signed Rights v2
+attestation and in every independently signed qualification report. A missing,
+same-UID, malformed, or mismatched binding is a qualification HOLD.
+The RuntimeTrust-bearing F0 candidate, preflight report, and qualification
+bundle use their internal v3 schemas; their pre-RuntimeTrust v2 labels are
+rejected rather than reinterpreted.
 
 `profile=product` is currently hard-blocked before dataset access. The
 detached-signature verifier, monotonic consumption records, sealed-directory

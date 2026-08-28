@@ -74,12 +74,53 @@ export const DFR_MEMORY_BASIS = "unmeasured-bootstrap:official-dfr-v1.3.0-single
 export const LTX25_SPLIT_BF16_T2A_MEMORY_GIB = 72;
 export const LTX25_SPLIT_BF16_T2A_MEMORY_BASIS =
   "measured-cold-start:ltx-2.5-split-bf16-t2a.v1";
+// The first full-size native IA2V qualification run uses the same sequential
+// split-BF16 transformer, spatial upscaler and video VAE loads as the measured
+// 1024x1536 / 289-frame distilled baseline. IA2V adds a 0.365-GB audio VAE and
+// small frozen audio latents, but the historical generic A2V 50/18 constants
+// have no local peak measurement behind them. Reserve the baseline's 66-GiB
+// workload budget for this one audited, refiner-free profile and let the DGX
+// orchestrator add its canonical 12-GiB start headroom. This is deliberately a
+// provisional proxy, not a measured IA2V profile; every profile deviation
+// falls back to the generic estimator until the first run records a real peak.
+export const LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB = 66;
+export const LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS =
+  "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1";
 
 function isLtx25SplitBf16TextToAudio(request: GenerationRequest): boolean {
   return request.mode === "text-to-audio"
     && request.models.layout === "split"
     && request.models.generation === "2.5"
     && request.quantization.mode === "none";
+}
+
+function isLtx25SplitBf16Ia2vCalibrationProfile(
+  request: GenerationRequest,
+  resourceFrames: number,
+): boolean {
+  const postprocess = request.postprocess;
+  return request.mode === "image-audio-to-video"
+    && request.models.layout === "split"
+    && request.models.generation === "2.5"
+    && request.quantization.mode === "none"
+    && request.width === 1024
+    && request.height === 1536
+    && request.numFrames === 289
+    && resourceFrames === 289
+    && request.frameRate === 24
+    && request.audio.maxDuration === null
+    && request.audio.finalMix.path === ""
+    && request.audio.finalMix.name === ""
+    && request.tiling
+    && !request.enhancePrompt
+    && request.images.length === 1
+    && request.images[0]?.frameIndex === 0
+    && request.models.loras.length === 0
+    && !request.models.gemmaLora.enabled
+    && !postprocess.longcatLipsync.enabled
+    && !postprocess.latentSync.enabled
+    && !postprocess.museTalk.enabled
+    && !postprocess.lipForcing.enabled;
 }
 
 function selectedCheckpointPath(request: GenerationRequest): string {
@@ -160,11 +201,14 @@ export function estimateResources(request: GenerationRequest, options: EstimateO
     + dfr.temporalUpscalings * 12
     + (dfr.spatialUpscalings === 2 ? 8 : 0);
   const ltx25T2aSplitBf16 = isLtx25SplitBf16TextToAudio(request);
+  const ltx25Ia2vCalibration = isLtx25SplitBf16Ia2vCalibrationProfile(request, resourceFrames);
   const memoryGiB = request.mode === "dfr"
     ? Math.max(dfrBootstrapFloor, roundedMemoryGiB)
     : ltx25T2aSplitBf16
       ? Math.max(LTX25_SPLIT_BF16_T2A_MEMORY_GIB, roundedMemoryGiB)
-      : roundedMemoryGiB;
+      : ltx25Ia2vCalibration
+        ? LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_GIB
+        : roundedMemoryGiB;
 
   const dfrOutput = request.mode === "dfr" ? dfrOutputGeometry(request) : null;
   const duration = request.mode === "retake"
@@ -190,6 +234,8 @@ export function estimateResources(request: GenerationRequest, options: EstimateO
       ...(qualificationHold ? { qualificationHold: true as const } : {}),
     } : ltx25T2aSplitBf16 ? {
       memoryBasis: LTX25_SPLIT_BF16_T2A_MEMORY_BASIS,
+    } : ltx25Ia2vCalibration ? {
+      memoryBasis: LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS,
     } : {}),
   };
 }

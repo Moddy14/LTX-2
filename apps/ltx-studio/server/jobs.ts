@@ -40,6 +40,7 @@ import {
   type ProjectRunBinding,
 } from "../shared/projects.js";
 import { canonicalJson } from "../shared/canonicalJson.js";
+import { LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS } from "../shared/estimates.js";
 import {
   PUBLIC_JOB_PERSISTENCE_HOLD_CODE,
   PUBLIC_JOB_PERSISTENCE_HOLD_REASON,
@@ -216,6 +217,20 @@ import {
   type LegacyTerminalHistory,
   type LegacyTerminalStatus,
 } from "./legacyOutput.js";
+import {
+  LocalProcessResourceTelemetryRecorder,
+  type LocalProcessResourceIdentity,
+  type LocalProcessResourceSample,
+  type LocalProcessResourceTelemetryReceipt,
+} from "./localProcessResourceTelemetry.js";
+import {
+  captureLtxResourceTelemetryOutput,
+  LTX_RESOURCE_TELEMETRY_MANIFEST_BASENAME,
+  ltxResourceTelemetryMeasurementBlockers,
+  verifyLtxResourceTelemetryEvidence,
+  type LtxResourceTelemetryBinding,
+  type LtxResourceTelemetryManifest,
+} from "./ltxResourceTelemetryEvidence.js";
 
 const HOST_TCB_DOCKER_ENV: NodeJS.ProcessEnv = Object.freeze({
   PATH: SEALED_EXECUTABLE_PATH,
@@ -306,6 +321,7 @@ type ThermalWatcherOperations = Partial<{
   processIsAlive: (child: ChildProcess) => boolean;
   signalProcessGroup: (child: ChildProcess, signal: NodeJS.Signals) => boolean;
   setHeartbeatPhase: (phase: string) => void;
+  onPause: () => void;
   dockerAction: (action: "pause" | "unpause", containerName: string) => boolean;
 }>;
 
@@ -447,6 +463,17 @@ type RawOutputCandidateAuthorityJob = Pick<
   "request" | "experiment" | "runProvenance" | "identityEvidence"
 >;
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
+type LtxResourceTelemetrySettlement = {
+  receipt: LocalProcessResourceTelemetryReceipt | null;
+  observerError: string | null;
+};
+type ActiveLtxResourceTelemetry = {
+  binding: LtxResourceTelemetryBinding;
+  controller: AbortController;
+  evidenceDirectory: string;
+  thermalPauseCount: number;
+  settlement: Promise<LtxResourceTelemetrySettlement>;
+};
 type BoundProcessOptions = {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -1695,6 +1722,13 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function boundedResourceTelemetryError(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/[\r\n\t]+/gu, " ")
+    .trim() || "unbekannter Telemetriefehler";
+  return message.length <= 1_000 ? message : `${message.slice(0, 999)}…`;
+}
+
 export type AtomicSnapshotFileOperations = {
   mkdir: (path: string) => void;
   open: (path: string, flags: string, mode?: number) => number;
@@ -1811,6 +1845,40 @@ function fsyncSnapshotDirectory(
 
 function atomicJsonFile(path: string, value: object): void {
   atomicTextFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function exclusiveDurableJsonFile(path: string, value: object): void {
+  const temporaryPath = join(dirname(path), `.${path.split("/").at(-1)}.${randomUUID()}.tmp`);
+  let descriptor: number | undefined;
+  let linked = false;
+  try {
+    descriptor = openSync(
+      temporaryPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    linkSync(temporaryPath, path);
+    linked = true;
+    unlinkSync(temporaryPath);
+    const directoryDescriptor = openSync(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY);
+    try {
+      fsyncSync(directoryDescriptor);
+    } finally {
+      closeSync(directoryDescriptor);
+    }
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { closeSync(descriptor); } catch { /* retain the authoritative write failure */ }
+    }
+    if (!linked) {
+      try { unlinkSync(temporaryPath); } catch { /* retain the authoritative write failure */ }
+    }
+    throw error;
+  }
 }
 
 export type ProtectedJsonReadOperations = {
@@ -3513,6 +3581,10 @@ export class JobManager extends EventEmitter {
   }> | null = null;
 
   private reusableBaseSource: ReusableLtxBaseSource | null = null;
+  private createLocalProcessResourceTelemetry = (options: {
+    identity: LocalProcessResourceIdentity;
+    evidenceDirectory: string;
+  }): LocalProcessResourceTelemetryRecorder => new LocalProcessResourceTelemetryRecorder(options);
   private ownedDockerOperations: OwnedDockerOperations = {
     run: (args) => {
       const result = spawnSync(hostTcbExecutables.docker, [...args], {
@@ -6336,6 +6408,7 @@ export class JobManager extends EventEmitter {
           yieldDecisionId: () => string | null;
         } | null } = { value: null };
         let stopThermalWatcher: () => void = () => undefined;
+        let resourceTelemetry: ActiveLtxResourceTelemetry | null = null;
         let child: ChildProcess;
         try {
           child = await this.spawnProcessWithDurableGate(job, job.plan.executable, ltxArgs, {
@@ -6356,6 +6429,12 @@ export class JobManager extends EventEmitter {
             // its first instruction cannot outrun logs/completion/thermal QA.
             this.consumeProcessLogs(job, gatedChild, progressTracker);
             completion = this.waitForProcess(gatedChild);
+            resourceTelemetry = await this.startLtxResourceTelemetry(
+              job,
+              cooperativeGeneration,
+              job.plan.executable,
+              ltxArgs,
+            );
             if (!await this.transitionDgxJob(job, "running", {
               current_step: cooperativeEnabled
                 ? "ltx native pipeline running with cooperative Euler checkpoints"
@@ -6372,11 +6451,25 @@ export class JobManager extends EventEmitter {
                   cooperativeGeneration,
                 )
               : null;
-            stopThermalWatcher = this.watchThermals(job, gatedChild, thermalBaselineC);
+            stopThermalWatcher = this.watchThermals(job, gatedChild, thermalBaselineC, {
+              onPause: () => {
+                if (resourceTelemetry) resourceTelemetry.thermalPauseCount += 1;
+              },
+            });
           });
         } catch (error) {
+          const telemetrySettlement = await this.finishLtxResourceTelemetry(resourceTelemetry);
           stopThermalWatcher();
           await boundaryWatcher.value?.stop();
+          await this.recordLtxResourceTelemetry(
+            job,
+            resourceTelemetry,
+            telemetrySettlement,
+            { code: null, signal: null, error: error instanceof Error ? error : new Error(String(error)) },
+            false,
+            false,
+            null,
+          );
           if (this.jobShouldStop(job)) return;
           this.failJob(
             job,
@@ -6387,9 +6480,36 @@ export class JobManager extends EventEmitter {
           return;
         }
         const ltxResult = await (completion ?? this.waitForProcess(child));
+        const settledResourceTelemetry = resourceTelemetry as ActiveLtxResourceTelemetry | null;
+        let processGroupExitedNaturally = false;
+        if (settledResourceTelemetry) {
+          try {
+            processGroupExitedNaturally = localProcessGroupIsGone(
+              settledResourceTelemetry.binding.processIdentity,
+            );
+          } catch {
+            // An unreadable natural-exit proof keeps this measurement ineligible;
+            // confirmProcessGroupGone still owns mandatory cleanup below.
+          }
+        }
+        const telemetrySettlement = await this.finishLtxResourceTelemetry(settledResourceTelemetry);
         stopThermalWatcher();
         await boundaryWatcher.value?.stop();
-        await this.confirmProcessGroupGone(job, child);
+        let processGroupGone = false;
+        try {
+          await this.confirmProcessGroupGone(job, child);
+          processGroupGone = true;
+        } finally {
+          await this.recordLtxResourceTelemetry(
+            job,
+            settledResourceTelemetry,
+            telemetrySettlement,
+            ltxResult,
+            processGroupGone,
+            processGroupExitedNaturally,
+            processGroupGone ? ltxOutput : null,
+          );
+        }
         if (this.jobShouldStop(job)) {
           return;
         }
@@ -7126,6 +7246,316 @@ export class JobManager extends EventEmitter {
       join(hybridRoot, job.id),
     )) return;
     await this.flushDgxTerminalDelivery(job);
+  }
+
+  private async startLtxResourceTelemetry(
+    job: RuntimeJob,
+    cooperativeGeneration: number,
+    executable: string,
+    args: readonly string[],
+  ): Promise<ActiveLtxResourceTelemetry | null> {
+    const estimate = estimateRequest(job.request, [...this.jobs.values()]);
+    const memoryBasis = estimate.memoryBasis;
+    if (memoryBasis !== LTX25_SPLIT_BF16_IA2V_1024X1536_289F_MEMORY_BASIS) return null;
+
+    const lease = requireDgxLeaseAuthority(job);
+    const identity = job.localProcessGroupIdentity;
+    const provenance = job.runProvenance;
+    if (!identity
+      || !provenance
+      || !runProvenanceFingerprintMatches(provenance)
+      || job.authorityRequestSha256 !== createHash("sha256")
+        .update(canonicalJson(job.authorityBoundRequest))
+        .digest("hex")
+      || lease.preparedAdmissionSha256 !== preparedAdmissionSha256(lease.preparedAdmission)
+      || lease.preparedAdmission.estimated_memory_gib !== estimate.memoryGiB
+      || lease.preparedAdmission.resource_profile.required_gib !== estimate.memoryGiB) {
+      throw new Error(
+        "Peak-RAM-Telemetrie verweigert die Gate-Freigabe: Request-, Provenienz-, Prozessgruppen- oder Admission-Bindung ist nicht exakt.",
+      );
+    }
+
+    const evidenceDirectory = join(
+      dirname(this.storagePath),
+      "resource-telemetry",
+      job.id,
+      `ltx-g${cooperativeGeneration}`,
+    );
+    const recorder = this.createLocalProcessResourceTelemetry({
+      identity,
+      evidenceDirectory,
+    });
+    const binding: LtxResourceTelemetryBinding = {
+      studioJobId: job.id,
+      dgxJobId: lease.dgxJobId,
+      preparedAdmissionSha256: lease.preparedAdmissionSha256,
+      declaredMemoryGiB: lease.preparedAdmission.estimated_memory_gib,
+      requiredMemoryGiB: lease.preparedAdmission.resource_profile.required_gib,
+      memoryBasis,
+      requestSha256: job.authorityRequestSha256,
+      runProvenanceFingerprint: provenance.fingerprint,
+      runProvenanceSha256: createHash("sha256").update(canonicalJson(provenance)).digest("hex"),
+      cooperativeGeneration,
+      executable,
+      argumentsSha256: createHash("sha256").update(canonicalJson(args)).digest("hex"),
+      processIdentity: structuredClone(identity),
+      observerIdentity: structuredClone(recorder.observerIdentity),
+    };
+    let initialSample: LocalProcessResourceSample;
+    try {
+      initialSample = recorder.capture();
+    } catch (error) {
+      throw new Error(
+        `Peak-RAM-Telemetrie konnte ihre erste Probe nicht dauerhaft vor dem Starttoken sichern: ${
+          boundedResourceTelemetryError(error)
+        }`,
+      );
+    }
+
+    const initialError = initialSample.sourceErrors.length > 0
+      || !initialSample.identityVerified
+      || !initialSample.processGroup.attributionVerified
+      || initialSample.processGroup.accountedResidentKiB === null
+      ? "Die erste Peak-RAM-Probe ist nicht vollständig und eindeutig der gebundenen Prozessgruppe zurechenbar."
+      : null;
+    if (initialError) {
+      let receipt: LocalProcessResourceTelemetryReceipt | null = null;
+      let observerError = initialError;
+      try {
+        receipt = recorder.finalize();
+      } catch (error) {
+        observerError += ` Summary-Persistenz: ${boundedResourceTelemetryError(error)}`;
+      }
+      const failedActive: ActiveLtxResourceTelemetry = {
+        binding,
+        controller: new AbortController(),
+        evidenceDirectory,
+        thermalPauseCount: 0,
+        settlement: Promise.resolve({ receipt, observerError }),
+      };
+      // Even an observer failure before FD3 release is an immutable attempt.
+      // Route it through the same verifier and parent-provenance binding as a
+      // completed process, while keeping the still-gated group explicitly
+      // ineligible. The outer spawn gate remains responsible for termination.
+      await this.recordLtxResourceTelemetry(
+        job,
+        failedActive,
+        { receipt, observerError },
+        { code: null, signal: null, error: new Error(initialError) },
+        false,
+        false,
+        null,
+      );
+      throw new Error(`Peak-RAM-Telemetrie hält das Startgate geschlossen: ${observerError}`);
+    }
+
+    this.appendLog(
+      job,
+      `Peak-RAM-Beobachter aktiv: erste Prozessgruppenprobe ist vor dem Starttoken fsync-persistiert; Basis ${memoryBasis}.`,
+    );
+    this.changed();
+    const controller = new AbortController();
+    const settlement = recorder.run(controller.signal).then<
+      LtxResourceTelemetrySettlement,
+      LtxResourceTelemetrySettlement
+    >(
+      (receipt) => ({ receipt, observerError: null }),
+      (error) => {
+        let receipt: LocalProcessResourceTelemetryReceipt | null = null;
+        let observerError = boundedResourceTelemetryError(error);
+        try {
+          receipt = recorder.finalize();
+        } catch (finalizeError) {
+          observerError += `; Summary-Persistenz: ${boundedResourceTelemetryError(finalizeError)}`;
+        }
+        return { receipt, observerError };
+      },
+    );
+    return { binding, controller, evidenceDirectory, thermalPauseCount: 0, settlement };
+  }
+
+  private async finishLtxResourceTelemetry(
+    active: ActiveLtxResourceTelemetry | null,
+  ): Promise<LtxResourceTelemetrySettlement | null> {
+    if (!active) return null;
+    active.controller.abort();
+    return active.settlement;
+  }
+
+  private async persistLtxResourceTelemetryManifest(
+    active: ActiveLtxResourceTelemetry,
+    settlement: LtxResourceTelemetrySettlement,
+    result: ProcessResult,
+    processGroupGone: boolean,
+    processGroupExitedNaturally: boolean,
+    outputPath: string | null,
+  ): Promise<{
+    manifest: LtxResourceTelemetryManifest;
+    manifestPath: string;
+    manifestSha256: string;
+  }> {
+    let observerError = settlement.observerError;
+    let output: LtxResourceTelemetryManifest["output"] = null;
+    if (processGroupGone && !result.error && result.code === 0 && outputPath && this.fileReady(outputPath)) {
+      try {
+        output = captureLtxResourceTelemetryOutput(outputPath);
+      } catch (error) {
+        observerError = [observerError, `Ausgabebindung: ${boundedResourceTelemetryError(error)}`]
+          .filter(Boolean)
+          .join("; ");
+      }
+    }
+    const telemetry = settlement.receipt ? {
+      jsonlPath: settlement.receipt.jsonlPath,
+      jsonlSha256: settlement.receipt.jsonlSha256,
+      summaryPath: settlement.receipt.summaryPath,
+      summarySha256: settlement.receipt.summarySha256,
+      summary: settlement.receipt.summary,
+    } : null;
+    const measurementBlockers = ltxResourceTelemetryMeasurementBlockers({
+      binding: active.binding,
+      summary: telemetry?.summary ?? null,
+      observerError,
+      result,
+      processGroupGone,
+      processGroupExitedNaturally,
+      thermalPauseCount: active.thermalPauseCount,
+      outputBound: output !== null,
+      outputTechnicalValid: output?.technical.blockers.length === 0,
+    });
+    const measurementEligibleForCalibration = telemetry?.summary.quality === "sufficient"
+      && measurementBlockers.length === 0;
+    const unsignedManifest = {
+      schemaVersion: "ltx-studio-ltx-resource-telemetry-manifest.v1" as const,
+      binding: active.binding,
+      telemetry,
+      observerError,
+      processOutcome: {
+        code: result.code,
+        signal: result.signal,
+        error: result.error ? boundedResourceTelemetryError(result.error) : null,
+      },
+      processGroupGone,
+      processGroupExitedNaturally,
+      thermalPauseCount: active.thermalPauseCount,
+      output,
+      measurementEligibleForCalibration,
+      recordedAt: now(),
+    };
+    const manifest: LtxResourceTelemetryManifest = {
+      ...unsignedManifest,
+      fingerprint: createHash("sha256").update(canonicalJson(unsignedManifest)).digest("hex"),
+    };
+    const manifestPath = join(active.evidenceDirectory, LTX_RESOURCE_TELEMETRY_MANIFEST_BASENAME);
+    exclusiveDurableJsonFile(manifestPath, manifest);
+    const verified = verifyLtxResourceTelemetryEvidence(manifestPath, {
+      expectedBinding: active.binding,
+      ...(output ? { expectedOutputPath: output.path } : {}),
+    });
+    if (canonicalJson(verified.manifest) !== canonicalJson(manifest)) {
+      throw new Error("Verifiziertes Peak-RAM-Manifest weicht vom gebundenen Manifest ab.");
+    }
+    return {
+      manifest: verified.manifest,
+      manifestPath,
+      manifestSha256: verified.manifestSha256,
+    };
+  }
+
+  private async recordLtxResourceTelemetry(
+    job: RuntimeJob,
+    active: ActiveLtxResourceTelemetry | null,
+    settlement: LtxResourceTelemetrySettlement | null,
+    result: ProcessResult,
+    processGroupGone: boolean,
+    processGroupExitedNaturally: boolean,
+    outputPath: string | null,
+  ): Promise<void> {
+    if (!active || !settlement) return;
+    try {
+      const evidence = await this.persistLtxResourceTelemetryManifest(
+        active,
+        settlement,
+        result,
+        processGroupGone,
+        processGroupExitedNaturally,
+        outputPath,
+      );
+      const summary = evidence.manifest.telemetry?.summary;
+      const peakKiB = summary?.metrics.processGroup.maximumAccountedResidentKiB ?? null;
+      const minimumAvailableKiB = summary?.metrics.host.minimumMemAvailableKiB ?? null;
+      const minimumFreeKiB = summary?.metrics.host.minimumMemFreeKiB ?? null;
+      const parentProvenance = job.runProvenance;
+      if (!parentProvenance
+        || !runProvenanceFingerprintMatches(parentProvenance)
+        || parentProvenance.fingerprint !== active.binding.runProvenanceFingerprint
+        || createHash("sha256").update(canonicalJson(parentProvenance)).digest("hex")
+          !== active.binding.runProvenanceSha256) {
+        throw new Error("Peak-RAM-Manifest kann nicht an seine unveränderte Eltern-Laufprovenienz gebunden werden.");
+      }
+      const evidenceRole = `evidence:resource-telemetry:g${active.binding.cooperativeGeneration}`;
+      if (!await this.bindJobRunProvenanceFile(job, evidence.manifestPath, evidenceRole)) {
+        throw new Error("Peak-RAM-Manifest wurde vor seiner Laufprovenienzbindung abgebrochen.");
+      }
+      const boundProvenance = job.runProvenance;
+      const boundFiles = boundProvenance?.files.filter((file) => file.role === evidenceRole) ?? [];
+      if (!boundProvenance
+        || !runProvenanceFingerprintMatches(boundProvenance)
+        || boundFiles.length !== 1
+        || boundFiles[0].kind !== "file"
+        || boundFiles[0].path !== evidence.manifestPath
+        || boundFiles[0].sha256 !== evidence.manifestSha256) {
+        throw new Error("Peak-RAM-Manifest fehlt nach der Bindung in der exakten Laufprovenienz.");
+      }
+      const verifiedAfterBinding = verifyLtxResourceTelemetryEvidence(evidence.manifestPath, {
+        expectedBinding: active.binding,
+        ...(evidence.manifest.output ? { expectedOutputPath: evidence.manifest.output.path } : {}),
+      });
+      if (verifiedAfterBinding.manifestSha256 !== evidence.manifestSha256) {
+        throw new Error("Peak-RAM-Manifest änderte sich während seiner Laufprovenienzbindung.");
+      }
+      if (evidence.manifest.measurementEligibleForCalibration && peakKiB !== null) {
+        this.appendLog(
+          job,
+          `Peak-RAM-Einzelmessung kryptografisch verifiziert und an die Laufprovenienz gebunden: `
+            + `${(peakKiB / 1_048_576).toFixed(2)} GiB konservative Prozessgruppen-Hüllkurve; Host-Minimum ${
+              minimumAvailableKiB === null ? "unbekannt" : `${(minimumAvailableKiB / 1_048_576).toFixed(2)} GiB`
+            }; MemFree-Minimum ${
+              minimumFreeKiB === null ? "unbekannt" : `${(minimumFreeKiB / 1_048_576).toFixed(2)} GiB`
+            }; Swap-In/Out ${String(summary?.metrics.host.pswpinDeltaPages ?? "unbekannt")}/`
+            + `${String(summary?.metrics.host.pswpoutDeltaPages ?? "unbekannt")} Seiten; `
+            + `Manifest ${evidence.manifestSha256} unter ${evidence.manifestPath}; `
+            + "keine automatische RAM-Absenkung aus einem einzelnen Lauf.",
+        );
+      } else {
+        const blockers = ltxResourceTelemetryMeasurementBlockers({
+          binding: active.binding,
+          summary: summary ?? null,
+          observerError: evidence.manifest.observerError,
+          result,
+          processGroupGone,
+          processGroupExitedNaturally,
+          thermalPauseCount: active.thermalPauseCount,
+          outputBound: evidence.manifest.output !== null,
+          outputTechnicalValid: evidence.manifest.output?.technical.blockers.length === 0,
+        });
+        this.appendLog(
+          job,
+          "Peak-RAM-Telemetrie unzureichend; beobachtete Werte sind nur Untergrenzen und kalibrieren die RAM-Prognose nicht"
+            + `${blockers.length > 0 ? ` (${blockers.join(", ")})` : ""}. `
+            + `Manifest ${evidence.manifestSha256} ist als ${evidenceRole} an die Laufprovenienz gebunden `
+            + `und liegt unter ${evidence.manifestPath}.`,
+        );
+      }
+      this.changed();
+    } catch (error) {
+      this.appendLog(
+        job,
+        "Peak-RAM-Telemetrie unzureichend; die Beweispersistenz scheiterte und darf die RAM-Prognose nicht kalibrieren: "
+          + boundedResourceTelemetryError(error),
+      );
+      this.changed();
+    }
   }
 
   private fileReady(path: string): boolean {
@@ -8706,6 +9136,9 @@ export class JobManager extends EventEmitter {
           estimatedMemoryGiBOverride ?? estimate.memoryGiB,
           job.id,
         );
+        const requestedMemoryBasis = estimatedMemoryGiBOverride === undefined
+          ? estimate.memoryBasis
+          : undefined;
         const [preparedAdmission] = buildAdmissionRequests(
           job.request,
           requestedMemoryGiB,
@@ -8714,7 +9147,9 @@ export class JobManager extends EventEmitter {
         this.appendLog(
           job,
           `DGX-Queue: Modellbedarf ${requestedMemoryGiB} GiB RAM und `
-            + `${estimate.outputGiB.toFixed(2)} GiB Ausgabe; der Orchestrator entscheidet das Start-Fence.`,
+            + `${estimate.outputGiB.toFixed(2)} GiB Ausgabe`
+            + `${requestedMemoryBasis ? `; RAM-Basis ${requestedMemoryBasis}` : ""}`
+            + "; der Orchestrator entscheidet das Start-Fence.",
         );
         job.dgxSubmitPending = true;
         job.dgxSubmitStartedAt = now();
@@ -10967,6 +11402,7 @@ export class JobManager extends EventEmitter {
     const signalChild = operations.signalProcessGroup ?? signalProcessGroup;
     const setHeartbeatPhase = operations.setHeartbeatPhase
       ?? ((phase: string) => this.setDgxOwnerHeartbeatPhase(job, phase));
+    const onPause = operations.onPause ?? (() => undefined);
     let peakC = baselineC;
     const guard = new ThermalPauseGuard({
       pauseAtC: thermalPauseC,
@@ -10994,6 +11430,7 @@ export class JobManager extends EventEmitter {
         const action = guard.observe(temperatureC, job.status === "paused");
         if (action === "pause_hot" || action === "pause_unreadable") {
           if (!signalChild(child, "SIGSTOP")) return;
+          onPause();
           job.status = "paused";
           setHeartbeatPhase("thermal_pause");
           const reason = action === "pause_hot"

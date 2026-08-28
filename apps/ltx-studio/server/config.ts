@@ -24,6 +24,7 @@ export const hostTcbExecutables = Object.freeze({
   env: "/usr/bin/env",
   ffmpeg: "/usr/bin/ffmpeg",
   ffprobe: "/usr/bin/ffprobe",
+  nvidiaSmi: "/usr/bin/nvidia-smi",
   python3: "/usr/bin/python3.12",
   sudo: "/usr/bin/sudo",
   systemdRun: "/usr/bin/systemd-run",

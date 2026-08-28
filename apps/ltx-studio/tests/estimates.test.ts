@@ -6,6 +6,7 @@ import {
 } from "../shared/estimates.js";
 import { estimateRequest } from "../server/estimates.js";
 import * as mediaProbe from "../server/mediaProbe.js";
+import type { GenerationRequest } from "../shared/pipelines.js";
 import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 describe("resource and runtime estimates", () => {
@@ -79,6 +80,81 @@ describe("resource and runtime estimates", () => {
     expect(estimateResources(request)).toMatchObject({ memoryGiB: 34 });
     expect(estimateResources(request).memoryBasis).toBeUndefined();
     expect(estimateResources(validLtx25SplitRequest("distilled")).memoryGiB).toBe(58);
+  });
+
+  it("uses a provisional 66-GiB proxy only for the audited full IA2V profile", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    const estimate = estimateResources(request);
+
+    expect(estimate).toMatchObject({
+      memoryGiB: 66,
+      memoryBasis:
+        "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+    });
+    // The orchestrator owns this canonical 12-GiB non-Qwen headroom.
+    expect(estimate.memoryGiB + 12).toBe(78);
+  });
+
+  it.each([
+    ["different geometry", (request: GenerationRequest) => { request.width = 960; }],
+    ["different height", (request: GenerationRequest) => { request.height = 1504; }],
+    ["different duration", (request: GenerationRequest) => { request.numFrames = 281; }],
+    ["different frame rate", (request: GenerationRequest) => { request.frameRate = 25; }],
+    ["an audio-derived cap", (request: GenerationRequest) => { request.audio.maxDuration = 12.05; }],
+    ["a separate final audio mix", (request: GenerationRequest) => {
+      request.audio.finalMix = { path: "/inputs/final.wav", name: "final.wav" };
+    }],
+    ["multiple image conditions", (request: GenerationRequest) => {
+      request.images.push({ ...request.images[0], name: "second.png" });
+    }],
+    ["a nonzero image frame", (request: GenerationRequest) => { request.images[0].frameIndex = 8; }],
+    ["a transformer LoRA", (request: GenerationRequest) => {
+      request.models.loras.push({ path: "/models/extra.safetensors", strength: 1 });
+    }],
+    ["a Gemma LoRA", (request: GenerationRequest) => {
+      request.models.gemmaLora.enabled = true;
+    }],
+    ["tiling disabled", (request: GenerationRequest) => { request.tiling = false; }],
+    ["runtime quantization", (request: GenerationRequest) => { request.quantization.mode = "fp8-cast"; }],
+    ["legacy model layout", (request: GenerationRequest) => { request.models.layout = "monolith"; }],
+    ["legacy model generation", (request: GenerationRequest) => { request.models.generation = "2.3"; }],
+    ["prompt enhancement", (request: GenerationRequest) => { request.enhancePrompt = true; }],
+    ["a postprocessor", (request: GenerationRequest) => { request.postprocess.latentSync.enabled = true; }],
+  ] as const)("falls back to the generic IA2V estimator for %s", (_label, mutate) => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    mutate(request);
+
+    const estimate = estimateResources(request);
+    expect(estimate.memoryBasis).toBeUndefined();
+    expect(estimate.memoryGiB).toBeGreaterThanOrEqual(68);
+  });
+
+  it("does not apply the IA2V proxy to audio-only conditioning", () => {
+    const request = validRequest("audio-to-video");
+    request.models.layout = "split";
+    request.models.generation = "2.5";
+    request.quantization.mode = "none";
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+
+    expect(estimateResources(request).memoryBasis).toBeUndefined();
+    expect(estimateResources(request).memoryGiB).toBe(74);
   });
 
   it("does not discount a BF16 checkpoint that is cast to FP8 at runtime", () => {

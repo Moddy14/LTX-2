@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from .authorization import studio_sha256_document
 from .design import document_sha256
+from .runtime_trust import RuntimeTrustBindingError, validate_runtime_trust_binding
 
 OBSERVATIONS_SCHEMA = "ltx-studio-technical-observations.v1"
-BUNDLE_SCHEMA = "ltx-av-eval-technical-qualification-bundle.v1"
-QUALIFICATION_SCHEMA = "ltx-studio-qualification-report.v1"
+BUNDLE_SCHEMA = "ltx-av-eval-technical-qualification-bundle.v2"
+QUALIFICATION_SCHEMA = "ltx-studio-qualification-report.v2"
 R0_ACTIONS = ("continue_current", "resume_current", "wait_for_successor", "yield_to_waiting_job")
 BOUNDARY_POSITIONS = ("early", "middle", "late")
 TECHNICAL_GATES = ("cold-canary", "playable-output", "provenance")
@@ -278,8 +280,19 @@ def _validate_soak(raw: object, *, candidates: dict[str, set[str]]) -> list[dict
     return raw
 
 
-def build_technical_evidence_bundle(raw: object, *, surface: object) -> dict[str, Any]:
-    """Validate raw live rows and emit detailed plus unsigned Studio qualification documents."""
+def build_technical_evidence_bundle(
+    raw: object,
+    *,
+    surface: object,
+    runtime_trust: object | None = None,
+) -> dict[str, Any]:
+    """Validate live rows and emit RuntimeTrust-bound unsigned Studio v2 reports.
+
+    ``runtime_trust`` must come from the Studio's external RuntimeTrust verifier.
+    This function never invents or fills any part of that binding.  F0 later
+    requires the exact same binding in an independently signed Rights v2
+    attestation before it accepts the signed qualification reports.
+    """
 
     if not isinstance(raw, dict):
         raise TechnicalEvidenceError("technical observations must be an object")
@@ -301,6 +314,10 @@ def build_technical_evidence_bundle(raw: object, *, surface: object) -> dict[str
     )
     if raw["schema_version"] != OBSERVATIONS_SCHEMA:
         raise TechnicalEvidenceError("unsupported technical observations schema")
+    try:
+        validated_runtime_trust = validate_runtime_trust_binding(runtime_trust)
+    except RuntimeTrustBindingError as error:
+        raise TechnicalEvidenceError(str(error)) from error
     release_digest = _sha256(raw["release_digest"], "release_digest")
     preregistration_digest = _sha256(raw["preregistration_digest"], "preregistration_digest")
     surface_digest = _sha256(raw["surface_digest"], "surface_digest")
@@ -379,6 +396,7 @@ def build_technical_evidence_bundle(raw: object, *, surface: object) -> dict[str
                 "releaseDigest": release_digest,
                 "preregistrationDigest": preregistration_digest,
                 "surfaceDigest": surface_digest,
+                "runtimeTrust": copy.deepcopy(validated_runtime_trust),
                 "producerId": producer_id,
                 "producerDigest": document_sha256(detailed[kind]),
                 "verdict": "pass",

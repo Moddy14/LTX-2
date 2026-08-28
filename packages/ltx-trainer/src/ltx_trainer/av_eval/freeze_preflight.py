@@ -24,16 +24,14 @@ from .design import REPORT_SCHEMA as DESIGN_REPORT_SCHEMA
 from .governance import GovernanceError, validate_preregistration
 from .pilot import PilotError, validate_design_pilot_binding_report
 from .readiness import READINESS_REPORT_SCHEMA
+from .runtime_trust import RuntimeTrustBindingError, validate_runtime_trust_binding
 from .surface_contract import SurfaceContractError, build_candidate_vbench_surface_binding
 
-LEGACY_F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v1"
-LEGACY_F0_REPORT_SCHEMA = "ltx-av-eval-f0-preflight-report.v1"
-LEGACY_QUALIFICATION_BUNDLE_SCHEMA = "ltx-av-eval-f0-qualification-bundle.v1"
-F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v2"
-F0_REPORT_SCHEMA = "ltx-av-eval-f0-preflight-report.v2"
-QUALIFICATION_BUNDLE_SCHEMA = "ltx-av-eval-f0-qualification-bundle.v2"
-STUDIO_QUALIFICATION_SCHEMA = "ltx-studio-qualification-report.v1"
-STUDIO_RIGHTS_SCHEMA = "ltx-studio-rights-attestation.v1"
+F0_CANDIDATE_SCHEMA = "ltx-av-eval-f0-candidate.v3"
+F0_REPORT_SCHEMA = "ltx-av-eval-f0-preflight-report.v3"
+QUALIFICATION_BUNDLE_SCHEMA = "ltx-av-eval-f0-qualification-bundle.v3"
+STUDIO_QUALIFICATION_SCHEMA = "ltx-studio-qualification-report.v2"
+STUDIO_RIGHTS_SCHEMA = "ltx-studio-rights-attestation.v2"
 STUDIO_TRUST_SCHEMA = "ltx-studio-trusted-keys.v1"
 DETAILED_REPORT_IDS = {
     "d0-readiness",
@@ -195,6 +193,7 @@ def _validate_candidate(raw: object) -> tuple[dict[str, Any], dict[str, str], di
             "trust_policy_digest",
             "preregistration_digest",
             "rights_attestation_digest",
+            "runtime_trust",
             "evaluation_authorization_digest",
             "target_sota_claim_ids",
             "detailed_reports",
@@ -221,6 +220,10 @@ def _validate_candidate(raw: object) -> tuple[dict[str, Any], dict[str, str], di
         "evaluation_authorization_digest",
     ):
         _sha256(raw[field], field)
+    try:
+        runtime_trust = validate_runtime_trust_binding(raw["runtime_trust"])
+    except RuntimeTrustBindingError as error:
+        raise FreezePreflightError(str(error)) from error
     _identifier(raw["transaction_id"], "transaction_id")
     targets = raw["target_sota_claim_ids"]
     if not isinstance(targets, list) or not targets or targets != sorted(set(targets)):
@@ -241,7 +244,9 @@ def _validate_candidate(raw: object) -> tuple[dict[str, Any], dict[str, str], di
         context="qualification reports",
         id_field="kind",
     )
-    return raw, detailed, qualifications
+    candidate = dict(raw)
+    candidate["runtime_trust"] = runtime_trust
+    return candidate, detailed, qualifications
 
 
 def validate_f0_candidate(raw: object) -> dict[str, Any]:
@@ -288,7 +293,7 @@ def _validate_rights(
     *,
     now: datetime,
     required_until: datetime,
-) -> None:
+) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise FreezePreflightError("rights attestation must be an object")
     _exact_keys(
@@ -298,6 +303,7 @@ def _validate_rights(
             "releaseDigest",
             "surfaceDigest",
             "evidenceCatalogDigest",
+            "runtimeTrust",
             "policyVersion",
             "validAt",
             "expiresAt",
@@ -309,6 +315,10 @@ def _validate_rights(
     )
     if raw["schemaVersion"] != STUDIO_RIGHTS_SCHEMA or raw["policyVersion"] != "ltx-studio-release-rights.v1":
         raise FreezePreflightError("unsupported rights attestation schema or policy")
+    try:
+        runtime_trust = validate_runtime_trust_binding(raw["runtimeTrust"])
+    except RuntimeTrustBindingError as error:
+        raise FreezePreflightError(str(error)) from error
     evidence_ids = raw["evidenceIds"]
     if not isinstance(evidence_ids, list) or not evidence_ids or len(evidence_ids) != len(set(evidence_ids)):
         raise FreezePreflightError("rights attestation needs unique evidence IDs")
@@ -339,6 +349,7 @@ def _validate_rights(
         raise FreezePreflightError(f"rights signature rejected: {error}") from error
     if digest != candidate["rights_attestation_digest"]:
         raise FreezePreflightError("rights attestation digest mismatch")
+    return runtime_trust
 
 
 def _validate_sota_evaluator_rights(
@@ -645,6 +656,7 @@ def _validate_qualification_reports(  # noqa: PLR0912
     trust_policy: object,
     detailed_producers: dict[str, str],
     candidate_entries: dict[str, set[str]],
+    runtime_trust: dict[str, Any],
     *,
     now: datetime,
 ) -> None:
@@ -670,6 +682,7 @@ def _validate_qualification_reports(  # noqa: PLR0912
                 "releaseDigest",
                 "preregistrationDigest",
                 "surfaceDigest",
+                "runtimeTrust",
                 "producerId",
                 "producerDigest",
                 "verdict",
@@ -691,6 +704,7 @@ def _validate_qualification_reports(  # noqa: PLR0912
             report["releaseDigest"] != candidate["release_digest"]
             or report["preregistrationDigest"] != candidate["preregistration_digest"]
             or report["surfaceDigest"] != candidate["surface_digest"]
+            or report["runtimeTrust"] != runtime_trust
         ):
             raise FreezePreflightError(f"qualification report binding mismatch: {kind}")
         coverage = _validate_coverage(report["coverage"], context=f"qualification report {kind}")
@@ -899,7 +913,7 @@ def build_f0_preflight_report(  # noqa: PLR0913
         required_from=now,
         required_until=complete_by,
     )
-    _validate_rights(
+    runtime_trust = _validate_rights(
         candidate,
         rights_attestation,
         rights_signature,
@@ -907,6 +921,10 @@ def build_f0_preflight_report(  # noqa: PLR0913
         now=now,
         required_until=complete_by,
     )
+    if runtime_trust["trustPolicyDigests"]["release"] != candidate["trust_policy_digest"]:
+        raise FreezePreflightError("qualification HOLD: RuntimeTrust does not pin the signed F0 trusted-key policy")
+    if runtime_trust != candidate["runtime_trust"]:
+        raise FreezePreflightError("qualification HOLD: signed Rights v2 and F0 candidate RuntimeTrust bindings differ")
     _validate_sota_evaluator_rights(candidate, rights_evidence_catalog, rights_attestation)
     candidate_entries, cooperative_modes = _validate_surface(candidate, surface, rights_attestation)
     detailed_producers = _validate_detailed_reports(
@@ -924,6 +942,7 @@ def build_f0_preflight_report(  # noqa: PLR0913
         trust_policy,
         detailed_producers,
         candidate_entries,
+        runtime_trust,
         now=now,
     )
     return {
@@ -935,6 +954,7 @@ def build_f0_preflight_report(  # noqa: PLR0913
         "candidate_surface_binding_digest": candidate["candidate_surface_binding_digest"],
         "preregistration_digest": candidate["preregistration_digest"],
         "rights_attestation_digest": candidate["rights_attestation_digest"],
+        "runtime_trust_digest": studio_sha256_document(runtime_trust),
         "evaluation_authorization_digest": candidate["evaluation_authorization_digest"],
         "trust_policy_digest": candidate["trust_policy_digest"],
         "holdout_digest": candidate["holdout_digest"],

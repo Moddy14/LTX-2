@@ -465,6 +465,8 @@ def build_q2_qualification_report(  # noqa: PLR0912, PLR0913, PLR0915
         raise HoldoutDecisionError("Q2 candidate signature dialect is not canonical Studio JSON")
     if studio_sha256_document(trust_policy) != candidate["trust_policy_digest"]:
         raise HoldoutDecisionError("Q2 trusted-key policy does not match F0")
+    if candidate["runtime_trust"]["trustPolicyDigests"]["release"] != candidate["trust_policy_digest"]:
+        raise HoldoutDecisionError("Q2 RuntimeTrust does not pin the signed F0 trusted-key policy")
     bindings = {
         "release_digest": candidate["release_digest"],
         "surface_digest": candidate["surface_digest"],
@@ -648,7 +650,7 @@ def build_q2_qualification_report(  # noqa: PLR0912, PLR0913, PLR0915
         "releaseDigest": candidate["release_digest"],
         "preregistrationDigest": candidate["preregistration_digest"],
         "surfaceDigest": candidate["surface_digest"],
-        "candidateSurfaceBindingDigest": candidate["candidate_surface_binding_digest"],
+        "runtimeTrust": candidate["runtime_trust"],
         "producerId": producer_id,
         "producerDigest": candidate["q2_runner_digest"],
         "verdict": "pass",

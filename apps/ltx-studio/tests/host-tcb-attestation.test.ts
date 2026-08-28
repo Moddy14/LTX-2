@@ -184,6 +184,17 @@ afterEach(() => {
 describe("post-install Host-TCB attestation", () => {
   it("binds the runtime, full Host-TCB, loaded unit, and separate root pin", () => {
     const value = fixture();
+    const nvidiaSmi = (value.manifest.hostTcb.tools as Array<{ name?: unknown }>).find(
+      (tool) => tool.name === "nvidia-smi",
+    );
+    expect(nvidiaSmi).toMatchObject({
+      path: "/usr/bin/nvidia-smi",
+      dynamicLibraries: [{
+        name: "nvml",
+        path: "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.580.173.02",
+        license: { path: "/usr/share/doc/libnvidia-compute-580/copyright" },
+      }],
+    });
     const record = createHostTcbAttestation({
       releaseRoot: value.root,
       releaseDigest: digest,

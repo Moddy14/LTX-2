@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { access, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -41,6 +41,11 @@ import {
   validRequestBoundExperimentBinding,
   type StudioJob,
 } from "../server/jobs.js";
+import { ltxResourceTelemetryMeasurementBlockers } from "../server/ltxResourceTelemetryEvidence.js";
+import type {
+  LocalProcessResourceObserverIdentity,
+  LocalProcessResourceTelemetrySummary,
+} from "../server/localProcessResourceTelemetry.js";
 import { hybridRoot, outputRoot, repoRoot, thermalPollIntervalMs } from "../server/config.js";
 import { notApplicableIdentityEvidence } from "../server/inputEvidence.js";
 import { NATIVE_RUNTIME_SOURCE_CONTRACTS } from "../server/nativeRuntimeSourceGate.js";
@@ -55,7 +60,7 @@ import {
   LIPFORCING_IMAGE_PATCH_SET_ID,
   LIPFORCING_IMAGE_SOURCE_REVISION,
 } from "../server/dockerImageIdentity.js";
-import { canonicalJson } from "../shared/canonicalJson.js";
+import { canonicalizeJson, canonicalJson } from "../shared/canonicalJson.js";
 import {
   PUBLIC_JOB_PERSISTENCE_HOLD_CODE,
   PUBLIC_JOB_PERSISTENCE_HOLD_REASON,
@@ -95,7 +100,7 @@ import { experimentRequestSha256V1 } from "../server/experimentDigest.js";
 import { ExperimentStore } from "../server/experimentStore.js";
 import { reconcileExperimentsBeforeServerStart } from "../server/startupExperimentReconciliation.js";
 import { bootstrapJobStartEnforcer } from "../server/startEnforcer.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 import { publishCompletedOutputFixture } from "./output-publication-fixture.js";
 
 const roots: string[] = [];
@@ -6056,6 +6061,674 @@ describe("job persistence and reservations", () => {
       dgxJobId,
     });
   });
+
+  it("persists the provisional IA2V memory basis in the actual queue log", async () => {
+    let submitted: AdmissionRequest | null = null;
+    const dgxJobId = testDgxJobId("ia2v-provisional-memory-basis");
+    let studioJobId = "";
+    const manager = new JobManager(await statePath(), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, undefined, null, {
+      submit: async (admissionRequest) => {
+        submitted = admissionRequest;
+        return boundDgxSubmit(studioJobId, dgxJobId, "accepted", admissionRequest);
+      },
+    });
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.frameRate = 24;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    request.longClipAcknowledged = true;
+    const created = manager.create(request);
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, unknown>).get(created.id)!;
+    Reflect.set(manager, "readStartResourceSnapshot", () => ({
+      availableMemoryGiB: 80,
+      totalMemoryGiB: 121.69,
+      swapFreeGiB: 1,
+      swapTotalGiB: 16,
+      outputFreeGiB: 100,
+    }));
+    Reflect.set(manager, "startAcceptedDgxJob", async () => "started");
+
+    const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+      job: unknown,
+    ) => Promise<boolean>;
+    expect(await waitForDgxQueueStart.call(manager, runtimeJob)).toBe(true);
+
+    expect(submitted).toMatchObject({
+      estimated_memory_gib: 66,
+      resource_profile: { required_gib: 66 },
+    });
+    expect(manager.get(created.id)?.logs).toEqual(expect.arrayContaining([
+      expect.stringContaining(
+        "RAM-Basis provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+      ),
+    ]));
+  });
+
+  it("fails every incomplete, resumed, swapped, or forcibly cleaned telemetry calibration closed", () => {
+    const observer: LocalProcessResourceObserverIdentity = {
+      schemaVersion: "ltx-studio-local-process-resource-observer.v1",
+      executable: "/usr/bin/nvidia-smi",
+      executableSha256: "a".repeat(64),
+      versionArguments: ["--version"],
+      versionOutputSha256: "b".repeat(64),
+      versionFirstLine: "NVIDIA-SMI fixture",
+      queryArguments: [
+        "--query-compute-apps=pid,used_memory",
+        "--format=csv,noheader,nounits",
+      ],
+      queryTimeoutMs: 750,
+      environment: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LC_ALL: "C" },
+      dynamicLibraries: [{
+        name: "nvml",
+        path: "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.580.173.02",
+        sha256: "e".repeat(64),
+        licensePath: "/usr/share/doc/libnvidia-compute-580/copyright",
+        licenseSha256: "f".repeat(64),
+      }],
+      residentAccounting: "vmrss-plus-nvidia-used-memory-conservative-envelope.v1",
+    };
+    const summary: LocalProcessResourceTelemetrySummary = {
+      schemaVersion: "ltx-studio-local-process-resource-summary.v1",
+      identity: {
+        bootId: "11111111-1111-4111-8111-111111111111",
+        processGroupId: 100,
+        leaderStartTicks: "1000",
+      },
+      startedAt: "2026-08-28T00:00:00.000Z",
+      finishedAt: "2026-08-28T00:00:01.000Z",
+      intervalMs: 1_000,
+      maximumPermittedGapMs: 3_000,
+      observer,
+      sampleCount: 2,
+      lastSuccessfulSequence: 2,
+      terminalGapMs: 0,
+      maxGapMs: 1_000,
+      quality: "sufficient",
+      qualityReasons: [],
+      sourceErrors: [],
+      jsonl: {
+        name: "local-process-resources.v1.jsonl",
+        bytes: 2,
+        sha256: "c".repeat(64),
+      },
+      metrics: {
+        host: {
+          minimumMemFreeKiB: 20 * 1_048_576,
+          minimumMemAvailableKiB: 40 * 1_048_576,
+          swapTotalKiB: 1,
+          minimumSwapFreeKiB: 1,
+          pswpinDeltaPages: 0,
+          pswpoutDeltaPages: 0,
+        },
+        processGroup: {
+          maximumProcessCount: 1,
+          maximumRssAnonKiB: 1,
+          maximumVmRssKiB: 1,
+          maximumVmHwmKiB: 1,
+          maximumVmSwapKiB: 0,
+          maximumNvidiaUsedMemoryMiB: 1,
+          maximumAccountedResidentKiB: 1,
+        },
+      },
+    };
+    const valid = {
+      binding: {
+        cooperativeGeneration: 0,
+        declaredMemoryGiB: 66,
+        requiredMemoryGiB: 66,
+        memoryBasis:
+          "provisional-proxy:ltx-2.5-split-bf16-ia2v-1024x1536-289f-24fps-tiled-explicit-1img-no-lora-no-refiner.v1",
+        processIdentity: summary.identity,
+        observerIdentity: observer,
+      },
+      summary,
+      observerError: null,
+      result: { code: 0, signal: null, error: null },
+      processGroupGone: true,
+      processGroupExitedNaturally: true,
+      thermalPauseCount: 0,
+      outputBound: true,
+      outputTechnicalValid: true,
+    };
+    expect(ltxResourceTelemetryMeasurementBlockers(valid)).toEqual([]);
+
+    const cases = [
+      [{ binding: { ...valid.binding, cooperativeGeneration: 1 } }, "resumed_generation_requires_job_rollup"],
+      [{ processGroupExitedNaturally: false }, "process_group_required_forced_cleanup"],
+      [{ thermalPauseCount: 1 }, "thermal_pause_observed"],
+      [{ summary: { ...summary, sampleCount: 1 } }, "fewer_than_two_samples"],
+      [{ summary: {
+        ...summary,
+        metrics: {
+          ...summary.metrics,
+          processGroup: { ...summary.metrics.processGroup, maximumVmSwapKiB: 1 },
+        },
+      } }, "process_group_swap_observed"],
+      [{ summary: {
+        ...summary,
+        metrics: {
+          ...summary.metrics,
+          host: { ...summary.metrics.host, pswpoutDeltaPages: 1 },
+        },
+      } }, "host_swap_out_observed"],
+      [{ summary: {
+        ...summary,
+        metrics: {
+          ...summary.metrics,
+          host: { ...summary.metrics.host, minimumMemAvailableKiB: 12 * 1_048_576 - 1 },
+        },
+      } }, "host_minimum_available_below_12_gib"],
+      [{ summary: {
+        ...summary,
+        metrics: {
+          ...summary.metrics,
+          processGroup: {
+            ...summary.metrics.processGroup,
+            maximumAccountedResidentKiB: 66 * 1_048_576 + 1,
+          },
+        },
+      } }, "resident_peak_exceeds_declared_memory"],
+      [{ observerError: "observer failed" }, "observer failed"],
+      [{ outputBound: false }, "output_unbound"],
+      [{ outputTechnicalValid: false }, "output_technical_contract_invalid"],
+      [{ result: { code: 1, signal: null, error: null } }, "process_exit_1"],
+      [{ result: { code: 0, signal: "SIGTERM", error: null } }, "process_signal_SIGTERM"],
+      [{ binding: {
+        ...valid.binding,
+        observerIdentity: { ...observer, executableSha256: "d".repeat(64) },
+      } }, "observer_identity_mismatch"],
+    ] as const;
+    for (const [override, expectedBlocker] of cases) {
+      expect(ltxResourceTelemetryMeasurementBlockers({ ...valid, ...override }))
+        .toContain(expectedBlocker);
+    }
+  });
+
+  it("binds an ineligible pre-start telemetry attempt without releasing the FD3 target", async () => {
+    const path = await statePath();
+    const root = join(path, "..");
+    const sideEffect = join(root, "ia2v-prestart-telemetry-target-started");
+    const target = join(root, "ia2v-prestart-telemetry-target.sh");
+    await writeFile(target, `#!/bin/sh
+printf started > ${JSON.stringify(sideEffect)}
+`);
+    await chmod(target, 0o755);
+
+    const manager = new JobManager(path, false);
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.frameRate = 24;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    request.longClipAcknowledged = true;
+    request.outputName = `ia2v-prestart-telemetry-${Date.now()}.mp4`;
+    const created = manager.create(request);
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    active.runProvenance = runProvenance();
+    expect((Reflect.get(manager, "classifyExecution") as (
+      job: Record<string, unknown>,
+      executionClass: "dgx",
+    ) => boolean).call(manager, active, "dgx")).toBe(true);
+    active.status = "running";
+    active.startedAt = new Date().toISOString();
+
+    const dgxJobId = testDgxJobId(`ia2v-prestart-telemetry-${created.id}`);
+    const [preparedAdmission] = buildAdmissionRequests(request, undefined, created.id);
+    const admissionSha256 = createHash("sha256")
+      .update(canonicalJson(preparedAdmission))
+      .digest("hex");
+    const leaseReceipt = {
+      ...testDgxLeaseReceipt(created.id, dgxJobId, request),
+      preparedAdmission,
+      preparedAdmissionSha256: admissionSha256,
+    };
+    active.dgxSubmitPending = true;
+    active.dgxSubmitStartedAt = leaseReceipt.submitStartedAt;
+    active.dgxPreparedAdmission = preparedAdmission;
+    active.dgxPreparedAdmissionSha256 = admissionSha256;
+    (Reflect.get(manager, "commitDgxLeaseReceipt") as (
+      job: Record<string, unknown>,
+      remote: QueueJobSummary,
+      receipt: typeof leaseReceipt,
+      terminalIntent: boolean,
+    ) => void).call(
+      manager,
+      active,
+      boundDgxJob(created.id, dgxJobId, "accepted"),
+      leaseReceipt,
+      false,
+    );
+    const queue = Reflect.get(manager, "queue") as string[];
+    queue.splice(queue.indexOf(created.id), 1);
+    (Reflect.get(manager, "changed") as () => void).call(manager);
+
+    const capture = vi.fn(() => ({
+      sourceErrors: [{ source: "nvidia_smi", message: "synthetic first-sample failure" }],
+      identityVerified: false,
+      processGroup: {
+        attributionVerified: false,
+        accountedResidentKiB: null,
+      },
+    }));
+    const run = vi.fn();
+    Reflect.set(manager, "createLocalProcessResourceTelemetry", (options: {
+      evidenceDirectory: string;
+    }) => {
+      mkdirSync(options.evidenceDirectory, { recursive: true, mode: 0o700 });
+      return {
+        observerIdentity: {
+          schemaVersion: "ltx-studio-local-process-resource-observer.v1" as const,
+          executable: "/usr/bin/nvidia-smi",
+          executableSha256: "c".repeat(64),
+          versionArguments: ["--version"] as ["--version"],
+          versionOutputSha256: "d".repeat(64),
+          versionFirstLine: "NVIDIA-SMI fixture",
+          queryArguments: [
+            "--query-compute-apps=pid,used_memory",
+            "--format=csv,noheader,nounits",
+          ] as const,
+          queryTimeoutMs: 750 as const,
+          environment: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LC_ALL: "C" } as const,
+          dynamicLibraries: [{
+            name: "nvml" as const,
+            path: "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.580.173.02",
+            sha256: "e".repeat(64),
+            licensePath: "/usr/share/doc/libnvidia-compute-580/copyright" as const,
+            licenseSha256: "f".repeat(64),
+          }],
+          residentAccounting: "vmrss-plus-nvidia-used-memory-conservative-envelope.v1" as const,
+        },
+        capture,
+        run,
+        finalize: () => {
+          throw new Error("synthetic summary unavailable");
+        },
+      };
+    });
+
+    const startTelemetry = Reflect.get(manager, "startLtxResourceTelemetry") as (
+      job: Record<string, unknown>,
+      generation: number,
+      executable: string,
+      args: readonly string[],
+    ) => Promise<unknown>;
+    const spawnWithGate = Reflect.get(manager, "spawnProcessWithDurableGate") as (
+      job: Record<string, unknown>,
+      executable: string,
+      args: string[],
+      options: { cwd: string; env: NodeJS.ProcessEnv },
+      beforeRelease: () => Promise<void>,
+    ) => Promise<ReturnType<typeof spawn>>;
+    await expect(spawnWithGate.call(
+      manager,
+      active,
+      target,
+      [],
+      { cwd: root, env: { PATH: "/usr/bin:/bin", LC_ALL: "C" } },
+      async () => {
+        await startTelemetry.call(manager, active, 0, target, []);
+      },
+    )).rejects.toThrow(/Peak-RAM-Telemetrie hält das Startgate geschlossen/u);
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(await access(sideEffect).then(() => true, () => false)).toBe(false);
+
+    const manifestPath = join(
+      root,
+      "resource-telemetry",
+      created.id,
+      "ltx-g0",
+      "ltx-resource-telemetry.manifest.v1.json",
+    );
+    const manifestBytes = await readFile(manifestPath);
+    const manifest = JSON.parse(manifestBytes.toString("utf8"));
+    expect(manifest).toMatchObject({
+      schemaVersion: "ltx-studio-ltx-resource-telemetry-manifest.v1",
+      binding: {
+        studioJobId: created.id,
+        dgxJobId,
+        cooperativeGeneration: 0,
+      },
+      telemetry: null,
+      processOutcome: { code: null, signal: null },
+      processGroupGone: false,
+      processGroupExitedNaturally: false,
+      output: null,
+      measurementEligibleForCalibration: false,
+    });
+    expect(manifest.observerError).toContain("synthetic summary unavailable");
+
+    const evidenceRole = "evidence:resource-telemetry:g0";
+    const evidenceFiles = (active.runProvenance as RunProvenance).files
+      .filter((file) => file.role === evidenceRole);
+    expect(evidenceFiles).toHaveLength(1);
+    expect(evidenceFiles[0]).toMatchObject({
+      kind: "file",
+      role: evidenceRole,
+      path: manifestPath,
+      sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+    });
+  });
+
+  it("durably samples the provisional IA2V process group before writing the FD3 token", async () => {
+    const path = await statePath();
+    const root = join(path, "..");
+    const sideEffect = join(root, "ia2v-telemetry-gated-output.mp4");
+    const target = join(root, "ia2v-telemetry-gated-target.sh");
+    await writeFile(target, `#!/bin/sh
+exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
+  -f lavfi -i color=c=black:s=1024x1536:r=24:d=12.041667 \\
+  -f lavfi -i anullsrc=r=48000:cl=stereo:d=12.041667 \\
+  -frames:v 289 -c:v libx264 -preset ultrafast -pix_fmt yuv420p \\
+  -c:a aac -ar 48000 -ac 2 -shortest ${JSON.stringify(sideEffect)}
+`);
+    await chmod(target, 0o755);
+    const manager = new JobManager(path, false);
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.width = 1024;
+    request.height = 1536;
+    request.numFrames = 289;
+    request.frameRate = 24;
+    request.audio.maxDuration = null;
+    request.tiling = true;
+    request.enhancePrompt = false;
+    request.longClipAcknowledged = true;
+    request.outputName = `ia2v-telemetry-gate-${Date.now()}.mp4`;
+    const created = manager.create(request);
+    const active = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    active.runProvenance = runProvenance();
+    expect((Reflect.get(manager, "classifyExecution") as (
+      job: Record<string, unknown>,
+      executionClass: "dgx",
+    ) => boolean).call(manager, active, "dgx")).toBe(true);
+    active.status = "running";
+    active.startedAt = new Date().toISOString();
+    const dgxJobId = testDgxJobId(`ia2v-telemetry-gate-${created.id}`);
+    const [preparedAdmission] = buildAdmissionRequests(request, undefined, created.id);
+    const admissionSha256 = createHash("sha256")
+      .update(canonicalJson(preparedAdmission))
+      .digest("hex");
+    const leaseReceipt = {
+      ...testDgxLeaseReceipt(created.id, dgxJobId, request),
+      preparedAdmission,
+      preparedAdmissionSha256: admissionSha256,
+    };
+    active.dgxSubmitPending = true;
+    active.dgxSubmitStartedAt = leaseReceipt.submitStartedAt;
+    active.dgxPreparedAdmission = preparedAdmission;
+    active.dgxPreparedAdmissionSha256 = admissionSha256;
+    (Reflect.get(manager, "commitDgxLeaseReceipt") as (
+      job: Record<string, unknown>,
+      remote: QueueJobSummary,
+      receipt: typeof leaseReceipt,
+      terminalIntent: boolean,
+    ) => void).call(
+      manager,
+      active,
+      boundDgxJob(created.id, dgxJobId, "accepted"),
+      leaseReceipt,
+      false,
+    );
+    expect(active.dgxPreparedAdmission).toBeUndefined();
+    expect(active.dgxPreparedAdmissionSha256).toBeUndefined();
+    const queue = Reflect.get(manager, "queue") as string[];
+    queue.splice(queue.indexOf(created.id), 1);
+    (Reflect.get(manager, "changed") as () => void).call(manager);
+
+    const capture = vi.fn();
+    Reflect.set(manager, "createLocalProcessResourceTelemetry", (options: {
+      identity: { bootId: string; processGroupId: number; leaderStartTicks: string };
+      evidenceDirectory: string;
+    }) => {
+      const observerIdentity = {
+        schemaVersion: "ltx-studio-local-process-resource-observer.v1" as const,
+        executable: "/usr/bin/nvidia-smi",
+        executableSha256: "c".repeat(64),
+        versionArguments: ["--version"] as ["--version"],
+        versionOutputSha256: "d".repeat(64),
+        versionFirstLine: "NVIDIA-SMI fixture",
+        queryArguments: [
+          "--query-compute-apps=pid,used_memory",
+          "--format=csv,noheader,nounits",
+        ] as const,
+        queryTimeoutMs: 750 as const,
+        environment: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LC_ALL: "C" } as const,
+        dynamicLibraries: [{
+          name: "nvml" as const,
+          path: "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.580.173.02",
+          sha256: "e".repeat(64),
+          licensePath: "/usr/share/doc/libnvidia-compute-580/copyright" as const,
+          licenseSha256: "f".repeat(64),
+        }] as [{
+          name: "nvml";
+          path: string;
+          sha256: string;
+          licensePath: "/usr/share/doc/libnvidia-compute-580/copyright";
+          licenseSha256: string;
+        }],
+        residentAccounting: "vmrss-plus-nvidia-used-memory-conservative-envelope.v1" as const,
+      };
+      const sample = (sequence: 1 | 2) => ({
+        schemaVersion: "ltx-studio-local-process-resource-sample.v1" as const,
+        sequence,
+        capturedAt: sequence === 1
+          ? "2026-08-28T00:00:00.000Z"
+          : "2026-08-28T00:00:01.000Z",
+        monotonicMs: (sequence - 1) * 1_000,
+        gapMs: sequence === 1 ? null : 1_000,
+        identity: options.identity,
+        identityVerified: true,
+        host: {
+          memFreeKiB: 20 * 1_048_576,
+          memAvailableKiB: 40 * 1_048_576,
+          swapTotalKiB: 16 * 1_048_576,
+          swapFreeKiB: 15 * 1_048_576,
+          pswpinPages: 0,
+          pswpoutPages: 0,
+        },
+        processGroup: {
+          attributionVerified: true,
+          pids: [options.identity.processGroupId],
+          processCount: 1,
+          rssAnonKiB: 1_024,
+          vmRssKiB: 1_024,
+          vmHwmKiB: 1_024,
+          vmSwapKiB: 0,
+          nvidiaUsedMemoryMiB: 1,
+          accountedResidentKiB: 2_048,
+          nvidiaPids: [{ pid: options.identity.processGroupId, usedMemoryMiB: 1 }],
+        },
+        sourceErrors: [],
+      });
+      const samples = [sample(1), sample(2)];
+      const jsonlBytes = Buffer.from(
+        samples.map((value) => JSON.stringify(canonicalizeJson(value))).join("\n") + "\n",
+        "utf8",
+      );
+      const jsonlSha256 = createHash("sha256").update(jsonlBytes).digest("hex");
+      const summary = {
+        schemaVersion: "ltx-studio-local-process-resource-summary.v1" as const,
+        identity: options.identity,
+        startedAt: "2026-08-28T00:00:00.000Z",
+        finishedAt: "2026-08-28T00:00:01.000Z",
+        intervalMs: 1_000 as const,
+        maximumPermittedGapMs: 3_000 as const,
+        observer: observerIdentity,
+        sampleCount: 2,
+        lastSuccessfulSequence: 2,
+        terminalGapMs: 1,
+        maxGapMs: 1_000,
+        quality: "sufficient" as const,
+        qualityReasons: [],
+        sourceErrors: [],
+        jsonl: {
+          name: "local-process-resources.v1.jsonl" as const,
+          bytes: jsonlBytes.byteLength,
+          sha256: jsonlSha256,
+        },
+        metrics: {
+          host: {
+            minimumMemFreeKiB: 20 * 1_048_576,
+            minimumMemAvailableKiB: 40 * 1_048_576,
+            swapTotalKiB: 16 * 1_048_576,
+            minimumSwapFreeKiB: 15 * 1_048_576,
+            pswpinDeltaPages: 0,
+            pswpoutDeltaPages: 0,
+          },
+          processGroup: {
+            maximumProcessCount: 1,
+            maximumRssAnonKiB: 1_024,
+            maximumVmRssKiB: 1_024,
+            maximumVmHwmKiB: 1_024,
+            maximumVmSwapKiB: 0,
+            maximumNvidiaUsedMemoryMiB: 1,
+            maximumAccountedResidentKiB: 2_048,
+          },
+        },
+      };
+      const jsonlPath = join(options.evidenceDirectory, "local-process-resources.v1.jsonl");
+      const summaryPath = join(options.evidenceDirectory, "local-process-resources.summary.v1.json");
+      const summaryBytes = Buffer.from(canonicalJson(summary), "utf8");
+      mkdirSync(options.evidenceDirectory, { recursive: true, mode: 0o700 });
+      writeFileSync(jsonlPath, jsonlBytes, { mode: 0o600, flag: "wx" });
+      writeFileSync(summaryPath, summaryBytes, { mode: 0o600, flag: "wx" });
+      const receipt = {
+        schemaVersion: "ltx-studio-local-process-resource-evidence.v1" as const,
+        jsonlPath,
+        jsonlSha256,
+        summaryPath,
+        summarySha256: createHash("sha256").update(summaryBytes).digest("hex"),
+        summary,
+      };
+      return {
+        observerIdentity,
+        capture: () => {
+          capture();
+          return sample(1);
+        },
+        run: (signal: AbortSignal) => new Promise((resolvePromise) => {
+          const finish = () => resolvePromise(receipt);
+          if (signal.aborted) finish();
+          else signal.addEventListener("abort", finish, { once: true });
+        }),
+        finalize: () => receipt,
+      };
+    });
+
+    const waitForProcess = Reflect.get(manager, "waitForProcess") as (
+      process: ReturnType<typeof spawn>,
+    ) => Promise<{ code: number | null; signal: NodeJS.Signals | null; error: Error | null }>;
+    const startTelemetry = Reflect.get(manager, "startLtxResourceTelemetry") as (
+      job: Record<string, unknown>,
+      generation: number,
+      executable: string,
+      args: readonly string[],
+    ) => Promise<unknown>;
+    let telemetry: unknown = null;
+    let completion: ReturnType<typeof waitForProcess> | null = null;
+    const child = await (Reflect.get(manager, "spawnProcessWithDurableGate") as (
+      job: Record<string, unknown>,
+      executable: string,
+      args: string[],
+      options: { cwd: string; env: NodeJS.ProcessEnv },
+      beforeRelease: (process: ReturnType<typeof spawn>) => Promise<void>,
+    ) => Promise<ReturnType<typeof spawn>>).call(
+      manager,
+      active,
+      target,
+      [],
+      { cwd: root, env: { PATH: "/usr/bin:/bin", LC_ALL: "C" } },
+      async (gatedChild) => {
+        completion = waitForProcess.call(manager, gatedChild);
+        telemetry = await startTelemetry.call(manager, active, 0, target, []);
+        const gate = gatedChild.stdio[3] as PassThrough;
+        const originalEnd = gate.end.bind(gate);
+        gate.end = ((chunk: string, callback: () => void) => {
+          expect(capture).toHaveBeenCalledTimes(1);
+          return originalEnd(chunk, callback);
+        }) as typeof gate.end;
+      },
+    );
+    const result = await (completion ?? waitForProcess.call(manager, child));
+    const finishTelemetry = Reflect.get(manager, "finishLtxResourceTelemetry") as (
+      activeTelemetry: unknown,
+    ) => Promise<unknown>;
+    const settlement = await finishTelemetry.call(manager, telemetry);
+    await (Reflect.get(manager, "confirmProcessGroupGone") as (
+      job: Record<string, unknown>,
+      process: ReturnType<typeof spawn>,
+    ) => Promise<void>).call(manager, active, child);
+    await (Reflect.get(manager, "recordLtxResourceTelemetry") as (
+      job: Record<string, unknown>,
+      activeTelemetry: unknown,
+      telemetrySettlement: unknown,
+      processResult: typeof result,
+      processGroupGone: boolean,
+      processGroupExitedNaturally: boolean,
+      outputPath: string,
+    ) => Promise<void>).call(manager, active, telemetry, settlement, result, true, true, sideEffect);
+
+    const manifestPath = join(
+      root,
+      "resource-telemetry",
+      created.id,
+      "ltx-g0",
+      "ltx-resource-telemetry.manifest.v1.json",
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const outputBytes = await readFile(sideEffect);
+    expect(result).toMatchObject({ code: 0, signal: null, error: null });
+    expect(outputBytes.byteLength).toBeGreaterThan(0);
+    expect(manifest).toMatchObject({
+      schemaVersion: "ltx-studio-ltx-resource-telemetry-manifest.v1",
+      binding: {
+        studioJobId: created.id,
+        dgxJobId,
+        declaredMemoryGiB: 66,
+        requiredMemoryGiB: 66,
+        memoryBasis: expect.stringMatching(/^provisional-proxy:/u),
+        cooperativeGeneration: 0,
+      },
+      processOutcome: { code: 0, signal: null, error: null },
+      processGroupGone: true,
+      processGroupExitedNaturally: true,
+      measurementEligibleForCalibration: true,
+      output: {
+        path: sideEffect,
+        sizeBytes: outputBytes.byteLength,
+        sha256: createHash("sha256").update(outputBytes).digest("hex"),
+        technical: {
+          schemaVersion: "ltx-studio-ltx-resource-output-contract.v1",
+          blockers: [],
+        },
+      },
+    });
+    expect(active.logs).toEqual(expect.arrayContaining([
+      expect.stringContaining("erste Prozessgruppenprobe ist vor dem Starttoken fsync-persistiert"),
+      expect.stringContaining("Peak-RAM-Einzelmessung kryptografisch verifiziert"),
+    ]));
+    expect((active.runProvenance as RunProvenance).files).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "evidence:resource-telemetry:g0",
+        path: manifestPath,
+        sha256: createHash("sha256").update(await readFile(manifestPath)).digest("hex"),
+      }),
+    ]));
+  }, 10_000);
 
   it("continues an adopted ambiguous lease when only its diagnostic log write fails", async () => {
     const path = await statePath();

@@ -8,6 +8,7 @@ import {
   parseCanonicalDigestFile,
   DIGEST_NAME,
   MANIFEST_NAME,
+  productionTcbLicenses,
   releaseArtifacts,
   sha256Bytes,
   sha256File,
@@ -63,6 +64,10 @@ if (sha256File(surfacePath) !== manifest.surface.sha256
   || sha256File(rightsPath) !== manifest.rights.evidenceCatalog.sha256
   || sha256File(buildTcbPath) !== manifest.buildTcb.sha256) {
   throw new Error("Release governance artifact digest mismatch");
+}
+if (canonicalJson(manifest.rights.productionTcbLicenses)
+  !== canonicalJson(productionTcbLicenses(manifest.hostTcb))) {
+  throw new Error("Release production-TCB license inventory differs from its Host-TCB contract");
 }
 const buildTcbText = readFileSync(buildTcbPath, "utf8");
 const buildTcb = JSON.parse(buildTcbText);

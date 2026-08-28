@@ -3,6 +3,11 @@ export const HOST_TOOL_SPECS: Readonly<Record<string, {
   path: string;
   versionArgs: readonly string[];
   licensePath: string;
+  dynamicLibraries?: readonly {
+    name: string;
+    path: string;
+    licensePath: string;
+  }[];
   skipDependencies?: boolean;
 }>>;
 export function captureHostTcbContract(

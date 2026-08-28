@@ -96,3 +96,63 @@ export function uniqueComponents(components) {
     return a < b ? -1 : a > b ? 1 : 0;
   });
 }
+
+function requiredTcbLicense(component, label) {
+  if (!component || typeof component !== "object"
+    || typeof component.name !== "string" || component.name.length === 0
+    || !component.license || typeof component.license !== "object"
+    || typeof component.license.path !== "string" || component.license.path.length === 0
+    || typeof component.license.sha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(component.license.sha256)) {
+    throw new Error(`${label} has no exact production-TCB license identity`);
+  }
+  return component.license;
+}
+
+/**
+ * Derive the exact production-TCB license inventory from the same Host-TCB
+ * contract that is embedded in the release manifest. Explicit dynamic-library
+ * dependencies (currently nvidia-smi's NVML) are first-class host components;
+ * keeping this derivation shared prevents the rights list from silently
+ * dropping them while the Host-TCB/SBOM still records their executable bytes.
+ */
+export function productionTcbLicenses(hostTcb) {
+  if (!hostTcb || typeof hostTcb !== "object"
+    || !Array.isArray(hostTcb.runtimeComponents)
+    || !Array.isArray(hostTcb.tools)) {
+    throw new Error("Host-TCB has no exact runtime/tool inventory for production licenses");
+  }
+  const licenses = [];
+  for (const component of hostTcb.runtimeComponents) {
+    const license = requiredTcbLicense(component, "Host-TCB runtime component");
+    licenses.push({
+      component: component.name,
+      scope: "in-release",
+      path: license.path,
+      sha256: license.sha256,
+    });
+  }
+  for (const component of hostTcb.tools) {
+    const license = requiredTcbLicense(component, "Host-TCB tool");
+    licenses.push({
+      component: component.name,
+      scope: "host",
+      path: license.path,
+      sha256: license.sha256,
+    });
+    const dynamicLibraries = component.dynamicLibraries === undefined ? [] : component.dynamicLibraries;
+    if (!Array.isArray(dynamicLibraries)) {
+      throw new Error(`Host-TCB tool ${component.name} has an invalid dynamic-library inventory`);
+    }
+    for (const library of dynamicLibraries) {
+      const libraryLicense = requiredTcbLicense(library, `Host-TCB tool ${component.name} dynamic library`);
+      licenses.push({
+        component: `${component.name}:${library.name}`,
+        scope: "host",
+        path: libraryLicense.path,
+        sha256: libraryLicense.sha256,
+      });
+    }
+  }
+  return licenses;
+}

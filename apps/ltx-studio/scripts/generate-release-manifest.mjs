@@ -8,6 +8,7 @@ import {
   canonicalDigestFile,
   DIGEST_NAME,
   MANIFEST_NAME,
+  productionTcbLicenses,
   releaseArtifacts,
   sha256Bytes,
   sha256File,
@@ -309,20 +310,7 @@ const manifest = {
       path: "apps/ltx-studio/release/rights-evidence.v1.json",
       sha256: sha256File(rightsEvidencePath),
     },
-    productionTcbLicenses: [
-      ...hostTcb.runtimeComponents.map((component) => ({
-        component: component.name,
-        scope: "in-release",
-        path: component.license.path,
-        sha256: component.license.sha256,
-      })),
-      ...hostTcb.tools.map((component) => ({
-        component: component.name,
-        scope: "host",
-        path: component.license.path,
-        sha256: component.license.sha256,
-      })),
-    ],
+    productionTcbLicenses: productionTcbLicenses(hostTcb),
     status: "requires-current-signed-rights-attest",
   },
   sbom: {

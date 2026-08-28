@@ -89,7 +89,7 @@ def _rights_catalog(*, blocked_evaluator_id: str | None) -> dict[str, Any]:
     return catalog
 
 
-def _fixture(  # noqa: PLR0913, PLR0915
+def _fixture(  # noqa: PLR0912, PLR0913, PLR0915
     *,
     now: datetime = NOW,
     q1_sota_status: str = "anchor-pilot-pass",
@@ -101,6 +101,9 @@ def _fixture(  # noqa: PLR0913, PLR0915
     soak_jobs: int = 50,
     pause_mode_families: list[str] | None = None,
     evaluator_rights_failure: str | None = None,
+    runtime_trust_release_policy_digest: str | None = None,
+    rights_runtime_trust_build_digest: str | None = None,
+    qualification_runtime_trust_build_digest: str | None = None,
     relabelled_frozen90_design: bool = False,
     d1_payload_variant: str | None = None,
 ) -> dict[str, Any]:
@@ -373,6 +376,30 @@ def _fixture(  # noqa: PLR0913, PLR0915
         "policyId": "f0-trust-policy-01",
         "keys": policy_keys,
     }
+    runtime_trust = {
+        "schemaVersion": "ltx-studio-runtime-trust-binding.v2",
+        "hostTcbAttestationSha256": "a" * 64,
+        "hostTcbContractSha256": "b" * 64,
+        "servicePolicySha256": "c" * 64,
+        "buildTcbSha256": "d" * 64,
+        "authorityIsolation": {
+            "schemaVersion": "ltx-studio-authority-isolation.v1",
+            "status": "attested",
+            "mechanism": "separate-studio-identity-proc-fd-isolation",
+            "hostTcbAttestationSha256": "a" * 64,
+            "brokerAttestationSha256": None,
+            "reasonCode": None,
+        },
+        "trustPolicyDigests": {
+            "release": studio_sha256_document(trust_policy),
+            "activationWriter": "2" * 64,
+            "qualificationAuthorizer": "3" * 64,
+            "runtimeRights": "4" * 64,
+            "bootstrapAuthority": "5" * 64,
+        },
+    }
+    if runtime_trust_release_policy_digest is not None:
+        runtime_trust["trustPolicyDigests"]["release"] = runtime_trust_release_policy_digest
 
     def sign(document: object, key_id: str) -> dict[str, Any]:
         payload = studio_canonical_json(document)
@@ -405,10 +432,11 @@ def _fixture(  # noqa: PLR0913, PLR0915
     )
     rights_catalog = _rights_catalog(blocked_evaluator_id=blocked_evaluator_id)
     rights = {
-        "schemaVersion": "ltx-studio-rights-attestation.v1",
+        "schemaVersion": "ltx-studio-rights-attestation.v2",
         "releaseDigest": release_digest,
         "surfaceDigest": surface_digest,
         "evidenceCatalogDigest": studio_sha256_document(rights_catalog),
+        "runtimeTrust": copy.deepcopy(runtime_trust),
         "policyVersion": "ltx-studio-release-rights.v1",
         "validAt": _timestamp(now - timedelta(hours=1)),
         "expiresAt": _timestamp(now + timedelta(hours=48)),
@@ -419,9 +447,14 @@ def _fixture(  # noqa: PLR0913, PLR0915
         ],
         "warnings": [],
     }
+    if rights_runtime_trust_build_digest is not None:
+        rights["runtimeTrust"]["buildTcbSha256"] = rights_runtime_trust_build_digest
     qualification_reports: list[dict[str, Any]] = []
     qualification_digests: dict[str, str] = {}
     for kind in QUALIFICATION_KINDS:
+        report_runtime_trust = copy.deepcopy(runtime_trust)
+        if qualification_runtime_trust_build_digest is not None:
+            report_runtime_trust["buildTcbSha256"] = qualification_runtime_trust_build_digest
         ownership = {
             "d1-calibration": [
                 "av-sync",
@@ -455,11 +488,12 @@ def _fixture(  # noqa: PLR0913, PLR0915
             "r3-canaries": ["cold-canary", "playable-output", "provenance"],
         }.get(kind, [])
         report = {
-            "schemaVersion": "ltx-studio-qualification-report.v1",
+            "schemaVersion": "ltx-studio-qualification-report.v2",
             "kind": kind,
             "releaseDigest": release_digest,
             "preregistrationDigest": preregistration_digest,
             "surfaceDigest": surface_digest,
+            "runtimeTrust": report_runtime_trust,
             "producerId": f"producer.{kind}",
             "producerDigest": detailed_digests.get(kind, "a" * 64),
             "verdict": "pass",
@@ -479,7 +513,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
         qualification_reports.append({"document": report, "signature": sign(report, "qualification-key-01")})
         qualification_digests[kind] = studio_sha256_document(report)
     candidate = {
-        "schema_version": "ltx-av-eval-f0-candidate.v2",
+        "schema_version": "ltx-av-eval-f0-candidate.v3",
         "candidate_id": "final-candidate-001",
         "release_digest": release_digest,
         "surface_digest": surface_digest,
@@ -493,6 +527,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
         "trust_policy_digest": studio_sha256_document(trust_policy),
         "preregistration_digest": preregistration_digest,
         "rights_attestation_digest": studio_sha256_document(rights),
+        "runtime_trust": copy.deepcopy(runtime_trust),
         "evaluation_authorization_digest": studio_sha256_document(evaluation_authorization),
         "target_sota_claim_ids": TARGETS,
         "detailed_reports": [
@@ -517,7 +552,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
         "surface": surface,
         "detailed_reports": detailed_reports,
         "qualification_bundle": {
-            "schema_version": "ltx-av-eval-f0-qualification-bundle.v2",
+            "schema_version": "ltx-av-eval-f0-qualification-bundle.v3",
             "reports": qualification_reports,
         },
         "now": now,
@@ -637,10 +672,68 @@ def test_complete_f0_preflight_binds_the_single_q2_authorization() -> None:
     second = build_f0_preflight_report(**copy.deepcopy(fixture))
 
     assert first == second
+    assert first["schema_version"] == "ltx-av-eval-f0-preflight-report.v3"
     assert first["status"] == "f0-pass-ready-for-q2"
     assert first["q2_authorized"] is True
     assert first["production_authorized"] is False
     assert first["target_sota_claim_ids"] == TARGETS
+    assert first["runtime_trust_digest"] == studio_sha256_document(fixture["rights_attestation"]["runtimeTrust"])
+
+
+def test_f0_rejects_pre_runtime_trust_v2_candidate_and_bundle_labels() -> None:
+    old_candidate = _fixture()
+    old_candidate["raw"]["schema_version"] = "ltx-av-eval-f0-candidate.v2"
+    with pytest.raises(FreezePreflightError, match="unsupported F0 candidate schema"):
+        build_f0_preflight_report(**old_candidate)
+
+    old_bundle = _fixture()
+    old_bundle["qualification_bundle"]["schema_version"] = "ltx-av-eval-f0-qualification-bundle.v2"
+    with pytest.raises(FreezePreflightError, match="unsupported qualification bundle"):
+        build_f0_preflight_report(**old_bundle)
+
+
+def test_f0_holds_without_a_signed_attested_runtime_trust_binding() -> None:
+    missing_candidate = _fixture()
+    del missing_candidate["raw"]["runtime_trust"]
+    with pytest.raises(FreezePreflightError, match=r"missing=.*runtime_trust"):
+        build_f0_preflight_report(**missing_candidate)
+
+    missing = _fixture()
+    del missing["rights_attestation"]["runtimeTrust"]
+    with pytest.raises(FreezePreflightError, match=r"missing=.*runtimeTrust"):
+        build_f0_preflight_report(**missing)
+
+    same_uid = _fixture()
+    same_uid["rights_attestation"]["runtimeTrust"]["authorityIsolation"] = {
+        "schemaVersion": "ltx-studio-authority-isolation.v1",
+        "status": "hold",
+        "mechanism": "same-local-uid",
+        "attestationSha256": None,
+        "reasonCode": "same-uid-authority-not-authentic",
+    }
+    with pytest.raises(FreezePreflightError, match="qualification HOLD"):
+        build_f0_preflight_report(**same_uid)
+
+
+def test_f0_holds_when_a_signed_v2_report_does_not_share_rights_runtime_trust() -> None:
+    fixture = _fixture(qualification_runtime_trust_build_digest="e" * 64)
+
+    with pytest.raises(FreezePreflightError, match="qualification report binding mismatch"):
+        build_f0_preflight_report(**fixture)
+
+
+def test_f0_holds_when_signed_rights_and_candidate_runtime_trust_differ() -> None:
+    fixture = _fixture(rights_runtime_trust_build_digest="e" * 64)
+
+    with pytest.raises(FreezePreflightError, match="Rights v2 and F0 candidate RuntimeTrust"):
+        build_f0_preflight_report(**fixture)
+
+
+def test_f0_holds_when_runtime_trust_does_not_pin_the_signed_policy() -> None:
+    fixture = _fixture(runtime_trust_release_policy_digest="f" * 64)
+
+    with pytest.raises(FreezePreflightError, match="does not pin the signed F0 trusted-key policy"):
+        build_f0_preflight_report(**fixture)
 
 
 def test_f0_rejects_a_relabelled_frozen90_design_report() -> None:
@@ -1033,6 +1126,23 @@ def test_q2_assembles_only_consumed_objective_mos_and_anchor_passes(tmp_path: Pa
 
     assert report["kind"] == "q2-holdout"
     assert report["verdict"] == "pass"
+    assert set(report) == {
+        "schemaVersion",
+        "kind",
+        "releaseDigest",
+        "preregistrationDigest",
+        "surfaceDigest",
+        "runtimeTrust",
+        "producerId",
+        "producerDigest",
+        "verdict",
+        "warnings",
+        "coverage",
+        "claimResults",
+    }
+    assert report["schemaVersion"] == "ltx-studio-qualification-report.v2"
+    assert report["runtimeTrust"] == fixture["raw"]["runtime_trust"]
+    assert "candidateSurfaceBindingDigest" not in report
     assert {result["status"] for result in report["claimResults"]} == {"local-only", "sota-qualified"}
     assert all(
         result["sotaAnchorDigest"]

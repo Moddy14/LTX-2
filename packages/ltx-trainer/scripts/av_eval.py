@@ -582,11 +582,16 @@ def _run_q2_score(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_technical_score(observations_path: Path, surface_path: Path) -> int:
+def _run_technical_score(
+    observations_path: Path,
+    surface_path: Path,
+    runtime_trust_path: Path,
+) -> int:
     try:
         report = build_technical_evidence_bundle(
             json.loads(observations_path.read_text(encoding="utf-8")),
             surface=json.loads(surface_path.read_text(encoding="utf-8")),
+            runtime_trust=json.loads(runtime_trust_path.read_text(encoding="utf-8")),
         )
     except (OSError, json.JSONDecodeError, TechnicalEvidenceError) as error:
         logger.error("R0/R3 technical observations rejected: %s", error)
@@ -762,6 +767,12 @@ def main() -> int:  # noqa: PLR0915
     technical_score = subcommands.add_parser("technical-score", help="assemble fail-closed R0/R3 live evidence")
     technical_score.add_argument("--observations", type=Path, required=True)
     technical_score.add_argument("--surface", type=Path, required=True)
+    technical_score.add_argument(
+        "--runtime-trust",
+        type=Path,
+        required=True,
+        help="RuntimeTrust v2 binding exported by the Studio's external verifier",
+    )
     args = parser.parse_args()
     handlers = {
         "artifact-score": lambda: _run_artifact_score(args.observations),
@@ -804,7 +815,11 @@ def main() -> int:  # noqa: PLR0915
         "q2-score": lambda: _run_q2_score(args),
         "readiness-check": lambda: _run_readiness_check(args),
         "sharpness-score": lambda: _run_sharpness_score(args.observations),
-        "technical-score": lambda: _run_technical_score(args.observations, args.surface),
+        "technical-score": lambda: _run_technical_score(
+            args.observations,
+            args.surface,
+            args.runtime_trust,
+        ),
         "vbench-score": lambda: _run_vbench_score(args.observations, args.design),
         "vbench-runtime-check": lambda: _run_vbench_runtime_check(args.config, args.checkout),
         "vbench-environment-check": lambda: _run_vbench_environment_check(args),

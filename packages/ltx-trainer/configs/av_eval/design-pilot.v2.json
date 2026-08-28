@@ -1264,7 +1264,7 @@
     "candidate_surface": {
       "schema_version": "ltx-av-eval-candidate-vbench-surface-binding.v2",
       "surface_schema_version": "candidate-release-surface.v1",
-      "surface_digest": "01e2ed30f26aff8321496a7dcf689b99cd55b8479d65a7db8df924291ac10ff2",
+      "surface_digest": "923288902549cc5bd76f53030151658b166e34fffc682db215ac7601b5de8745",
       "projection_digest": "67ef51581695b3919b16a869b1dcf8d0209cae544121359048ff7c43af48aef5",
       "candidate_entry_count": 25,
       "claim_ids": [

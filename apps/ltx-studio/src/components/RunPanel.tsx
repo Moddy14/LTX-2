@@ -812,6 +812,12 @@ export function RunPanel({
               <span>RAM-Prognose</span>
               <strong>{estimate.memoryGiB} GiB</strong>
             </div>
+            {estimate.memoryBasis?.startsWith("provisional-proxy:") ? (
+              <div className="run-summary__line">
+                <span>RAM-Basis</span>
+                <strong>Provisorisch · Peakmessung ausstehend</strong>
+              </div>
+            ) : null}
             <div className="run-summary__line">
               <span>Ausgabedatei</span>
               <strong>ca. {estimate.outputGiB.toFixed(2)} GiB</strong>

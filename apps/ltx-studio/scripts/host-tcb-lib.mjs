@@ -14,9 +14,23 @@ import {
 
 export const HOST_TCB_SCHEMA = "ltx-studio-host-tcb.v2";
 
+const NVIDIA_ML_CANONICAL_PATH = realpathSync(
+  "/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1",
+);
+
 export const HOST_TOOL_SPECS = Object.freeze({
   ffmpeg: { path: "/usr/bin/ffmpeg", versionArgs: ["-version"], licensePath: "/usr/share/doc/ffmpeg/copyright" },
   ffprobe: { path: "/usr/bin/ffprobe", versionArgs: ["-version"], licensePath: "/usr/share/doc/ffmpeg/copyright" },
+  "nvidia-smi": {
+    path: "/usr/bin/nvidia-smi",
+    versionArgs: ["--version"],
+    licensePath: "/usr/share/doc/nvidia-utils-580/copyright",
+    dynamicLibraries: [{
+      name: "nvml",
+      path: NVIDIA_ML_CANONICAL_PATH,
+      licensePath: "/usr/share/doc/libnvidia-compute-580/copyright",
+    }],
+  },
   docker: { path: "/usr/bin/docker", versionArgs: ["--version"], licensePath: "/usr/share/common-licenses/Apache-2.0" },
   sudo: { path: "/usr/bin/sudo", versionArgs: ["--version"], licensePath: "/usr/share/doc/sudo/copyright" },
   "systemd-run": { path: "/usr/bin/systemd-run", versionArgs: ["--version"], licensePath: "/usr/share/doc/systemd/copyright" },
@@ -43,6 +57,7 @@ function runVersion(path, args, execute) {
   const output = execute(path, args, {
     encoding: "utf8",
     env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LC_ALL: "C" },
+    timeout: 10_000,
     maxBuffer: 4 * 1024 * 1024,
   });
   if (typeof output !== "string" || output.length === 0) {
@@ -139,6 +154,18 @@ function captureTool(name, spec, execute, options = {}) {
     version: runVersion(spec.path, spec.versionArgs, execute),
     license,
     elfClosure: captureDependencies(spec.path, options),
+    dynamicLibraries: (spec.dynamicLibraries ?? []).map((library) => {
+      const binary = exactRegularFile(library.path, false);
+      return {
+        name: library.name,
+        ...binary,
+        license: exactRegularFile(library.licensePath, false),
+        elfClosure: captureDependencies(library.path, {
+          ...options,
+          requireInterpreter: false,
+        }),
+      };
+    }),
   };
 }
 

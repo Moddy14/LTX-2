@@ -178,7 +178,7 @@ def test_vbench_design_exactly_covers_candidate_surface_claims() -> None:
     assert binding["claim_ids"] == sorted(design_claims)
     assert binding["schema_version"] == "ltx-av-eval-candidate-vbench-surface-binding.v2"
     assert binding["surface_schema_version"] == "candidate-release-surface.v1"
-    assert binding["surface_digest"] == "01e2ed30f26aff8321496a7dcf689b99cd55b8479d65a7db8df924291ac10ff2"
+    assert binding["surface_digest"] == "923288902549cc5bd76f53030151658b166e34fffc682db215ac7601b5de8745"
     assert binding["projection_digest"] == "67ef51581695b3919b16a869b1dcf8d0209cae544121359048ff7c43af48aef5"
     assert binding["candidate_entry_count"] == 25
     assert {
