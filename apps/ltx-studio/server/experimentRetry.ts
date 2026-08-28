@@ -1,5 +1,6 @@
 import {
   supportsA2vGuidanceExperiment,
+  supportsPositivePromptExperiment,
   type ControlledExperiment,
 } from "../shared/experiments.js";
 import {
@@ -61,6 +62,15 @@ export async function inspectRetryableExperimentArm(
     throw new ExperimentConflictError(
       "Der historische IA2V-Guidance-Arm bleibt als Evidenz lesbar, darf aber nicht erneut gestartet werden: "
       + "der offizielle SimpleDenoiser-Vertrag konsumiert die kontrollierte Variable nicht.",
+    );
+  }
+  if (
+    experiment.candidate.variable === "positive-prompt"
+    && !supportsPositivePromptExperiment(experiment.arms[0].request)
+  ) {
+    throw new ExperimentConflictError(
+      "Der Positive-Beschreibung-Arm darf nicht erneut gestartet werden: "
+      + "sein Request liegt außerhalb des freigegebenen LTX-2.5-Split-IA2V-Vertrags.",
     );
   }
   const selected = experiment.arms[arm === "baseline" ? 0 : 1];

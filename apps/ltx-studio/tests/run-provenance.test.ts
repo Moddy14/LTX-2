@@ -15,6 +15,7 @@ import {
   captureRunProvenance,
   forkVerifiedRunProvenanceForArtifactPromotion,
   normalizeRunProvenance,
+  runProvenanceEnvironmentMatches,
   runProvenanceFingerprintMatches,
   verifyProvenanceFileEvidence,
   verifyPythonPackageBinding,
@@ -306,6 +307,92 @@ describe("run provenance", () => {
       ...baseline,
       verifiedAt: null,
     })).toThrow(/nicht verifiziert/u);
+  });
+
+  it("matches prompt experiments only across the complete immutable execution-input surface", () => {
+    const original: RunProvenance = {
+      schemaVersion: "ltx-studio-run-provenance.v1",
+      capturedAt: "2026-08-28T03:00:00.000Z",
+      verifiedAt: null,
+      files: [{
+        role: "model:transformer",
+        path: "/models/transformer.safetensors",
+        kind: "file",
+        sizeBytes: 1,
+        modifiedAtMs: 1,
+        changedAtMs: 1,
+        fileId: "1",
+        sha256: "a".repeat(64),
+        entries: [],
+      }],
+      code: [{
+        repositoryRoot: "/repo",
+        commit: "1".repeat(40),
+        dirty: false,
+        trackedDiffSha256: "2".repeat(64),
+        untracked: [],
+        fingerprint: "3".repeat(64),
+      }],
+      runtime: {
+        platform: "linux",
+        architecture: "arm64",
+        kernelRelease: "test",
+        nodeVersion: "test",
+        pythonExecutable: "/python",
+        pythonVersion: "test",
+        packages: {},
+        ffmpegVersion: "test",
+        fingerprint: "4".repeat(64),
+      },
+      fingerprint: "5".repeat(64),
+    };
+    const rebound = bindRunExecutionDecision(original, {
+      schemaVersion: "ltx-studio-execution-decision.v5",
+      executionClass: "dgx",
+      decidedAt: "2026-08-28T03:00:01.000Z",
+      reason: "Fresh prompt baseline.",
+      requestSha256: "6".repeat(64),
+      protocolSha256: "7".repeat(64),
+      cpuReuse: null,
+      operation: null,
+    });
+    const baseline = { ...rebound, verifiedAt: "2026-08-28T03:20:00.000Z" };
+    const current = {
+      files: structuredClone(baseline.files),
+      code: structuredClone(baseline.code),
+      runtime: structuredClone(baseline.runtime),
+      upstreamContracts: baseline.upstreamContracts,
+      release: baseline.release,
+      containerImages: baseline.containerImages,
+    };
+
+    expect(runProvenanceEnvironmentMatches(baseline, current)).toBe(true);
+    current.files[0].sha256 = "b".repeat(64);
+    expect(runProvenanceEnvironmentMatches(baseline, current)).toBe(false);
+    current.files = structuredClone(baseline.files);
+    current.files.push({
+      ...structuredClone(baseline.files[0]),
+      role: "evidence:resource-telemetry:g0",
+      path: "/evidence/telemetry.json",
+      sha256: "c".repeat(64),
+    });
+    expect(runProvenanceEnvironmentMatches(baseline, current)).toBe(true);
+    current.files = structuredClone(baseline.files);
+    current.code[0].fingerprint = "8".repeat(64);
+    expect(runProvenanceEnvironmentMatches(baseline, current)).toBe(false);
+    current.code = structuredClone(baseline.code);
+    current.runtime.fingerprint = "9".repeat(64);
+    expect(runProvenanceEnvironmentMatches(baseline, current)).toBe(false);
+    expect(runProvenanceEnvironmentMatches({ ...baseline, verifiedAt: null }, {
+      files: baseline.files,
+      code: baseline.code,
+      runtime: baseline.runtime,
+    })).toBe(false);
+    expect(runProvenanceEnvironmentMatches({ ...baseline, fingerprint: "0".repeat(64) }, {
+      files: baseline.files,
+      code: baseline.code,
+      runtime: baseline.runtime,
+    })).toBe(false);
   });
 
   it("manifests only Gemma configuration and shards referenced by the HF index", async () => {

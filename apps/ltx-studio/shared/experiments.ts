@@ -7,6 +7,7 @@ import {
   hasDialogueIntent,
   isAudioConditionedMode,
   outputNameSchema,
+  positivePromptSchema,
   type GenerationRequest,
 } from "./pipelines.js";
 
@@ -25,6 +26,10 @@ export const experimentCandidateSchema = z.discriminatedUnion("variable", [
   z.object({
     variable: z.literal("reference-image-crf"),
     value: z.number().int().min(0).max(51),
+  }).strict(),
+  z.object({
+    variable: z.literal("positive-prompt"),
+    value: positivePromptSchema,
   }).strict(),
   z.object({
     variable: z.literal("lipdub-reference-strength"),
@@ -75,8 +80,23 @@ export function supportsA2vGuidanceExperiment(
   return request.mode === "audio-to-video";
 }
 
+/**
+ * Prompt ablations are released narrowly for the official LTX-2.5 split IA2V
+ * command whose two-stage runtime demonstrably consumes `request.prompt`.
+ * Other modes may map or ignore prompt text differently and must earn their
+ * own executable-variable contract before this selector is widened.
+ */
+export function supportsPositivePromptExperiment(
+  request: Pick<GenerationRequest, "mode" | "models">,
+): boolean {
+  return request.mode === "image-audio-to-video"
+    && request.models.generation === "2.5"
+    && request.models.layout === "split";
+}
+
 export function availableExperimentVariables(request: GenerationRequest): ExperimentVariableId[] {
   const variables: ExperimentVariableId[] = ["replicate-seed", "resolution"];
+  if (supportsPositivePromptExperiment(request)) variables.push("positive-prompt");
   if (supportsA2vGuidanceExperiment(request)) variables.unshift("a2v-guidance");
   if (request.images[0]) variables.push("reference-image-strength", "reference-image-crf");
   if (request.mode === "lipdub") variables.unshift("lipdub-reference-strength");
@@ -117,14 +137,11 @@ export const experimentCreateInputSchema = z.object({
   baselineOutputName: outputNameSchema.optional(),
   candidate: experimentCandidateSchema,
 }).strict().superRefine((value, context) => {
-  if (
-    value.candidate.variable === "lipforcing-raw-output-profile"
-    && value.baselineOutputName !== undefined
-  ) {
+  if (experimentRequiresFreshBaseline(value.candidate) && value.baselineOutputName !== undefined) {
     context.addIssue({
       code: "custom",
       path: ["baselineOutputName"],
-      message: "Das LipForcing-Rohvideo-Experiment benötigt einen frisch gerenderten Baseline-Arm.",
+      message: "Dieses Experiment benötigt einen frischen Baseline-Arm mit identischen Ausführungsinputs, Code und Runtime.",
     });
   }
 });
@@ -132,7 +149,8 @@ export const experimentCreateInputSchema = z.object({
 export type ExperimentCreateInput = z.infer<typeof experimentCreateInputSchema>;
 
 export function experimentRequiresFreshBaseline(candidate: ExperimentCandidate): boolean {
-  return candidate.variable === "lipforcing-raw-output-profile";
+  return candidate.variable === "lipforcing-raw-output-profile"
+    || candidate.variable === "positive-prompt";
 }
 
 export function rawMuxPairV1BaselineError(request: GenerationRequest): string | null {
@@ -209,14 +227,11 @@ export const controlledExperimentSchema = z.object({
     experimentRunArmSchema.extend({ arm: z.literal("candidate") }),
   ]),
 }).strict().superRefine((value, context) => {
-  if (
-    value.candidate.variable === "lipforcing-raw-output-profile"
-    && value.baselineEvidence !== null
-  ) {
+  if (experimentRequiresFreshBaseline(value.candidate) && value.baselineEvidence !== null) {
     context.addIssue({
       code: "custom",
       path: ["baselineEvidence"],
-      message: "Das LipForcing-Rohvideo-Experiment erlaubt ausschließlich einen frisch gerenderten Baseline-Arm.",
+      message: "Dieses Experiment erlaubt ausschließlich einen frischen Baseline-Arm mit identischen Ausführungsinputs, Code und Runtime.",
     });
   }
   if (value.status === "superseded") {
@@ -288,6 +303,7 @@ export const experimentVariableLabels: Record<ExperimentVariableId, string> = {
   "a2v-guidance": "A2V Guidance",
   "reference-image-strength": "Referenzbildstärke",
   "reference-image-crf": "Referenzbild-CRF",
+  "positive-prompt": "Positive Beschreibung",
   "lipdub-reference-strength": "LipDub-Referenzstärke",
   "lipforcing-enabled": "LipForcing an",
   "lipforcing-decoder": "LipForcing: Decoder",
@@ -310,6 +326,8 @@ export function allowedExperimentPaths(candidate: ExperimentCandidate): string[]
       return ["images[0].strength"];
     case "reference-image-crf":
       return ["images[0].crf"];
+    case "positive-prompt":
+      return ["prompt"];
     case "lipdub-reference-strength":
       return ["lipDub.referenceVideo.strength"];
     case "lipforcing-enabled":
@@ -350,6 +368,9 @@ export function applyExperimentCandidate(
     case "reference-image-crf":
       if (!request.images[0]) throw new Error("Die Ablation benötigt ein erstes Referenzbild.");
       request.images[0].crf = candidate.value;
+      break;
+    case "positive-prompt":
+      request.prompt = candidate.value;
       break;
     case "lipdub-reference-strength":
       if (request.mode !== "lipdub") {

@@ -8,7 +8,10 @@ import type {
   ControlledExperiment,
   ExperimentRunBinding,
 } from "../shared/experiments.js";
-import { supportsA2vGuidanceExperiment } from "../shared/experiments.js";
+import {
+  supportsA2vGuidanceExperiment,
+  supportsPositivePromptExperiment,
+} from "../shared/experiments.js";
 import type { StudioOutput } from "../shared/outputs.js";
 import {
   publishedOutputIsReusableLipForcingVisual,
@@ -213,6 +216,16 @@ export async function experimentAdmissionPreflight(
     return unverifiableExperimentAdmissionPreflight(
       "Der eingefrorene A2V-Guidance-Arm ist für den offiziellen IA2V-8+3-Pfad nicht ausführbar: "
       + "dessen SimpleDenoiser-Vertrag konsumiert diesen Wert nicht.",
+      { checkedAt },
+    );
+  }
+  if (
+    experiment.candidate.variable === "positive-prompt"
+    && !supportsPositivePromptExperiment(experiment.arms[0].request)
+  ) {
+    return unverifiableExperimentAdmissionPreflight(
+      "Der eingefrorene Positive-Beschreibung-Arm liegt außerhalb des freigegebenen "
+      + "LTX-2.5-Split-IA2V-Prompt-Vertrags.",
       { checkedAt },
     );
   }

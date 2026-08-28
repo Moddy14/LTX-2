@@ -9,7 +9,7 @@ import { toPublicControlledExperiment } from "../server/publicOutput.js";
 import { buildExperimentCreateInput } from "../src/experimentCreate.js";
 import { outputForArm } from "../src/experimentOutputs.js";
 import type { StudioOutput } from "../src/types.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
 
@@ -99,6 +99,20 @@ describe("adopted experiment baselines", () => {
       candidate: { variable: "lipforcing-mouth-delay-ms", value: 25 },
       reusableBaselineOutputName: "reusable-baseline.mp4",
     })).toHaveProperty("baselineOutputName", "reusable-baseline.mp4");
+  });
+
+  it("never adopts an older-code baseline for a positive-description comparison", () => {
+    const request = validLtx25SplitRequest("image-audio-to-video");
+
+    expect(buildExperimentCreateInput({
+      title: "Prompt-Timing A gegen B",
+      baselineRequest: request,
+      candidate: {
+        variable: "positive-prompt",
+        value: "Locked camera and restrained audio-driven articulation.",
+      },
+      reusableBaselineOutputName: "older-code-baseline.mp4",
+    })).not.toHaveProperty("baselineOutputName");
   });
 
   it("resolves the adopted baseline through the stable public server confirmation", async () => {

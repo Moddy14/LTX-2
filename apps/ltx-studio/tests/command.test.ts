@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mergeGenerationRequest, pipelineModes } from "../shared/pipelines.js";
+import { applyExperimentCandidate } from "../shared/experiments.js";
 import {
   buildCommand,
   renderPrompt,
@@ -369,6 +370,27 @@ describe("buildCommand", () => {
     expect(plan.args).not.toContain("--official-comfy-sampler");
     expect(plan.args).not.toContain("--distilled-lora");
     expect(plan.requiredPaths).not.toContainEqual(expect.objectContaining({ label: "Distilled LoRA" }));
+  });
+
+  it("binds a prompt-only IA2V candidate to argv while preserving exact dialogue, image and audio", () => {
+    const baseline = validLtx25SplitRequest("image-audio-to-video");
+    baseline.prompt = "Baseline portrait direction.";
+    baseline.promptParts.dialogue = "Der exakte Dialog bleibt bytegleich gebunden.";
+    const candidate = applyExperimentCandidate(baseline, {
+      variable: "positive-prompt",
+      value: "Locked framing with small audio-driven syllable shapes.",
+    });
+    const baselinePlan = buildCommand(baseline);
+    const candidatePlan = buildCommand(candidate);
+    const argument = (plan: typeof baselinePlan, flag: string) =>
+      plan.args[plan.args.indexOf(flag) + 1];
+
+    expect(argument(candidatePlan, "--prompt")).toBe(renderPrompt(candidate));
+    expect(argument(candidatePlan, "--prompt")).toContain(candidate.prompt);
+    expect(argument(candidatePlan, "--prompt")).toContain(baseline.promptParts.dialogue);
+    expect(candidate.promptParts.dialogue).toBe(baseline.promptParts.dialogue);
+    expect(argument(candidatePlan, "--audio-path")).toBe(argument(baselinePlan, "--audio-path"));
+    expect(argument(candidatePlan, "--image")).toBe(argument(baselinePlan, "--image"));
   });
 
   it("fails closed when an official IA2V request claims a guidance value the command cannot consume", () => {

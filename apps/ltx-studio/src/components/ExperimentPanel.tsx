@@ -19,6 +19,7 @@ import {
   generationRequestDiffPaths,
   rawMuxPairV1BaselineError,
   supportsA2vGuidanceExperiment,
+  supportsPositivePromptExperiment,
   type ExperimentCandidate,
   type ExperimentCreateInput,
   type ExperimentVariableId,
@@ -36,7 +37,7 @@ import { buildExperimentCreateInput } from "../experimentCreate";
 import { outputForArm } from "../experimentOutputs";
 import { fieldHelp } from "../fieldHelp";
 import type { Health, StudioJob, StudioOutput } from "../types";
-import { InfoTooltip, NumberField, SelectField, TextField } from "./Controls";
+import { Field, InfoTooltip, NumberField, SelectField, TextField } from "./Controls";
 
 type ExperimentPanelProps = {
   request: GenerationRequest;
@@ -76,6 +77,8 @@ function initialValue(request: GenerationRequest, variable: ExperimentVariableId
       return request.images[0]?.strength === 0.9 ? 1 : 0.9;
     case "reference-image-crf":
       return request.images[0]?.crf === 0 ? 33 : 0;
+    case "positive-prompt":
+      return null;
     case "lipdub-reference-strength":
       return request.lipDub.referenceVideo.strength === 0.9 ? 1 : 0.9;
     case "lipforcing-enabled":
@@ -98,6 +101,7 @@ function candidateFromState(
   value: number | null,
   width: number,
   height: number,
+  prompt: string,
   request: GenerationRequest,
 ): ExperimentCandidate {
   switch (variable) {
@@ -114,6 +118,8 @@ function candidateFromState(
       if (value === null) throw new Error("Der Kandidatenwert fehlt.");
       return { variable, value: Math.round(value) };
     }
+    case "positive-prompt":
+      return { variable, value: prompt };
     case "lipforcing-enabled":
       return { variable };
     case "lipforcing-decoder":
@@ -163,6 +169,10 @@ function experimentValue(
       return (request.images[0]?.strength ?? 0).toFixed(2).replace(/\.?0+$/, "");
     case "reference-image-crf":
       return String(request.images[0]?.crf ?? 0);
+    case "positive-prompt": {
+      const collapsed = request.prompt.replace(/\s+/g, " ").trim();
+      return collapsed.length <= 180 ? collapsed : `${collapsed.slice(0, 179)}…`;
+    }
     case "lipdub-reference-strength":
       return request.lipDub.referenceVideo.strength.toFixed(2).replace(/\.?0+$/, "");
     case "lipforcing-enabled":
@@ -241,6 +251,7 @@ export function ExperimentPanel({
   const [value, setValue] = useState(() => initialValue(request, variables[0]));
   const [width, setWidth] = useState(request.width);
   const [height, setHeight] = useState(request.height);
+  const [candidatePrompt, setCandidatePrompt] = useState(request.prompt);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preflights, setPreflights] = useState<Record<string, AdmissionPreflightReport>>({});
@@ -252,13 +263,19 @@ export function ExperimentPanel({
     setValue(initialValue(request, fallback));
     setWidth(request.width);
     setHeight(request.height);
+    setCandidatePrompt(request.prompt);
   }, [height, request, variable, variables, width]);
+
+  useEffect(() => {
+    setCandidatePrompt(request.prompt);
+  }, [request.prompt]);
 
   const selectVariable = (next: ExperimentVariableId) => {
     setVariable(next);
     setValue(initialValue(request, next));
     setWidth(request.width);
     setHeight(request.height);
+    setCandidatePrompt(request.prompt);
     setError(null);
   };
 
@@ -275,7 +292,14 @@ export function ExperimentPanel({
   };
 
   const create = () => action("create", async () => {
-    const candidate = candidateFromState(variable, value, width, height, request);
+    const candidate = candidateFromState(
+      variable,
+      value,
+      width,
+      height,
+      candidatePrompt,
+      request,
+    );
     await onCreate(buildExperimentCreateInput({
       title,
       baselineRequest: request,
@@ -327,12 +351,36 @@ export function ExperimentPanel({
               den Kandidaten erst nach unabhängig belegter Paket- und Decoder-Header-Gleichheit zu.
             </p>
           </>
+        ) : variable === "positive-prompt" ? (
+          <p className="experiment-fixed-value">
+            Prompt-Vergleich: Baseline und Kandidat müssen frisch mit identischen Ausführungsinputs,
+            Code und Runtime laufen; bei Drift wird der Kandidatenstart vor der DGX-Admission
+            abgewiesen. Eine vorhandene Ausgabe wird nicht übernommen. Dialog, Audio,
+            Referenzbild, Seed, Modell und alle weiteren Einstellungen bleiben identisch.
+          </p>
         ) : reusableBaseline ? (
           <p className="experiment-fixed-value">
             Verifizierte Baseline wird ohne neuen LTX-Render übernommen: {reusableBaseline.name}
           </p>
         ) : null}
-        {variable === "resolution" ? (
+        {variable === "positive-prompt" ? (
+          <Field
+            label="Positive Beschreibung des Kandidaten"
+            hint={fieldHelp.experimentPositivePromptCandidate}
+          >
+            <textarea
+              className="prompt-input"
+              aria-label="Positive Beschreibung des Kandidaten"
+              value={candidatePrompt}
+              maxLength={16_000}
+              placeholder="Nur die geplante alternative Szenen-, Kamera- und Bewegungsbeschreibung…"
+              onChange={(event) => setCandidatePrompt(event.target.value)}
+            />
+            <span className="character-count">
+              {candidatePrompt.length.toLocaleString("de-AT")} / 16.000
+            </span>
+          </Field>
+        ) : variable === "resolution" ? (
           <div className="field-grid field-grid--2">
             <NumberField
               label="Kandidatenbreite"
@@ -403,7 +451,13 @@ export function ExperimentPanel({
         <button
           type="button"
           className="button button--secondary"
-          disabled={!requestValid || !title.trim() || busyAction !== null}
+          disabled={
+            !requestValid
+            || !title.trim()
+            || busyAction !== null
+            || (variable === "positive-prompt"
+              && (!candidatePrompt.trim() || candidatePrompt.trim() === request.prompt.trim()))
+          }
           onClick={() => void create()}
         >
           {busyAction === "create" ? <LoaderCircle className="spin" size={16} /> : <FlaskConical size={16} />}
@@ -422,8 +476,13 @@ export function ExperimentPanel({
             const candidateOutput = outputForArm(experiment, 1, outputs);
             const baselineRetryable = armRetryable(baseline, baselineJob, baselineOutput);
             const candidateRetryable = armRetryable(candidate, candidateJob, candidateOutput);
-            const unsupportedHistoricalTreatment = experiment.candidate.variable === "a2v-guidance"
-              && !supportsA2vGuidanceExperiment(baseline.request);
+            const unsupportedHistoricalTreatment = (
+              experiment.candidate.variable === "a2v-guidance"
+              && !supportsA2vGuidanceExperiment(baseline.request)
+            ) || (
+              experiment.candidate.variable === "positive-prompt"
+              && !supportsPositivePromptExperiment(baseline.request)
+            );
             const baselineQualificationHold = qualificationHoldForRequest(baseline.request);
             const candidateQualificationHold = qualificationHoldForRequest(candidate.request);
             const experimentQualificationHold = baselineQualificationHold ?? candidateQualificationHold;
@@ -513,8 +572,10 @@ export function ExperimentPanel({
                 <div className="experiment-gates">
                   {unsupportedHistoricalTreatment ? (
                     <span className="is-waiting">
-                      <TriangleAlert size={14} /> Historischer IA2V-Guidance-Arm nicht wiederholbar
-                      <InfoTooltip text="Der offizielle IA2V-8+3-Pfad verwendet in beiden Stufen SimpleDenoiser und konsumiert die registrierte Guidance-Variable nicht. Der abgebrochene Arm bleibt als Audit-Evidenz sichtbar, kann aber nicht erneut gestartet werden." />
+                      <TriangleAlert size={14} /> Historischer Experimentarm nicht wiederholbar
+                      <InfoTooltip text={experiment.candidate.variable === "a2v-guidance"
+                        ? "Der offizielle IA2V-8+3-Pfad verwendet in beiden Stufen SimpleDenoiser und konsumiert die registrierte Guidance-Variable nicht. Der abgebrochene Arm bleibt als Audit-Evidenz sichtbar, kann aber nicht erneut gestartet werden."
+                        : "Dieser Positive-Beschreibung-Arm liegt außerhalb des freigegebenen LTX-2.5-Split-IA2V-Prompt-Vertrags und bleibt nur als Audit-Evidenz sichtbar."} />
                     </span>
                   ) : experimentQualificationHold ? (
                     <span className="is-waiting">

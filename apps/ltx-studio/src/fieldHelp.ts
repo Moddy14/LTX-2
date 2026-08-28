@@ -433,6 +433,8 @@ export const fieldHelp = {
     "Wofür: Wählt genau eine serverseitig zugelassene Änderung. Alle übrigen Request-Felder einschließlich Seed bleiben bei einer Ablation unverändert; ein Seedwechsel wird ausdrücklich als Replikat geführt.",
   experimentCandidate:
     "Wofür: Legt den Kandidatenwert vor dem ersten Lauf fest. Gute Eingabe: nur einen fachlich begründeten Wert wählen; nach dem Einfrieren kann er nicht mehr geändert werden.",
+  experimentPositivePromptCandidate:
+    "Wofür: Ersetzt im Kandidatenarm ausschließlich die positive Beschreibung. Dialog, Audio, Referenzbild, Seed, Modell und alle weiteren Einstellungen bleiben durch das Experimentprotokoll unverändert.",
   experimentProtocolHash:
     "Wofür: Bindet Titel, beide vollständigen Requests, kontrollierte Variable und erlaubte Diff-Pfade kryptografisch. Derselbe Hash muss auf Baseline, Kandidat und späterem Vergleich liegen.",
   experimentEvidenceStatus:

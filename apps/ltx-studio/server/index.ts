@@ -20,6 +20,7 @@ import { generationRequestSchema, outputNameSchema, PIPELINES } from "../shared/
 import { qualificationHoldForRequest } from "../shared/qualificationHold.js";
 import {
   experimentCreateInputSchema,
+  experimentRequiresFreshBaseline,
   type ControlledExperiment,
 } from "../shared/experiments.js";
 import {
@@ -160,6 +161,8 @@ import {
 import { resolveIdentityEvidenceReferences, verifyIdentityEvidence } from "./inputEvidence.js";
 import {
   captureProvenanceFile,
+  captureRunEnvironmentEvidence,
+  runProvenanceEnvironmentMatches,
   runProvenanceFingerprintMatches,
   verifyProvenanceFileEvidence,
 } from "./runProvenance.js";
@@ -220,6 +223,37 @@ outputs.wireAuthorityRevoker((outputName, expectedJobId) => {
 });
 jobs.wireReusableBaseSource(outputs);
 const experiments = new ExperimentStore(experimentRoot);
+
+async function assertPositivePromptEnvironmentMatchesBaseline(
+  experiment: ControlledExperiment,
+  arm: "baseline" | "candidate",
+  selectedRequest: z.infer<typeof generationRequestSchema>,
+  plan: ReturnType<typeof buildCommand>,
+): Promise<void> {
+  if (arm !== "candidate" || experiment.candidate.variable !== "positive-prompt") return;
+  const baselineJobId = experiment.arms[0].jobId;
+  const baseline = baselineJobId ? jobs.get(baselineJobId) : undefined;
+  if (baseline?.status !== "completed" || !baseline.runProvenance?.verifiedAt) {
+    throw new ExperimentConflictError(
+      "Der Prompt-Kandidat benötigt den frisch abgeschlossenen Baseline-Arm mit verifizierter Laufprovenienz.",
+    );
+  }
+  const baselineOutput = outputs.list(jobs.outputAuthorityList())
+    .find((output) => outputVerifiesExperimentBaseline(output, experiment));
+  if (!baselineOutput) {
+    throw new ExperimentConflictError(
+      "Der Prompt-Kandidat benötigt die unveränderte, verifizierte Videoausgabe seines frischen Baseline-Arms.",
+    );
+  }
+  const current = await captureRunEnvironmentEvidence(selectedRequest, plan);
+  if (!runProvenanceEnvironmentMatches(baseline.runProvenance, current)) {
+    throw new ExperimentConflictError(
+      "Der Prompt-Kandidat wird vor dem Start abgewiesen: Ausführungsinputs, Code oder Runtime stimmen nicht "
+      + "exakt mit dem frischen Baseline-Arm überein.",
+    );
+  }
+}
+
 const blindEvaluations = new BlindEvaluationStore(blindEvaluationRoot, outputRoot);
 let blindEvaluatorServerLock = blindEvaluations.hasActiveSession();
 const studioEventStreams = new Set<Response>();
@@ -1359,9 +1393,9 @@ app.post("/api/experiments", (request, response) => {
   let payload = experimentCreateInputSchema.parse(request.body);
   let baselineEvidence = null;
   if (payload.baselineOutputName) {
-    if (payload.candidate.variable === "lipforcing-raw-output-profile") {
+    if (experimentRequiresFreshBaseline(payload.candidate)) {
       throw new ExperimentConflictError(
-        "Das LipForcing-Rohvideo-Experiment benötigt zwingend einen frischen Baseline-Lauf.",
+        "Dieses Experiment benötigt zwingend einen frischen Baseline-Lauf mit identischen Ausführungsinputs, Code und Runtime.",
       );
     }
     const output = outputs.list(jobs.outputAuthorityList())
@@ -1477,6 +1511,12 @@ app.post("/api/experiments/:id/runs/:arm/preflight", async (request, response) =
     if (!qualificationHoldForRequest(selectedRequest)) {
       verifyNativeRuntimeSource(selectedRequest, rendererPythonExecutable);
     }
+    await assertPositivePromptEnvironmentMatchesBaseline(
+      experiment,
+      arm,
+      selectedRequest,
+      buildCommand(selectedRequest),
+    );
     const outputEvidence = audioOnly
       ? inspectReadOnlyOutput(experiment.arms[0].request.outputName)
       : { outputs: [], reusableCandidates: [] };
@@ -1522,15 +1562,19 @@ app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
       && runProvenanceFingerprintMatches(baseline.runProvenance);
     const rawOutputExperiment = storedExperiment.candidate.variable
       === "lipforcing-raw-output-profile";
+    const positivePromptExperiment = storedExperiment.candidate.variable === "positive-prompt";
     const immutableBaselineImage = rawOutputExperiment
       ? lipForcingImageIdentity(baseline?.runProvenance?.containerImages)
       : null;
     if ((rawOutputExperiment && (!verifiedBaselineJob || !immutableBaselineImage))
-      || (!rawOutputExperiment && !verifiedBaselineJob && !baselineOutput)) {
+      || (positivePromptExperiment && (!verifiedBaselineJob || !baselineOutput))
+      || (!rawOutputExperiment && !positivePromptExperiment && !verifiedBaselineJob && !baselineOutput)) {
       throw new ExperimentConflictError(
         rawOutputExperiment
           ? "Der Rohvideo-Kandidat benötigt einen frisch abgeschlossenen Baseline-Lauf mit verifizierter unveränderlicher LipForcing-Containeridentität."
-          : "Der gebundene Baseline-Lauf muss vollständig abgeschlossen und mit verifizierter Laufprovenienz belegt sein.",
+          : positivePromptExperiment
+            ? "Der Prompt-Kandidat benötigt einen frisch abgeschlossenen Baseline-Lauf samt unveränderter, verifizierter Videoausgabe und Laufprovenienz."
+            : "Der gebundene Baseline-Lauf muss vollständig abgeschlossen und mit verifizierter Laufprovenienz belegt sein.",
       );
     }
   }
@@ -1575,6 +1619,12 @@ app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
   if (planErrors.length > 0) {
     throw new ExperimentConflictError(`Experimentarm kann nicht gestartet werden: ${planErrors.join(" ")}`);
   }
+  await assertPositivePromptEnvironmentMatchesBaseline(
+    experiment,
+    arm,
+    selectedRequest,
+    plan,
+  );
   const job = jobs.create(selectedRequest, {
     variantOf: arm === "candidate" ? experiment.arms[0].jobId : null,
     experiment: binding,
@@ -1609,7 +1659,7 @@ app.post("/api/experiments/:id/runs/:arm", async (request, response) => {
     } else {
       try {
         jobs.cancel(job.id);
-        jobs.remove(job.id);
+        jobs.removeDetachedDeferredExperimentJob(job.id);
       } catch {
         // A deferred job has no process or remote lease. If an unexpected
         // invariant prevents removal, its durable start fence remains safer
@@ -1717,7 +1767,7 @@ app.delete("/api/outputs/:filename", (request, response) => {
   if (!outputNameSchema.safeParse(filename).success) {
     return response.status(404).json({ error: "Ausgabe nicht gefunden." });
   }
-  jobs.assertOutputMutationAllowed(filename);
+  jobs.assertOutputDeletionAllowed(filename);
   if (analyses.isActive(filename) || t2aAudioAnalyses.isActive(filename)) {
     return response.status(409).json({
       error: "Die objektive Analyse dieser Ausgabe läuft noch. Analyse zuerst abbrechen.",

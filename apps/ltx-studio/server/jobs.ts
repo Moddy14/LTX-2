@@ -33,6 +33,7 @@ import {
   rawMuxPairV1CandidateError,
   experimentRunBindingSchema,
   isAdoptedLipForcingCandidate,
+  supportsPositivePromptExperiment,
   type ExperimentRunBinding,
 } from "../shared/experiments.js";
 import {
@@ -171,6 +172,7 @@ import {
   forkVerifiedRunProvenanceForArtifactPromotion,
   normalizeRunProvenance,
   runProvenanceFingerprintMatches,
+  runProvenanceEnvironmentMatches,
   verifyRunProvenance,
 } from "./runProvenance.js";
 import { lipForcingImageIdentity } from "./dockerImageIdentity.js";
@@ -1239,6 +1241,7 @@ export const DEVELOPMENT_LIPFORCING_RAW_OUTPUT_SURFACE_ID =
   "development:lipforcing-raw-output-profile:h264-crf13-mux-copy-v1";
 
 const LIPFORCING_RAW_OUTPUT_EXPERIMENT_PATH = "postprocess.lipForcing.rawOutputProfile";
+const POSITIVE_PROMPT_EXPERIMENT_PATH = "prompt";
 
 export function validRequestBoundExperimentBinding(
   request: GenerationRequest,
@@ -1266,6 +1269,67 @@ export function validRawOutputExperimentBinding(
     && value.adoptedBaseline !== true
     ? value
     : null;
+}
+
+export function validPositivePromptExperimentBinding(
+  request: GenerationRequest,
+  binding: ExperimentRunBinding | null | undefined,
+): ExperimentRunBinding | null {
+  const value = validPositivePromptExperimentArmBinding(request, binding);
+  return value?.arm === "candidate" ? value : null;
+}
+
+export function validPositivePromptExperimentArmBinding(
+  request: GenerationRequest,
+  binding: ExperimentRunBinding | null | undefined,
+): ExperimentRunBinding | null {
+  const value = validRequestBoundExperimentBinding(request, binding);
+  if (!value || !supportsPositivePromptExperiment(request)) return null;
+  if (value.kind !== "ablation"
+    || value.variableId !== "positive-prompt"
+    || value.changedRequestPaths.length !== 1
+    || value.changedRequestPaths[0] !== POSITIVE_PROMPT_EXPERIMENT_PATH
+    || value.protocolSha256.length !== 64
+    || value.adoptedBaseline === true) return null;
+  if (value.arm === "baseline") {
+    return value.baselineJobId === null
+      && value.baselineRequestSha256 === value.requestSha256
+      ? value
+      : null;
+  }
+  return value.baselineJobId !== null ? value : null;
+}
+
+export function positivePromptCandidateEnvironmentError(
+  candidate: Pick<StudioJob, "request" | "experiment" | "runProvenance">,
+  baseline: Pick<StudioJob, "status" | "runProvenance"> | null | undefined,
+): string | null {
+  if (
+    candidate.experiment?.arm !== "candidate"
+    || candidate.experiment.variableId !== "positive-prompt"
+  ) return null;
+  if (!validPositivePromptExperimentBinding(candidate.request, candidate.experiment)) {
+    return "Der Prompt-Kandidat besitzt keine exakt request- und protokollgebundene Einzelfaktor-Autorität.";
+  }
+  if (
+    baseline?.status !== "completed"
+    || !runProvenanceEnvironmentMatches(baseline.runProvenance, candidate.runProvenance)
+  ) {
+    return "Der Prompt-Kandidat wurde vor DGX-Admission abgewiesen: Ausführungsinputs, Code oder Runtime-Provenienz "
+      + "stimmen nicht exakt mit dem frischen Baseline-Arm überein.";
+  }
+  return null;
+}
+
+export function genericLtxBaseReuseAllowed(
+  job: Pick<StudioJob, "request" | "experiment">,
+): boolean {
+  const postprocess = job.request.postprocess;
+  const reuseRelevant = postprocess.longcatLipsync.enabled
+    || postprocess.latentSync.enabled
+    || postprocess.museTalk.enabled
+    || postprocess.lipForcing.enabled;
+  return reuseRelevant && job.experiment?.variableId !== "positive-prompt";
 }
 
 export function validRawOutputBaselineExperimentBinding(
@@ -3699,6 +3763,19 @@ export class JobManager extends EventEmitter {
     }
   }
 
+  assertOutputDeletionAllowed(outputName: string): void {
+    this.assertOutputMutationAllowed(outputName);
+    const protectedArm = [...this.jobs.values()].find((job) =>
+      job.outputName === outputName
+      && job.experiment?.variableId === "positive-prompt"
+      && validPositivePromptExperimentArmBinding(job.request, job.experiment) !== null);
+    if (protectedArm) {
+      throw new JobConflictError(
+        "Die Ausgabe ist Teil eines hashgebundenen Prompt-A/B-Experiments und bleibt als Vergleichsevidenz geschützt.",
+      );
+    }
+  }
+
   /** Reject missing or legacy jobs before a bound route can grant new authority. */
   assertJobMutationAllowed(id: string): void {
     const job = this.jobs.get(id);
@@ -4353,6 +4430,44 @@ export class JobManager extends EventEmitter {
         "Der Job ist noch aktiv oder seine DGX-Abschlussmeldung ist noch nicht bestätigt.",
       );
     }
+    if (job.experiment?.variableId === "positive-prompt"
+      && validPositivePromptExperimentArmBinding(job.request, job.experiment)) {
+      throw new JobConflictError(
+        "Der Job ist Teil eines hashgebundenen Prompt-A/B-Experiments und bleibt als Vergleichsevidenz geschützt.",
+      );
+    }
+    return this.removeTerminalJob(id, job);
+  }
+
+  /**
+   * Roll back only a never-armed experiment prepare whose external attach CAS
+   * was proven absent. This is deliberately separate from the public history
+   * deletion path so a bound prompt arm can never use the cleanup exception.
+   */
+  removeDetachedDeferredExperimentJob(id: string): StudioJob | undefined {
+    this.assertPersistenceAvailable("Rollback eines nicht gebundenen Experimentjobs");
+    const job = this.jobs.get(id);
+    if (!job) return undefined;
+    if (!job.experiment
+      || !job.startDeferred
+      || job.status !== "cancelled"
+      || job.startedAt !== null
+      || job.dgxJobId !== null
+      || job.executionClass !== "pending"
+      || job.identityEvidence !== null
+      || job.runProvenance !== null
+      || job.outputPublication !== undefined
+      || this.jobSettlementPending(job)
+      || this.fileReady(job.plan.outputPath)) {
+      throw new JobConflictError(
+        "Nur ein nachweislich nie gestarteter, nicht publizierter und weiterhin startgesperrter "
+        + "Experiment-Prepare darf nach fehlgeschlagener Armbindung entfernt werden.",
+      );
+    }
+    return this.removeTerminalJob(id, job);
+  }
+
+  private removeTerminalJob(id: string, job: RuntimeJob): StudioJob {
     this.jobs.delete(id);
     try {
       this.changed();
@@ -5624,6 +5739,53 @@ export class JobManager extends EventEmitter {
     return { evidence, error: null };
   }
 
+  private positivePromptBaselineAuthority(job: RuntimeJob): {
+    baseline: RuntimeJob | null;
+    error: string | null;
+  } {
+    if (job.experiment?.arm !== "candidate" || job.experiment.variableId !== "positive-prompt") {
+      return { baseline: null, error: null };
+    }
+    const candidateBinding = validPositivePromptExperimentBinding(job.request, job.experiment);
+    const baseline = candidateBinding?.baselineJobId
+      ? this.jobs.get(candidateBinding.baselineJobId) ?? null
+      : null;
+    const baselineBinding = baseline
+      ? validPositivePromptExperimentArmBinding(baseline.request, baseline.experiment)
+      : null;
+    const currentPublication = baseline?.outputPublication
+      ? readValidOutputPublicationAuthority(outputRoot, baseline.outputName)
+      : null;
+    const publicationMatches = Boolean(
+      baseline
+      && this.fileReady(baseline.plan.outputPath)
+      && currentPublication
+      && baseline.outputPublication
+      && canonicalJson(currentPublication) === canonicalJson(baseline.outputPublication)
+      && currentPublication.jobId === baseline.id
+      && currentPublication.publishedAt === baseline.finishedAt,
+    );
+    if (!candidateBinding?.baselineJobId
+      || !baseline
+      || baseline.status !== "completed"
+      || baselineBinding?.arm !== "baseline"
+      || baselineBinding.experimentId !== candidateBinding.experimentId
+      || baselineBinding.protocolSha256 !== candidateBinding.protocolSha256
+      || baselineBinding.requestSha256 !== candidateBinding.baselineRequestSha256
+      || baseline.outputName !== candidateBinding.baselineOutputName
+      || runtimeAuthorityRequestSha256(baseline) === null
+      || !publicationMatches
+      || baseline.runProvenance?.verifiedAt == null
+      || !runProvenanceFingerprintMatches(baseline.runProvenance)) {
+      return {
+        baseline: null,
+        error: "Der Prompt-Kandidat benötigt den abgeschlossenen, frisch gerenderten, "
+          + "publizierten und exakt protokollgebundenen Baseline-Arm.",
+      };
+    }
+    return { baseline, error: null };
+  }
+
   private rawOutputPairAuthority(job: RawOutputCandidateAuthorityJob): {
     authority: RawMuxBaselineAuthority | null;
     authorityBinding: ExecutionFileBinding | null;
@@ -5910,6 +6072,16 @@ export class JobManager extends EventEmitter {
   private async run(job: RuntimeJob): Promise<void> {
     const exactAdoptedRefinerRun = isAdoptedLipForcingCandidate(job.experiment);
     const rawMuxPairedCandidate = isBoundRawOutputCandidate(job);
+    const positivePromptExperimentArm = job.experiment?.variableId === "positive-prompt"
+      ? validPositivePromptExperimentArmBinding(job.request, job.experiment)
+      : null;
+    if (job.experiment?.variableId === "positive-prompt" && !positivePromptExperimentArm) {
+      this.failJob(
+        job,
+        "Der Prompt-Experimentarm besitzt keine exakt request- und protokollgebundene Einzelfaktor-Autorität.",
+      );
+      return;
+    }
     if (!this.verifyNativeRuntimeSourceBeforeAdmission(job)) return;
     const requiredAssetIds = exactAdoptedRefinerRun || rawMuxPairedCandidate
       ? []
@@ -6184,6 +6356,19 @@ export class JobManager extends EventEmitter {
         : undefined,
     )) return;
 
+    if (positivePromptExperimentArm?.arm === "candidate") {
+      const authority = this.positivePromptBaselineAuthority(job);
+      if (authority.error || !authority.baseline) {
+        this.failJob(job, authority.error ?? "Der frische Prompt-Baseline-Arm ist nicht verfügbar.");
+        return;
+      }
+      const environmentError = positivePromptCandidateEnvironmentError(job, authority.baseline);
+      if (environmentError) {
+        this.failJob(job, environmentError);
+        return;
+      }
+    }
+
     const reusableLipForcingOutput = this.findReusableLipForcingOutput(job);
     if (reusableLipForcingOutput) {
       await this.runReusedLipForcingAudioRetime(job, reusableLipForcingOutput);
@@ -6289,7 +6474,7 @@ export class JobManager extends EventEmitter {
       this.changed();
     }
 
-    const reusableBase = hybridEnabled || refinerEnabled
+    const reusableBase = genericLtxBaseReuseAllowed(job)
       ? this.findReusableLtxBase(job)
       : undefined;
     if (reusableBase) {
@@ -6362,6 +6547,26 @@ export class JobManager extends EventEmitter {
           last_error: job.error ?? "run provenance verification failed",
         });
         return;
+      }
+      if (positivePromptExperimentArm?.arm === "candidate") {
+        const authority = this.positivePromptBaselineAuthority(job);
+        if (authority.error || !authority.baseline) {
+          this.failJob(job, authority.error ?? "Der frische Prompt-Baseline-Arm ist nicht verfügbar.");
+          await this.transitionDgxJob(job, "failed", {
+            current_step: "fresh prompt baseline authority changed before LTX allocation",
+            last_error: job.error ?? "fresh prompt baseline authority verification failed",
+          });
+          return;
+        }
+        const environmentError = positivePromptCandidateEnvironmentError(job, authority.baseline);
+        if (environmentError) {
+          this.failJob(job, environmentError);
+          await this.transitionDgxJob(job, "failed", {
+            current_step: "fresh prompt control environment changed before LTX allocation",
+            last_error: job.error ?? "fresh prompt control environment verification failed",
+          });
+          return;
+        }
       }
       this.appendLog(job, `LTX-Start: ${job.command}`);
       const ltxArgs = [...job.plan.args];

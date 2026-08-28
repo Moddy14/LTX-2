@@ -186,6 +186,23 @@ describe("experimentAdmissionPreflight", () => {
     expect(report.notes.join(" ")).toContain("SimpleDenoiser-Vertrag");
   });
 
+  it("marks an out-of-contract positive-prompt arm unverifiable before admission", async () => {
+    const value = fixture();
+    value.experiment.candidate = { variable: "positive-prompt", value: "Different direction." };
+    value.experiment.changedRequestPaths = ["prompt"];
+    value.binding.variableId = "positive-prompt";
+    value.binding.changedRequestPaths = ["prompt"];
+
+    const report = await experimentAdmissionPreflight(
+      value.experiment,
+      "candidate",
+      { binding: value.binding, outputs: [], reusableCandidates: [] },
+    );
+
+    expect(report.verdict).toBe("nicht-pruefbar");
+    expect(report.notes.join(" ")).toContain("LTX-2.5-Split-IA2V-Prompt-Vertrags");
+  });
+
   it("short-circuits a regular DFR arm before any admission call", async () => {
     const value = fixture();
     value.experiment.candidate = { variable: "replicate-seed", value: 23_072_027 };

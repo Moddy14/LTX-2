@@ -15,6 +15,7 @@ import {
   describeLipForcingFailure,
   isActiveJobStatus,
   frameProcessLogChunk,
+  genericLtxBaseReuseAllowed,
   DEVELOPMENT_LIPFORCING_RAW_OUTPUT_SURFACE_ID,
   DGX_OWNER_HEARTBEAT_FAILURE_TIMEOUT_MS,
   DGX_OWNER_HEARTBEAT_INTERVAL_MS,
@@ -28,6 +29,7 @@ import {
   openBoundExecutable,
   PipelineProgressTracker,
   progressFromPipelineLog,
+  positivePromptCandidateEnvironmentError,
   publishedOutputIsReusableLtxBase,
   publishedOutputIsReusableLipForcingVisual,
   quarantineRestoredUnpublishedArtifact,
@@ -37,6 +39,7 @@ import {
   requestsShareLtxBase,
   requestsShareLipForcingVisual,
   resolveRenderOutputPaths,
+  validPositivePromptExperimentBinding,
   validRawOutputExperimentBinding,
   validRequestBoundExperimentBinding,
   type StudioJob,
@@ -1135,6 +1138,246 @@ describe("job persistence and reservations", () => {
     candidate.postprocess.lipForcing.enabled = false;
     expect(() => jobSurfaceEntryId(candidate, "experiment", false, binding))
       .toThrow("Unbekanntes oder inaktives");
+  });
+
+  it("accepts a positive-prompt candidate only with the exact fresh ablation binding", () => {
+    const candidate = validLtx25SplitRequest("image-audio-to-video");
+    const binding = {
+      schemaVersion: "ltx-studio-experiment-run.v1" as const,
+      experimentId: "22222222-2222-4222-8222-222222222222",
+      protocolSha256: "a".repeat(64),
+      arm: "candidate" as const,
+      kind: "ablation" as const,
+      variableId: "positive-prompt",
+      changedRequestPaths: ["prompt"],
+      baselineRequestSha256: "b".repeat(64),
+      requestSha256: experimentRequestSha256V1(candidate),
+      baselineJobId: "11111111-1111-4111-8111-111111111111",
+      baselineOutputName: "fresh-prompt-baseline.mp4",
+    };
+
+    expect(validPositivePromptExperimentBinding(candidate, binding)).toEqual(binding);
+    expect(validPositivePromptExperimentBinding(candidate, {
+      ...binding,
+      changedRequestPaths: ["promptParts.dialogue"],
+    })).toBeNull();
+    expect(validPositivePromptExperimentBinding(candidate, {
+      ...binding,
+      adoptedBaseline: true,
+    })).toBeNull();
+    expect(validPositivePromptExperimentBinding(candidate, {
+      ...binding,
+      requestSha256: "0".repeat(64),
+    })).toBeNull();
+
+    const unsupportedGeneration = structuredClone(candidate);
+    unsupportedGeneration.models.generation = "2.3";
+    expect(validPositivePromptExperimentBinding(unsupportedGeneration, {
+      ...binding,
+      requestSha256: experimentRequestSha256V1(unsupportedGeneration),
+    })).toBeNull();
+
+    const unsupportedLayout = structuredClone(candidate);
+    unsupportedLayout.models.layout = "monolith";
+    expect(validPositivePromptExperimentBinding(unsupportedLayout, {
+      ...binding,
+      requestSha256: experimentRequestSha256V1(unsupportedLayout),
+    })).toBeNull();
+
+    const unsupportedMode = structuredClone(candidate);
+    unsupportedMode.mode = "audio-to-video";
+    expect(validPositivePromptExperimentBinding(unsupportedMode, {
+      ...binding,
+      requestSha256: experimentRequestSha256V1(unsupportedMode),
+    })).toBeNull();
+
+    const matching = {
+      ...bindRunExecutionDecision(runProvenance({ verified: false }), {
+        schemaVersion: "ltx-studio-execution-decision.v5" as const,
+        executionClass: "dgx" as const,
+        decidedAt: "2026-08-28T03:00:00.000Z",
+        reason: "Fresh prompt baseline.",
+        requestSha256: "d".repeat(64),
+        protocolSha256: binding.protocolSha256,
+        cpuReuse: null,
+        operation: null,
+      }),
+      verifiedAt: "2026-08-28T03:20:00.000Z",
+    };
+    expect(positivePromptCandidateEnvironmentError({
+      request: candidate,
+      experiment: binding,
+      runProvenance: matching,
+    }, {
+      status: "completed",
+      runProvenance: matching,
+    })).toBeNull();
+    expect(positivePromptCandidateEnvironmentError({
+      request: candidate,
+      experiment: binding,
+      runProvenance: {
+        ...matching,
+        code: [{ ...matching.code[0], fingerprint: "e".repeat(64) }],
+      },
+    }, {
+      status: "completed",
+      runProvenance: matching,
+    })).toContain("vor DGX-Admission abgewiesen");
+    expect(positivePromptCandidateEnvironmentError({
+      request: candidate,
+      experiment: binding,
+      runProvenance: matching,
+    }, null)).toContain("vor DGX-Admission abgewiesen");
+
+    candidate.postprocess.lipForcing.enabled = true;
+    expect(genericLtxBaseReuseAllowed({ request: candidate, experiment: binding })).toBe(false);
+    expect(genericLtxBaseReuseAllowed({
+      request: candidate,
+      experiment: {
+        ...binding,
+        arm: "baseline",
+        baselineJobId: null,
+        baselineRequestSha256: binding.requestSha256,
+      },
+    })).toBe(false);
+    expect(genericLtxBaseReuseAllowed({ request: candidate, experiment: null })).toBe(true);
+  });
+
+  it("protects prompt A/B outputs from deletion without blocking analysis mutations", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.outputName = "protected-prompt-candidate.mp4";
+    const binding = {
+      schemaVersion: "ltx-studio-experiment-run.v1" as const,
+      experimentId: "22222222-2222-4222-8222-222222222222",
+      protocolSha256: "a".repeat(64),
+      arm: "candidate" as const,
+      kind: "ablation" as const,
+      variableId: "positive-prompt",
+      changedRequestPaths: ["prompt"],
+      baselineRequestSha256: "b".repeat(64),
+      requestSha256: experimentRequestSha256V1(request),
+      baselineJobId: "11111111-1111-4111-8111-111111111111",
+      baselineOutputName: "protected-prompt-baseline.mp4",
+    };
+    const created = manager.create(request, { experiment: binding, deferStart: true });
+
+    expect(() => manager.assertOutputMutationAllowed(request.outputName)).not.toThrow();
+    expect(() => manager.assertOutputDeletionAllowed(request.outputName))
+      .toThrow("hashgebundenen Prompt-A/B-Experiments");
+
+    manager.cancel(created.id);
+    expect(() => manager.remove(created.id))
+      .toThrow("hashgebundenen Prompt-A/B-Experiments");
+    expect(manager.get(created.id)).toBeDefined();
+    expect(() => manager.assertOutputDeletionAllowed(request.outputName))
+      .toThrow("hashgebundenen Prompt-A/B-Experiments");
+  });
+
+  it("keeps the private attach-failure cleanup limited to a never-armed prompt prepare", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.outputName = "detached-prompt-prepare.mp4";
+    const binding = {
+      schemaVersion: "ltx-studio-experiment-run.v1" as const,
+      experimentId: "22222222-2222-4222-8222-222222222222",
+      protocolSha256: "a".repeat(64),
+      arm: "candidate" as const,
+      kind: "ablation" as const,
+      variableId: "positive-prompt",
+      changedRequestPaths: ["prompt"],
+      baselineRequestSha256: "b".repeat(64),
+      requestSha256: experimentRequestSha256V1(request),
+      baselineJobId: "11111111-1111-4111-8111-111111111111",
+      baselineOutputName: "detached-prompt-baseline.mp4",
+    };
+    const created = manager.create(request, { experiment: binding, deferStart: true });
+
+    manager.cancel(created.id);
+    expect(manager.removeDetachedDeferredExperimentJob(created.id)).toMatchObject({
+      id: created.id,
+      status: "cancelled",
+    });
+    expect(manager.get(created.id)).toBeUndefined();
+  });
+
+  it("submits no DGX admission when a prompt candidate input artifact differs from its baseline", async () => {
+    let submits = 0;
+    const baselineProvenance = {
+      ...bindRunExecutionDecision(runProvenance({ verified: false }), {
+        schemaVersion: "ltx-studio-execution-decision.v5" as const,
+        executionClass: "dgx" as const,
+        decidedAt: "2026-08-28T03:00:00.000Z",
+        reason: "Fresh prompt baseline.",
+        requestSha256: "d".repeat(64),
+        protocolSha256: "a".repeat(64),
+        cpuReuse: null,
+        operation: null,
+      }),
+      verifiedAt: "2026-08-28T03:20:00.000Z",
+    };
+    const manager = new JobManager(
+      await statePath(),
+      false,
+      null,
+      {
+        capture: async () => notApplicableIdentityEvidence(),
+        verify: async (evidence) => ({ evidence, error: null }),
+      },
+      undefined,
+      null,
+      {
+        submit: async () => {
+          submits += 1;
+          throw new Error("DGX submit must remain unreachable");
+        },
+      },
+      {
+        capture: async () => runProvenance({ modelSha: "f".repeat(64), verified: false }),
+        verify: async (evidence) => ({ evidence, error: null }),
+      },
+    );
+    const request = validLtx25SplitRequest("image-audio-to-video");
+    request.outputName = "prompt-input-drift-candidate.mp4";
+    const binding = {
+      schemaVersion: "ltx-studio-experiment-run.v1" as const,
+      experimentId: "22222222-2222-4222-8222-222222222222",
+      protocolSha256: "a".repeat(64),
+      arm: "candidate" as const,
+      kind: "ablation" as const,
+      variableId: "positive-prompt",
+      changedRequestPaths: ["prompt"],
+      baselineRequestSha256: "b".repeat(64),
+      requestSha256: experimentRequestSha256V1(request),
+      baselineJobId: "11111111-1111-4111-8111-111111111111",
+      baselineOutputName: "prompt-input-drift-baseline.mp4",
+    };
+    const created = manager.create(request, { experiment: binding, deferStart: true });
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    (runtimeJob.plan as { requiredPaths: unknown[] }).requiredPaths = [];
+    Reflect.set(manager, "verifyNativeRuntimeSourceBeforeAdmission", () => true);
+    Reflect.set(manager, "modelInventoryOperations", {
+      read: async () => verifiedModelInventory(),
+    });
+    Reflect.set(manager, "positivePromptBaselineAuthority", () => ({
+      baseline: { status: "completed", runProvenance: baselineProvenance },
+      error: null,
+    }));
+    Reflect.set(manager, "waitForDgxQueueStart", async () => {
+      submits += 1;
+      return true;
+    });
+
+    const run = Reflect.get(manager, "run") as (job: unknown) => Promise<void>;
+    await run.call(manager, runtimeJob);
+
+    expect(submits).toBe(0);
+    expect(manager.get(created.id)).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("Ausführungsinputs, Code oder Runtime-Provenienz"),
+      dgxJobId: null,
+    });
   });
 
   it("never classifies a bound mux-copy candidate as DGX fallback", async () => {

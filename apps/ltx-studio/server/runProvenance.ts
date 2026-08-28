@@ -615,6 +615,23 @@ function captureRuntimeEvidence(executable: string): ProvenanceRuntimeEvidence {
   return evidence;
 }
 
+export type RunEnvironmentEvidence = Pick<
+  RunProvenance,
+  "files" | "code" | "runtime" | "upstreamContracts" | "release" | "containerImages"
+>;
+
+async function captureCodeRuntimeEvidence(
+  request: GenerationRequest,
+  executable: string,
+): Promise<Pick<RunProvenance, "code" | "runtime">> {
+  const codeRoots = request.postprocess.longcatLipsync.enabled
+    ? [repoRoot, longcatProjectRoot]
+    : [repoRoot];
+  const code: ProvenanceCodeEvidence[] = [];
+  for (const root of codeRoots) code.push(await captureCodeEvidence(root));
+  return { code, runtime: captureRuntimeEvidence(executable) };
+}
+
 function provenanceFingerprint(value: Omit<RunProvenance, "fingerprint" | "verifiedAt">): string {
   return sha256Text(stableJson(value));
 }
@@ -634,6 +651,43 @@ export function runProvenanceFingerprintMatches(evidence: RunProvenance): boolea
     ...(evidence.executionDecision ? { executionDecision: evidence.executionDecision } : {}),
   };
   return provenanceFingerprint(base) === evidence.fingerprint;
+}
+
+export function runProvenanceEnvironmentMatches(
+  verifiedBaseline: RunProvenance | null | undefined,
+  candidate: RunEnvironmentEvidence | null | undefined,
+): boolean {
+  if (
+    !verifiedBaseline?.verifiedAt
+    || !candidate
+    || !runProvenanceFingerprintMatches(verifiedBaseline)
+  ) return false;
+  const executionInputFiles = (files: RunEnvironmentEvidence["files"]) => files
+    .filter((file) => ["code:", "input:", "model:", "runtime:"]
+      .some((prefix) => file.role.startsWith(prefix)))
+    .map((file) => ({
+      role: file.role,
+      path: file.path,
+      kind: file.kind,
+      sizeBytes: file.sizeBytes,
+      sha256: file.sha256,
+      entries: file.entries.map((entry) => ({
+        relativePath: entry.relativePath,
+        sizeBytes: entry.sizeBytes,
+        sha256: entry.sha256,
+      })),
+    }))
+    .sort((left, right) => left.role.localeCompare(right.role)
+      || left.path.localeCompare(right.path));
+  const comparable = (evidence: RunEnvironmentEvidence) => ({
+    files: executionInputFiles(evidence.files),
+    code: evidence.code.map(({ fingerprint }) => fingerprint),
+    runtime: evidence.runtime.fingerprint,
+    upstreamContracts: evidence.upstreamContracts ?? [],
+    release: evidence.release ?? null,
+    containerImages: (evidence.containerImages ?? []).map(({ fingerprint }) => fingerprint),
+  });
+  return stableJson(comparable(verifiedBaseline)) === stableJson(comparable(candidate));
 }
 
 /**
@@ -863,12 +917,7 @@ export async function captureRunProvenance(
       );
     }
   }
-  const codeRoots = request.postprocess.longcatLipsync.enabled
-    ? [repoRoot, longcatProjectRoot]
-    : [repoRoot];
-  const code: ProvenanceCodeEvidence[] = [];
-  for (const root of codeRoots) code.push(await captureCodeEvidence(root));
-  const runtime = captureRuntimeEvidence(plan.executable);
+  const { code, runtime } = await captureCodeRuntimeEvidence(request, plan.executable);
   const upstreamContracts = upstreamWorkflowContractsForRequest(request);
   let containerImages: ProvenanceContainerImageEvidence[] | undefined;
   if (request.postprocess.lipForcing.enabled) {
@@ -898,6 +947,24 @@ export async function captureRunProvenance(
     ...base,
     verifiedAt: null,
     fingerprint: provenanceFingerprint(base),
+  };
+}
+
+export async function captureRunEnvironmentEvidence(
+  request: GenerationRequest,
+  plan: CommandPlan,
+  options: Parameters<typeof captureRunProvenance>[2] = {},
+): Promise<RunEnvironmentEvidence> {
+  const captured = await captureRunProvenance(request, plan, options);
+  return {
+    files: captured.files,
+    code: captured.code,
+    runtime: captured.runtime,
+    upstreamContracts: captured.upstreamContracts ?? [],
+    release: captured.release,
+    ...(captured.containerImages !== undefined
+      ? { containerImages: captured.containerImages }
+      : {}),
   };
 }
 

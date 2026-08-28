@@ -18,8 +18,10 @@ import {
   controlledExperimentSchema,
   experimentCreateInputSchema,
   experimentKind,
+  experimentRequiresFreshBaseline,
   experimentRunBindingSchema,
   supportsA2vGuidanceExperiment,
+  supportsPositivePromptExperiment,
   type ControlledExperiment,
   type ExperimentBaselineEvidence,
   type ExperimentCreateInput,
@@ -258,11 +260,20 @@ export class ExperimentStore {
       );
     }
     if (
-      input.candidate.variable === "lipforcing-raw-output-profile"
+      input.candidate.variable === "positive-prompt"
+      && !supportsPositivePromptExperiment(input.baselineRequest)
+    ) {
+      throw new ExperimentConflictError(
+        "Die kontrollierte Positive-Beschreibung ist nur für den offiziellen LTX-2.5-Split-IA2V-Pfad freigegeben.",
+      );
+    }
+    if (
+      experimentRequiresFreshBaseline(input.candidate)
       && (input.baselineOutputName !== undefined || baselineEvidence !== null)
     ) {
       throw new ExperimentConflictError(
-        "Das LipForcing-Rohvideo-Experiment darf keine vorhandene Baseline übernehmen; ein frischer Baseline-Arm ist verpflichtend.",
+        "Dieses Experiment darf keine vorhandene Baseline übernehmen; ein frischer Baseline-Arm ist verpflichtend "
+        + "und beide Arme müssen identische Ausführungsinputs, Code und Runtime verwenden.",
       );
     }
     const parsed = experimentCreateInputSchema.parse(input);
@@ -337,6 +348,15 @@ export class ExperimentStore {
       throw new ExperimentConflictError(
         "Der offizielle IA2V-8+3-Pfad verwendet einen guidance-freien SimpleDenoiser-Vertrag; "
         + "dieser historische Draft darf nicht eingefroren werden.",
+      );
+    }
+    if (
+      current.candidate.variable === "positive-prompt"
+      && !supportsPositivePromptExperiment(current.arms[0].request)
+    ) {
+      throw new ExperimentConflictError(
+        "Die kontrollierte Positive-Beschreibung ist nur für den offiziellen LTX-2.5-Split-IA2V-Pfad freigegeben; "
+        + "dieser Draft darf nicht eingefroren werden.",
       );
     }
     const candidate = applyExperimentCandidate(current.arms[0].request, current.candidate);
@@ -482,6 +502,15 @@ export class ExperimentStore {
       throw new ExperimentConflictError(
         "Der historische IA2V-Guidance-Arm bleibt als Evidenz lesbar, darf aber nicht gestartet werden: "
         + "der offizielle SimpleDenoiser-Vertrag konsumiert die kontrollierte Variable nicht.",
+      );
+    }
+    if (
+      experiment.candidate.variable === "positive-prompt"
+      && !supportsPositivePromptExperiment(experiment.arms[0].request)
+    ) {
+      throw new ExperimentConflictError(
+        "Der Positive-Beschreibung-Arm darf nicht gestartet werden: "
+        + "nur der offizielle LTX-2.5-Split-IA2V-Pfad besitzt den belegten ausführbaren Prompt-Vertrag.",
       );
     }
   }

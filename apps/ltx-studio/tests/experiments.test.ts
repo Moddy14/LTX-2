@@ -21,7 +21,7 @@ import {
 } from "../server/experimentStore.js";
 import { JobManager } from "../server/jobs.js";
 import type { StudioOutput } from "../shared/outputs.js";
-import { validRequest } from "./fixtures.js";
+import { validLtx25SplitRequest, validRequest } from "./fixtures.js";
 
 const roots: string[] = [];
 
@@ -50,6 +50,105 @@ function baselineRequest() {
 }
 
 describe("controlled experiment contract", () => {
+  it("changes only the positive description while preserving dialogue and all other controls", () => {
+    const baseline = validLtx25SplitRequest("image-audio-to-video");
+    baseline.prompt = "Baseline portrait prompt";
+    baseline.promptParts.dialogue = "Der exakt gebundene Dialog bleibt unverändert.";
+    const definition = {
+      variable: "positive-prompt" as const,
+      value: "Locked camera, stable face, restrained speech-sized mouth movement.",
+    };
+
+    const candidate = applyExperimentCandidate(baseline, definition);
+
+    expect(candidate.prompt).toBe(definition.value);
+    expect(candidate.promptParts.dialogue).toBe(baseline.promptParts.dialogue);
+    expect(validateControlledExperimentDifference(baseline, candidate, definition))
+      .toEqual(["prompt"]);
+    expect(allowedExperimentPaths(definition)).toEqual(["prompt"]);
+    expect({ ...candidate, prompt: baseline.prompt }).toEqual(baseline);
+  });
+
+  it("validates positive-description candidates with the same length and NUL safety contract", () => {
+    expect(experimentCandidateSchema.parse({
+      variable: "positive-prompt",
+      value: "  Alternative Beschreibung  ",
+    })).toEqual({
+      variable: "positive-prompt",
+      value: "Alternative Beschreibung",
+    });
+    expect(experimentCandidateSchema.safeParse({
+      variable: "positive-prompt",
+      value: "Ungültig\0versteckt",
+    }).success).toBe(false);
+    expect(experimentCandidateSchema.safeParse({
+      variable: "positive-prompt",
+      value: "x".repeat(16_001),
+    }).success).toBe(false);
+  });
+
+  it("freezes and reopens a prompt-only protocol with immutable request hashes", async () => {
+    const root = await experimentRoot();
+    const store = new ExperimentStore(root);
+    const baseline = validLtx25SplitRequest("image-audio-to-video");
+    baseline.prompt = "Baseline portrait prompt";
+    baseline.outputName = "prompt-baseline.mp4";
+    const draft = store.create({
+      title: "Positive Beschreibung A gegen B",
+      baselineRequest: baseline,
+      candidate: {
+        variable: "positive-prompt",
+        value: "Locked portrait framing with restrained audio-driven articulation.",
+      },
+    }, "2026-08-28T02:00:00.000Z");
+
+    expect(draft.changedRequestPaths).toEqual(["prompt"]);
+    expect(generationRequestDiffPaths(draft.arms[0].request, draft.arms[1].request))
+      .toEqual(["outputName", "prompt"]);
+
+    const frozen = store.freeze(draft.id, "2026-08-28T02:01:00.000Z");
+    expect(frozen.protocolSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(new ExperimentStore(root).verifyFrozenIntegrity(draft.id).protocolSha256)
+      .toBe(frozen.protocolSha256);
+  });
+
+  it("rejects prompt treatments outside split LTX-2.5 IA2V and any adopted baseline", async () => {
+    const store = new ExperimentStore(await experimentRoot());
+    const legacyIa2v = validRequest("image-audio-to-video");
+    const candidate = {
+      variable: "positive-prompt" as const,
+      value: "A different visible direction.",
+    };
+
+    expect(() => store.create({
+      title: "Nicht belegter Prompt-Pfad",
+      baselineRequest: legacyIa2v,
+      candidate,
+    })).toThrow("nur für den offiziellen LTX-2.5-Split-IA2V-Pfad");
+
+    const official = validLtx25SplitRequest("image-audio-to-video");
+    expect(experimentCreateInputSchema.safeParse({
+      title: "Keine Alt-Baseline",
+      baselineRequest: official,
+      baselineOutputName: official.outputName,
+      candidate,
+    }).success).toBe(false);
+
+    expect(() => store.create({
+      title: "Keine Alt-Baseline mit Evidenz",
+      baselineRequest: official,
+      baselineOutputName: official.outputName,
+      candidate,
+    }, "2026-08-28T02:10:00.000Z", {
+      outputName: official.outputName,
+      jobId: "11111111-1111-4111-8111-111111111111",
+      sizeBytes: 1_024,
+      changedAt: "2026-08-28T02:09:00.000Z",
+      fileId: "1",
+      provenanceFingerprint: "a".repeat(64),
+    })).toThrow("frischer Baseline-Arm");
+  });
+
   it("applies exactly the registered A2V variable and rejects hidden changes", () => {
     const baseline = baselineRequest();
     const candidate = applyExperimentCandidate(baseline, {

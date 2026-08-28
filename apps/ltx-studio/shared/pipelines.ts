@@ -358,6 +358,7 @@ const withoutNul = <T extends z.ZodType<string>>(schema: T) => schema.refine(
   (value) => !value.includes("\0"),
   { message: "NUL-Zeichen sind nicht erlaubt." },
 );
+export const positivePromptSchema = withoutNul(z.string().trim().min(1).max(16_000));
 const pathValue = withoutNul(z.string().trim().max(4096));
 
 export const loraSchema = z.object({
@@ -417,7 +418,7 @@ export const generationRequestSchema = z
   .object({
     mode: z.enum(pipelineModes),
     sourceMode: z.enum(sourceModes),
-    prompt: withoutNul(z.string().trim().min(1).max(16_000)),
+    prompt: positivePromptSchema,
     promptParts: promptPartsSchema,
     negativePrompt: withoutNul(z.string().max(16_000)),
     enhancePrompt: z.boolean(),

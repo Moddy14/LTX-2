@@ -96,6 +96,17 @@ describe("releaseRetryableExperimentArm", () => {
     expect(wired.releaseArm).not.toHaveBeenCalled();
   });
 
+  it("keeps an out-of-contract positive-prompt arm permanently non-retryable", async () => {
+    const { experiment } = await frozenExperimentWithCandidate();
+    experiment.candidate = { variable: "positive-prompt", value: "Different direction." };
+    experiment.changedRequestPaths = ["prompt"];
+    const wired = deps({ getJob: () => ({ status: "cancelled", dgxJobId: null }) }, experiment);
+
+    await expect(inspectRetryableExperimentArm(experiment, "candidate", wired))
+      .rejects.toThrow("außerhalb des freigegebenen LTX-2.5-Split-IA2V-Vertrags");
+    expect(wired.releaseArm).not.toHaveBeenCalled();
+  });
+
   it("proves a cancelled retry read-only without releasing the stored arm", async () => {
     const { experiment } = await frozenExperimentWithCandidate();
     const wired = deps({ getJob: () => ({ status: "cancelled", dgxJobId: null }) }, experiment);
