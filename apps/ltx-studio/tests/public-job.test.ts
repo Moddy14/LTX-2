@@ -199,6 +199,64 @@ function allKeys(value: unknown): string[] {
 }
 
 describe("public StudioJob DTO", () => {
+  it("publishes only the normalized DGX memory-wait allowlist", () => {
+    const request = validRequest();
+    const internal = {
+      id: "33333333-3333-4333-8333-333333333335",
+      status: "queued",
+      mode: request.mode,
+      prompt: request.prompt,
+      outputName: request.outputName,
+      outputUrl: null,
+      createdAt: "2026-08-28T06:25:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+      progress: null,
+      error: null,
+      logs: [],
+      command: "",
+      request,
+      favorite: false,
+      variantOf: null,
+      experiment: null,
+      project: null,
+      runtimeMs: null,
+      cancelledBy: null,
+      thermalProfile: null,
+      dgxJobId: "dgx-job-20260828-083000-0123456789ab",
+      dgxMemoryWait: {
+        schemaVersion: "ltx-studio-dgx-memory-wait.v1",
+        kind: "memory",
+        observedAt: "2026-08-28T06:30:00.000Z",
+        availableGiB: 43.32,
+        pendingReservationsGiB: 0,
+        requiredAvailableGiB: 94,
+        currentShortfallGiB: 50.68,
+        qwenPagingReservedGiB: null,
+        qwenRestoreReservedGiB: null,
+        raw_secret: "must-not-cross-public-boundary",
+      },
+      identityEvidence: null,
+      runProvenance: null,
+    } as unknown as StudioJob;
+
+    const dto = toPublicStudioJob(internal);
+
+    expect(dto.dgxMemoryWait).toEqual({
+      schemaVersion: "ltx-studio-dgx-memory-wait.v1",
+      kind: "memory",
+      observedAt: "2026-08-28T06:30:00.000Z",
+      availableGiB: 43.32,
+      pendingReservationsGiB: 0,
+      requiredAvailableGiB: 94,
+      currentShortfallGiB: 50.68,
+      qwenPagingReservedGiB: null,
+      qwenRestoreReservedGiB: null,
+    });
+    expect(JSON.stringify(dto)).not.toContain("raw_secret");
+    expect(JSON.stringify(dto)).not.toContain("must-not-cross-public-boundary");
+  });
+
   it.each(["settling", "settled"] as const)(
     "preserves the non-sensitive cancellation settlement state %s",
     (cancellationState) => {

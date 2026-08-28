@@ -1,4 +1,5 @@
 import type { GenerationRequest } from "../shared/pipelines.js";
+import type { DgxMemoryBlocker } from "../shared/dgxMemoryWait.js";
 import {
   admissionPreflightPlan,
   type AdmissionPreflightReport,
@@ -73,6 +74,8 @@ export type AdmissionDecision = {
   idempotent_replay?: boolean;
   /** Exact existing queue identity fenced by the replay-only endpoint. */
   replay_bound_job_id?: string;
+  /** Optional structured start-gate diagnostic; validated before display. */
+  blocker?: unknown;
   job_id?: string;
   evicted_for?: {
     requested_by?: string;
@@ -128,12 +131,17 @@ export type QueueJobSummary = {
   retry_after_seconds?: number | null;
   message_for_humans?: string;
   app_message?: string;
+  /** Raw Runtime-API field. Consumers must use normalizeDgxMemoryBlocker. */
+  blocker?: unknown;
   current_step?: string;
   last_error?: string;
   runner_last_seen_at?: string | null;
   runtime_status?: Record<string, unknown> | null;
   idempotency_key?: string | null;
 };
+
+/** Compile-time convenience for already normalized Runtime-API diagnostics. */
+export type { DgxMemoryBlocker };
 
 export function cooperativeQueueContractConfirmed(
   admission: AdmissionRequest,

@@ -12,6 +12,7 @@ import {
   FolderKanban,
   LoaderCircle,
   ListVideo,
+  MemoryStick,
   Pause,
   Play,
   Repeat2,
@@ -137,6 +138,20 @@ function formatFileSize(bytes: number): string {
   return bytes >= 1024 ** 3
     ? `${(bytes / 1024 ** 3).toFixed(2)} GiB`
     : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+}
+
+function formatMemoryGiB(value: number): string {
+  return new Intl.NumberFormat("de-AT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatMemoryObservedAt(value: string): string {
+  return new Intl.DateTimeFormat("de-AT", {
+    dateStyle: "short",
+    timeStyle: "medium",
+  }).format(new Date(value));
 }
 
 function lipSyncOutputStatusLabel(output: StudioOutput): string {
@@ -329,8 +344,17 @@ export function RunPanel({
     : estimate.etaSeconds >= 3600
       ? `${(estimate.etaSeconds / 3600).toFixed(1)} h`
       : `${Math.max(1, Math.round(estimate.etaSeconds / 60))} min`;
-  const activeJob = jobs.find((job) => ["queued", "running", "paused"].includes(job.status)) ?? null;
-  const monitorJob = activeJob ?? selectedJob;
+  const currentSelectedJob = selectedJob
+    ? jobs.find((job) => job.id === selectedJob.id) ?? selectedJob
+    : null;
+  const selectedActiveJob = currentSelectedJob
+    && ["queued", "running", "paused"].includes(currentSelectedJob.status)
+    ? currentSelectedJob
+    : null;
+  const activeJob = selectedActiveJob
+    ?? jobs.find((job) => ["queued", "running", "paused"].includes(job.status))
+    ?? null;
+  const monitorJob = activeJob ?? currentSelectedJob;
   const monitorRuntime = monitorJob?.startedAt
     ? monitorJob.runtimeMs ?? Date.now() - Date.parse(monitorJob.startedAt)
     : null;
@@ -775,6 +799,34 @@ export function RunPanel({
                 <span>Fortsetzen bei/unter {monitorJob.thermalProfile.resumeBelowC.toFixed(0)} °C</span>
               </div>
             ) : null}
+            {monitorJob.dgxMemoryWait ? (
+              <div className="run-monitor__memory-wait" role="status">
+                <div className="run-monitor__memory-wait-title">
+                  <MemoryStick size={15} />
+                  <strong>DGX wartet auf Arbeitsspeicher</strong>
+                </div>
+                <p>
+                  Beim letzten bestätigten Start-Gate fehlten {formatMemoryGiB(monitorJob.dgxMemoryWait.currentShortfallGiB)} GiB.
+                  Die Zahl stammt aus dem letzten autoritativen Start-Gate und ist keine Reclaim-Prognose.
+                </p>
+                <p>
+                  Messung: <time dateTime={monitorJob.dgxMemoryWait.observedAt}>
+                    {formatMemoryObservedAt(monitorJob.dgxMemoryWait.observedAt)}
+                  </time>
+                </p>
+                <div className="run-monitor__memory-wait-values">
+                  <span>Verfügbar <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.availableGiB)} GiB</strong></span>
+                  <span>Reserviert <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.pendingReservationsGiB)} GiB</strong></span>
+                  <span>Startschwelle <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.requiredAvailableGiB)} GiB</strong></span>
+                  {monitorJob.dgxMemoryWait.qwenPagingReservedGiB !== null ? (
+                    <span>Qwen-Einpage-Reserve <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.qwenPagingReservedGiB)} GiB</strong></span>
+                  ) : null}
+                  {monitorJob.dgxMemoryWait.qwenRestoreReservedGiB !== null ? (
+                    <span>Qwen-Restore-Reserve <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.qwenRestoreReservedGiB)} GiB</strong></span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             {monitorJob.cancelledBy === "studio" ? (
               <p className="run-monitor__notice">{cancellationIsSettling(monitorJob)
                 ? "Abbruch läuft: Prozess, Container und DGX-Zustand werden noch bestätigt."
@@ -805,7 +857,7 @@ export function RunPanel({
               <strong>{(monitorJob?.request ?? request).enhancePrompt ? "Aktiv" : "Aus"}</strong>
             </div>
             <div className="run-summary__line">
-              <span>Queue</span>
+              <span>Studio aktiv</span>
               <strong>{health?.queueDepth ?? 0}</strong>
             </div>
             <div className="run-summary__line">

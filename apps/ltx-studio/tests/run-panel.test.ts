@@ -90,7 +90,142 @@ function minimalRunPanelProps(
   };
 }
 
+function queuedJob(request: ReturnType<typeof validRequest>): StudioJob {
+  return {
+    id: "8b174b6e-a9ff-4b6f-95f7-512f18c3f53a",
+    status: "queued",
+    mode: request.mode,
+    prompt: request.prompt,
+    outputName: request.outputName,
+    outputUrl: null,
+    createdAt: "2026-08-28T06:25:00.000Z",
+    startedAt: null,
+    finishedAt: null,
+    progress: null,
+    error: null,
+    logs: ["DGX-Queue wartet."],
+    command: "private command",
+    request,
+    favorite: false,
+    variantOf: null,
+    experiment: null,
+    project: null,
+    runtimeMs: null,
+    cancelledBy: null,
+    dgxJobId: "dgx-job-20260828-083000-0123456789ab",
+    thermalProfile: null,
+    runProvenanceSummary: null,
+    executionClass: "dgx",
+    executionDecisionSummary: null,
+  };
+}
+
 describe("source preview media selection", () => {
+  it("shows the validated DGX memory equation in the run monitor", () => {
+    const request = validRequest("two-stage");
+    const job: StudioJob = {
+      id: "8b174b6e-a9ff-4b6f-95f7-512f18c3f53a",
+      status: "queued",
+      mode: request.mode,
+      prompt: request.prompt,
+      outputName: request.outputName,
+      outputUrl: null,
+      createdAt: "2026-08-28T06:25:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+      progress: null,
+      error: null,
+      logs: ["DGX-Queue wartet."],
+      command: "private command",
+      request,
+      favorite: false,
+      variantOf: null,
+      experiment: null,
+      project: null,
+      runtimeMs: null,
+      cancelledBy: null,
+      dgxJobId: "dgx-job-20260828-083000-0123456789ab",
+      dgxMemoryWait: {
+        schemaVersion: "ltx-studio-dgx-memory-wait.v1",
+        kind: "memory",
+        observedAt: "2026-08-28T06:30:00.000Z",
+        availableGiB: 43.32,
+        pendingReservationsGiB: 0,
+        requiredAvailableGiB: 94,
+        currentShortfallGiB: 50.68,
+        qwenPagingReservedGiB: null,
+        qwenRestoreReservedGiB: null,
+      },
+      thermalProfile: null,
+      runProvenanceSummary: null,
+      executionClass: "dgx",
+      executionDecisionSummary: null,
+    };
+    const props = minimalRunPanelProps(request);
+    props.jobs = [job];
+    props.selectedJob = job;
+
+    const markup = renderToStaticMarkup(createElement(RunPanel, props));
+
+    expect(markup).toContain("DGX wartet auf Arbeitsspeicher");
+    expect(markup).toContain("Beim letzten bestätigten Start-Gate fehlten 50,68 GiB");
+    expect(markup).toContain("Verfügbar <strong>43,32 GiB</strong>");
+    expect(markup).toContain("Reserviert <strong>0,00 GiB</strong>");
+    expect(markup).toContain("Startschwelle <strong>94,00 GiB</strong>");
+    expect(markup).toContain("keine Reclaim-Prognose");
+    expect(markup).toContain("Messung:");
+  });
+
+  it("shows the Qwen restore reserve when it participates in the equation", () => {
+    const request = validRequest("two-stage");
+    const props = minimalRunPanelProps(request);
+    props.jobs = [{
+      ...queuedJob(request),
+      dgxMemoryWait: {
+        schemaVersion: "ltx-studio-dgx-memory-wait.v1",
+        kind: "memory",
+        observedAt: "2026-08-28T06:30:00.000Z",
+        availableGiB: 70.5,
+        pendingReservationsGiB: 0,
+        requiredAvailableGiB: 72,
+        currentShortfallGiB: 25.5,
+        qwenPagingReservedGiB: null,
+        qwenRestoreReservedGiB: 24,
+      },
+    }];
+    props.selectedJob = props.jobs[0]!;
+
+    const markup = renderToStaticMarkup(createElement(RunPanel, props));
+
+    expect(markup).toContain("Qwen-Restore-Reserve <strong>24,00 GiB</strong>");
+  });
+
+  it("keeps the explicitly selected active job in the monitor when several jobs are active", () => {
+    const request = validRequest("two-stage");
+    const otherJob = {
+      ...queuedJob(request),
+      id: "11111111-1111-4111-8111-111111111111",
+      outputName: "other-active.mp4",
+    } satisfies StudioJob;
+    const selectedJob = {
+      ...queuedJob(request),
+      id: "22222222-2222-4222-8222-222222222222",
+      status: "paused" as const,
+      outputName: "selected-active.mp4",
+    } satisfies StudioJob;
+    const props = minimalRunPanelProps(request);
+    props.jobs = [otherJob, selectedJob];
+    props.selectedJob = selectedJob;
+
+    const markup = renderToStaticMarkup(createElement(RunPanel, props));
+    const monitorStart = markup.indexOf('<section class="run-monitor');
+    const monitorEnd = markup.indexOf("</section>", monitorStart);
+    const monitorMarkup = markup.slice(monitorStart, monitorEnd);
+
+    expect(monitorMarkup).toContain("selected-active.mp4");
+    expect(monitorMarkup).not.toContain("other-active.mp4");
+  });
+
   it("marks a provisional RAM proxy visibly instead of presenting it as measured", () => {
     const props = minimalRunPanelProps(validRequest("image-audio-to-video"));
     props.estimate = {

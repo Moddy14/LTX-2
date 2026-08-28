@@ -184,6 +184,13 @@ import {
 } from "./nativeRuntimeSourceGate.js";
 import { outputAnalysisRecordSchema } from "../shared/objectiveQuality.js";
 import { RuntimeApiError } from "./runtimeApi.js";
+import {
+  describeDgxMemoryWait,
+  memoryWaitFromDgxBlocker,
+  normalizeDgxMemoryBlocker,
+  normalizePublicDgxMemoryWait,
+  type PublicDgxMemoryWait,
+} from "../shared/dgxMemoryWait.js";
 import { releaseSurfaceEntryForRequest } from "../shared/releaseSurface.js";
 import {
   jobStartSources,
@@ -358,6 +365,8 @@ export type StudioJob = {
   cancellationState?: "requested" | "settling" | "settled" | null;
   thermalProfile: ThermalProfile | null;
   dgxJobId: string | null;
+  /** Latest validated, non-authoritative DGX memory wait diagnostic. */
+  dgxMemoryWait?: PublicDgxMemoryWait | null;
   identityEvidence: IdentityInputEvidence | null;
   runProvenance: RunProvenance | null;
   /**
@@ -749,6 +758,16 @@ const DGX_REMOTE_TERMINAL_STATES = new Set<QueueJobState>([
   "rejected",
 ]);
 const DGX_POSITIVE_DISCOVERY_STATES = new Set<QueueJobState>(["accepted", "queued"]);
+const DGX_MEMORY_WAIT_RESOLVED_STATES = new Set<QueueJobState>([
+  "starting",
+  "running",
+  "pausing",
+  "resuming",
+  "completed",
+  "failed",
+  "cancelled",
+  "rejected",
+]);
 const DGX_QUEUE_JOB_STATES = new Set<QueueJobState>([
   "submitted",
   "accepted",
@@ -768,6 +787,22 @@ function runtimePayloadError(error: RuntimeApiError): string | null {
   if (!error.payload || typeof error.payload !== "object") return null;
   const value = (error.payload as Record<string, unknown>).error;
   return typeof value === "string" ? value : null;
+}
+
+function runtimePayloadBlocker(error: unknown): unknown {
+  if (!(error instanceof RuntimeApiError)
+    || !error.payload
+    || typeof error.payload !== "object"
+    || Array.isArray(error.payload)) return undefined;
+  return (error.payload as Record<string, unknown>).blocker;
+}
+
+function queueJobMemoryBlocker(
+  job: QueueJobSummary,
+  fallbackBlocker?: unknown,
+): unknown {
+  if (DGX_MEMORY_WAIT_RESOLVED_STATES.has(job.state)) return undefined;
+  return job.blocker === undefined ? fallbackBlocker : job.blocker;
 }
 
 type DgxTerminalObservation = {
@@ -4433,6 +4468,7 @@ export class JobManager extends EventEmitter {
       cancelledBy: null,
       thermalProfile: null,
       dgxJobId: null,
+      dgxMemoryWait: null,
       identityEvidence: null,
       runProvenance: null,
       executionClass: "pending",
@@ -4618,6 +4654,7 @@ export class JobManager extends EventEmitter {
       finishedAt: job.finishedAt,
       runtimeMs: job.runtimeMs,
       logs: [...job.logs],
+      dgxMemoryWait: job.dgxMemoryWait ? structuredClone(job.dgxMemoryWait) : null,
       dgxTerminalDelivery: job.dgxTerminalDelivery
         ? structuredClone(job.dgxTerminalDelivery)
         : undefined,
@@ -4639,6 +4676,7 @@ export class JobManager extends EventEmitter {
       job.status = "cancelled";
       job.cancelledBy = "studio";
       job.finishedAt = now();
+      job.dgxMemoryWait = null;
       if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
       if (job.ownedDockerContainer) job.ownedDockerContainer.state = "cleanup";
       this.appendLog(
@@ -4658,6 +4696,7 @@ export class JobManager extends EventEmitter {
         job.finishedAt = snapshot.finishedAt;
         job.runtimeMs = snapshot.runtimeMs;
         job.logs = snapshot.logs;
+        job.dgxMemoryWait = snapshot.dgxMemoryWait;
         if (snapshot.dgxTerminalDelivery) {
           job.dgxTerminalDelivery = snapshot.dgxTerminalDelivery;
         } else {
@@ -8071,7 +8110,11 @@ export class JobManager extends EventEmitter {
 
     const previousFinishedAt = job.finishedAt;
     const previousLogs = [...job.logs];
+    const previousDgxMemoryWait = job.dgxMemoryWait
+      ? structuredClone(job.dgxMemoryWait)
+      : null;
     job.finishedAt = completedAt;
+    job.dgxMemoryWait = null;
     job.outputPublication = publicationAuthority;
     job.outputPublicationCommitPending = normalized;
     this.appendLog(
@@ -8098,6 +8141,7 @@ export class JobManager extends EventEmitter {
       delete job.outputPublication;
       job.finishedAt = previousFinishedAt;
       job.logs = previousLogs;
+      job.dgxMemoryWait = previousDgxMemoryWait;
       const cleanupErrors: unknown[] = [];
       try {
         removeOutputPublicationAuthority(job.plan.outputPath);
@@ -9108,6 +9152,7 @@ export class JobManager extends EventEmitter {
       finishedAt: job.finishedAt,
       runtimeMs: job.runtimeMs,
       logs: [...job.logs],
+      dgxMemoryWait: job.dgxMemoryWait ? structuredClone(job.dgxMemoryWait) : null,
       dgxJobId: job.dgxJobId,
       dgxJobTerminal: job.dgxJobTerminal,
       dgxSubmitPending: job.dgxSubmitPending,
@@ -9135,6 +9180,7 @@ export class JobManager extends EventEmitter {
       job.finishedAt = now();
       if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
     }
+    job.dgxMemoryWait = null;
     job.dgxJobId = response.job.job_id;
     job.dgxJobTerminal = true;
     delete job.dgxSubmitPending;
@@ -9167,6 +9213,7 @@ export class JobManager extends EventEmitter {
         job.finishedAt = snapshot.finishedAt;
         job.runtimeMs = snapshot.runtimeMs;
         job.logs.splice(0, job.logs.length, ...snapshot.logs);
+        job.dgxMemoryWait = snapshot.dgxMemoryWait;
         job.dgxJobId = snapshot.dgxJobId;
         job.dgxJobTerminal = snapshot.dgxJobTerminal;
         if (snapshot.dgxSubmitPending) job.dgxSubmitPending = true;
@@ -9432,6 +9479,7 @@ export class JobManager extends EventEmitter {
         const recovered = await this.reconcilePendingDgxSubmit(job);
         if (recovered === undefined) return false;
         if (recovered) {
+          this.observeDgxMemoryWait(job, queueJobMemoryBlocker(recovered));
           if (DGX_POSITIVE_DISCOVERY_STATES.has(recovered.state)
             && !await this.confirmDgxCooperativeQueueContract(
               job,
@@ -9561,6 +9609,10 @@ export class JobManager extends EventEmitter {
         await this.flushDgxTerminalDelivery(job);
         return false;
       }
+      this.observeDgxMemoryWait(
+        job,
+        queueJobMemoryBlocker(queueJob, admission.blocker),
+      );
       if (job.dgxSubmitReconcileRetry) {
         clearTimeout(job.dgxSubmitReconcileRetry);
         delete job.dgxSubmitReconcileRetry;
@@ -9675,6 +9727,7 @@ export class JobManager extends EventEmitter {
         continue;
       }
       if (this.jobShouldStop(job)) return "stopped";
+      this.observeDgxMemoryWait(job, queueJobMemoryBlocker(queueJob));
       if (DGX_POSITIVE_DISCOVERY_STATES.has(queueJob.state)
         && !await this.confirmDgxCooperativeQueueContract(
           job,
@@ -9712,6 +9765,10 @@ export class JobManager extends EventEmitter {
           }
           const replayResponse = replayResult.response;
           queueJob = replayResponse.job;
+          this.observeDgxMemoryWait(
+            job,
+            queueJobMemoryBlocker(queueJob, replayResponse.admission.blocker),
+          );
           terminalObservation = dgxSubmitTerminalObservation(
             replayResponse,
             job.id,
@@ -9950,6 +10007,7 @@ export class JobManager extends EventEmitter {
     job: RuntimeJob,
     acceptedQueueJob: QueueJobSummary,
   ): Promise<DgxStartOutcome> {
+    this.observeDgxMemoryWait(job, queueJobMemoryBlocker(acceptedQueueJob));
     if (!await this.confirmDgxCooperativeQueueContract(
       job,
       acceptedQueueJob,
@@ -10066,6 +10124,7 @@ export class JobManager extends EventEmitter {
             );
           }
           if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+          this.observeDgxMemoryWait(job, queueJobMemoryBlocker(current));
           if (state === "starting" || state === "resuming") {
             assertDgxCooperativeQueueContract(
               job,
@@ -10107,6 +10166,7 @@ export class JobManager extends EventEmitter {
               `DGX-State-PATCH bestätigte ${state} nicht exakt callergebunden.`,
             );
           }
+          this.observeDgxMemoryWait(job, queueJobMemoryBlocker(applied));
           if (state === "starting" || state === "resuming") {
             assertDgxCooperativeQueueContract(
               job,
@@ -10144,6 +10204,7 @@ export class JobManager extends EventEmitter {
                 );
               }
               if (this.jobShouldStop(job) || job.dgxJobId !== expectedDgxJobId) return false;
+              this.observeDgxMemoryWait(job, queueJobMemoryBlocker(remote));
               if (state === "starting" || state === "resuming") {
                 assertDgxCooperativeQueueContract(
                   job,
@@ -10186,6 +10247,10 @@ export class JobManager extends EventEmitter {
             }
           }
           const startFenceState = state === "starting" || state === "resuming" ? state : null;
+          if (startFenceState) {
+            const blocker = runtimePayloadBlocker(error);
+            if (blocker !== undefined) this.observeDgxMemoryWait(job, blocker);
+          }
           const retryDelayMs = startFenceState
             ? retryableStartFenceDelayMs(error)
             : null;
@@ -10231,6 +10296,9 @@ export class JobManager extends EventEmitter {
     const detail = transitionError instanceof Error
       ? transitionError.message
       : String(transitionError);
+    const unresolvedMemoryFence = normalizeDgxMemoryBlocker(
+      runtimePayloadBlocker(transitionError),
+    ) !== null;
     while (!this.shuttingDown && isActiveJobStatus(job.status) && job.dgxJobId) {
       let remote: QueueJobSummary;
       let pollReceipt: DgxLeaseReceipt | null = null;
@@ -10281,6 +10349,17 @@ export class JobManager extends EventEmitter {
         continue;
       }
       if (this.jobShouldStop(job)) return "failed";
+      this.observeDgxMemoryWait(job, queueJobMemoryBlocker(remote), {
+        // A PATCH-409 may carry the authoritative memory equation while its
+        // immediate read-back projects only the still-unresolved queue state.
+        // Keep that one measurement until this reconciliation resolves, but
+        // never carry it across a successful/terminal state or an ordinary
+        // poll. The admission reason can belong to an older epoch, especially
+        // for paused -> resuming, and therefore cannot overrule the newer 409.
+        retainWhenMissing: unresolvedMemoryFence
+          && queueJobMemoryBlocker(remote) === undefined
+          && ["accepted", "queued", "paused"].includes(remote.state),
+      });
       assertDgxCooperativeQueueContract(
         job,
         remote,
@@ -10603,6 +10682,7 @@ export class JobManager extends EventEmitter {
         : undefined,
       dgxPreparedAdmissionSha256: job.dgxPreparedAdmissionSha256,
       dgxSubmitReconcileDelayMs: job.dgxSubmitReconcileDelayMs,
+      dgxMemoryWait: job.dgxMemoryWait ? structuredClone(job.dgxMemoryWait) : null,
       logs: [...job.logs],
     };
     delete job.dgxTerminalDelivery;
@@ -10625,6 +10705,7 @@ export class JobManager extends EventEmitter {
     delete job.dgxSubmitStartedAt;
     delete job.dgxPreparedAdmission;
     delete job.dgxPreparedAdmissionSha256;
+    job.dgxMemoryWait = null;
     this.appendLog(
       job,
       observation.state === delivery.state
@@ -10669,6 +10750,7 @@ export class JobManager extends EventEmitter {
         } else {
           delete job.dgxSubmitReconcileDelayMs;
         }
+        job.dgxMemoryWait = snapshot.dgxMemoryWait;
         job.logs.splice(0, job.logs.length, ...snapshot.logs);
         throw new DgxTerminalReceiptPersistenceError(error);
       }
@@ -10736,6 +10818,7 @@ export class JobManager extends EventEmitter {
     job.status = "failed";
     job.error = message;
     job.finishedAt = now();
+    job.dgxMemoryWait = null;
     if (job.startedAt) job.runtimeMs = Date.now() - Date.parse(job.startedAt);
     this.appendLog(job, message);
     this.changed();
@@ -12349,6 +12432,40 @@ export class JobManager extends EventEmitter {
     return true;
   }
 
+  private observeDgxMemoryWait(
+    job: RuntimeJob,
+    rawBlocker: unknown,
+    options: {
+      observedAt?: string;
+      retainWhenMissing?: boolean;
+    } = {},
+  ): boolean {
+    const next = memoryWaitFromDgxBlocker(rawBlocker, options.observedAt ?? now());
+    if (!next) {
+      if (rawBlocker === undefined && options.retainWhenMissing) return false;
+      if (!job.dgxMemoryWait) return false;
+      job.dgxMemoryWait = null;
+      return true;
+    }
+    const previous = normalizePublicDgxMemoryWait(job.dgxMemoryWait);
+    if (previous
+      && previous.availableGiB === next.availableGiB
+      && previous.pendingReservationsGiB === next.pendingReservationsGiB
+      && previous.requiredAvailableGiB === next.requiredAvailableGiB
+      && previous.currentShortfallGiB === next.currentShortfallGiB
+      && previous.qwenPagingReservedGiB === next.qwenPagingReservedGiB
+      && previous.qwenRestoreReservedGiB === next.qwenRestoreReservedGiB) {
+      // A queue poll can project the same persisted gate snapshot repeatedly;
+      // receipt time is not measurement time. Preserve the first observation
+      // until at least one equation operand actually changes.
+      job.dgxMemoryWait = previous;
+      return false;
+    }
+    job.dgxMemoryWait = next;
+    this.appendLog(job, describeDgxMemoryWait(next));
+    return true;
+  }
+
   private appendLog(job: RuntimeJob, value: string): void {
     job.logs.push(cleanLogLine(value));
     if (job.logs.length > MAX_LOG_LINES) job.logs.splice(0, job.logs.length - MAX_LOG_LINES);
@@ -13476,6 +13593,9 @@ export class JobManager extends EventEmitter {
               }
             : thermalProfileFromLogs(entry.logs),
           dgxJobId,
+          dgxMemoryWait: isActiveJobStatus(status) && dgxJobId
+            ? normalizePublicDgxMemoryWait(entry.dgxMemoryWait)
+            : null,
           dgxJobTerminal: Boolean(restoredTerminalReceipt),
           dgxTerminalDelivery: dgxJobId
             ? restoredTerminalDelivery

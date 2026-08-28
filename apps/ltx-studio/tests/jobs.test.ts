@@ -7543,6 +7543,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
   });
 
   it("adopts and cancels a remote lease created while queue submit was in flight", async () => {
+    const path = await statePath();
     const dgxJobId = testDgxJobId("submit-cancel-race");
     let studioJobId = "";
     let submitStartedResolve!: () => void;
@@ -7554,7 +7555,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       releaseSubmitResolve = resolve;
     });
     const transitions: string[] = [];
-    const manager = new JobManager(await statePath(), false, null, {
+    const manager = new JobManager(path, false, null, {
       capture: async () => notApplicableIdentityEvidence(),
       verify: async (evidence) => ({ evidence, error: null }),
     }, {
@@ -7567,7 +7568,15 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       submit: async (admissionRequest) => {
         submitStartedResolve();
         await releaseSubmit;
-        return boundDgxSubmit(studioJobId, dgxJobId, "accepted", admissionRequest);
+        const response = boundDgxSubmit(studioJobId, dgxJobId, "accepted", admissionRequest);
+        response.job.blocker = {
+          kind: "memory",
+          available_gib: 43.32,
+          pending_reservations_gib: 0,
+          required_available_gib: 94,
+          current_shortfall_gib: 50.68,
+        };
+        return response;
       },
     });
     const created = manager.create(validRequest());
@@ -7597,8 +7606,11 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     expect(manager.get(created.id)).toMatchObject({
       status: "cancelled",
       dgxJobId,
+      dgxMemoryWait: null,
       outputUrl: null,
     });
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Array<Record<string, unknown>>;
+    expect(persisted[0]?.dgxMemoryWait).toBeNull();
   });
 
   it("keeps terminal delivery fenced when HOLD wins a deferred cancellation GET", async () => {
@@ -10817,6 +10829,308 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     expect(await transition.call(manager, runtimeJob, "starting")).toBe(true);
     expect(transitions).toBe(2);
     expect(manager.get(created.id)?.logs.join("\n")).toContain("Queue-Job bleibt accepted");
+  });
+
+  it("persists and logs a validated memory start-fence blocker", async () => {
+    const path = await statePath();
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("memory-fence-diagnostic");
+    const memoryBlocker = {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    };
+    const manager = new JobManager(path, false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0" as const,
+        job: boundDgxJob(studioJobId, jobId, "queued", {
+          reason: "insufficient_memory",
+          reservation_active: false,
+        }),
+      }),
+      transition: async () => {
+        throw new RuntimeApiError("insufficient_memory", 409, {
+          error: "start_gate_active",
+          reason: "insufficient_memory",
+          retry_after_seconds: 30,
+          blocker: memoryBlocker,
+        });
+      },
+    }, null);
+    Reflect.set(manager, "waitForDelay", async () => false);
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const internalJobs = Reflect.get(manager, "jobs") as Map<string, { dgxJobId: string | null }>;
+    const runtimeJob = internalJobs.get(created.id)!;
+    bindTestDgxLease(
+      runtimeJob as unknown as Record<string, unknown>,
+      created.id,
+      dgxJobId,
+    );
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(false);
+    expect(manager.get(created.id)?.dgxMemoryWait).toMatchObject({
+      schemaVersion: "ltx-studio-dgx-memory-wait.v1",
+      currentShortfallGiB: 50.68,
+      availableGiB: 43.32,
+      requiredAvailableGiB: 94,
+    });
+    expect(manager.get(created.id)?.logs.join("\n")).toContain(
+      "DGX-Speicher: aktuell fehlen 50,68 GiB",
+    );
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Array<Record<string, unknown>>;
+    expect(persisted[0]?.dgxMemoryWait).toMatchObject({
+      currentShortfallGiB: 50.68,
+      qwenPagingReservedGiB: null,
+      qwenRestoreReservedGiB: null,
+    });
+  });
+
+  it("keeps a fresh resuming-409 memory blocker over a historical paused GET reason", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("resuming-memory-fence-diagnostic");
+    const memoryBlocker = {
+      kind: "memory",
+      available_gib: 70,
+      pending_reservations_gib: 4,
+      required_available_gib: 94,
+      current_shortfall_gib: 28,
+    };
+    const manager = new JobManager(await statePath(), false, null, undefined, {
+      read: async (jobId) => ({
+        schema_version: "dgx-job-read.v0" as const,
+        job: boundDgxJob(studioJobId, jobId, "paused", {
+          reason: "selected segment waiter passed fresh start gate",
+          reservation_active: false,
+        }),
+      }),
+      transition: async () => {
+        throw new RuntimeApiError("insufficient_memory", 409, {
+          error: "start_gate_active",
+          reason: "insufficient_memory",
+          retry_after_seconds: 30,
+          blocker: memoryBlocker,
+        });
+      },
+    }, null);
+    Reflect.set(manager, "waitForDelay", async () => false);
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    runtimeJob.status = "paused";
+    bindTestDgxLease(runtimeJob, created.id, dgxJobId);
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "resuming",
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "resuming")).toBe(false);
+    expect(manager.get(created.id)?.dgxMemoryWait).toMatchObject({
+      currentShortfallGiB: 28,
+      availableGiB: 70,
+      pendingReservationsGiB: 4,
+      requiredAvailableGiB: 94,
+    });
+  });
+
+  it("clears a stale memory blocker when an ordinary queue GET reports another reason", async () => {
+    const path = await statePath();
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("memory-fence-cleared-by-queue-reason");
+    const read = vi.fn(async (jobId: string) => ({
+      schema_version: "dgx-job-read.v0" as const,
+      job: boundDgxJob(studioJobId, jobId, "queued", {
+        reason: "not_selected_queue_winner",
+        reservation_active: false,
+      }),
+    }));
+    const manager = new JobManager(path, false, null, undefined, {
+      read,
+      transition: async (jobId, state) => boundDgxTransition(studioJobId, jobId, state),
+    }, null);
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, created.id, dgxJobId);
+    (Reflect.get(manager, "observeDgxMemoryWait") as (
+      job: unknown,
+      blocker: unknown,
+    ) => boolean).call(manager, runtimeJob, {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    });
+    (Reflect.get(manager, "changed") as () => void).call(manager);
+    let delays = 0;
+    Reflect.set(manager, "waitForDelay", async () => {
+      delays += 1;
+      return delays === 1;
+    });
+
+    const waitForQueued = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+    expect(await waitForQueued.call(manager, runtimeJob, 30_000)).toBe("stopped");
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(manager.get(created.id)?.dgxMemoryWait).toBeNull();
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Array<Record<string, unknown>>;
+    expect(persisted[0]?.dgxMemoryWait).toBeNull();
+  });
+
+  it("treats an explicit queue blocker null as a clear instead of reviving admission data", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("explicit-null-memory-clear");
+    const memoryBlocker = {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    };
+    const manager = new JobManager(await statePath(), false, null, {
+      capture: async () => notApplicableIdentityEvidence(),
+      verify: async (evidence) => ({ evidence, error: null }),
+    }, undefined, null, {
+      submit: async (admissionRequest) => {
+        const response = boundDgxSubmit(studioJobId, dgxJobId, "queued", admissionRequest);
+        return {
+          ...response,
+          job: { ...response.job, blocker: null },
+          admission: { ...response.admission, blocker: memoryBlocker },
+        };
+      },
+    });
+    Reflect.set(manager, "waitForLocalPreAdmissionResources", async () => true);
+    Reflect.set(manager, "waitForDelay", async () => false);
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const waitForDgxQueueStart = Reflect.get(manager, "waitForDgxQueueStart") as (
+      job: unknown,
+    ) => Promise<boolean>;
+
+    expect(await waitForDgxQueueStart.call(manager, runtimeJob)).toBe(false);
+    expect(manager.get(created.id)?.dgxMemoryWait).toBeNull();
+    expect(manager.get(created.id)?.logs.join("\n")).not.toContain("DGX-Speicher:");
+  });
+
+  it("clears a previous memory blocker after an authoritative successful start", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("memory-fence-cleared-by-start");
+    const staleMemoryBlocker = {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    };
+    const manager = new JobManager(await statePath(), false, null, undefined, {
+      read: async (jobId) => boundDgxRead(studioJobId, jobId, "accepted"),
+      transition: async (jobId, state) => {
+        const response = boundDgxTransition(studioJobId, jobId, state);
+        response.job.blocker = staleMemoryBlocker;
+        return response;
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, created.id, dgxJobId);
+    (Reflect.get(manager, "observeDgxMemoryWait") as (
+      job: unknown,
+      blocker: unknown,
+    ) => boolean).call(manager, runtimeJob, staleMemoryBlocker);
+    expect(manager.get(created.id)?.dgxMemoryWait).not.toBeNull();
+
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "starting",
+    ) => Promise<boolean>;
+    expect(await transition.call(manager, runtimeJob, "starting")).toBe(true);
+    expect(manager.get(created.id)?.dgxMemoryWait).toBeNull();
+  });
+
+  it("does not refresh the measurement time for an identical persisted blocker", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest());
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const observe = Reflect.get(manager, "observeDgxMemoryWait") as (
+      job: unknown,
+      blocker: unknown,
+      options: { observedAt: string },
+    ) => boolean;
+    const blocker = {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    };
+
+    expect(observe.call(manager, runtimeJob, blocker, {
+      observedAt: "2026-08-28T06:30:00.000Z",
+    })).toBe(true);
+    expect(observe.call(manager, runtimeJob, blocker, {
+      observedAt: "2026-08-28T07:30:00.000Z",
+    })).toBe(false);
+    expect(manager.get(created.id)?.dgxMemoryWait?.observedAt)
+      .toBe("2026-08-28T06:30:00.000Z");
+    expect(manager.get(created.id)?.logs.filter((line) => line.startsWith("DGX-Speicher:")))
+      .toHaveLength(1);
+  });
+
+  it("does not revive a stale start blocker while a running job enters pausing", async () => {
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("stale-memory-blocker-during-pausing");
+    const staleMemoryBlocker = {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    };
+    const manager = new JobManager(await statePath(), false, null, undefined, {
+      read: async (jobId) => boundDgxRead(studioJobId, jobId, "running"),
+      transition: async (jobId, state) => {
+        const response = boundDgxTransition(studioJobId, jobId, state);
+        response.job.blocker = staleMemoryBlocker;
+        return response;
+      },
+    }, null);
+    const created = manager.create(validRequest());
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    runtimeJob.status = "running";
+    bindTestDgxLease(runtimeJob, created.id, dgxJobId);
+    (Reflect.get(manager, "observeDgxMemoryWait") as (
+      job: unknown,
+      blocker: unknown,
+    ) => boolean).call(manager, runtimeJob, staleMemoryBlocker);
+    const transition = Reflect.get(manager, "transitionDgxJob") as (
+      job: unknown,
+      state: "pausing",
+    ) => Promise<boolean>;
+
+    expect(await transition.call(manager, runtimeJob, "pausing")).toBe(true);
+    expect(manager.get(created.id)?.dgxMemoryWait).toBeNull();
   });
 
   it("waits when the Orchestrator has not selected the accepted job as queue winner", async () => {

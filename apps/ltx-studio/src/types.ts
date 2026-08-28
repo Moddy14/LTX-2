@@ -2,6 +2,7 @@ import type { GenerationRequest, PipelineDefinition } from "../shared/pipelines.
 import type { PublicStudioAsset } from "../shared/assetPublic.js";
 import type { PublicHealth } from "../shared/healthPublic.js";
 import type { JobExecutionClass } from "../shared/jobExecution.js";
+import type { PublicDgxMemoryWait } from "../shared/dgxMemoryWait.js";
 import type {
   PublicExecutionDecisionSummary,
   PublicRunProvenanceSummary,
@@ -46,6 +47,7 @@ export type StudioJob = {
   /** Backend-proven cancellation settlement; missing only for legacy/stub data. */
   cancellationState?: "requested" | "settling" | "settled" | null;
   dgxJobId: string | null;
+  dgxMemoryWait?: PublicDgxMemoryWait | null;
   thermalProfile: {
     baselineC: number;
     currentC: number | null;

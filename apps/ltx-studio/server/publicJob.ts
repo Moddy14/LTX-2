@@ -19,6 +19,7 @@ import {
   toPublicExperimentRunSummary,
   toPublicProjectRunSummary,
 } from "./publicOutput.js";
+import { normalizePublicDgxMemoryWait } from "../shared/dgxMemoryWait.js";
 
 export type PublicStudioJob = Omit<
   StudioJob,
@@ -121,6 +122,7 @@ function summarizeExecutionDecision(
  * non-authoritative summaries above.
  */
 export function toPublicStudioJob(job: StudioJob): PublicStudioJob {
+  const dgxMemoryWait = normalizePublicDgxMemoryWait(job.dgxMemoryWait);
   return {
     id: job.id,
     status: job.status,
@@ -145,6 +147,7 @@ export function toPublicStudioJob(job: StudioJob): PublicStudioJob {
     cancellationState: job.cancellationState ?? null,
     thermalProfile: job.thermalProfile ? structuredClone(job.thermalProfile) : null,
     dgxJobId: job.dgxJobId,
+    dgxMemoryWait,
     historyStatus: job.historyStatus,
     historicalDgxJobId: job.historicalDgxJobId,
     executionClass: job.executionClass,
