@@ -2383,6 +2383,16 @@ summary:focus-visible,
   color: #7b541d;
 }
 
+.experiment-gates .tooltip__content,
+.experiment-hash .tooltip__content,
+.experiment-evidence .tooltip__content {
+  right: 0;
+  left: auto;
+  width: min(260px, calc(100vw - 32px));
+  white-space: normal;
+  transform: none;
+}
+
 .experiment-item__facts span:last-child {
   overflow: hidden;
   max-width: 100%;

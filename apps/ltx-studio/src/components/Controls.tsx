@@ -9,6 +9,11 @@ export function InfoTooltip({ text }: { text: string }) {
       tabIndex={0}
       aria-label={`Feldhilfe: ${text}`}
       aria-describedby={tooltipId}
+      onMouseDown={(event) => {
+        // Pointer clicks must not pin a help popup over adjacent controls.
+        // Keyboard focus remains available through tabIndex for accessibility.
+        event.preventDefault();
+      }}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();

@@ -3109,6 +3109,57 @@ function recheckVerifiedExecutionDescriptor(descriptor: VerifiedExecutionDescrip
   }
 }
 
+function executionRevisionMatchesAtomicRename(
+  before: ExecutionFileRevision,
+  after: ExecutionFileRevision,
+): boolean {
+  return before.sizeBytes === after.sizeBytes
+    && before.modifiedAtMs === after.modifiedAtMs
+    && after.changedAtMs >= before.changedAtMs
+    && before.fileId === after.fileId
+    && before.deviceId === after.deviceId
+    && before.mode === after.mode
+    && before.uid === after.uid
+    && before.gid === after.gid
+    && before.nlink === after.nlink;
+}
+
+/**
+ * Rebinds a held, already verified inode after its private staging name was
+ * atomically renamed to the public output name. rename(2) legitimately changes
+ * ctime on the same inode, so the strict pre-exec revision comparison cannot be
+ * reused here. Bytes, hash, inode/device, ownership, mode, link count and the
+ * final non-symlink path remain fail-closed and are checked on both sides of
+ * the hash pass.
+ */
+export function rebindVerifiedExecutionDescriptorAfterAtomicRename(
+  descriptor: VerifiedExecutionDescriptor,
+  outputPath: string,
+): VerifiedExecutionDescriptor {
+  const before = fstatSync(descriptor.fd);
+  const beforeRevision = executionRevision(before);
+  const beforePath = lstatSync(outputPath);
+  const beforePathRevision = executionRevision(beforePath);
+  if (!before.isFile()
+    || beforePath.isSymbolicLink()
+    || !beforePath.isFile()
+    || !executionRevisionMatchesAtomicRename(descriptor.revision, beforeRevision)
+    || !executionRevisionsEqual(beforeRevision, beforePathRevision)) {
+    throw new Error("Atomar publiziertes Snapshot-FD stimmt nicht mit dem finalen Ausgabepfad überein.");
+  }
+  const sha256 = hashExecutionDescriptor(descriptor.fd, before.size, "Atomar publiziertes Snapshot-FD");
+  const afterRevision = executionRevision(fstatSync(descriptor.fd));
+  const afterPath = lstatSync(outputPath);
+  if (afterPath.isSymbolicLink()
+    || !afterPath.isFile()
+    || sha256 !== descriptor.sha256
+    || !executionRevisionsEqual(beforeRevision, afterRevision)
+    || !executionRevisionsEqual(afterRevision, executionRevision(afterPath))) {
+    throw new Error("Atomar publiziertes Snapshot-FD änderte sich während der finalen Bindung.");
+  }
+  return { ...descriptor, revision: afterRevision };
+}
+
 function cpuAudioRetimeDescriptorsMatch(
   source: CpuAudioRetimeReuseSourceBinding,
   inheritedFds: readonly number[],
@@ -10128,7 +10179,10 @@ export class JobManager extends EventEmitter {
         verifyRootOwnedBoundMediaTool(ffprobe, "/usr/bin/ffprobe");
         this.revalidateRuntimeTrustBoundary(job, "native Packet-Copy-Audio-Publikation");
         this.promotePrivateOutput(temporaryOutput, job.plan.outputPath);
-        recheckVerifiedExecutionDescriptor(candidateDescriptor);
+        candidateDescriptor = rebindVerifiedExecutionDescriptorAfterAtomicRename(
+          candidateDescriptor,
+          job.plan.outputPath,
+        );
         recheckVerifiedExecutionDescriptor(receiptDescriptor);
       } catch (error) {
         quarantineUnreleasedArtifact(

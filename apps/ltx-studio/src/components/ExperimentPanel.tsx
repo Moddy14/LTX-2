@@ -39,6 +39,8 @@ import { fieldHelp } from "../fieldHelp";
 import type { Health, StudioJob, StudioOutput } from "../types";
 import { Field, InfoTooltip, NumberField, SelectField, TextField } from "./Controls";
 
+const REDUNDANT_ACTIVE_PHONEME_VISEME_MESSAGE = "Die automatische Laut-/Lippenprüfung ist aktiv.";
+
 type ExperimentPanelProps = {
   request: GenerationRequest;
   requestValid: boolean;
@@ -516,6 +518,10 @@ export function ExperimentPanel({
                 ? ["DGX-Orchestrator nicht erreichbar"]
                 : [];
             const phonemeViseme = health?.evaluators.phonemeViseme;
+            const phonemeVisemeHelp = phonemeViseme?.message
+              && phonemeViseme.message !== REDUNDANT_ACTIVE_PHONEME_VISEME_MESSAGE
+              ? phonemeViseme.message
+              : null;
             const analysesCompleted = currentAnalysisCompleted(baselineOutput)
               && currentAnalysisCompleted(candidateOutput);
             const outputsReady = Boolean(baselineOutput && candidateOutput);
@@ -618,10 +624,7 @@ export function ExperimentPanel({
                       ? <CircleCheck size={14} />
                       : <TriangleAlert size={14} />}
                     Laut-/Lippenprüfung: {evaluatorStatusLabel(health)}
-                    <InfoTooltip
-                      text={phonemeViseme?.message
-                        ?? "Die App vergleicht gesprochene Laute mit der sichtbaren Lippenbewegung und prüft besonders den Lippenschluss bei P, B und M."}
-                    />
+                    {phonemeVisemeHelp ? <InfoTooltip text={phonemeVisemeHelp} /> : null}
                   </span>
                 </div>
                 {preflight ? (

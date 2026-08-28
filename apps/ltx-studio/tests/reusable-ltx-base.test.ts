@@ -1,5 +1,5 @@
 import { appendFile, lstat, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
-import { closeSync, readFileSync } from "node:fs";
+import { closeSync, readFileSync, renameSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import {
   exactBoundLipForcingOutputFromSidecars,
   openVerifiedExecutionDescriptor,
   pinExactLipForcingReuse,
+  rebindVerifiedExecutionDescriptorAfterAtomicRename,
   runProvenanceSharesLtxBase,
   type ReusableLtxBaseCandidate,
   type StudioJob,
@@ -476,6 +477,69 @@ describe("exact protocol-bound LipForcing CPU reuse", () => {
       );
       expect(child.status).toBe(0);
       expect(child.stdout).toBe(original);
+    } finally {
+      closeSync(pinned.fd);
+    }
+  });
+
+  it("rebinds the same verified inode after an atomic publication rename", async () => {
+    const root = await outputRoot();
+    const stagedPath = join(root, "candidate.tmp.mp4");
+    const outputPath = join(root, "candidate.mp4");
+    const original = "receipt-bound-candidate";
+    await writeFile(stagedPath, original, { mode: 0o400 });
+    const stats = await lstat(stagedPath);
+    const revision = {
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      changedAtMs: stats.ctimeMs,
+      fileId: String(stats.ino),
+      deviceId: String(stats.dev),
+      mode: stats.mode,
+      uid: stats.uid,
+      gid: stats.gid,
+      nlink: 1 as const,
+    };
+    const sha256 = createHash("sha256").update(original).digest("hex");
+    const pinned = openVerifiedExecutionDescriptor(stagedPath, sha256, revision);
+    try {
+      renameSync(stagedPath, outputPath);
+      const rebound = rebindVerifiedExecutionDescriptorAfterAtomicRename(pinned, outputPath);
+      expect(rebound.fd).toBe(pinned.fd);
+      expect(rebound.sha256).toBe(sha256);
+      expect(rebound.revision.fileId).toBe(revision.fileId);
+      expect(rebound.revision.deviceId).toBe(revision.deviceId);
+      expect(await readFile(outputPath, "utf8")).toBe(original);
+    } finally {
+      closeSync(pinned.fd);
+    }
+  });
+
+  it("rejects path replacement instead of rebinding a different published inode", async () => {
+    const root = await outputRoot();
+    const stagedPath = join(root, "candidate.tmp.mp4");
+    const outputPath = join(root, "candidate.mp4");
+    await writeFile(stagedPath, "receipt-bound-candidate", { mode: 0o400 });
+    const stats = await lstat(stagedPath);
+    const revision = {
+      sizeBytes: stats.size,
+      modifiedAtMs: stats.mtimeMs,
+      changedAtMs: stats.ctimeMs,
+      fileId: String(stats.ino),
+      deviceId: String(stats.dev),
+      mode: stats.mode,
+      uid: stats.uid,
+      gid: stats.gid,
+      nlink: 1 as const,
+    };
+    const sha256 = createHash("sha256").update("receipt-bound-candidate").digest("hex");
+    const pinned = openVerifiedExecutionDescriptor(stagedPath, sha256, revision);
+    try {
+      renameSync(stagedPath, outputPath);
+      await unlink(outputPath);
+      await writeFile(outputPath, "attacker-path-replacement", { mode: 0o400 });
+      expect(() => rebindVerifiedExecutionDescriptorAfterAtomicRename(pinned, outputPath))
+        .toThrow();
     } finally {
       closeSync(pinned.fd);
     }
