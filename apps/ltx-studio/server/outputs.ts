@@ -1388,7 +1388,12 @@ export class OutputLibrary {
           jobId: record.jobId,
           request: record.request,
           authorityBoundRequest: record.authorityBoundRequest,
-          authorityRequestSha256: record.authorityRequestSha256,
+          // Experiment reuse has its own frozen v1 canonical encoding.  The
+          // record digest above intentionally remains the job-authority
+          // digest (pretty canonical JSON); handing that digest to the
+          // experiment verifier makes every real sidecar fail even though
+          // the exact raw request bytes are present.
+          authorityRequestSha256: sha256Json(record.authorityBoundRequest),
           identityEvidence: record.identityEvidence,
           runProvenance: record.runProvenance,
           settingsSidecarPath: settingsPath(this.root, record.outputName),
@@ -1732,6 +1737,8 @@ export class OutputLibrary {
             outputPath: join(this.root, outputName),
             jobId: record.jobId,
             request: record.request,
+            authorityBoundRequest: record.authorityBoundRequest,
+            authorityRequestSha256: sha256Json(record.authorityBoundRequest),
             identityEvidence: record.identityEvidence,
             runProvenance: record.runProvenance,
             settingsSidecarPath: settingsPath(this.root, outputName),

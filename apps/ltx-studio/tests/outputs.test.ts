@@ -637,6 +637,27 @@ describe("generated output library", () => {
       writeFile(join(root, tamperedName), "original authority bytes"),
     ]);
     const verifiedJob = completedJob(verifiedName, "2026-08-25T21:00:00.000Z");
+    const rawVerifiedRequest = structuredClone(verifiedJob.request) as unknown as {
+      audio: Record<string, unknown>;
+    };
+    delete rawVerifiedRequest.audio.outputDelayMs;
+    const rawVerifiedRequestAuthoritySha256 = createHash("sha256")
+      .update(canonicalJson(rawVerifiedRequest))
+      .digest("hex");
+    verifiedJob.executionDecision = {
+      schemaVersion: "ltx-studio-execution-decision.v5",
+      executionClass: "dgx",
+      decidedAt: "2026-08-25T20:59:00.000Z",
+      reason: "Fixture predates the native output-delay request field.",
+      requestSha256: rawVerifiedRequestAuthoritySha256,
+      protocolSha256: null,
+      cpuReuse: null,
+      operation: null,
+    };
+    Object.assign(verifiedJob, {
+      authorityBoundRequest: rawVerifiedRequest,
+      authorityRequestSha256: rawVerifiedRequestAuthoritySha256,
+    });
     verifiedJob.identityEvidence = {
       schemaVersion: "ltx-studio-identity-evidence.v1",
       status: "verified",
@@ -689,6 +710,8 @@ describe("generated output library", () => {
         outputName: verifiedName,
         jobId: verifiedJob.id,
         request: verifiedJob.request,
+        authorityBoundRequest: rawVerifiedRequest,
+        authorityRequestSha256: sha256Json(rawVerifiedRequest),
       }),
     ]);
     await expect(stat(missingSidecarPath)).rejects.toThrow();
