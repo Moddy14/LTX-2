@@ -88,6 +88,7 @@ import {
   type ModelInventory,
 } from "../shared/models.js";
 import { RuntimeApiError } from "../server/runtimeApi.js";
+import { dgxRuntimeRequestSha256 } from "../server/dgxRequestDigest.js";
 import {
   buildAdmissionRequests,
   type AdmissionRequest,
@@ -119,6 +120,12 @@ function testDgxJobId(label: string): string {
 
 function dgxCaller(studioJobId: string): string {
   return `ltx-studio:${studioJobId}`;
+}
+
+function exactDgxRequestSha256(request: AdmissionRequest): string {
+  const digest = dgxRuntimeRequestSha256(request);
+  if (digest === null) throw new Error("test AdmissionRequest is not canonically digestible");
+  return digest;
 }
 
 function boundDgxJob(
@@ -7078,6 +7085,61 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     expect(persisted[0]).not.toHaveProperty("dgxSubmitPending");
   });
 
+  it.each([
+    ["empty legacy marker", "", true],
+    ["malformed marker", "not-a-timestamp", false],
+  ] as const)(
+    "treats %s correctly during positive ambiguous-submit discovery",
+    async (_case, startedAt, shouldRecover) => {
+      const dgxJobId = testDgxJobId(`ambiguous-started-at-${_case}`);
+      const manager = new JobManager(
+        await statePath(),
+        false,
+        null,
+        undefined,
+        undefined,
+        null,
+        { submit: vi.fn(), list: vi.fn() },
+      );
+      const created = manager.create(validRequest());
+      const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+        .get(created.id)!;
+      bindTestPendingDgxSubmit(
+        runtimeJob,
+        created.id,
+        runtimeJob.request as ReturnType<typeof validRequest>,
+      );
+      const preparedAdmission = runtimeJob.dgxPreparedAdmission as AdmissionRequest;
+      const list = vi.fn(async () => authoritativeQueueList([
+        queueListJobHintForAdmission(
+          created.id,
+          dgxJobId,
+          "accepted",
+          preparedAdmission,
+          { started_at: startedAt },
+        ),
+      ]));
+      Reflect.set(manager, "dgxAdmissionOperations", { submit: vi.fn(), list });
+      Reflect.set(manager, "waitForDelay", async () => false);
+      const reconcile = Reflect.get(manager, "reconcilePendingDgxSubmit") as (
+        job: Record<string, unknown>,
+      ) => Promise<QueueJobSummary | null | undefined>;
+
+      const recovered = await reconcile.call(manager, runtimeJob);
+
+      if (shouldRecover) {
+        expect(recovered).toMatchObject({ job_id: dgxJobId, started_at: "" });
+        expect(runtimeJob).toMatchObject({ dgxJobId });
+        expect(runtimeJob.dgxSubmitPending).toBeUndefined();
+      } else {
+        expect(recovered).toBeUndefined();
+        expect(runtimeJob.dgxJobId).toBeNull();
+        expect(runtimeJob.dgxSubmitPending).toBe(true);
+      }
+      expect(list).toHaveBeenCalledOnce();
+    },
+  );
+
   it.each(["requested_by", "source_app", "idempotency_key"] as const)(
     "never grants a DGX lease from a direct Submit response with wrong %s",
     async (fault) => {
@@ -8971,13 +9033,15 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       submittedExpectedJobId = expectedDgxJobId;
       submittedSignal = signal;
       const receipt = runtimeJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
-      return boundDgxReplay(
+      const response = boundDgxReplay(
         studioJobId,
         dgxJobId,
         "accepted",
         admissionRequest,
         receipt.observedCreatedAt,
       );
+      response.job.started_at = "";
+      return response;
     });
     const read = vi.fn(async (jobId: string) =>
       boundDgxRead(studioJobId, jobId, "queued"));
@@ -9012,6 +9076,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       expect(remote).toMatchObject({
         job_id: dgxJobId,
         state: "accepted",
+        started_at: "",
         reservation_active: false,
       });
       return "started";
@@ -9052,6 +9117,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     "accepted-missing-reservation",
     "queued-wrong-decision",
     "queued-active-reservation",
+    "malformed-started-at",
     "missing-cooperative-capability",
   ] as const)("fails closed without starting for a %s queue replay", async (fault) => {
     let studioJobId = "";
@@ -9096,6 +9162,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       }
       if (fault === "queued-wrong-decision") response.admission.decision = "accepted";
       if (fault === "queued-active-reservation") response.job.reservation_active = true;
+      if (fault === "malformed-started-at") response.job.started_at = "not-a-timestamp";
       if (fault === "missing-cooperative-capability") response.job.segment_waiter = false;
       return response;
     });
@@ -9413,11 +9480,13 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
   it("settles an exact replay-endpoint HTTP 410 tombstone without entering global HOLD", async () => {
     let studioJobId = "";
     let observedCreatedAt = "";
+    let requestSha256 = "";
     const dgxJobId = testDgxJobId("replay-exact-gone");
     const initialSubmit = vi.fn(async () => {
       throw new Error("initial submit must not run for a bound lease");
     });
-    const replay = vi.fn(async () => {
+    const replay = vi.fn(async (admissionRequest: AdmissionRequest) => {
+      requestSha256 = exactDgxRequestSha256(admissionRequest);
       throw new RuntimeApiError("job_gone", 410, {
         error: "job_gone",
         job_id: dgxJobId,
@@ -9428,6 +9497,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
         finished_at: observedCreatedAt,
         reaped_at: observedCreatedAt,
         idempotency_key: `ltx-studio:${studioJobId}`,
+        request_sha256: requestSha256,
       });
     });
     const transition = vi.fn(async () => {
@@ -9483,7 +9553,10 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
         remoteTerminalState: "cancelled",
         evidence: {
           kind: "job-gone",
+          schemaVersion: "ltx-studio-dgx-job-gone-evidence.v1",
+          runtimeSchemaVersion: "dgx-job-gone.v0",
           idempotencyKey: dgxCaller(created.id),
+          requestSha256,
         },
       },
     });
@@ -9684,6 +9757,10 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     "reaped before finished",
     "future timestamp",
     "timestamp without offset",
+    "missing request digest",
+    "uppercase request digest",
+    "malformed request digest",
+    "wrong-request digest",
   ] as const)("enters HOLD for an unbound replay-endpoint 410 tombstone: %s", async (_case) => {
     let studioJobId = "";
     let observedCreatedAt = "";
@@ -9692,8 +9769,9 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     const initialSubmit = vi.fn(async () => {
       throw new Error("initial submit must not run for a bound lease");
     });
-    const replay = vi.fn(async () => {
+    const replay = vi.fn(async (admissionRequest: AdmissionRequest) => {
       const observedCreatedAtMs = Date.parse(observedCreatedAt);
+      const requestSha256 = exactDgxRequestSha256(admissionRequest);
       const payload: Record<string, unknown> = {
         error: "job_gone",
         job_id: dgxJobId,
@@ -9703,6 +9781,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
         finished_at: observedCreatedAt,
         reaped_at: observedCreatedAt,
         idempotency_key: `ltx-studio:${studioJobId}`,
+        request_sha256: requestSha256,
       };
       if (_case === "wrong job") payload.job_id = foreignDgxJobId;
       if (_case === "wrong caller") payload.idempotency_key = "ltx-studio:foreign-caller";
@@ -9721,6 +9800,17 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       if (_case === "timestamp without offset") {
         payload.finished_at = observedCreatedAt.replace(/Z$/u, "");
         payload.reaped_at = observedCreatedAt.replace(/Z$/u, "");
+      }
+      if (_case === "missing request digest") delete payload.request_sha256;
+      if (_case === "uppercase request digest") {
+        payload.request_sha256 = requestSha256.toUpperCase();
+      }
+      if (_case === "malformed request digest") payload.request_sha256 = "not-a-sha256";
+      if (_case === "wrong-request digest") {
+        payload.request_sha256 = exactDgxRequestSha256({
+          ...admissionRequest,
+          estimated_memory_gib: admissionRequest.estimated_memory_gib + 1,
+        });
       }
       throw new RuntimeApiError("untrusted job_gone", 410, {
         ...payload,
@@ -10020,6 +10110,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
           finished_at: observedCreatedAt,
           reaped_at: observedCreatedAt,
           idempotency_key: `ltx-studio:${studioJobId}`,
+          request_sha256: exactDgxRequestSha256(admissionRequest),
         });
       });
       let remoteState: QueueJobState = "queued";
@@ -10130,6 +10221,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
           finished_at: observedCreatedAt,
           reaped_at: observedCreatedAt,
           idempotency_key: `ltx-studio:${studioJobId}`,
+          request_sha256: exactDgxRequestSha256(admissionRequest),
         });
       });
       const read = vi.fn(async (jobId: string) => {
@@ -11700,9 +11792,9 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     seedJob.startedAt = new Date(Date.now() - 1_000).toISOString();
     seedJob.finishedAt = new Date().toISOString();
     bindTestDgxLease(seedJob, created.id, dgxJobId);
-    const leaseObservedCreatedAt = (
-      seedJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
-    ).observedCreatedAt;
+    const leaseReceipt = seedJob.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+    const leaseObservedCreatedAt = leaseReceipt.observedCreatedAt;
+    const leaseRequestSha256 = exactDgxRequestSha256(leaseReceipt.preparedAdmission);
     const queue = Reflect.get(seed, "queue") as string[];
     queue.splice(queue.indexOf(created.id), 1);
     (Reflect.get(seed, "prepareDgxTerminalDelivery") as (
@@ -11729,6 +11821,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
           finished_at: leaseObservedCreatedAt,
           reaped_at: leaseObservedCreatedAt,
           idempotency_key: `ltx-studio:${created.id}`,
+          request_sha256: leaseRequestSha256,
         });
       },
       transition,
@@ -11761,7 +11854,9 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
         confirmedAt: expect.any(String),
         evidence: {
           kind: "job-gone",
-          schemaVersion: "dgx-job-gone.v0",
+          schemaVersion: "ltx-studio-dgx-job-gone-evidence.v1",
+          runtimeSchemaVersion: "dgx-job-gone.v0",
+          requestSha256: leaseRequestSha256,
           finishedAt: leaseObservedCreatedAt,
           reapedAt: leaseObservedCreatedAt,
           reason: "terminal_record_bound_to_key",
@@ -11791,6 +11886,32 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     expect(restartedThrice.get(created.id)?.cancellationState).toBe("settled");
     expect(restartRead).not.toHaveBeenCalled();
     expect(restartTransition).not.toHaveBeenCalled();
+
+    const legacyPersisted = structuredClone(persisted);
+    const legacyReceipt = legacyPersisted[0]!.dgxTerminalReceipt as Record<string, unknown>;
+    legacyReceipt.evidence = {
+      kind: "job-gone",
+      schemaVersion: "dgx-job-gone.v0",
+      idempotencyKey: dgxCaller(created.id),
+      finishedAt: leaseObservedCreatedAt,
+      reapedAt: leaseObservedCreatedAt,
+      reason: "terminal_record_bound_to_key",
+    };
+    await writeFile(path, JSON.stringify(legacyPersisted));
+    const legacyRead = vi.fn(async () => {
+      throw new Error("a readable legacy terminal receipt must suppress GET");
+    });
+    const legacyTransition = vi.fn(async () => {
+      throw new Error("a readable legacy terminal receipt must suppress PATCH");
+    });
+    const legacyRestored = new JobManager(path, false, null, undefined, {
+      read: legacyRead,
+      transition: legacyTransition,
+    }, null);
+    expect(legacyRestored.persistenceHealth()).toEqual({ status: "ok", restartRequired: false });
+    expect(legacyRestored.get(created.id)?.cancellationState).toBe("settled");
+    expect(legacyRead).not.toHaveBeenCalled();
+    expect(legacyTransition).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -11804,6 +11925,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
     override,
   ) => {
     let leaseObservedCreatedAt = "";
+    let leaseRequestSha256 = "";
     const manager = new JobManager(await statePath(), false, null, undefined, {
       read: async (jobId) => {
         throw new RuntimeApiError("untrusted gone response", statusCode, {
@@ -11815,6 +11937,7 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
           finished_at: leaseObservedCreatedAt,
           reaped_at: leaseObservedCreatedAt,
           idempotency_key: `ltx-studio:${created.id}`,
+          request_sha256: leaseRequestSha256,
           ...override,
         });
       },
@@ -11833,9 +11956,9 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       created.id,
       testDgxJobId(`invalid-gone-${statusCode}-${_case}`),
     );
-    leaseObservedCreatedAt = (
-      active.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>
-    ).observedCreatedAt;
+    const leaseReceipt = active.dgxLeaseReceipt as ReturnType<typeof testDgxLeaseReceipt>;
+    leaseObservedCreatedAt = leaseReceipt.observedCreatedAt;
+    leaseRequestSha256 = exactDgxRequestSha256(leaseReceipt.preparedAdmission);
     (Reflect.get(manager, "prepareDgxTerminalDelivery") as (
       job: unknown,
       state: "cancelled",

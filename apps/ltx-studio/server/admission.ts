@@ -602,6 +602,11 @@ export function parseStrictOffsetDateTime(value: unknown): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+/** Runtime API legacy records use both null and the empty string for "never started". */
+export function isDgxNeverStarted(value: unknown): value is null | "" {
+  return value === null || value === "";
+}
+
 function nonNegativeInteger(value: unknown): value is number {
   return typeof value === "number"
     && Number.isInteger(value)
@@ -714,7 +719,7 @@ export function normalizeQueueJobsWithDiagnostics(response: unknown): QueueListR
         || candidate.exclusive_runtime.trim().length === 0
         || candidate.exclusive_runtime !== candidate.exclusive_runtime.trim()
         || parseStrictOffsetDateTime(candidate.created_at) === null
-        || (candidate.started_at !== null
+        || (!isDgxNeverStarted(candidate.started_at)
           && parseStrictOffsetDateTime(candidate.started_at) === null)
         || typeof candidate.reservation_active !== "boolean"
         || typeof candidate.idempotency_key !== "string"

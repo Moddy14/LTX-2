@@ -5,6 +5,7 @@ import {
   assertAuthoritativeQueueList,
   buildAdmissionRequests,
   decisionMessage,
+  isDgxNeverStarted,
   normalizeSegmentBoundaryDecision,
   normalizeQueueJobs,
   normalizeQueueJobsWithDiagnostics,
@@ -417,6 +418,39 @@ describe("DGX admission contract", () => {
       queueReadable: true,
       admissionState: "local_queue_v0",
       lockLane: { state: "free", waiters: 0 },
+    });
+  });
+
+  it("treats null and the empty started_at as never started but rejects malformed text", () => {
+    expect(isDgxNeverStarted(null)).toBe(true);
+    expect(isDgxNeverStarted("")).toBe(true);
+    expect(isDgxNeverStarted("not-a-timestamp")).toBe(false);
+    expect(isDgxNeverStarted(undefined)).toBe(false);
+
+    const emptyStartedAt = queueJob(
+      "dgx-job-20260827-080000-000000000011",
+      "accepted",
+      "ltx-studio:empty-started-at",
+    );
+    emptyStartedAt.started_at = "";
+    const malformedStartedAt = queueJob(
+      "dgx-job-20260827-080000-000000000012",
+      "queued",
+      "ltx-studio:malformed-started-at",
+    );
+    malformedStartedAt.started_at = "not-a-timestamp";
+
+    expect(normalizeQueueJobsWithDiagnostics(queueRead({
+      accepted_jobs: [emptyStartedAt],
+      active_jobs: [],
+      cooling_jobs: [],
+      queued_jobs: [malformedStartedAt],
+    }))).toMatchObject({
+      jobs: [expect.objectContaining({
+        job_id: emptyStartedAt.job_id,
+        started_at: "",
+      })],
+      discardedJobLikeEntries: 1,
     });
   });
 

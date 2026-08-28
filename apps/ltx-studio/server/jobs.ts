@@ -89,6 +89,7 @@ import {
   cooperativeCheckpointPath,
   heartbeatQueueJob,
   isDgxJobId,
+  isDgxNeverStarted,
   listQueueJobs,
   parseStrictOffsetDateTime,
   queueAdmissionMemoryGiB,
@@ -108,6 +109,7 @@ import {
   type QueueTransitionState,
   type SegmentBoundaryDecision,
 } from "./admission.js";
+import { dgxRuntimeRequestSha256Matches } from "./dgxRequestDigest.js";
 import { buildCommand, type CommandPlan, validateRequestPlan } from "./command.js";
 import { getModelInventory } from "./models.js";
 import {
@@ -583,6 +585,16 @@ type DgxTerminalReceipt = {
         finishedAt: string;
         reapedAt: string;
         reason: string | null;
+      }
+    | {
+        kind: "job-gone";
+        schemaVersion: "ltx-studio-dgx-job-gone-evidence.v1";
+        runtimeSchemaVersion: "dgx-job-gone.v0";
+        idempotencyKey: string;
+        requestSha256: string;
+        finishedAt: string;
+        reapedAt: string;
+        reason: string | null;
       };
 };
 type DgxLeaseReceipt = {
@@ -919,7 +931,7 @@ function dgxReplayResponseLeaseBound(
       receipt.submitStartedAt,
     )) return false;
   if (DGX_POSITIVE_DISCOVERY_STATES.has(response.job.state)
-    && response.job.started_at !== null) return false;
+    && !isDgxNeverStarted(response.job.started_at)) return false;
   if (response.job.state === "queued"
     && (response.admission.decision !== "queued"
       || response.job.reservation_active !== false)) return false;
@@ -965,7 +977,7 @@ function dgxQueueJobMatchesPreparedAdmission(
   submitStartedAt: string,
 ): boolean {
   return DGX_POSITIVE_DISCOVERY_STATES.has(remote.state)
-    && remote.started_at === null
+    && isDgxNeverStarted(remote.started_at)
     && remote.reservation_active === (remote.state === "accepted")
     && dgxQueueJobIdentityMatchesPreparedAdmission(
       remote,
@@ -1162,6 +1174,7 @@ function dgxGoneTerminalObservation(
     || payload.terminal !== true
     || payload.job_id !== receipt.dgxJobId
     || payload.idempotency_key !== receipt.idempotencyKey
+    || !dgxRuntimeRequestSha256Matches(receipt.preparedAdmission, payload.request_sha256)
     || typeof state !== "string"
     || !DGX_REMOTE_TERMINAL_STATES.has(state as QueueJobState)
     || finishedAtMs === null
@@ -1177,8 +1190,10 @@ function dgxGoneTerminalObservation(
     state: state as DgxObservedTerminalState,
     evidence: {
       kind: "job-gone",
-      schemaVersion: "dgx-job-gone.v0",
+      schemaVersion: "ltx-studio-dgx-job-gone-evidence.v1",
+      runtimeSchemaVersion: "dgx-job-gone.v0",
       idempotencyKey: receipt.idempotencyKey,
+      requestSha256: payload.request_sha256 as string,
       finishedAt,
       reapedAt,
       reason: typeof payload.reason === "string" ? payload.reason.slice(0, 1_000) : null,
@@ -3137,6 +3152,28 @@ function normalizeDgxTerminalReceipt(value: unknown): DgxTerminalReceipt | undef
       idempotencyKey: expectedCaller,
       replayBoundJobId: candidate.dgxJobId,
       idempotentReplay: true,
+    };
+  } else if (rawEvidence.kind === "job-gone"
+    && rawEvidence.schemaVersion === "ltx-studio-dgx-job-gone-evidence.v1"
+    && rawEvidence.runtimeSchemaVersion === "dgx-job-gone.v0"
+    && rawEvidence.idempotencyKey === expectedCaller
+    && typeof rawEvidence.requestSha256 === "string"
+    && /^[0-9a-f]{64}$/.test(rawEvidence.requestSha256)) {
+    const finishedAt = canonicalIsoTimestamp(rawEvidence.finishedAt);
+    const reapedAt = canonicalIsoTimestamp(rawEvidence.reapedAt);
+    if (!finishedAt
+      || !reapedAt
+      || Date.parse(reapedAt) < Date.parse(finishedAt)
+      || (rawEvidence.reason !== null && typeof rawEvidence.reason !== "string")) return undefined;
+    evidence = {
+      kind: "job-gone",
+      schemaVersion: "ltx-studio-dgx-job-gone-evidence.v1",
+      runtimeSchemaVersion: "dgx-job-gone.v0",
+      idempotencyKey: expectedCaller,
+      requestSha256: rawEvidence.requestSha256,
+      finishedAt,
+      reapedAt,
+      reason: rawEvidence.reason === null ? null : rawEvidence.reason.slice(0, 1_000),
     };
   } else if (rawEvidence.kind === "job-gone"
     && rawEvidence.schemaVersion === "dgx-job-gone.v0"
