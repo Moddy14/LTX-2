@@ -155,6 +155,7 @@ describe("source preview media selection", () => {
         currentShortfallGiB: 50.68,
         qwenPagingReservedGiB: null,
         qwenRestoreReservedGiB: null,
+        qwenEvictedTriggerReservedGiB: null,
       },
       thermalProfile: null,
       runProvenanceSummary: null,
@@ -191,6 +192,7 @@ describe("source preview media selection", () => {
         currentShortfallGiB: 25.5,
         qwenPagingReservedGiB: null,
         qwenRestoreReservedGiB: 24,
+        qwenEvictedTriggerReservedGiB: null,
       },
     }];
     props.selectedJob = props.jobs[0]!;
@@ -198,6 +200,31 @@ describe("source preview media selection", () => {
     const markup = renderToStaticMarkup(createElement(RunPanel, props));
 
     expect(markup).toContain("Qwen-Restore-Reserve <strong>24,00 GiB</strong>");
+  });
+
+  it("shows the distinct Qwen eviction-trigger reserve", () => {
+    const request = validRequest("two-stage");
+    const props = minimalRunPanelProps(request);
+    props.jobs = [{
+      ...queuedJob(request),
+      dgxMemoryWait: {
+        schemaVersion: "ltx-studio-dgx-memory-wait.v1",
+        kind: "memory",
+        observedAt: "2026-08-28T06:30:00.000Z",
+        availableGiB: 100,
+        pendingReservationsGiB: 0,
+        requiredAvailableGiB: 94,
+        currentShortfallGiB: 76,
+        qwenPagingReservedGiB: null,
+        qwenRestoreReservedGiB: null,
+        qwenEvictedTriggerReservedGiB: 82,
+      },
+    }];
+    props.selectedJob = props.jobs[0]!;
+
+    const markup = renderToStaticMarkup(createElement(RunPanel, props));
+
+    expect(markup).toContain("Qwen-Eviction-Trigger-Reserve <strong>82,00 GiB</strong>");
   });
 
   it("keeps the explicitly selected active job in the monitor when several jobs are active", () => {

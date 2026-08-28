@@ -10984,7 +10984,151 @@ exec /usr/bin/ffmpeg -hide_banner -loglevel error \\
       currentShortfallGiB: 50.68,
       qwenPagingReservedGiB: null,
       qwenRestoreReservedGiB: null,
+      qwenEvictedTriggerReservedGiB: null,
     });
+  });
+
+  it("uses the Runtime-API restore observation time and eviction reserve from queue GET", async () => {
+    const path = await statePath();
+    let studioJobId = "";
+    const dgxJobId = testDgxJobId("persisted-restore-gate-observation");
+    const observedAt = "2026-08-28T10:30:00+02:00";
+    const read = vi.fn(async (jobId: string) => ({
+      schema_version: "dgx-job-read.v0" as const,
+      job: boundDgxJob(studioJobId, jobId, "queued", {
+        reason: "qwen_restore_reserved",
+        reservation_active: false,
+        durable_waiter: false,
+        segment_waiter: false,
+        prestart_only_waiter: false,
+        last_start_gate: {
+          schema_version: "dgx-last-start-gate.v0",
+          error: "qwen_gate_active",
+          reason: "qwen_restore_reserved",
+          observed_at: observedAt,
+          retry_after_seconds: 30,
+          blocker: {
+            kind: "memory",
+            available_gib: 100,
+            pending_reservations_gib: 0,
+            required_available_gib: 94,
+            current_shortfall_gib: 76,
+            qwen_evicted_trigger_reserved_gib: 82,
+          },
+        },
+      }),
+    }));
+    const manager = new JobManager(path, false, null, undefined, {
+      read,
+      transition: async (jobId, state) => boundDgxTransition(studioJobId, jobId, state),
+    }, null);
+    const request = validRequest("two-stage-hq");
+    const created = manager.create(request);
+    studioJobId = created.id;
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    bindTestDgxLease(runtimeJob, created.id, dgxJobId, request);
+    let delays = 0;
+    Reflect.set(manager, "waitForDelay", async () => {
+      delays += 1;
+      return delays === 1;
+    });
+
+    const waitForQueued = Reflect.get(manager, "waitForQueuedDgxJob") as (
+      job: unknown,
+      delayMs: number,
+    ) => Promise<string>;
+    expect(await waitForQueued.call(manager, runtimeJob, 30_000)).toBe("stopped");
+    expect(read).toHaveBeenCalled();
+    expect(manager.get(created.id)?.dgxMemoryWait).toMatchObject({
+      observedAt: "2026-08-28T08:30:00.000Z",
+      currentShortfallGiB: 76,
+      qwenEvictedTriggerReservedGiB: 82,
+    });
+    const persisted = JSON.parse(await readFile(path, "utf8")) as Array<Record<string, unknown>>;
+    expect(persisted[0]?.dgxMemoryWait).toMatchObject({
+      observedAt: "2026-08-28T08:30:00.000Z",
+      qwenEvictedTriggerReservedGiB: 82,
+    });
+  });
+
+  it("treats a valid blockerless restore observation as an authoritative memory clear", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest());
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const observeBlocker = Reflect.get(manager, "observeDgxMemoryWait") as (
+      job: unknown,
+      blocker: unknown,
+    ) => boolean;
+    observeBlocker.call(manager, runtimeJob, {
+      kind: "memory",
+      available_gib: 43.32,
+      pending_reservations_gib: 0,
+      required_available_gib: 94,
+      current_shortfall_gib: 50.68,
+    });
+    const observeQueue = Reflect.get(manager, "observeQueueJobMemoryWait") as (
+      job: unknown,
+      queueJob: unknown,
+      fallback?: unknown,
+      options?: { retainWhenMissing?: boolean },
+    ) => boolean;
+    expect(observeQueue.call(manager, runtimeJob, {
+      state: "queued",
+      started_at: null,
+      durable_waiter: false,
+      segment_waiter: false,
+      prestart_only_waiter: false,
+      last_start_gate: {
+        schema_version: "dgx-last-start-gate.v0",
+        error: "qwen_gate_active",
+        reason: "qwen_restore_reserved",
+        observed_at: "2026-08-28T08:30:00Z",
+        retry_after_seconds: null,
+      },
+    }, undefined, { retainWhenMissing: true })).toBe(true);
+    expect(manager.get(created.id)?.dgxMemoryWait).toBeNull();
+  });
+
+  it("advances only a newer authoritative restore measurement without duplicating its log", async () => {
+    const manager = new JobManager(await statePath(), false);
+    const created = manager.create(validRequest("two-stage-hq"));
+    const runtimeJob = (Reflect.get(manager, "jobs") as Map<string, Record<string, unknown>>)
+      .get(created.id)!;
+    const observeQueue = Reflect.get(manager, "observeQueueJobMemoryWait") as (
+      job: unknown,
+      queueJob: unknown,
+    ) => boolean;
+    const remote = (observedAt: string) => ({
+      state: "accepted",
+      started_at: "",
+      durable_waiter: false,
+      segment_waiter: false,
+      prestart_only_waiter: false,
+      last_start_gate: {
+        schema_version: "dgx-last-start-gate.v0",
+        error: "qwen_gate_active",
+        reason: "qwen_restore_reserved",
+        observed_at: observedAt,
+        retry_after_seconds: 30,
+        blocker: {
+          kind: "memory",
+          available_gib: 43.32,
+          pending_reservations_gib: 0,
+          required_available_gib: 94,
+          current_shortfall_gib: 50.68,
+        },
+      },
+    });
+
+    expect(observeQueue.call(manager, runtimeJob, remote("2026-08-28T08:30:00Z"))).toBe(true);
+    expect(observeQueue.call(manager, runtimeJob, remote("2026-08-28T08:35:00Z"))).toBe(true);
+    expect(observeQueue.call(manager, runtimeJob, remote("2026-08-28T08:34:00Z"))).toBe(false);
+    expect(manager.get(created.id)?.dgxMemoryWait?.observedAt)
+      .toBe("2026-08-28T08:35:00.000Z");
+    expect(manager.get(created.id)?.logs.filter((line) => line.startsWith("DGX-Speicher:")))
+      .toHaveLength(1);
   });
 
   it("keeps a fresh resuming-409 memory blocker over a historical paused GET reason", async () => {

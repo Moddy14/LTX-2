@@ -234,6 +234,7 @@ describe("public StudioJob DTO", () => {
         currentShortfallGiB: 50.68,
         qwenPagingReservedGiB: null,
         qwenRestoreReservedGiB: null,
+        qwenEvictedTriggerReservedGiB: null,
         raw_secret: "must-not-cross-public-boundary",
       },
       identityEvidence: null,
@@ -252,6 +253,7 @@ describe("public StudioJob DTO", () => {
       currentShortfallGiB: 50.68,
       qwenPagingReservedGiB: null,
       qwenRestoreReservedGiB: null,
+      qwenEvictedTriggerReservedGiB: null,
     });
     expect(JSON.stringify(dto)).not.toContain("raw_secret");
     expect(JSON.stringify(dto)).not.toContain("must-not-cross-public-boundary");

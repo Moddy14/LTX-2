@@ -824,6 +824,9 @@ export function RunPanel({
                   {monitorJob.dgxMemoryWait.qwenRestoreReservedGiB !== null ? (
                     <span>Qwen-Restore-Reserve <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.qwenRestoreReservedGiB)} GiB</strong></span>
                   ) : null}
+                  {monitorJob.dgxMemoryWait.qwenEvictedTriggerReservedGiB !== null ? (
+                    <span>Qwen-Eviction-Trigger-Reserve <strong>{formatMemoryGiB(monitorJob.dgxMemoryWait.qwenEvictedTriggerReservedGiB)} GiB</strong></span>
+                  ) : null}
                 </div>
               </div>
             ) : null}

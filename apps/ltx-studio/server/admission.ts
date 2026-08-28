@@ -123,6 +123,7 @@ export type QueueJobSummary = {
    */
   durable_waiter?: boolean;
   segment_waiter?: boolean;
+  prestart_only_waiter?: boolean;
   reservation_active?: boolean;
   queue_position?: number | null;
   decision?: string;
@@ -133,6 +134,8 @@ export type QueueJobSummary = {
   app_message?: string;
   /** Raw Runtime-API field. Consumers must use normalizeDgxMemoryBlocker. */
   blocker?: unknown;
+  /** Raw additive Runtime-API restore observation; normalize before use. */
+  last_start_gate?: unknown;
   current_step?: string;
   last_error?: string;
   runner_last_seen_at?: string | null;
